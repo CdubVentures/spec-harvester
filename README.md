@@ -16,6 +16,8 @@ Commands:
 - `run-batch --category mouse [--brand <brand>]`
 - `discover --category mouse [--brand <brand>]`
 - `test-s3 [--fixture <path>] [--s3key <key>] [--dry-run]`
+- `sources-plan --category mouse`
+- `sources-report --category mouse [--top <n>]`
 - `rebuild-index --category mouse`
 
 ## Category Config Layout
@@ -65,11 +67,16 @@ Discovery candidates (manual approval queue):
 
 - `s3://{S3_BUCKET}/{S3_INPUT_PREFIX}/_discovery/{category}/{runId}.json`
 - `s3://{S3_BUCKET}/{S3_INPUT_PREFIX}/_sources/candidates/{category}/{runId}.json`
+- `s3://{S3_BUCKET}/{S3_INPUT_PREFIX}/_sources/overrides/{category}/sources.override.json` (optional runtime source override)
 
 Learning artifacts:
 
 - `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_learning/{category}/profiles/{profileId}.json`
 - `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/{category}/{productId}/runs/{runId}/logs/learning.json`
+- `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_source_intel/{category}/domain_stats.json`
+- `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_source_intel/{category}/promotion_suggestions/YYYY-MM-DD.json`
+- `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_source_intel/{category}/expansion_plans/YYYY-MM-DD.json`
+- `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_source_intel/{category}/expansion_plans/brands/{brand}/YYYY-MM-DD.json`
 
 ## Environment Variables
 
@@ -82,10 +89,10 @@ Core:
 
 Budgets/throttles:
 
-- `MAX_URLS_PER_PRODUCT=10`
-- `MAX_CANDIDATE_URLS=50`
+- `MAX_URLS_PER_PRODUCT=20`
+- `MAX_CANDIDATE_URLS_PER_PRODUCT=50` (also supports `MAX_CANDIDATE_URLS`)
 - `MAX_PAGES_PER_DOMAIN=2`
-- `MAX_RUN_SECONDS=180`
+- `MAX_RUN_SECONDS=300`
 - `MAX_JSON_BYTES=2000000`
 - `MAX_PDF_BYTES=8000000`
 - `CONCURRENCY=2`
@@ -95,9 +102,23 @@ Budgets/throttles:
 Discovery (optional):
 
 - `DISCOVERY_ENABLED=true|false` (default `false`)
+- `FETCH_CANDIDATE_SOURCES=true|false` (default `true`)
 - `SEARCH_PROVIDER=bing|google_cse|none` (default `none`)
 - `BING_SEARCH_KEY`, `BING_SEARCH_ENDPOINT`
 - `GOOGLE_CSE_KEY`, `GOOGLE_CSE_CX`
+
+LLM / OpenAI (optional):
+
+- `LLM_ENABLED=true|false` (default `false`)
+- `LLM_WRITE_SUMMARY=true|false` (default `false`)
+- `LLM_PLAN_DISCOVERY_QUERIES=true|false` (default `false`)
+- `OPENAI_API_KEY=...`
+- `OPENAI_BASE_URL=...` (default `https://api.openai.com`)
+- `OPENAI_MODEL_EXTRACT=...`
+- `OPENAI_MODEL_PLAN=...`
+- `OPENAI_MODEL_WRITE=...`
+- `OPENAI_MAX_INPUT_CHARS=50000`
+- `OPENAI_TIMEOUT_MS=40000`
 
 Local toggles:
 
@@ -161,6 +182,18 @@ S3 integration test through the main CLI:
 node src/cli/spec.js test-s3
 ```
 
+Source intelligence report:
+
+```bash
+node src/cli/spec.js sources-report --category mouse --top 30
+```
+
+Source expansion plan generation:
+
+```bash
+node src/cli/spec.js sources-plan --category mouse
+```
+
 ## Tests and Smoke
 
 Unit tests:
@@ -207,6 +240,8 @@ Each run records reusable learning artifacts:
 - unknown-field rate trend
 
 On the next run, the planner reuses high-yield URLs first, so evidence quality improves over time without relaxing validation or safety controls.
+Set `FETCH_CANDIDATE_SOURCES=true` for wider evidence crawl while keeping candidate domains non-counting until approved.
+LLM remains optional and candidate-only; it never bypasses validation gates or anchor locks.
 
 ## Domain Approval Workflow
 
@@ -214,7 +249,8 @@ Discovery results do not count toward 3-confirmation until approved.
 
 1. Run `discover` with official API provider enabled.
 2. Review candidate file at `.../_sources/candidates/{category}/{runId}.json`.
-3. Add approved host to `categories/{category}/sources.json` under correct tier.
+3. Add approved host to `categories/{category}/sources.json` under correct tier,
+   or to `specs/inputs/_sources/overrides/{category}/sources.override.json` for runtime override.
 4. Re-run `run-one`/`run-batch`.
 
 ## How to Add a Category

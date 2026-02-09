@@ -5,6 +5,9 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
+COPY requirements.txt ./
+RUN python3 -m pip install --no-cache-dir -r requirements.txt
+
 COPY . .
 
 ENV NODE_ENV=production

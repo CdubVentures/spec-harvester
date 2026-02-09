@@ -20,6 +20,7 @@ const METHOD_WEIGHT = {
   html_table: 0.9,
   embedded_state: 0.85,
   ldjson: 0.75,
+  llm_extract: 0.2,
   dom: 0.4
 };
 

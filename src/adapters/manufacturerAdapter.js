@@ -32,7 +32,7 @@ function findSupportLikeUrls(html, baseUrl) {
   const regex = /href\s*=\s*["']([^"']+)["'][^>]*>/gi;
   for (const match of String(html || '').matchAll(regex)) {
     const href = match[1];
-    if (!/support|manual|spec|datasheet|documentation/i.test(href)) {
+    if (!/support|manual|spec|specsheet|datasheet|documentation|technical/i.test(href)) {
       continue;
     }
     try {

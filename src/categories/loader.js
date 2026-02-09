@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { extractRootDomain } from '../utils/common.js';
+import { toPosixKey } from '../s3/storage.js';
 
 const cache = new Map();
 
@@ -33,7 +34,7 @@ function tierToNumeric(tierName) {
   if (tierName === 'retailer') {
     return 3;
   }
-  return 2;
+  return 4;
 }
 
 export function resolveTierNameForHost(host, categoryConfig) {
@@ -74,7 +75,62 @@ export function isInstrumentedHost(host, categoryConfig) {
   return tierName === 'lab';
 }
 
-export async function loadCategoryConfig(category) {
+function mergeUnique(arr = []) {
+  return [...new Set((arr || []).map((item) => normalizeHost(item)).filter(Boolean))];
+}
+
+function mergeSources(baseSources, overrideSources) {
+  if (!overrideSources || typeof overrideSources !== 'object') {
+    return baseSources;
+  }
+
+  const mergedApproved = {};
+  const baseApproved = baseSources?.approved || {};
+  const overrideApproved = overrideSources?.approved || {};
+  const tierNames = new Set([...Object.keys(baseApproved), ...Object.keys(overrideApproved)]);
+
+  for (const tierName of tierNames) {
+    mergedApproved[tierName] = mergeUnique([
+      ...(baseApproved[tierName] || []),
+      ...(overrideApproved[tierName] || [])
+    ]);
+  }
+
+  return {
+    approved: mergedApproved,
+    denylist: mergeUnique([...(baseSources?.denylist || []), ...(overrideSources?.denylist || [])])
+  };
+}
+
+function buildCategoryConfig({
+  category,
+  schema,
+  sources,
+  requiredFields,
+  anchors,
+  searchTemplates
+}) {
+  const sourceHosts = flattenApprovedHosts(sources);
+  const denylist = (sources.denylist || []).map(normalizeHost);
+
+  return {
+    category,
+    schema,
+    sources,
+    requiredFields,
+    anchorFields: anchors,
+    searchTemplates,
+    sourceHosts,
+    denylist,
+    requiredFieldSet: new Set(requiredFields),
+    criticalFieldSet: new Set(schema.critical_fields || []),
+    editorialFieldSet: new Set(schema.editorial_fields || []),
+    fieldOrder: schema.field_order || [],
+    approvedRootDomains: new Set(sourceHosts.map((item) => extractRootDomain(item.host)))
+  };
+}
+
+async function loadCategoryBaseConfig(category) {
   if (cache.has(category)) {
     return cache.get(category);
   }
@@ -94,25 +150,53 @@ export async function loadCategoryConfig(category) {
   const anchors = JSON.parse(anchorsRaw);
   const searchTemplates = JSON.parse(searchTemplatesRaw);
 
-  const sourceHosts = flattenApprovedHosts(sources);
-  const denylist = (sources.denylist || []).map(normalizeHost);
-
-  const config = {
+  const config = buildCategoryConfig({
     category,
     schema,
     sources,
     requiredFields,
-    anchorFields: anchors,
-    searchTemplates,
-    sourceHosts,
-    denylist,
-    requiredFieldSet: new Set(requiredFields),
-    criticalFieldSet: new Set(schema.critical_fields || []),
-    editorialFieldSet: new Set(schema.editorial_fields || []),
-    fieldOrder: schema.field_order || [],
-    approvedRootDomains: new Set(sourceHosts.map((item) => extractRootDomain(item.host)))
-  };
+    anchors,
+    searchTemplates
+  });
 
   cache.set(category, config);
   return config;
+}
+
+export async function loadCategoryConfig(category, options = {}) {
+  const baseConfig = await loadCategoryBaseConfig(category);
+
+  const storage = options.storage;
+  const config = options.config;
+
+  if (!storage || !config) {
+    return baseConfig;
+  }
+
+  const overrideKey = toPosixKey(
+    config.s3InputPrefix,
+    '_sources',
+    'overrides',
+    category,
+    'sources.override.json'
+  );
+
+  const overrideSources = await storage.readJsonOrNull(overrideKey);
+  if (!overrideSources) {
+    return baseConfig;
+  }
+
+  const mergedSources = mergeSources(baseConfig.sources, overrideSources);
+
+  return {
+    ...buildCategoryConfig({
+      category,
+      schema: baseConfig.schema,
+      sources: mergedSources,
+      requiredFields: baseConfig.requiredFields,
+      anchors: baseConfig.anchorFields,
+      searchTemplates: baseConfig.searchTemplates
+    }),
+    sources_override_key: overrideKey
+  };
 }

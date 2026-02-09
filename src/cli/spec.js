@@ -9,6 +9,11 @@ import { rebuildCategoryIndex } from '../indexer/rebuildIndex.js';
 import { buildRunId } from '../utils/common.js';
 import { EventLogger } from '../logger.js';
 import { runS3Integration } from './s3-integration.js';
+import {
+  generateSourceExpansionPlans,
+  loadSourceIntel,
+  promotionSuggestionsKey
+} from '../intel/sourceIntel.js';
 
 function usage() {
   return [
@@ -19,6 +24,8 @@ function usage() {
     '  run-batch --category <category> [--brand <brand>] [--local] [--dry-run]',
     '  discover --category <category> [--brand <brand>] [--local]',
     '  test-s3 [--fixture <path>] [--s3key <key>] [--dry-run]',
+    '  sources-plan --category <category> [--local]',
+    '  sources-report --category <category> [--top <n>] [--local]',
     '  rebuild-index --category <category> [--local]'
   ].join('\n');
 }
@@ -31,7 +38,8 @@ function buildConfig(args) {
     localInputRoot: args['local-input-root'] || undefined,
     localOutputRoot: args['local-output-root'] || undefined,
     discoveryEnabled: asBool(args['discovery-enabled'], undefined),
-    searchProvider: args['search-provider'] || undefined
+    searchProvider: args['search-provider'] || undefined,
+    fetchCandidateSources: asBool(args['fetch-candidate-sources'], undefined)
   });
 }
 
@@ -130,7 +138,7 @@ async function commandRunBatch(config, storage, args) {
 
 async function commandDiscover(config, storage, args) {
   const category = args.category || 'mouse';
-  const categoryConfig = await loadCategoryConfig(category);
+  const categoryConfig = await loadCategoryConfig(category, { storage, config });
   const allKeys = await storage.listInputKeys(category);
   const keys = await filterKeysByBrand(storage, allKeys, args.brand);
   const logger = new EventLogger();
@@ -148,7 +156,10 @@ async function commandDiscover(config, storage, args) {
       categoryConfig,
       job,
       runId,
-      logger
+      logger,
+      planningHints: {
+        missingCriticalFields: categoryConfig.schema?.critical_fields || []
+      }
     });
 
     runs.push({
@@ -167,6 +178,58 @@ async function commandDiscover(config, storage, args) {
     total_inputs: allKeys.length,
     selected_inputs: keys.length,
     runs
+  };
+}
+
+async function commandSourcesReport(config, storage, args) {
+  const category = args.category || 'mouse';
+  const top = Math.max(1, Number.parseInt(args.top || '25', 10) || 25);
+
+  const intel = await loadSourceIntel({ storage, config, category });
+  const domains = Object.values(intel.data.domains || {}).sort(
+    (a, b) => (b.planner_score || 0) - (a.planner_score || 0)
+  );
+
+  const suggestionKey = promotionSuggestionsKey(config, category);
+  const suggestions = await storage.readJsonOrNull(suggestionKey);
+
+  return {
+    command: 'sources-report',
+    category,
+    domain_stats_key: intel.key,
+    domain_count: domains.length,
+    top_domains: domains.slice(0, top).map((item) => ({
+      rootDomain: item.rootDomain,
+      planner_score: item.planner_score,
+      attempts: item.attempts,
+      identity_match_rate: item.identity_match_rate,
+      major_anchor_conflict_rate: item.major_anchor_conflict_rate,
+      fields_accepted_count: item.fields_accepted_count,
+      products_seen: item.products_seen,
+      approved_attempts: item.approved_attempts,
+      candidate_attempts: item.candidate_attempts
+    })),
+    promotion_suggestions_key: suggestionKey,
+    promotion_suggestion_count: suggestions?.suggestion_count || 0
+  };
+}
+
+async function commandSourcesPlan(config, storage, args) {
+  const category = args.category || 'mouse';
+  const categoryConfig = await loadCategoryConfig(category, { storage, config });
+  const result = await generateSourceExpansionPlans({
+    storage,
+    config,
+    category,
+    categoryConfig
+  });
+
+  return {
+    command: 'sources-plan',
+    category,
+    expansion_plan_key: result.expansionPlanKey,
+    brand_plan_count: result.planCount,
+    brand_plan_keys: result.brandPlanKeys
   };
 }
 
@@ -210,6 +273,10 @@ async function main() {
     output = await commandDiscover(config, storage, args);
   } else if (command === 'test-s3') {
     output = await commandTestS3();
+  } else if (command === 'sources-plan') {
+    output = await commandSourcesPlan(config, storage, args);
+  } else if (command === 'sources-report') {
+    output = await commandSourcesReport(config, storage, args);
   } else if (command === 'rebuild-index') {
     output = await commandRebuildIndex(config, storage, args);
   } else {

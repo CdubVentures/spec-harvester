@@ -128,6 +128,27 @@ function normalizeKey(key) {
     .replace(/[^a-z0-9]/g, '');
 }
 
+function buildPathAliasSet(path) {
+  const camelSplit = String(path || '').replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+  const tokens = camelSplit
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  const out = new Set(tokens);
+  for (let i = 0; i < tokens.length; i += 1) {
+    if (i + 1 < tokens.length) {
+      out.add(`${tokens[i]}${tokens[i + 1]}`);
+    }
+    if (i + 2 < tokens.length) {
+      out.add(`${tokens[i]}${tokens[i + 1]}${tokens[i + 2]}`);
+    }
+  }
+  return out;
+}
+
 function flattenObject(value, prefix = '', out = [], depth = 0) {
   if (value === null || value === undefined || depth > 8) {
     return out;
@@ -157,7 +178,13 @@ function flattenObject(value, prefix = '', out = [], depth = 0) {
 }
 
 function pickFieldFromPath(path) {
-  const key = normalizeKey(path.split('.').slice(-1)[0]);
+  const segments = String(path || '')
+    .split(/[.\[\]]+/g)
+    .map((part) => normalizeKey(part))
+    .filter(Boolean);
+  const key = segments[segments.length - 1] || '';
+  const aliasSet = buildPathAliasSet(path);
+  const normalizedPath = normalizeKey(path);
 
   for (const [field, aliases] of Object.entries(FIELD_ALIASES)) {
     if (aliases.includes(key)) {
@@ -166,7 +193,13 @@ function pickFieldFromPath(path) {
   }
 
   for (const [field, aliases] of Object.entries(FIELD_ALIASES)) {
-    if (aliases.some((alias) => normalizeKey(path).includes(alias))) {
+    if (aliases.some((alias) => aliasSet.has(alias))) {
+      return field;
+    }
+  }
+
+  for (const [field, aliases] of Object.entries(FIELD_ALIASES)) {
+    if (aliases.some((alias) => alias.length >= 8 && normalizedPath.includes(alias))) {
       return field;
     }
   }
@@ -234,6 +267,54 @@ function normalizeConnectionValue(value) {
   return normalizeString(value);
 }
 
+function sanitizeComponentField(field, value) {
+  const text = normalizeString(value);
+  const token = normalizeToken(text);
+  const noiseWords = [
+    'latency',
+    'specification',
+    'specifications',
+    'operating',
+    'software',
+    'configuration',
+    'retailers',
+    'comments',
+    'capable'
+  ];
+
+  if (['sensor', 'switch', 'encoder'].includes(field)) {
+    if (!text || text === 'unk') {
+      return 'unk';
+    }
+    if (['true', 'false', 'yes', 'no', 'n/a'].includes(token)) {
+      return 'unk';
+    }
+    if (!/[a-z]/i.test(text) || text.length < 6) {
+      return 'unk';
+    }
+    const words = token.split(' ').filter(Boolean);
+    if (words.length > 8) {
+      return 'unk';
+    }
+    if (noiseWords.some((word) => words.includes(word))) {
+      return 'unk';
+    }
+    return text;
+  }
+
+  if (['sensor_brand', 'switch_brand', 'encoder_brand'].includes(field)) {
+    if (!text || text === 'unk') {
+      return 'unk';
+    }
+    if (!/[a-z]/i.test(text) || text.length < 3) {
+      return 'unk';
+    }
+    return text;
+  }
+
+  return text;
+}
+
 function normalizeByField(field, value) {
   if (value === null || value === undefined || value === '') {
     return 'unk';
@@ -258,7 +339,7 @@ function normalizeByField(field, value) {
     return normalizeNumeric(value);
   }
 
-  return normalizeString(value);
+  return sanitizeComponentField(field, value);
 }
 
 function gatherIdentityCandidates(flattened) {

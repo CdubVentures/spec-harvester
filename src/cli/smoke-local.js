@@ -4,6 +4,7 @@ import path from 'node:path';
 import { loadConfig } from '../config.js';
 import { createStorage } from '../s3/storage.js';
 import { runProduct } from '../pipeline/runProduct.js';
+import { asBool, parseArgs } from './args.js';
 
 function assert(condition, message) {
   if (!condition) {
@@ -12,13 +13,17 @@ function assert(condition, message) {
 }
 
 async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  const runLlmMode = asBool(args.llm, process.env.LLM_ENABLED === 'true');
+
   const config = loadConfig({
     localMode: true,
     dryRun: true,
     localInputRoot: 'sample_inputs',
     localOutputRoot: 'out',
     writeMarkdownSummary: false,
-    discoveryEnabled: false
+    discoveryEnabled: false,
+    llmEnabled: false
   });
 
   const storage = createStorage(config);
@@ -40,6 +45,38 @@ async function main() {
     `Smoke assertion failed: expected BELOW_CONFIDENCE_THRESHOLD, got ${result.summary.validated_reason}`
   );
 
+  let llmRun = {
+    enabled: false
+  };
+  if (runLlmMode) {
+    if (!process.env.OPENAI_API_KEY) {
+      llmRun = {
+        enabled: false,
+        skipped: true,
+        reason: 'OPENAI_API_KEY not set'
+      };
+    } else {
+      const llmConfig = loadConfig({
+        localMode: true,
+        dryRun: true,
+        localInputRoot: 'sample_inputs',
+        localOutputRoot: 'out',
+        writeMarkdownSummary: false,
+        discoveryEnabled: false,
+        llmEnabled: true
+      });
+      const llmStorage = createStorage(llmConfig);
+      const llmResult = await runProduct({ storage: llmStorage, config: llmConfig, s3Key });
+      llmRun = {
+        enabled: true,
+        runId: llmResult.runId,
+        validated: llmResult.summary.validated,
+        validated_reason: llmResult.summary.validated_reason,
+        llm_summary: llmResult.summary.llm
+      };
+    }
+  }
+
   process.stdout.write(
     `${JSON.stringify(
       {
@@ -52,7 +89,8 @@ async function main() {
         completeness_required_percent: result.summary.completeness_required_percent,
         coverage_overall_percent: result.summary.coverage_overall_percent,
         normalized_out: normalizedOutPath,
-        summary_out: summaryOutPath
+        summary_out: summaryOutPath,
+        llm_mode: llmRun
       },
       null,
       2

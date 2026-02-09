@@ -23,6 +23,19 @@ import {
   loadLearningProfile,
   persistLearningProfile
 } from '../learning/selfImproveLoop.js';
+import {
+  buildEvidencePack
+} from '../llm/evidencePack.js';
+import {
+  extractCandidatesLLM
+} from '../llm/extractCandidatesLLM.js';
+import {
+  writeSummaryMarkdownLLM
+} from '../llm/writeSummaryLLM.js';
+import {
+  loadSourceIntel,
+  persistSourceIntel
+} from '../intel/sourceIntel.js';
 
 function bestIdentityFromSources(sourceResults) {
   const sorted = [...sourceResults].sort((a, b) => {
@@ -34,10 +47,85 @@ function bestIdentityFromSources(sourceResults) {
   return sorted[0]?.identityCandidates || {};
 }
 
+const METHOD_PRIORITY = {
+  network_json: 5,
+  embedded_state: 4,
+  ldjson: 3,
+  pdf: 3,
+  dom: 2,
+  llm_extract: 1
+};
+
+function parseFirstNumber(value) {
+  const text = String(value || '');
+  const match = text.match(/-?\d+(\.\d+)?/);
+  if (!match) {
+    return null;
+  }
+  const num = Number.parseFloat(match[0]);
+  return Number.isFinite(num) ? num : null;
+}
+
+function plausibilityBoost(field, value) {
+  const num = parseFirstNumber(value);
+  if (num === null) {
+    return 0;
+  }
+
+  if (field === 'weight') {
+    return num >= 20 && num <= 250 ? 2 : -6;
+  }
+  if (field === 'lngth' || field === 'width' || field === 'height') {
+    return num >= 20 && num <= 200 ? 2 : -6;
+  }
+  if (field === 'dpi') {
+    return num >= 100 && num <= 100000 ? 2 : -6;
+  }
+  if (field === 'polling_rate') {
+    return num >= 125 && num <= 10000 ? 2 : -6;
+  }
+  if (field === 'ips') {
+    return num >= 50 && num <= 1000 ? 2 : -4;
+  }
+  if (field === 'acceleration') {
+    return num >= 10 && num <= 200 ? 2 : -4;
+  }
+
+  return 0;
+}
+
+function candidateScore(candidate) {
+  const methodScore = METHOD_PRIORITY[candidate.method] || 0;
+  const keyPath = String(candidate.keyPath || '').toLowerCase();
+  const field = String(candidate.field || '');
+  const numeric = parseFirstNumber(candidate.value);
+  let score = methodScore * 10;
+  if (field && keyPath.includes(field.toLowerCase())) {
+    score += 2;
+  }
+  if (numeric !== null) {
+    if (field === 'dpi') {
+      score += Math.min(6, numeric / 8000);
+    } else if (field === 'polling_rate') {
+      score += Math.min(6, numeric / 1000);
+    } else if (field === 'ips' || field === 'acceleration') {
+      score += Math.min(3, numeric / 300);
+    }
+  }
+  score += plausibilityBoost(field, candidate.value);
+  return score;
+}
+
 function buildCandidateFieldMap(fieldCandidates) {
   const map = {};
+  const scoreByField = {};
   for (const row of fieldCandidates || []) {
-    if (!map[row.field] && row.value !== 'unk') {
+    if (String(row.value || '').trim().toLowerCase() === 'unk') {
+      continue;
+    }
+    const score = candidateScore(row);
+    if (!Object.prototype.hasOwnProperty.call(scoreByField, row.field) || score > scoreByField[row.field]) {
+      scoreByField[row.field] = score;
       map[row.field] = row.value;
     }
   }
@@ -56,6 +144,15 @@ function dedupeCandidates(candidates) {
     out.push(candidate);
   }
   return out;
+}
+
+function isAnchorLocked(field, anchors) {
+  const value = anchors?.[field];
+  return String(value || '').trim() !== '';
+}
+
+function isIdentityLockedField(field) {
+  return ['id', 'brand', 'model', 'base_model', 'category', 'sku'].includes(field);
 }
 
 function createEmptyProvenance(fieldOrder, fields) {
@@ -87,6 +184,26 @@ function resolveTargets(job, categoryConfig) {
   };
 }
 
+function isDiscoveryOnlySourceUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const path = parsed.pathname.toLowerCase();
+    const query = parsed.search.toLowerCase();
+    if (path.includes('/search')) {
+      return true;
+    }
+    if (path.includes('/catalogsearch') || path.includes('/find')) {
+      return true;
+    }
+    if ((query.includes('q=') || query.includes('query=')) && path.length <= 16) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export async function runProduct({ storage, config, s3Key }) {
   const runId = buildRunId();
   const logger = new EventLogger();
@@ -97,7 +214,7 @@ export async function runProduct({ storage, config, s3Key }) {
   const job = await storage.readJson(s3Key);
   const productId = job.productId;
   const category = job.category || 'mouse';
-  const categoryConfig = await loadCategoryConfig(category);
+  const categoryConfig = await loadCategoryConfig(category, { storage, config });
 
   const fieldOrder = categoryConfig.fieldOrder;
   const requiredFields = job.requirements?.requiredFields || categoryConfig.requiredFields;
@@ -105,7 +222,11 @@ export async function runProduct({ storage, config, s3Key }) {
   const anchors = job.anchors || {};
 
   const adapterManager = createAdapterManager(config, logger);
-  const planner = new SourcePlanner(job, config, categoryConfig);
+  const sourceIntel = await loadSourceIntel({ storage, config, category });
+  const planner = new SourcePlanner(job, config, categoryConfig, {
+    requiredFields,
+    sourceIntel: sourceIntel.data
+  });
 
   let learningProfile = null;
   if (config.selfImproveEnabled) {
@@ -128,6 +249,8 @@ export async function runProduct({ storage, config, s3Key }) {
   const sourceResults = [];
   const artifactsByHost = {};
   const adapterArtifacts = [];
+  let llmCandidatesAccepted = 0;
+  let llmSourcesUsed = 0;
 
   const discoveryResult = await discoverCandidateSources({
     config,
@@ -135,11 +258,16 @@ export async function runProduct({ storage, config, s3Key }) {
     categoryConfig,
     job,
     runId,
-    logger
+    logger,
+    planningHints: {
+      missingCriticalFields: categoryConfig.schema?.critical_fields || []
+    }
   });
 
   planner.seed(discoveryResult.approvedUrls || []);
-  planner.seedCandidates(discoveryResult.candidateUrls || []);
+  if (discoveryResult.enabled && config.maxCandidateUrls > 0 && config.fetchCandidateSources) {
+    planner.seedCandidates(discoveryResult.candidateUrls || []);
+  }
 
   await fetcher.start();
 
@@ -176,35 +304,93 @@ export async function runProduct({ storage, config, s3Key }) {
 
       planner.discoverFromHtml(source.url, pageData.html);
 
-      const extraction = extractCandidatesFromPage({
-        host: source.host,
-        html: pageData.html,
-        title: pageData.title,
-        ldjsonBlocks: pageData.ldjsonBlocks,
-        embeddedState: pageData.embeddedState,
-        networkResponses: pageData.networkResponses
-      });
+      const sourceUrl = pageData.finalUrl || source.url;
+      const discoveryOnlySource = isDiscoveryOnlySourceUrl(sourceUrl);
 
-      const adapterExtra = await adapterManager.extractForPage({
-        source,
-        pageData,
-        job,
-        runId
-      });
+      const extraction = discoveryOnlySource
+        ? {
+          identityCandidates: {},
+          fieldCandidates: []
+        }
+        : extractCandidatesFromPage({
+          host: source.host,
+          html: pageData.html,
+          title: pageData.title,
+          ldjsonBlocks: pageData.ldjsonBlocks,
+          embeddedState: pageData.embeddedState,
+          networkResponses: pageData.networkResponses
+        });
+
+      const adapterExtra = discoveryOnlySource
+        ? {
+          additionalUrls: [],
+          fieldCandidates: [],
+          identityCandidates: {},
+          pdfDocs: [],
+          adapterArtifacts: []
+        }
+        : await adapterManager.extractForPage({
+          source,
+          pageData,
+          job,
+          runId
+        });
 
       for (const url of adapterExtra.additionalUrls || []) {
         planner.enqueue(url, `adapter:${source.url}`);
       }
 
+      let llmExtraction = {
+        identityCandidates: {},
+        fieldCandidates: [],
+        conflicts: [],
+        notes: []
+      };
+      let evidencePack = null;
+      if (config.llmEnabled) {
+        evidencePack = buildEvidencePack({
+          source,
+          pageData,
+          adapterExtra,
+          config
+        });
+        llmExtraction = await extractCandidatesLLM({
+          job,
+          categoryConfig,
+          evidencePack,
+          config,
+          logger
+        });
+      }
+
+      const llmFieldCandidates = (llmExtraction.fieldCandidates || []).filter((row) => {
+        if (isIdentityLockedField(row.field)) {
+          return false;
+        }
+        if (isAnchorLocked(row.field, anchors)) {
+          return false;
+        }
+        return true;
+      });
+
       const mergedFieldCandidates = dedupeCandidates([
         ...(extraction.fieldCandidates || []),
-        ...(adapterExtra.fieldCandidates || [])
+        ...(adapterExtra.fieldCandidates || []),
+        ...llmFieldCandidates
       ]);
 
       const mergedIdentityCandidates = {
         ...(extraction.identityCandidates || {}),
         ...(adapterExtra.identityCandidates || {})
       };
+      for (const [key, value] of Object.entries(llmExtraction.identityCandidates || {})) {
+        if (String(job.identityLock?.[key] || '').trim() !== '') {
+          continue;
+        }
+        if (!mergedIdentityCandidates[key]) {
+          mergedIdentityCandidates[key] = value;
+        }
+      }
 
       const candidateFieldMap = buildCandidateFieldMap(mergedFieldCandidates);
       const anchorCheck = evaluateAnchorConflicts(anchors, candidateFieldMap);
@@ -238,6 +424,26 @@ export async function runProduct({ storage, config, s3Key }) {
         anchorStatus
       });
 
+      if (discoveryOnlySource) {
+        logger.info('source_discovery_only', {
+          url: sourceUrl
+        });
+      }
+
+      if (
+        source.approvedDomain &&
+        identity.match &&
+        (anchorCheck.majorConflicts || []).length === 0
+      ) {
+        const newlyFilledFields = mergedFieldCandidates
+          .filter((candidate) => {
+            const value = String(candidate.value || '').trim().toLowerCase();
+            return value && value !== 'unk';
+          })
+          .map((candidate) => candidate.field);
+        planner.markFieldsFilled(newlyFilledFields);
+      }
+
       artifactsByHost[source.host] = {
         html: pageData.html,
         ldjsonBlocks: pageData.ldjsonBlocks,
@@ -248,6 +454,23 @@ export async function runProduct({ storage, config, s3Key }) {
       };
 
       adapterArtifacts.push(...(adapterExtra.adapterArtifacts || []));
+      if (config.llmEnabled) {
+        adapterArtifacts.push({
+          name: `llm_${source.host}`,
+          payload: {
+            url: source.url,
+            evidence_ref_count: evidencePack?.references?.length || 0,
+            llm_candidate_count: llmFieldCandidates.length,
+            llm_conflicts: llmExtraction.conflicts,
+            llm_notes: llmExtraction.notes
+          }
+        });
+      }
+
+      if (llmFieldCandidates.length > 0) {
+        llmSourcesUsed += 1;
+        llmCandidatesAccepted += llmFieldCandidates.length;
+      }
 
       logger.info('source_processed', {
         url: source.url,
@@ -256,7 +479,8 @@ export async function runProduct({ storage, config, s3Key }) {
         identity_score: identity.score,
         anchor_status: anchorStatus,
         candidate_count: mergedFieldCandidates.length,
-        candidate_source: source.candidateSource
+        candidate_source: source.candidateSource,
+        llm_candidate_count: llmFieldCandidates.length
       });
     }
   } finally {
@@ -451,9 +675,19 @@ export async function runProduct({ storage, config, s3Key }) {
     sources_identity_matched: sourceResults.filter((s) => s.identity.match).length,
     discovery: {
       enabled: discoveryResult.enabled,
+      fetch_candidate_sources: Boolean(config.fetchCandidateSources),
       discovery_key: discoveryResult.discoveryKey,
       candidates_key: discoveryResult.candidatesKey,
       candidate_count: discoveryResult.candidates.length
+    },
+    llm: {
+      enabled: Boolean(config.llmEnabled && config.openaiApiKey),
+      model_extract: config.llmEnabled ? config.openaiModelExtract : null,
+      candidates_added: llmCandidatesAccepted,
+      sources_with_llm_candidates: llmSourcesUsed
+    },
+    source_registry: {
+      override_key: categoryConfig.sources_override_key || null
     },
     duration_ms: durationMs,
     generated_at: new Date().toISOString()
@@ -467,15 +701,45 @@ export async function runProduct({ storage, config, s3Key }) {
     confidence,
     completeness_required: summary.completeness_required,
     coverage_overall: summary.coverage_overall,
+    llm_candidates_added: llmCandidatesAccepted,
     duration_ms: durationMs
   });
 
   const rowTsv = tsvRowFromFields(fieldOrder, normalized.fields);
-  const markdownSummary = config.writeMarkdownSummary
-    ? buildMarkdownSummary({ normalized, summary })
-    : '';
+  let markdownSummary = '';
+  if (config.writeMarkdownSummary) {
+    if (config.llmEnabled && config.llmWriteSummary) {
+      markdownSummary = await writeSummaryMarkdownLLM({
+        normalized,
+        provenance,
+        summary,
+        config,
+        logger
+      }) || buildMarkdownSummary({ normalized, summary });
+    } else {
+      markdownSummary = buildMarkdownSummary({ normalized, summary });
+    }
+  }
 
   const runBase = storage.resolveOutputKey(category, productId, 'runs', runId);
+  const intelResult = await persistSourceIntel({
+    storage,
+    config,
+    category,
+    productId,
+    brand: job.identityLock?.brand || identity.brand || '',
+    sourceResults,
+    provenance,
+    categoryConfig
+  });
+
+  summary.source_intel = {
+    domain_stats_key: intelResult.domainStatsKey,
+    promotion_suggestions_key: intelResult.promotionSuggestionsKey,
+    expansion_plan_key: intelResult.expansionPlanKey,
+    brand_expansion_plan_count: intelResult.brandExpansionPlanCount
+  };
+
   let learning = null;
   if (config.selfImproveEnabled) {
     learning = await persistLearningProfile({

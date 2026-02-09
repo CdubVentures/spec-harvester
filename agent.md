@@ -1,65 +1,52 @@
-# Agent.md - Spec Harvester Operating Rules
+# agent.md - spec-harvester (Accuracy-first + LLM-assisted, repeatable)
 
 ## Mission
-Build accurate, auditable product specs with backend-first evidence collection.
-Current primary category is `mouse`; all logic must remain category-pluggable.
+Produce accurate, auditable device specs (mouse first; category-pluggable).
 
-## Non-negotiables
-- Accuracy over completeness.
-- Never guess. Use `unk` when uncertain, and `n/a` only when truly not applicable.
-- Preserve canonical schema field order exactly as category schema defines.
-- Respect identity lock and anchors as do-not-override constraints.
+Accuracy over completeness:
+- Never guess.
+- Use `unk` if unsure, and `n/a` only when truly not applicable.
 
-## Domain policy
-- Approved domains are defined in `categories/{category}/sources.json`.
-- Candidate domains discovered at runtime are evidence-only.
-- Candidate domains must never count toward pass-target confirmations.
-- Candidate promotion requires explicit human update to category sources config.
+## Safety and Compliance
+- No auth/paywall/captcha bypass.
+- Only use data accessible to a normal browser session.
+- Respect per-host throttles and budgets.
+- Do not store cookies or sensitive headers in S3/logs.
+- Never log secrets (AWS keys, search keys, OpenAI key, Elo key).
 
-## Identity and validation gates
-- Mouse identity gate must enforce 99% certainty.
-- If identity is ambiguous, output `MODEL_AMBIGUITY_ALERT` behavior and avoid filling specs.
-- `validated=true` only when identity gate, confidence threshold, completeness target, and anchor checks all pass.
-- Metrics must stay honest:
-  - `completeness_required` over required fields only
-  - `coverage_overall` over full schema (excluding configured editorial fields)
+## Category Configs
+All behavior must be category-driven from `categories/{category}/...`:
+- `schema.json`
+- `sources.json`
+- `required_fields.json`
+- `anchors.json`
+- `search_templates.json`
 
-## Evidence collection and safety
-- Prefer extraction methods in this order:
-  `network_json` -> `embedded_state` -> `ldjson` -> `html_table` -> `dom`.
-- Capture replay-safe request metadata for JSON/GraphQL evidence:
-  `request_url`, `request_method`, `request_post_json`, `resource_type`.
-- Do not store cookies, Authorization headers, or other sensitive headers.
-- Keep payloads bounded by configured byte limits.
-- Do not broaden crawling scope beyond planner budgets.
+## Credible Source Policy
+- Approved domains count toward confirmations.
+- Candidate domains may be fetched for evidence but do not count until approved.
+- Candidate tier must remain last (`tier=4`).
 
-## Confirmation policy
-- Default non-anchor fill requires 3 unique approved root domains.
-- Commonly wrong fields target 5 confirmations.
-- Instrumented-only fields require instrumented evidence and cannot use relaxed fill.
-- Optional relaxed mode:
-  `ALLOW_BELOW_PASS_TARGET_FILL=true` can fill with 2 confirmations only if:
-  - one is Tier 1 manufacturer, and
-  - one is Tier <=2 approved source.
-  Provenance must still mark `meets_pass_target=false`.
+## LLM Policy (OpenAI API)
+- LLM is optional; core pipeline must work with LLM disabled.
+- LLM outputs are candidate-only and must include `evidenceRefs`.
+- LLM must never override `identityLock` or anchor-locked fields.
+- LLM summaries must only restate validated values and provenance.
 
-## Self-improving loop
-- Each run must persist a learning profile under output `_learning`.
-- Learning may refine future seed priorities (preferred URLs, host yield stats).
-- Learning must not weaken safety rules, approval rules, or validation gates.
-- New domains discovered by search remain candidates until approved.
+## Learning and Source Intelligence
+- Persist per-domain stats under `_source_intel/{category}/...`.
+- Use stats only to improve source ordering and promotion suggestions.
+- Never auto-promote candidate domains without explicit approval.
 
-## Debug and deployment loop
-- Every run must emit structured logs and summary reasons for failure analysis.
-- Deployment cadence should run `run-batch` on schedule and reuse learning profiles.
-- Improvements must come from better source selection, adapter coverage, and approved domain updates, not unsafe crawling.
+## Validation Gate
+`validated` may be true only if all are true:
+- identity certainty >= 0.99
+- no major anchor conflicts
+- completeness_required >= target
+- confidence >= target
+- no critical fields below pass target
 
-## Execution standards for Codex tasks
-- Keep changes scoped and backward compatible.
-- Maintain CLI compatibility wrappers.
-- Run tests and smoke checks before finalizing:
-  - `npm test`
-  - `npm run smoke`
-  - `npm run smoke:local`
-- For S3 pipeline checks use:
-  - `node src/cli/spec.js test-s3`
+## Workflow (every Codex task)
+- Make minimal, scoped changes.
+- Run unit tests and smoke tests before finishing.
+- Update docs for behavior/env changes.

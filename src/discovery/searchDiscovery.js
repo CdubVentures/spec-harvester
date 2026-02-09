@@ -6,6 +6,8 @@ import {
   resolveTierForHost,
   resolveTierNameForHost
 } from '../categories/loader.js';
+import { extractRootDomain } from '../utils/common.js';
+import { planDiscoveryQueriesLLM } from '../llm/discoveryPlanner.js';
 
 function fillTemplate(template, variables) {
   return template
@@ -29,7 +31,7 @@ function classifyUrlCandidate(result, categoryConfig) {
   return {
     url: parsed.toString(),
     host,
-    rootDomain: host.split('.').slice(-2).join('.'),
+    rootDomain: extractRootDomain(host),
     title: result.title || '',
     snippet: result.snippet || '',
     query: result.query || '',
@@ -139,7 +141,8 @@ export async function discoverCandidateSources({
   categoryConfig,
   job,
   runId,
-  logger
+  logger,
+  planningHints = {}
 }) {
   if (!config.discoveryEnabled) {
     return {
@@ -160,7 +163,16 @@ export async function discoverCandidateSources({
   };
 
   const templates = categoryConfig.searchTemplates || [];
-  const queries = templates.map((template) => fillTemplate(template, variables)).filter(Boolean);
+  const baseQueries = templates.map((template) => fillTemplate(template, variables)).filter(Boolean);
+  const llmQueries = await planDiscoveryQueriesLLM({
+    job,
+    categoryConfig,
+    baseQueries,
+    missingCriticalFields: planningHints.missingCriticalFields || [],
+    config,
+    logger
+  });
+  const queries = [...new Set([...baseQueries, ...llmQueries])];
 
   const rawResults = [];
   if (config.searchProvider === 'bing' || config.searchProvider === 'google_cse') {
@@ -240,6 +252,7 @@ export async function discoverCandidateSources({
     runId,
     generated_at: new Date().toISOString(),
     provider: config.searchProvider,
+    llm_query_planning: Boolean(config.llmEnabled && config.llmPlanDiscoveryQueries),
     query_count: queries.length,
     discovered_count: discovered.length,
     approved_count: approvedOnly.length,

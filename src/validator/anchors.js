@@ -31,6 +31,46 @@ function compareExact(expected, actual) {
   return e === a;
 }
 
+function normalizePerfToken(token) {
+  const text = String(token || '').toLowerCase();
+  if (/^\d{2,3}k$/.test(text)) {
+    return text;
+  }
+  if (/^\d{4,5}$/.test(text)) {
+    const num = Number.parseInt(text, 10);
+    if (Number.isFinite(num) && num % 1000 === 0) {
+      return `${Math.round(num / 1000)}k`;
+    }
+  }
+  return '';
+}
+
+function sensorEquivalent(expected, actual) {
+  const expectedTokens = normalizeToken(expected).split(' ').filter(Boolean);
+  const actualTokens = normalizeToken(actual).split(' ').filter(Boolean);
+  if (!expectedTokens.length || !actualTokens.length) {
+    return false;
+  }
+
+  const ignore = new Set(['sensor', 'mouse', 'optical', 'ottico', 'de', 'der', 'and']);
+  const expectedSet = new Set(expectedTokens.filter((token) => !ignore.has(token)));
+  const actualSet = new Set(actualTokens.filter((token) => !ignore.has(token)));
+
+  let overlap = 0;
+  for (const token of expectedSet) {
+    if (actualSet.has(token)) {
+      overlap += 1;
+    }
+  }
+  if (overlap >= 2) {
+    return true;
+  }
+
+  const expectedPerf = expectedTokens.map((token) => normalizePerfToken(token)).find(Boolean);
+  const actualPerf = actualTokens.map((token) => normalizePerfToken(token)).find(Boolean);
+  return Boolean(expectedPerf && actualPerf && expectedPerf === actualPerf);
+}
+
 function pushConflict(conflicts, field, severity, expected, actual, reason) {
   conflicts.push({
     field,
@@ -41,12 +81,30 @@ function pushConflict(conflicts, field, severity, expected, actual, reason) {
   });
 }
 
-function compareNumericDiff(conflicts, field, expected, actual, minorThreshold, reasonMinor, reasonMajor) {
+function compareNumericDiff(
+  conflicts,
+  field,
+  expected,
+  actual,
+  minorThreshold,
+  reasonMinor,
+  reasonMajor,
+  options = {}
+) {
   const e = parseNumber(expected);
   const a = parseNumber(actual);
   if (e === null || a === null) {
     return;
   }
+
+  const maxOutlierRatio = Number.parseFloat(options.maxOutlierRatio || 0);
+  if (maxOutlierRatio > 1 && e > 0 && a > 0) {
+    const ratio = Math.max(a, e) / Math.min(a, e);
+    if (ratio > maxOutlierRatio) {
+      return;
+    }
+  }
+
   const diff = Math.abs(e - a);
   if (diff <= 0) {
     return;
@@ -105,7 +163,10 @@ export function evaluateAnchorConflicts(anchors = {}, candidateFields = {}) {
         actual,
         2,
         'Weight diff minor threshold',
-        'Weight diff major threshold'
+        'Weight diff major threshold',
+        {
+          maxOutlierRatio: 3
+        }
       );
       continue;
     }
@@ -118,7 +179,10 @@ export function evaluateAnchorConflicts(anchors = {}, candidateFields = {}) {
         actual,
         1,
         'Dimension diff minor threshold',
-        'Dimension diff major threshold'
+        'Dimension diff major threshold',
+        {
+          maxOutlierRatio: 2.2
+        }
       );
       continue;
     }
@@ -147,6 +211,9 @@ export function evaluateAnchorConflicts(anchors = {}, candidateFields = {}) {
         'middle_buttons'
       ].includes(field)
     ) {
+      if (field === 'sensor' && sensorEquivalent(expected, actual)) {
+        continue;
+      }
       const same = compareExact(expected, actual);
       if (same === false) {
         pushConflict(conflicts, field, 'MAJOR', expected, actual, `${field} mismatch`);

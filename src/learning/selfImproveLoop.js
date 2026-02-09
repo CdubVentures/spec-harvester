@@ -69,6 +69,7 @@ function buildHostStats(sourceResults) {
 function topPreferredUrls(sourceResults, limit = 12) {
   return [...new Set(
     (sourceResults || [])
+      .filter((source) => source.approvedDomain)
       .filter((source) => source.identity?.match)
       .filter((source) => (source.anchorCheck?.majorConflicts || []).length === 0)
       .sort((a, b) => a.tier - b.tier)

@@ -4,6 +4,7 @@ import { chromium } from 'playwright';
 import { extractLdJsonBlocks } from '../extractors/ldjsonExtractor.js';
 import { extractEmbeddedState } from '../extractors/embeddedStateExtractor.js';
 import { NetworkRecorder } from './networkRecorder.js';
+import { replayGraphqlRequests } from './graphqlReplay.js';
 import { wait } from '../utils/common.js';
 
 function fixtureFilenameFromHost(host) {
@@ -76,6 +77,19 @@ export class PlaywrightFetcher {
         await page.waitForLoadState('networkidle', { timeout: 6_000 });
       } catch {
         // Best effort only.
+      }
+
+      if (this.config.graphqlReplayEnabled) {
+        const replayRows = await replayGraphqlRequests({
+          page,
+          capturedResponses: recorder.rows,
+          maxReplays: this.config.maxGraphqlReplays,
+          maxJsonBytes: this.config.maxJsonBytes,
+          logger: this.logger
+        });
+        if (replayRows.length) {
+          recorder.rows.push(...replayRows);
+        }
       }
 
       html = await page.content();
