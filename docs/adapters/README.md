@@ -70,8 +70,10 @@ Rules:
 
 Current helpers:
 
-- `scripts/eloshapes_fetch.py`
-- `scripts/pdf_extract_tables.py`
+- `scripts/fetch_eloshapes_supabase.py` (primary)
+- `scripts/extract_pdf_kv.py` (primary)
+- `scripts/eloshapes_fetch.py` (compat wrapper)
+- `scripts/pdf_extract_tables.py` (compat wrapper)
 
 ## Safety rules
 

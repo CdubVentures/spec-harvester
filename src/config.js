@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
 function parseIntEnv(name, defaultValue) {
   const raw = process.env[name];
   if (raw === undefined || raw === null || raw === '') {
@@ -16,6 +19,69 @@ function parseBoolEnv(name, defaultValue = false) {
   return norm === '1' || norm === 'true' || norm === 'yes' || norm === 'on';
 }
 
+function parseDotEnvValue(rawValue) {
+  const trimmed = String(rawValue || '').trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed
+      .slice(1, -1)
+      .replace(/\\n/g, '\n')
+      .replace(/\\"/g, '"')
+      .replace(/\\'/g, "'");
+  }
+
+  const commentIndex = trimmed.indexOf(' #');
+  return (commentIndex >= 0 ? trimmed.slice(0, commentIndex) : trimmed).trim();
+}
+
+export function loadDotEnvFile(dotEnvPath = '.env') {
+  const fullPath = path.resolve(dotEnvPath);
+  let content = '';
+
+  try {
+    content = fs.readFileSync(fullPath, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return false;
+    }
+    throw error;
+  }
+
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) {
+      continue;
+    }
+
+    const withoutExport = trimmed.startsWith('export ')
+      ? trimmed.slice('export '.length).trim()
+      : trimmed;
+    const separatorIndex = withoutExport.indexOf('=');
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const key = withoutExport.slice(0, separatorIndex).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      continue;
+    }
+    if (process.env[key] !== undefined) {
+      continue;
+    }
+
+    const rawValue = withoutExport.slice(separatorIndex + 1);
+    process.env[key] = parseDotEnvValue(rawValue);
+  }
+
+  return true;
+}
+
 export function loadConfig(overrides = {}) {
   const maxCandidateUrlsFromEnv =
     process.env.MAX_CANDIDATE_URLS_PER_PRODUCT ||
@@ -31,6 +97,10 @@ export function loadConfig(overrides = {}) {
     maxUrlsPerProduct: parseIntEnv('MAX_URLS_PER_PRODUCT', 20),
     maxCandidateUrls: Number.isFinite(parsedCandidateUrls) ? parsedCandidateUrls : 50,
     maxPagesPerDomain: parseIntEnv('MAX_PAGES_PER_DOMAIN', 2),
+    manufacturerDeepResearchEnabled: parseBoolEnv('MANUFACTURER_DEEP_RESEARCH_ENABLED', true),
+    maxManufacturerUrlsPerProduct: parseIntEnv('MAX_MANUFACTURER_URLS_PER_PRODUCT', 20),
+    maxManufacturerPagesPerDomain: parseIntEnv('MAX_MANUFACTURER_PAGES_PER_DOMAIN', 8),
+    manufacturerReserveUrls: parseIntEnv('MANUFACTURER_RESERVE_URLS', 10),
     maxRunSeconds: parseIntEnv('MAX_RUN_SECONDS', 300),
     maxJsonBytes: parseIntEnv('MAX_JSON_BYTES', 2_000_000),
     maxPdfBytes: parseIntEnv('MAX_PDF_BYTES', 8_000_000),

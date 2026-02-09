@@ -63,6 +63,24 @@ function slug(value) {
     .replace(/^-+|-+$/g, '');
 }
 
+function countQueueHost(queue, host) {
+  let count = 0;
+  for (const row of queue || []) {
+    if (row.host === host) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function urlPath(url) {
+  try {
+    return new URL(url).pathname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
 export class SourcePlanner {
   constructor(job, config, categoryConfig, options = {}) {
     this.job = job;
@@ -81,15 +99,31 @@ export class SourcePlanner {
     this.maxUrls = config.maxUrlsPerProduct;
     this.maxCandidateUrls = config.maxCandidateUrls;
     this.maxPagesPerDomain = config.maxPagesPerDomain;
+    this.manufacturerDeepResearchEnabled = config.manufacturerDeepResearchEnabled !== false;
+    this.maxManufacturerUrls = Math.max(
+      1,
+      Math.min(this.maxUrls, Number(config.maxManufacturerUrlsPerProduct || this.maxUrls))
+    );
+    this.maxManufacturerPagesPerDomain = Math.max(
+      this.maxPagesPerDomain,
+      Number(config.maxManufacturerPagesPerDomain || this.maxPagesPerDomain)
+    );
+    this.manufacturerReserveUrls = this.manufacturerDeepResearchEnabled
+      ? Math.max(0, Math.min(this.maxUrls, Number(config.manufacturerReserveUrls || 0)))
+      : 0;
 
+    this.manufacturerQueue = [];
     this.queue = [];
     this.candidateQueue = [];
 
     this.visitedUrls = new Set();
     this.approvedVisitedCount = 0;
+    this.manufacturerVisitedCount = 0;
+    this.nonManufacturerVisitedCount = 0;
     this.candidateVisitedCount = 0;
     this.filledFields = new Set();
     this.hostCounts = new Map();
+    this.manufacturerHostCounts = new Map();
     this.candidateHostCounts = new Map();
 
     this.allowlistHosts = new Set();
@@ -127,6 +161,64 @@ export class SourcePlanner {
     ])].filter((token) => !this.brandTokens.includes(token) && !genericModelTokens.has(token));
 
     this.seed(job.seedUrls || []);
+    this.seedManufacturerDeepUrls();
+  }
+
+  seedManufacturerDeepUrls() {
+    if (!this.manufacturerDeepResearchEnabled) {
+      return;
+    }
+
+    const queryText = [
+      this.job.identityLock?.brand || '',
+      this.job.identityLock?.model || '',
+      this.job.identityLock?.variant || ''
+    ]
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!queryText) {
+      return;
+    }
+
+    const encodedQuery = encodeURIComponent(queryText);
+    const modelSlug = slug(this.job.identityLock?.model || this.job.productId || '');
+
+    const manufacturerHosts = new Set();
+    for (const sourceHost of this.categoryConfig.sourceHosts || []) {
+      if (sourceHost.tierName === 'manufacturer') {
+        manufacturerHosts.add(normalizeHost(sourceHost.host));
+      }
+    }
+    for (const host of this.preferred.manufacturerHosts || []) {
+      manufacturerHosts.add(normalizeHost(host));
+    }
+    for (const seedUrl of this.job.seedUrls || []) {
+      const host = getHost(seedUrl);
+      if (host && resolveTierNameForHost(host, this.categoryConfig) === 'manufacturer') {
+        manufacturerHosts.add(host);
+      }
+    }
+
+    for (const host of manufacturerHosts) {
+      if (!host) {
+        continue;
+      }
+
+      const seeds = [
+        `https://${host}/search?q=${encodedQuery}`,
+        `https://${host}/support/search?query=${encodedQuery}`,
+        `https://${host}/support/${modelSlug}`,
+        `https://${host}/downloads/${modelSlug}`,
+        `https://${host}/manual/${modelSlug}`,
+        `https://${host}/specs/${modelSlug}`
+      ];
+
+      for (const url of seeds) {
+        this.enqueue(url, 'manufacturer_deep_seed', { forceApproved: true });
+      }
+    }
   }
 
   seed(urls) {
@@ -204,22 +296,52 @@ export class SourcePlanner {
     const approvedDomain = this.shouldUseApprovedQueue(host, forceApproved, forceCandidate);
     const rootDomain = extractRootDomain(host);
     const priorityScore = this.domainPriority(rootDomain);
+    const tier = resolveTierForHost(host, this.categoryConfig);
+    const tierName = resolveTierNameForHost(host, this.categoryConfig);
+    const role = inferRoleForHost(host, this.categoryConfig);
+    const totalApprovedPlanned =
+      this.manufacturerQueue.length +
+      this.queue.length +
+      this.manufacturerVisitedCount +
+      this.nonManufacturerVisitedCount;
+    const isManufacturerSource = role === 'manufacturer';
 
     if (approvedDomain) {
-      if (this.queue.length + this.approvedVisitedCount >= this.maxUrls) {
+      if (totalApprovedPlanned >= this.maxUrls) {
         return;
       }
 
-      const domainCount = this.hostCounts.get(host) || 0;
-      if (domainCount >= this.maxPagesPerDomain) {
-        return;
+      if (isManufacturerSource) {
+        const plannedCount =
+          countQueueHost(this.manufacturerQueue, host) + (this.manufacturerHostCounts.get(host) || 0);
+        if (plannedCount >= this.maxManufacturerPagesPerDomain) {
+          return;
+        }
+        const manufacturerPlanned = this.manufacturerQueue.length + this.manufacturerVisitedCount;
+        if (manufacturerPlanned >= this.maxManufacturerUrls) {
+          return;
+        }
+      } else {
+        const plannedCount = countQueueHost(this.queue, host) + (this.hostCounts.get(host) || 0);
+        if (plannedCount >= this.maxPagesPerDomain) {
+          return;
+        }
+        if (this.manufacturerReserveUrls > 0) {
+          const reservedRemaining = Math.max(
+            0,
+            this.manufacturerReserveUrls -
+              (this.manufacturerQueue.length + this.manufacturerVisitedCount)
+          );
+          const maxNonManufacturerPlan = this.maxUrls - reservedRemaining;
+          const currentNonManufacturerPlan =
+            this.queue.length + this.nonManufacturerVisitedCount;
+          if (currentNonManufacturerPlan >= maxNonManufacturerPlan) {
+            return;
+          }
+        }
       }
 
-      const tier = resolveTierForHost(host, this.categoryConfig);
-      const tierName = resolveTierNameForHost(host, this.categoryConfig);
-      const role = inferRoleForHost(host, this.categoryConfig);
-
-      this.queue.push({
+      const row = {
         url: normalizedUrl,
         host,
         rootDomain,
@@ -230,8 +352,14 @@ export class SourcePlanner {
         approvedDomain: true,
         discoveredFrom,
         candidateSource: false
-      });
+      };
 
+      if (isManufacturerSource) {
+        this.manufacturerQueue.push(row);
+        this.sortManufacturerQueue();
+      } else {
+        this.queue.push(row);
+      }
       this.sortApprovedQueue();
       return;
     }
@@ -266,11 +394,20 @@ export class SourcePlanner {
   }
 
   hasNext() {
-    return this.queue.length > 0 || this.candidateQueue.length > 0;
+    return (
+      this.manufacturerQueue.length > 0 ||
+      this.queue.length > 0 ||
+      this.candidateQueue.length > 0
+    );
   }
 
   next() {
-    const source = this.queue.length > 0 ? this.queue.shift() : this.candidateQueue.shift();
+    const source =
+      this.manufacturerQueue.length > 0
+        ? this.manufacturerQueue.shift()
+        : this.queue.length > 0
+          ? this.queue.shift()
+          : this.candidateQueue.shift();
     if (!source) {
       return null;
     }
@@ -284,7 +421,16 @@ export class SourcePlanner {
       );
     } else {
       this.approvedVisitedCount += 1;
-      this.hostCounts.set(source.host, (this.hostCounts.get(source.host) || 0) + 1);
+      if (source.role === 'manufacturer') {
+        this.manufacturerVisitedCount += 1;
+        this.manufacturerHostCounts.set(
+          source.host,
+          (this.manufacturerHostCounts.get(source.host) || 0) + 1
+        );
+      } else {
+        this.nonManufacturerVisitedCount += 1;
+        this.hostCounts.set(source.host, (this.hostCounts.get(source.host) || 0) + 1);
+      }
     }
     return source;
   }
@@ -295,6 +441,8 @@ export class SourcePlanner {
     }
 
     const baseHost = getHost(baseUrl);
+    const manufacturerContext =
+      baseHost && resolveTierNameForHost(baseHost, this.categoryConfig) === 'manufacturer';
     const matches = html.matchAll(/href\s*=\s*["']([^"']+)["']/gi);
     for (const match of matches) {
       const href = match[1];
@@ -312,7 +460,7 @@ export class SourcePlanner {
             continue;
           }
         }
-        if (!this.isRelevantDiscoveredUrl(parsed)) {
+        if (!this.isRelevantDiscoveredUrl(parsed, { manufacturerContext })) {
           continue;
         }
         this.enqueue(parsed.toString(), baseUrl);
@@ -322,12 +470,33 @@ export class SourcePlanner {
     }
   }
 
-  isRelevantDiscoveredUrl(parsed) {
+  isRelevantDiscoveredUrl(parsed, context = {}) {
     const pathAndQuery = `${parsed.pathname || ''} ${parsed.search || ''}`.toLowerCase();
+    const pathname = parsed.pathname.toLowerCase();
+    if (/\.(css|js|svg|png|jpe?g|webp|gif|ico|woff2?|ttf|map|xml|json)$/i.test(pathname)) {
+      return false;
+    }
     if (/^\/[a-z]{2}-[a-z]{2}\//.test(parsed.pathname.toLowerCase())) {
       return false;
     }
+    if (/^\/[a-z]{2}\//.test(parsed.pathname.toLowerCase())) {
+      return false;
+    }
     if (!pathAndQuery || pathAndQuery === '/') {
+      return false;
+    }
+
+    const negativeKeywords = [
+      '/cart',
+      '/checkout',
+      '/account',
+      '/community',
+      '/blog',
+      '/newsroom',
+      '/store-locator',
+      '/gift-card'
+    ];
+    if (negativeKeywords.some((keyword) => pathAndQuery.includes(keyword))) {
       return false;
     }
 
@@ -354,6 +523,18 @@ export class SourcePlanner {
       }
     }
 
+    if (context.manufacturerContext) {
+      const manufacturerSignals = ['support', 'manual', 'spec', 'datasheet', 'technical', 'download'];
+      return (
+        manufacturerSignals.some((token) => pathAndQuery.includes(token)) &&
+        (
+          hasModelToken ||
+          this.brandTokens.some((token) => pathAndQuery.includes(token)) ||
+          this.modelTokens.length === 0
+        )
+      );
+    }
+
     return false;
   }
 
@@ -376,11 +557,24 @@ export class SourcePlanner {
     for (const row of this.queue) {
       row.priorityScore = this.domainPriority(row.rootDomain);
     }
+    for (const row of this.manufacturerQueue) {
+      row.priorityScore = this.domainPriority(row.rootDomain);
+    }
     for (const row of this.candidateQueue) {
       row.priorityScore = this.domainPriority(row.rootDomain);
     }
+    this.sortManufacturerQueue();
     this.sortApprovedQueue();
     this.sortCandidateQueue();
+  }
+
+  sortManufacturerQueue() {
+    this.manufacturerQueue.sort(
+      (a, b) =>
+        b.priorityScore - a.priorityScore ||
+        urlPath(a.url).localeCompare(urlPath(b.url)) ||
+        a.url.localeCompare(b.url)
+    );
   }
 
   sortApprovedQueue() {
@@ -420,6 +614,20 @@ export class SourcePlanner {
     }, 0);
 
     return Number.parseFloat((baseScore + Math.min(0.2, requiredBoost)).toFixed(6));
+  }
+
+  getStats() {
+    return {
+      manufacturer_queue_count: this.manufacturerQueue.length,
+      non_manufacturer_queue_count: this.queue.length,
+      candidate_queue_count: this.candidateQueue.length,
+      manufacturer_visited_count: this.manufacturerVisitedCount,
+      non_manufacturer_visited_count: this.nonManufacturerVisitedCount,
+      candidate_visited_count: this.candidateVisitedCount,
+      max_manufacturer_urls: this.maxManufacturerUrls,
+      max_urls: this.maxUrls,
+      manufacturer_reserve_urls: this.manufacturerReserveUrls
+    };
   }
 }
 

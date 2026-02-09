@@ -180,7 +180,7 @@ export const eloShapesAdapter = {
     }
 
     const outPath = path.join(os.tmpdir(), `eloshapes-${runId}.json`);
-    const scriptPath = path.resolve('scripts', 'eloshapes_fetch.py');
+    const scriptPath = path.resolve('scripts', 'fetch_eloshapes_supabase.py');
 
     try {
       await runCommand('python', [

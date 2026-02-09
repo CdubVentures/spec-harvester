@@ -13,6 +13,7 @@ node src/cli/spec.js <command>
 Commands:
 
 - `run-one --s3key <key>`
+- `run-ad-hoc --category <category> --brand <brand> --model <model>`
 - `run-batch --category mouse [--brand <brand>]`
 - `discover --category mouse [--brand <brand>]`
 - `test-s3 [--fixture <path>] [--s3key <key>] [--dry-run]`
@@ -92,6 +93,10 @@ Budgets/throttles:
 - `MAX_URLS_PER_PRODUCT=20`
 - `MAX_CANDIDATE_URLS_PER_PRODUCT=50` (also supports `MAX_CANDIDATE_URLS`)
 - `MAX_PAGES_PER_DOMAIN=2`
+- `MANUFACTURER_DEEP_RESEARCH_ENABLED=true|false` (default `true`)
+- `MAX_MANUFACTURER_URLS_PER_PRODUCT=20`
+- `MAX_MANUFACTURER_PAGES_PER_DOMAIN=8`
+- `MANUFACTURER_RESERVE_URLS=10` (keeps crawl slots for manufacturer URLs)
 - `MAX_RUN_SECONDS=300`
 - `MAX_JSON_BYTES=2000000`
 - `MAX_PDF_BYTES=8000000`
@@ -137,6 +142,29 @@ EloShapes adapter (optional, safe default disabled):
 
 If either value is missing, EloShapes API adapter is skipped.
 
+Dotenv support:
+
+- CLI auto-loads `.env` by default.
+- Override dotenv path with `--env <path>`.
+- Existing process env vars win over `.env` values.
+
+## Backend Data Scripts
+
+Primary Python helpers in `scripts/`:
+
+- `fetch_eloshapes_supabase.py`
+  - Range-pagination Supabase/PostgREST fetcher
+  - retry/backoff support
+  - bounded rows/pages and structured `page_trace`
+- `extract_pdf_kv.py`
+  - PDF table/text key-value extraction
+  - pair dedupe, bounds, extraction metadata
+
+Backward-compatible wrappers retained:
+
+- `eloshapes_fetch.py` -> forwards to `fetch_eloshapes_supabase.py`
+- `pdf_extract_tables.py` -> forwards to `extract_pdf_kv.py`
+
 ## Install
 
 ```bash
@@ -150,6 +178,18 @@ Run one:
 
 ```bash
 node src/cli/spec.js run-one --s3key specs/inputs/mouse/products/mouse-razer-viper-v3-pro.json
+```
+
+Run ad-hoc directly from identity inputs:
+
+```bash
+node src/cli/spec.js run-ad-hoc --category mouse --brand Razer --model "Viper V3 Pro" --variant Wireless
+```
+
+Run ad-hoc with seed URLs and explicit key:
+
+```bash
+node src/cli/spec.js run-ad-hoc --category mouse --brand Logitech --model "G Pro X Superlight 2" --seed-urls "https://www.logitechg.com/en-us/products/gaming-mice/pro-x-superlight-2.910-006628.html,https://www.rtings.com/mouse/reviews/logitech/g-pro-x-superlight-2" --s3key specs/inputs/mouse/products/mouse-logitech-g-pro-x-superlight-2.json
 ```
 
 Run batch:
@@ -242,6 +282,12 @@ Each run records reusable learning artifacts:
 On the next run, the planner reuses high-yield URLs first, so evidence quality improves over time without relaxing validation or safety controls.
 Set `FETCH_CANDIDATE_SOURCES=true` for wider evidence crawl while keeping candidate domains non-counting until approved.
 LLM remains optional and candidate-only; it never bypasses validation gates or anchor locks.
+
+Manufacturer-first behavior:
+
+- official manufacturer pages are queued and processed before labs/databases/retailers
+- manufacturer deep seeds are auto-added each run (`search/support/manual/spec/download` patterns)
+- reserved URL capacity prevents non-manufacturer pages from crowding out manufacturer research
 
 ## Domain Approval Workflow
 

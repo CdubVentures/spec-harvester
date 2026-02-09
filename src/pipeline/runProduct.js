@@ -641,6 +641,11 @@ export async function runProduct({ storage, config, s3Key }) {
 
   const durationMs = Date.now() - startMs;
   const validatedReason = gate.validatedReason;
+  const manufacturerSources = sourceResults.filter((source) => source.role === 'manufacturer');
+  const manufacturerMajorConflicts = manufacturerSources.reduce(
+    (count, source) => count + ((source.anchorCheck?.majorConflicts || []).length > 0 ? 1 : 0),
+    0
+  );
 
   const summary = {
     productId,
@@ -688,6 +693,12 @@ export async function runProduct({ storage, config, s3Key }) {
     },
     source_registry: {
       override_key: categoryConfig.sources_override_key || null
+    },
+    manufacturer_research: {
+      attempted_sources: manufacturerSources.length,
+      identity_matched_sources: manufacturerSources.filter((source) => source.identity?.match).length,
+      major_anchor_conflict_sources: manufacturerMajorConflicts,
+      planner: planner.getStats()
     },
     duration_ms: durationMs,
     generated_at: new Date().toISOString()

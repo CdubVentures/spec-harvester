@@ -10,6 +10,7 @@
   "scripts": {
     "test": "node --test",
     "run:one": "node src/cli/spec.js run-one",
+    "run:adhoc": "node src/cli/spec.js run-ad-hoc",
     "run:batch": "node src/cli/spec.js run-batch",
     "discover": "node src/cli/spec.js discover",
     "discover-sources": "node src/cli/spec.js discover",

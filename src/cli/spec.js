@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { loadConfig } from '../config.js';
-import { createStorage } from '../s3/storage.js';
+import { loadConfig, loadDotEnvFile } from '../config.js';
+import { createStorage, toPosixKey } from '../s3/storage.js';
 import { parseArgs, asBool } from './args.js';
 import { runProduct } from '../pipeline/runProduct.js';
 import { loadCategoryConfig } from '../categories/loader.js';
@@ -21,12 +21,16 @@ function usage() {
     '',
     'Commands:',
     '  run-one --s3key <key> [--local] [--dry-run]',
+    '  run-ad-hoc --category <category> --brand <brand> --model <model> [--variant <variant>] [--seed-urls <csv>] [--local]',
     '  run-batch --category <category> [--brand <brand>] [--local] [--dry-run]',
     '  discover --category <category> [--brand <brand>] [--local]',
     '  test-s3 [--fixture <path>] [--s3key <key>] [--dry-run]',
     '  sources-plan --category <category> [--local]',
     '  sources-report --category <category> [--top <n>] [--local]',
-    '  rebuild-index --category <category> [--local]'
+    '  rebuild-index --category <category> [--local]',
+    '',
+    'Global options:',
+    '  --env <path>   Path to dotenv file (default: .env)'
   ].join('\n');
 }
 
@@ -83,6 +87,32 @@ async function runWithConcurrency(items, concurrency, worker) {
   return results;
 }
 
+function slug(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function parseCsvList(value) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseJsonArg(name, value, defaultValue) {
+  if (value === undefined || value === null || value === '') {
+    return defaultValue;
+  }
+
+  try {
+    return JSON.parse(String(value));
+  } catch (error) {
+    throw new Error(`Invalid JSON for --${name}: ${error.message}`);
+  }
+}
+
 async function commandRunOne(config, storage, args) {
   const s3Key =
     args.s3key || `${config.s3InputPrefix}/mouse/products/mouse-razer-viper-v3-pro.json`;
@@ -90,6 +120,70 @@ async function commandRunOne(config, storage, args) {
   const result = await runProduct({ storage, config, s3Key });
   return {
     command: 'run-one',
+    productId: result.productId,
+    runId: result.runId,
+    validated: result.summary.validated,
+    validated_reason: result.summary.validated_reason,
+    confidence: result.summary.confidence,
+    completeness_required_percent: result.summary.completeness_required_percent,
+    coverage_overall_percent: result.summary.coverage_overall_percent,
+    runBase: result.exportInfo.runBase,
+    latestBase: result.exportInfo.latestBase
+  };
+}
+
+async function commandRunAdHoc(config, storage, args) {
+  const category = String(args.category || 'mouse').trim();
+  const brand = String(args.brand || '').trim();
+  const model = String(args.model || '').trim();
+  const variant = String(args.variant || '').trim();
+
+  if (!brand || !model) {
+    throw new Error('run-ad-hoc requires --brand and --model');
+  }
+
+  const autoProductId = [category, slug(brand), slug(model), slug(variant)]
+    .filter(Boolean)
+    .join('-');
+  const productId = String(args['product-id'] || autoProductId || `${category}-${Date.now()}`).trim();
+
+  const identityLock = {
+    brand,
+    model,
+    variant,
+    sku: String(args.sku || '').trim(),
+    mpn: String(args.mpn || '').trim(),
+    gtin: String(args.gtin || '').trim()
+  };
+
+  const seedUrls = parseCsvList(args['seed-urls']);
+  const anchors = parseJsonArg('anchors-json', args['anchors-json'], {});
+  const requirements = parseJsonArg('requirements-json', args['requirements-json'], null);
+
+  const job = {
+    productId,
+    category,
+    identityLock,
+    seedUrls,
+    anchors
+  };
+  if (requirements) {
+    job.requirements = requirements;
+  }
+
+  const s3Key =
+    args.s3key || toPosixKey(config.s3InputPrefix, category, 'products', `${productId}.json`);
+
+  await storage.writeObject(
+    s3Key,
+    Buffer.from(JSON.stringify(job, null, 2), 'utf8'),
+    { contentType: 'application/json' }
+  );
+
+  const result = await runProduct({ storage, config, s3Key });
+  return {
+    command: 'run-ad-hoc',
+    s3Key,
     productId: result.productId,
     runId: result.runId,
     validated: result.summary.validated,
@@ -261,12 +355,15 @@ async function main() {
   }
 
   const args = parseArgs(rest);
+  loadDotEnvFile(args.env || '.env');
   const config = buildConfig(args);
   const storage = createStorage(config);
 
   let output;
   if (command === 'run-one') {
     output = await commandRunOne(config, storage, args);
+  } else if (command === 'run-ad-hoc') {
+    output = await commandRunAdHoc(config, storage, args);
   } else if (command === 'run-batch') {
     output = await commandRunBatch(config, storage, args);
   } else if (command === 'discover') {

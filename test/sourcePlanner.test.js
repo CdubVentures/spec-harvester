@@ -6,6 +6,7 @@ function makeCategoryConfig() {
   return {
     sourceHosts: [
       { host: 'manufacturer.com', tierName: 'manufacturer' },
+      { host: 'lab.com', tierName: 'lab' },
       { host: 'db-a.com', tierName: 'database' },
       { host: 'db-b.com', tierName: 'database' }
     ],
@@ -18,6 +19,10 @@ function makeConfig(overrides = {}) {
     maxUrlsPerProduct: 20,
     maxCandidateUrls: 50,
     maxPagesPerDomain: 2,
+    maxManufacturerUrlsPerProduct: 20,
+    maxManufacturerPagesPerDomain: 8,
+    manufacturerReserveUrls: 0,
+    manufacturerDeepResearchEnabled: true,
     fetchCandidateSources: false,
     ...overrides
   };
@@ -76,4 +81,48 @@ test('source planner keeps candidates last and uses source-intel score inside a 
   assert.equal(third.host, 'random-candidate.com');
   assert.equal(third.tier, 4);
   assert.equal(third.candidateSource, true);
+});
+
+test('source planner prioritizes manufacturer queue ahead of same-tier lab pages', () => {
+  const planner = new SourcePlanner(
+    { seedUrls: [], preferredSources: {} },
+    makeConfig({ fetchCandidateSources: false }),
+    makeCategoryConfig()
+  );
+
+  planner.enqueue('https://lab.com/review/1');
+  planner.enqueue('https://manufacturer.com/product/1');
+
+  const first = planner.next();
+  const second = planner.next();
+
+  assert.equal(first.host, 'manufacturer.com');
+  assert.equal(first.role, 'manufacturer');
+  assert.equal(second.host, 'lab.com');
+});
+
+test('source planner preserves non-manufacturer capacity for manufacturer deep research', () => {
+  const planner = new SourcePlanner(
+    { seedUrls: [], preferredSources: {} },
+    makeConfig({
+      maxUrlsPerProduct: 4,
+      manufacturerReserveUrls: 2,
+      fetchCandidateSources: false
+    }),
+    makeCategoryConfig()
+  );
+
+  planner.enqueue('https://db-a.com/product/1');
+  planner.enqueue('https://db-b.com/product/1');
+  planner.enqueue('https://db-a.com/product/2');
+  planner.enqueue('https://db-b.com/product/2');
+  planner.enqueue('https://manufacturer.com/product/1');
+  planner.enqueue('https://manufacturer.com/support/product-1');
+
+  const hosts = [];
+  while (planner.hasNext()) {
+    hosts.push(planner.next().host);
+  }
+
+  assert.deepEqual(hosts, ['manufacturer.com', 'manufacturer.com', 'db-a.com', 'db-b.com']);
 });

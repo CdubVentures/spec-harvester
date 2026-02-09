@@ -117,7 +117,7 @@ async function parsePdfViaPython(buffer) {
   try {
     await fs.writeFile(pdfPath, buffer);
     await runCommand('python', [
-      path.resolve('scripts', 'pdf_extract_tables.py'),
+      path.resolve('scripts', 'extract_pdf_kv.py'),
       '--pdf',
       pdfPath,
       '--out',
