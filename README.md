@@ -120,6 +120,7 @@ NPM shortcuts:
 ```bash
 npm run test
 npm run smoke
+npm run test:s3
 ```
 
 ## Docker

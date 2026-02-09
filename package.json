@@ -11,7 +11,8 @@
     "test": "node --test",
     "run:one": "node src/cli/run-one.js",
     "run:batch": "node src/cli/run-batch.js",
-    "smoke": "node src/cli/run-one.js --local --dry-run --s3key specs/inputs/mouse/products/mouse-razer-viper-v3-pro.json"
+    "smoke": "node src/cli/run-one.js --local --dry-run --s3key specs/inputs/mouse/products/mouse-razer-viper-v3-pro.json",
+    "test:s3": "node src/cli/s3-integration.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.862.0",
