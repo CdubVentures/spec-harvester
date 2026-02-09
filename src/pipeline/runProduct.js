@@ -953,7 +953,8 @@ export async function runProduct({ storage, config, s3Key }) {
     brand: job.identityLock?.brand || identity.brand || '',
     sourceResults,
     provenance,
-    categoryConfig
+    categoryConfig,
+    constraintAnalysis
   });
 
   summary.source_intel = {

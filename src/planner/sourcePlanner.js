@@ -81,6 +81,21 @@ function urlPath(url) {
   }
 }
 
+function normalizeSourcePath(url) {
+  try {
+    const parsed = new URL(url);
+    const rawPath = String(parsed.pathname || '/')
+      .toLowerCase()
+      .replace(/\/+/g, '/');
+    if (!rawPath || rawPath === '/') {
+      return '/';
+    }
+    return rawPath.endsWith('/') ? rawPath.slice(0, -1) : rawPath;
+  } catch {
+    return '/';
+  }
+}
+
 function isSitemapLikePath(pathname) {
   const token = String(pathname || '').toLowerCase();
   return token.includes('sitemap') || token.endsWith('.xml');
@@ -334,7 +349,6 @@ export class SourcePlanner {
 
     const approvedDomain = this.shouldUseApprovedQueue(host, forceApproved, forceCandidate);
     const rootDomain = extractRootDomain(host);
-    const priorityScore = this.domainPriority(rootDomain);
     const tier = resolveTierForHost(host, this.categoryConfig);
     const tierName = resolveTierNameForHost(host, this.categoryConfig);
     const role = inferRoleForHost(host, this.categoryConfig);
@@ -387,11 +401,12 @@ export class SourcePlanner {
         tier,
         tierName,
         role,
-        priorityScore,
+        priorityScore: 0,
         approvedDomain: true,
         discoveredFrom,
         candidateSource: false
       };
+      row.priorityScore = this.sourcePriority(row);
 
       if (isManufacturerSource) {
         this.manufacturerQueue.push(row);
@@ -423,7 +438,17 @@ export class SourcePlanner {
       tier: 4,
       tierName: 'candidate',
       role: 'other',
-      priorityScore,
+      priorityScore: this.sourcePriority({
+        url: normalizedUrl,
+        host,
+        rootDomain,
+        tier: 4,
+        tierName: 'candidate',
+        role: 'other',
+        approvedDomain: false,
+        discoveredFrom,
+        candidateSource: true
+      }),
       approvedDomain: false,
       discoveredFrom,
       candidateSource: true
@@ -710,13 +735,13 @@ export class SourcePlanner {
     }
 
     for (const row of this.queue) {
-      row.priorityScore = this.domainPriority(row.rootDomain);
+      row.priorityScore = this.sourcePriority(row);
     }
     for (const row of this.manufacturerQueue) {
-      row.priorityScore = this.domainPriority(row.rootDomain);
+      row.priorityScore = this.sourcePriority(row);
     }
     for (const row of this.candidateQueue) {
-      row.priorityScore = this.domainPriority(row.rootDomain);
+      row.priorityScore = this.sourcePriority(row);
     }
     this.sortManufacturerQueue();
     this.sortApprovedQueue();
@@ -740,10 +765,13 @@ export class SourcePlanner {
     this.candidateQueue.sort((a, b) => b.priorityScore - a.priorityScore || a.url.localeCompare(b.url));
   }
 
-  domainPriority(rootDomain) {
+  getIntelBundle(rootDomain) {
     const intel = this.sourceIntelDomains[rootDomain];
     if (!intel) {
-      return 0;
+      return {
+        domainIntel: null,
+        activeIntel: null
+      };
     }
 
     const brandIntel =
@@ -751,15 +779,15 @@ export class SourcePlanner {
         ? intel.per_brand[this.brandKey]
         : null;
 
-    const activeIntel = brandIntel || intel;
-    const baseScore = Number.isFinite(activeIntel.planner_score)
-      ? activeIntel.planner_score
-      : Number.isFinite(intel.planner_score)
-        ? intel.planner_score
-        : 0;
+    return {
+      domainIntel: intel,
+      activeIntel: brandIntel || intel
+    };
+  }
+
+  scoreRequiredFieldBoost(activeIntel, domainIntel, missingRequiredFields) {
     const helpfulness =
-      activeIntel.per_field_helpfulness || intel.per_field_helpfulness || {};
-    const missingRequiredFields = this.requiredFields.filter((field) => !this.filledFields.has(field));
+      activeIntel?.per_field_helpfulness || domainIntel?.per_field_helpfulness || {};
     const requiredBoost = missingRequiredFields.reduce((acc, field) => {
       const count = Number.parseFloat(helpfulness[field] || 0);
       if (!Number.isFinite(count) || count <= 0) {
@@ -767,8 +795,101 @@ export class SourcePlanner {
       }
       return acc + Math.min(0.01, count / 500);
     }, 0);
+    return Math.min(0.2, requiredBoost);
+  }
 
-    return Number.parseFloat((baseScore + Math.min(0.2, requiredBoost)).toFixed(6));
+  readRewardScoreFromMethodMap(map, field) {
+    const prefix = `${field}::`;
+    let best = null;
+    for (const [key, row] of Object.entries(map || {})) {
+      if (!key.startsWith(prefix)) {
+        continue;
+      }
+      const score = Number.parseFloat(String(row?.reward_score ?? row?.score ?? 0));
+      if (!Number.isFinite(score)) {
+        continue;
+      }
+      if (best === null || score > best) {
+        best = score;
+      }
+    }
+    return best;
+  }
+
+  scoreFieldRewardBoost(row, domainIntel, activeIntel, missingRequiredFields) {
+    if (!missingRequiredFields.length || !domainIntel) {
+      return 0;
+    }
+
+    const pathKey = normalizeSourcePath(row?.url || '');
+    const pathIntel = domainIntel.per_path?.[pathKey] || null;
+    const domainFieldReward = activeIntel?.per_field_reward || domainIntel?.per_field_reward || {};
+    const domainMethodReward = activeIntel?.field_method_reward || domainIntel?.field_method_reward || {};
+    const pathFieldReward = pathIntel?.per_field_reward || {};
+    const pathMethodReward = pathIntel?.field_method_reward || {};
+
+    let total = 0;
+    let fieldCount = 0;
+    for (const field of missingRequiredFields) {
+      const pathFieldScore = Number.parseFloat(String(pathFieldReward?.[field]?.score ?? ''));
+      const domainFieldScore = Number.parseFloat(String(domainFieldReward?.[field]?.score ?? ''));
+      const pathMethodScore = this.readRewardScoreFromMethodMap(pathMethodReward, field);
+      const domainMethodScore = this.readRewardScoreFromMethodMap(domainMethodReward, field);
+
+      const pathBest = [pathFieldScore, pathMethodScore]
+        .filter((value) => Number.isFinite(value))
+        .sort((a, b) => b - a)[0];
+      const domainBest = [domainFieldScore, domainMethodScore]
+        .filter((value) => Number.isFinite(value))
+        .sort((a, b) => b - a)[0];
+
+      if (!Number.isFinite(pathBest) && !Number.isFinite(domainBest)) {
+        continue;
+      }
+
+      const weighted = (
+        (Number.isFinite(pathBest) ? pathBest * 0.7 : 0) +
+        (Number.isFinite(domainBest) ? domainBest * 0.3 : 0)
+      );
+      total += Math.max(-0.25, Math.min(0.35, weighted));
+      fieldCount += 1;
+    }
+
+    if (!fieldCount) {
+      return 0;
+    }
+    const avg = total / fieldCount;
+    return Number.parseFloat((Math.max(-0.2, Math.min(0.2, avg * 0.35))).toFixed(6));
+  }
+
+  sourcePriority(row) {
+    const rootDomain = row?.rootDomain;
+    if (!rootDomain) {
+      return 0;
+    }
+
+    const { domainIntel, activeIntel } = this.getIntelBundle(rootDomain);
+    if (!domainIntel || !activeIntel) {
+      return 0;
+    }
+
+    const baseScore = Number.isFinite(activeIntel.planner_score)
+      ? activeIntel.planner_score
+      : Number.isFinite(domainIntel.planner_score)
+        ? domainIntel.planner_score
+        : 0;
+    const missingRequiredFields = this.requiredFields.filter((field) => !this.filledFields.has(field));
+    const requiredBoost = this.scoreRequiredFieldBoost(activeIntel, domainIntel, missingRequiredFields);
+    const rewardBoost = this.scoreFieldRewardBoost(row, domainIntel, activeIntel, missingRequiredFields);
+
+    return Number.parseFloat((baseScore + requiredBoost + rewardBoost).toFixed(6));
+  }
+
+  domainPriority(rootDomain) {
+    return this.sourcePriority({
+      rootDomain,
+      url: `https://${rootDomain}/`
+    });
   }
 
   getStats() {

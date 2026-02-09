@@ -83,6 +83,58 @@ test('source planner keeps candidates last and uses source-intel score inside a 
   assert.equal(third.candidateSource, true);
 });
 
+test('source planner uses field reward memory to prefer stronger field paths', () => {
+  const planner = new SourcePlanner(
+    { seedUrls: [], preferredSources: {} },
+    makeConfig({ fetchCandidateSources: false }),
+    makeCategoryConfig(),
+    {
+      requiredFields: ['fields.sensor'],
+      sourceIntel: {
+        domains: {
+          'db-a.com': {
+            planner_score: 0.9,
+            per_field_reward: {
+              sensor: { score: -0.6 }
+            },
+            per_path: {
+              '/product/m100': {
+                path: '/product/m100',
+                per_field_reward: {
+                  sensor: { score: -0.8 }
+                }
+              }
+            }
+          },
+          'db-b.com': {
+            planner_score: 0.82,
+            per_field_reward: {
+              sensor: { score: 0.2 }
+            },
+            per_path: {
+              '/specs/m100': {
+                path: '/specs/m100',
+                per_field_reward: {
+                  sensor: { score: 0.95 }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  );
+
+  planner.enqueue('https://db-a.com/product/m100');
+  planner.enqueue('https://db-b.com/specs/m100');
+
+  const first = planner.next();
+  const second = planner.next();
+
+  assert.equal(first.host, 'db-b.com');
+  assert.equal(second.host, 'db-a.com');
+});
+
 test('source planner prioritizes manufacturer queue ahead of same-tier lab pages', () => {
   const planner = new SourcePlanner(
     { seedUrls: [], preferredSources: {} },

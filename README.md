@@ -138,6 +138,7 @@ Local toggles:
 - `ALLOW_BELOW_PASS_TARGET_FILL=true|false` (default `false`)
 - `SELF_IMPROVE_ENABLED=true|false` (default `true`)
 - `MAX_HYPOTHESIS_ITEMS=50`
+- `FIELD_REWARD_HALF_LIFE_DAYS=45` (decay window for field reward memory)
 - `BATCH_STRATEGY=explore|exploit|mixed` (default `mixed`)
 
 EloShapes adapter (optional, safe default disabled):

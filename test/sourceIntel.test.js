@@ -225,4 +225,103 @@ test('persistSourceIntel tracks parser health, fingerprints, and endpoint signal
   assert.equal(row.endpoint_signal_count, 2);
   assert.equal(row.endpoint_signal_avg_score > 0, true);
   assert.equal(row.parser_health_score > 0, true);
+  assert.equal(row.field_method_reward['sensor::unknown'].success_count > 0, true);
+  assert.equal(row.per_field_reward.sensor.score > 0, true);
+});
+
+test('persistSourceIntel applies negative learning and decay for field rewards', async () => {
+  const storage = makeMemoryStorage();
+  const config = {
+    s3OutputPrefix: 'specs/outputs',
+    fieldRewardHalfLifeDays: 1
+  };
+
+  await storage.writeObject(
+    'specs/outputs/_source_intel/mouse/domain_stats.json',
+    Buffer.from(JSON.stringify({
+      category: 'mouse',
+      updated_at: new Date().toISOString(),
+      domains: {
+        'decay-domain.com': {
+          rootDomain: 'decay-domain.com',
+          attempts: 0,
+          http_ok_count: 0,
+          identity_match_count: 0,
+          major_anchor_conflict_count: 0,
+          fields_contributed_count: 0,
+          fields_accepted_count: 0,
+          accepted_critical_fields_count: 0,
+          products_seen: 0,
+          recent_products: [],
+          approved_attempts: 0,
+          candidate_attempts: 0,
+          per_field_helpfulness: {},
+          field_method_reward: {
+            'sensor::network_json': {
+              field: 'sensor',
+              method: 'network_json',
+              seen_count: 10,
+              success_count: 10,
+              fail_count: 0,
+              contradiction_count: 0,
+              success_rate: 1,
+              contradiction_rate: 0,
+              reward_score: 1,
+              last_seen_at: '2025-01-01T00:00:00.000Z',
+              last_decay_at: '2025-01-01T00:00:00.000Z'
+            }
+          },
+          per_brand: {},
+          per_path: {}
+        }
+      }
+    }, null, 2), 'utf8')
+  );
+
+  await persistSourceIntel({
+    storage,
+    config,
+    category: 'mouse',
+    productId: 'mouse-decay-test',
+    brand: 'Acme',
+    sourceResults: [
+      {
+        host: 'decay-domain.com',
+        rootDomain: 'decay-domain.com',
+        finalUrl: 'https://decay-domain.com/specs/m100',
+        approvedDomain: true,
+        status: 200,
+        identity: { match: false },
+        anchorCheck: { majorConflicts: [{ field: 'sensor' }] },
+        fieldCandidates: [{ field: 'sensor', value: 'Wrong Sensor', method: 'network_json' }]
+      }
+    ],
+    provenance: {
+      sensor: {
+        value: 'unk',
+        evidence: []
+      }
+    },
+    categoryConfig: {
+      criticalFieldSet: new Set(['sensor']),
+      approvedRootDomains: new Set(['decay-domain.com'])
+    },
+    constraintAnalysis: {
+      contradictions: [
+        {
+          code: 'sensor_conflict',
+          fields: ['sensor']
+        }
+      ]
+    }
+  });
+
+  const intel = await loadSourceIntel({ storage, config, category: 'mouse' });
+  const row = intel.data.domains['decay-domain.com'];
+  const reward = row.field_method_reward['sensor::network_json'];
+
+  assert.equal(reward.seen_count < 10, true);
+  assert.equal(reward.contradiction_count > 0, true);
+  assert.equal(reward.reward_score < 1, true);
+  assert.equal(row.per_field_reward.sensor.score < 1, true);
 });

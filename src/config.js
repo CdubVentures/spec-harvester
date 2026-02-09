@@ -138,6 +138,7 @@ export function loadConfig(overrides = {}) {
     allowBelowPassTargetFill: parseBoolEnv('ALLOW_BELOW_PASS_TARGET_FILL', false),
     selfImproveEnabled: parseBoolEnv('SELF_IMPROVE_ENABLED', true),
     maxHypothesisItems: parseIntEnv('MAX_HYPOTHESIS_ITEMS', 50),
+    fieldRewardHalfLifeDays: parseIntEnv('FIELD_REWARD_HALF_LIFE_DAYS', 45),
     batchStrategy: (process.env.BATCH_STRATEGY || 'mixed').toLowerCase()
   };
 
