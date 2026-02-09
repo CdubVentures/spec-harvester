@@ -155,3 +155,65 @@ test('consensus never uses below-pass mode for instrumented fields', () => {
 
   assert.equal(result.fields.sensor_latency, 'unk');
 });
+
+test('consensus instrumented fields require true instrumented domains, not generic review domains', () => {
+  const categoryConfig = {
+    criticalFieldSet: new Set(['sensor_latency'])
+  };
+
+  const fieldOrder = ['id', 'brand', 'model', 'base_model', 'category', 'sku', 'sensor_latency'];
+
+  const result = runConsensusEngine({
+    sourceResults: [
+      {
+        host: 'rtings.com',
+        rootDomain: 'rtings.com',
+        tier: 1,
+        tierName: 'lab',
+        role: 'review',
+        approvedDomain: true,
+        identity: { match: true },
+        anchorCheck: { majorConflicts: [] },
+        fieldCandidates: [
+          { field: 'sensor_latency', value: '1.2', method: 'instrumented_api', keyPath: 'payload.latency' }
+        ]
+      },
+      {
+        host: 'db-one.com',
+        rootDomain: 'db-one.com',
+        tier: 2,
+        tierName: 'database',
+        role: 'review',
+        approvedDomain: true,
+        identity: { match: true },
+        anchorCheck: { majorConflicts: [] },
+        fieldCandidates: [
+          { field: 'sensor_latency', value: '1.2', method: 'instrumented_api', keyPath: 'payload.latency' }
+        ]
+      },
+      {
+        host: 'db-two.com',
+        rootDomain: 'db-two.com',
+        tier: 2,
+        tierName: 'database',
+        role: 'review',
+        approvedDomain: true,
+        identity: { match: true },
+        anchorCheck: { majorConflicts: [] },
+        fieldCandidates: [
+          { field: 'sensor_latency', value: '1.2', method: 'instrumented_api', keyPath: 'payload.latency' }
+        ]
+      }
+    ],
+    categoryConfig,
+    fieldOrder,
+    anchors: {},
+    identityLock: { brand: 'Razer', model: 'Viper V3 Pro' },
+    productId: 'mouse-a',
+    category: 'mouse',
+    config: { allowBelowPassTargetFill: true }
+  });
+
+  assert.equal(result.fields.sensor_latency, 'unk');
+  assert.equal(result.provenance.sensor_latency.instrumented_confirmations, 1);
+});

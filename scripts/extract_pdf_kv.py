@@ -128,8 +128,13 @@ def main() -> int:
     try:
         with pdfplumber.open(args.pdf) as pdf:
             for page in pdf.pages[:max_pages]:
-                page_text = normalize(page.extract_text() or "")
-                lines_scanned += len(page_text.splitlines())
+                raw_page_text = str(page.extract_text() or "")
+                normalized_lines = [
+                    normalize(line) for line in raw_page_text.splitlines()
+                ]
+                normalized_lines = [line for line in normalized_lines if line]
+                page_text = "\n".join(normalized_lines)
+                lines_scanned += len(normalized_lines)
                 pages.append(
                     {
                         "page_number": page.page_number,
@@ -157,7 +162,7 @@ def main() -> int:
                     break
 
         deduped_pairs = dedupe_pairs(all_pairs, max_pairs)
-        text_preview = normalize("\n".join(text_preview_chunks))[:max_text_preview_chars]
+        text_preview = "\n".join(text_preview_chunks)[:max_text_preview_chars]
 
         payload = {
             "ok": True,

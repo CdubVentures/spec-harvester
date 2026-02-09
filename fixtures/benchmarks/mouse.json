@@ -1,0 +1,19 @@
+{
+  "category": "mouse",
+  "cases": [
+    {
+      "productId": "mouse-razer-viper-v3-pro",
+      "expected": {
+        "fields": {
+          "brand": "Razer",
+          "model": "Viper V3 Pro",
+          "connection": "wireless",
+          "weight": "54",
+          "sensor": "Focus Pro 35K",
+          "dpi": "35000",
+          "switch_brand": "Razer"
+        }
+      }
+    }
+  ]
+}

@@ -11,6 +11,21 @@ function slug(value) {
     .replace(/^-+|-+$/g, '');
 }
 
+function normalizeSourcePath(url) {
+  try {
+    const parsed = new URL(url);
+    const rawPath = String(parsed.pathname || '/')
+      .toLowerCase()
+      .replace(/\/+/g, '/');
+    if (!rawPath || rawPath === '/') {
+      return '/';
+    }
+    return rawPath.endsWith('/') ? rawPath.slice(0, -1) : rawPath;
+  } catch {
+    return '/';
+  }
+}
+
 function createStatsTemplate(extra = {}) {
   return {
     attempts: 0,
@@ -30,21 +45,65 @@ function createStatsTemplate(extra = {}) {
     candidate_attempts: 0,
     per_field_helpfulness: {},
     per_field_accept_count: {},
+    endpoint_signal_count: 0,
+    endpoint_signal_score_total: 0,
+    endpoint_signal_avg_score: 0,
+    parser_runs: 0,
+    parser_success_count: 0,
+    parser_zero_candidate_count: 0,
+    parser_identity_miss_count: 0,
+    parser_anchor_block_count: 0,
+    parser_health_score_total: 0,
+    parser_health_score: 0,
+    fingerprint_counts: {},
+    fingerprint_unique_count: 0,
+    fingerprint_drift_rate: 0,
     last_seen_at: null,
     ...extra
   };
+}
+
+function hydrateStatsShape(entry) {
+  const defaults = createStatsTemplate();
+  for (const [key, value] of Object.entries(defaults)) {
+    if (entry[key] !== undefined) {
+      continue;
+    }
+    if (Array.isArray(value)) {
+      entry[key] = [];
+    } else if (value && typeof value === 'object') {
+      entry[key] = {};
+    } else {
+      entry[key] = value;
+    }
+  }
+  return entry;
 }
 
 function ensureDomainStats(domains, rootDomain) {
   if (!domains[rootDomain]) {
     domains[rootDomain] = createStatsTemplate({
       rootDomain,
-      per_brand: {}
+      per_brand: {},
+      per_path: {}
     });
   } else if (!domains[rootDomain].per_brand) {
     domains[rootDomain].per_brand = {};
   }
-  return domains[rootDomain];
+  if (!domains[rootDomain].per_path) {
+    domains[rootDomain].per_path = {};
+  }
+  return hydrateStatsShape(domains[rootDomain]);
+}
+
+function ensurePathStats(domainEntry, pathKey) {
+  const normalizedPath = String(pathKey || '/');
+  if (!domainEntry.per_path[normalizedPath]) {
+    domainEntry.per_path[normalizedPath] = createStatsTemplate({
+      path: normalizedPath
+    });
+  }
+  return hydrateStatsShape(domainEntry.per_path[normalizedPath]);
 }
 
 function ensureBrandStats(domainEntry, brand) {
@@ -64,7 +123,53 @@ function ensureBrandStats(domainEntry, brand) {
       brand_key: brandKey
     });
   }
-  return domainEntry.per_brand[brandKey];
+  return hydrateStatsShape(domainEntry.per_brand[brandKey]);
+}
+
+function incrementMapValue(map, key, delta = 1) {
+  map[key] = (map[key] || 0) + delta;
+}
+
+function trimLowestCountEntries(map, maxEntries = 64) {
+  const entries = Object.entries(map || {});
+  if (entries.length <= maxEntries) {
+    return map;
+  }
+
+  entries.sort((a, b) => b[1] - a[1]);
+  return Object.fromEntries(entries.slice(0, maxEntries));
+}
+
+function applySourceDiagnostics(entry, source) {
+  const endpointSignals = source.endpointSignals || [];
+  if (endpointSignals.length > 0) {
+    const scoreSum = endpointSignals.reduce((sum, row) => sum + (row.signal_score || 0), 0);
+    entry.endpoint_signal_count += endpointSignals.length;
+    entry.endpoint_signal_score_total += scoreSum;
+  }
+
+  const parser = source.parserHealth || null;
+  if (parser) {
+    entry.parser_runs += 1;
+    entry.parser_health_score_total += parser.health_score || 0;
+    if ((parser.candidate_count || 0) > 0) {
+      entry.parser_success_count += 1;
+    } else {
+      entry.parser_zero_candidate_count += 1;
+    }
+    if (parser.identity_match === false) {
+      entry.parser_identity_miss_count += 1;
+    }
+    if ((parser.major_anchor_conflicts || 0) > 0) {
+      entry.parser_anchor_block_count += 1;
+    }
+  }
+
+  const fingerprintId = source.fingerprint?.id;
+  if (fingerprintId) {
+    incrementMapValue(entry.fingerprint_counts, fingerprintId, 1);
+    entry.fingerprint_counts = trimLowestCountEntries(entry.fingerprint_counts, 96);
+  }
 }
 
 function updateDerivedStats(entry) {
@@ -76,13 +181,30 @@ function updateDerivedStats(entry) {
     (entry.fields_accepted_count || 0) / Math.max(1, entry.fields_contributed_count || 0),
     6
   );
+  entry.endpoint_signal_avg_score = round(
+    (entry.endpoint_signal_score_total || 0) / Math.max(1, entry.endpoint_signal_count || 0),
+    6
+  );
+  entry.parser_health_score = round(
+    (entry.parser_health_score_total || 0) / Math.max(1, entry.parser_runs || 0),
+    6
+  );
+  entry.fingerprint_unique_count = Object.keys(entry.fingerprint_counts || {}).length;
+  entry.fingerprint_drift_rate = round(
+    entry.fingerprint_unique_count / Math.max(1, entry.parser_runs || 0),
+    6
+  );
 
   const yieldBoost = Math.min(1, entry.acceptance_yield * 10);
+  const parserBoost = Math.min(1, entry.parser_health_score || 0);
+  const endpointBoost = Math.min(1, (entry.endpoint_signal_avg_score || 0) / 4);
   entry.planner_score = round(
     (entry.identity_match_rate * 0.5) +
       ((1 - entry.major_anchor_conflict_rate) * 0.2) +
       (entry.http_ok_rate * 0.1) +
-      (yieldBoost * 0.2),
+      (yieldBoost * 0.15) +
+      (parserBoost * 0.03) +
+      (endpointBoost * 0.02),
     6
   );
 }
@@ -93,6 +215,14 @@ function syncNamedMetrics(entry, seenAt) {
   entry.major_anchor_conflicts = entry.major_anchor_conflict_count || 0;
   entry.accepted_fields_count = entry.fields_accepted_count || 0;
   entry.per_field_accept_count = { ...(entry.per_field_helpfulness || {}) };
+  entry.parser_success_rate = round(
+    (entry.parser_success_count || 0) / Math.max(1, entry.parser_runs || 0),
+    6
+  );
+  entry.parser_identity_miss_rate = round(
+    (entry.parser_identity_miss_count || 0) / Math.max(1, entry.parser_runs || 0),
+    6
+  );
   entry.last_seen_at = seenAt;
 }
 
@@ -136,6 +266,49 @@ function collectAcceptedDomainHelpfulness(provenance, criticalFieldSet) {
       map[rootDomain].perField[field] = (map[rootDomain].perField[field] || 0) + 1;
       if (criticalFieldSet.has(field)) {
         map[rootDomain].acceptedCriticalFields += 1;
+      }
+    }
+  }
+
+  return map;
+}
+
+function collectAcceptedPathHelpfulness(provenance, criticalFieldSet) {
+  const map = {};
+
+  for (const [field, row] of Object.entries(provenance || {})) {
+    if (!valueIsFilled(row?.value)) {
+      continue;
+    }
+
+    const evidence = row?.evidence || [];
+    if (!evidence.length) {
+      continue;
+    }
+
+    const uniquePathEntries = new Set();
+    for (const item of evidence) {
+      const rootDomain = item?.rootDomain || item?.host || '';
+      if (!rootDomain) {
+        continue;
+      }
+      const path = normalizeSourcePath(item?.url || '');
+      uniquePathEntries.add(`${rootDomain}||${path}`);
+    }
+
+    for (const compositeKey of uniquePathEntries) {
+      if (!map[compositeKey]) {
+        map[compositeKey] = {
+          fieldsAccepted: 0,
+          acceptedCriticalFields: 0,
+          perField: {}
+        };
+      }
+
+      map[compositeKey].fieldsAccepted += 1;
+      map[compositeKey].perField[field] = (map[compositeKey].perField[field] || 0) + 1;
+      if (criticalFieldSet.has(field)) {
+        map[compositeKey].acceptedCriticalFields += 1;
       }
     }
   }
@@ -392,6 +565,7 @@ export async function persistSourceIntel({
   const current = loaded.data;
   const domains = { ...(current.domains || {}) };
   const perDomainRunSeen = new Set();
+  const perPathRunSeen = new Set();
   const seenAt = new Date().toISOString();
 
   for (const source of sourceResults || []) {
@@ -402,10 +576,13 @@ export async function persistSourceIntel({
 
     const entry = ensureDomainStats(domains, rootDomain);
     const brandStats = ensureBrandStats(entry, brand);
+    const pathKey = normalizeSourcePath(source.finalUrl || source.url || '');
+    const pathStats = ensurePathStats(entry, pathKey);
     entry.attempts += 1;
     if (brandStats) {
       brandStats.attempts += 1;
     }
+    pathStats.attempts += 1;
 
     const status = Number.parseInt(source.status || 0, 10);
     if (status >= 200 && status < 400) {
@@ -413,6 +590,7 @@ export async function persistSourceIntel({
       if (brandStats) {
         brandStats.http_ok_count += 1;
       }
+      pathStats.http_ok_count += 1;
     }
 
     if (source.identity?.match) {
@@ -420,6 +598,7 @@ export async function persistSourceIntel({
       if (brandStats) {
         brandStats.identity_match_count += 1;
       }
+      pathStats.identity_match_count += 1;
     }
 
     if ((source.anchorCheck?.majorConflicts || []).length > 0) {
@@ -427,6 +606,7 @@ export async function persistSourceIntel({
       if (brandStats) {
         brandStats.major_anchor_conflict_count += 1;
       }
+      pathStats.major_anchor_conflict_count += 1;
     }
 
     const contributedCount = (source.fieldCandidates || []).length;
@@ -434,20 +614,30 @@ export async function persistSourceIntel({
     if (brandStats) {
       brandStats.fields_contributed_count += contributedCount;
     }
+    pathStats.fields_contributed_count += contributedCount;
 
     if (source.approvedDomain) {
       entry.approved_attempts += 1;
       if (brandStats) {
         brandStats.approved_attempts += 1;
       }
+      pathStats.approved_attempts += 1;
     } else {
       entry.candidate_attempts += 1;
       if (brandStats) {
         brandStats.candidate_attempts += 1;
       }
+      pathStats.candidate_attempts += 1;
     }
 
+    applySourceDiagnostics(entry, source);
+    if (brandStats) {
+      applySourceDiagnostics(brandStats, source);
+    }
+    applySourceDiagnostics(pathStats, source);
+
     perDomainRunSeen.add(rootDomain);
+    perPathRunSeen.add(`${rootDomain}||${pathKey}`);
   }
 
   for (const rootDomain of perDomainRunSeen) {
@@ -470,7 +660,26 @@ export async function persistSourceIntel({
     }
   }
 
+  for (const compositeKey of perPathRunSeen) {
+    const [rootDomain, pathKey] = compositeKey.split('||');
+    if (!rootDomain) {
+      continue;
+    }
+    const entry = ensureDomainStats(domains, rootDomain);
+    const pathStats = ensurePathStats(entry, pathKey || '/');
+    const recent = new Set(pathStats.recent_products || []);
+    if (!recent.has(productId)) {
+      pathStats.products_seen += 1;
+    }
+    recent.add(productId);
+    pathStats.recent_products = [...recent].slice(-200);
+  }
+
   const acceptedHelpfulness = collectAcceptedDomainHelpfulness(
+    provenance,
+    categoryConfig?.criticalFieldSet || new Set()
+  );
+  const acceptedPathHelpfulness = collectAcceptedPathHelpfulness(
     provenance,
     categoryConfig?.criticalFieldSet || new Set()
   );
@@ -494,12 +703,32 @@ export async function persistSourceIntel({
     }
   }
 
+  for (const [compositeKey, stat] of Object.entries(acceptedPathHelpfulness)) {
+    const [rootDomain, pathKey] = compositeKey.split('||');
+    if (!rootDomain) {
+      continue;
+    }
+
+    const entry = ensureDomainStats(domains, rootDomain);
+    const pathStats = ensurePathStats(entry, pathKey || '/');
+    pathStats.fields_accepted_count += stat.fieldsAccepted;
+    pathStats.accepted_critical_fields_count += stat.acceptedCriticalFields;
+
+    for (const [field, count] of Object.entries(stat.perField || {})) {
+      pathStats.per_field_helpfulness[field] = (pathStats.per_field_helpfulness[field] || 0) + count;
+    }
+  }
+
   for (const entry of Object.values(domains)) {
     updateDerivedStats(entry);
     syncNamedMetrics(entry, seenAt);
     for (const brandEntry of Object.values(entry.per_brand || {})) {
       updateDerivedStats(brandEntry);
       syncNamedMetrics(brandEntry, seenAt);
+    }
+    for (const pathEntry of Object.values(entry.per_path || {})) {
+      updateDerivedStats(pathEntry);
+      syncNamedMetrics(pathEntry, seenAt);
     }
   }
 

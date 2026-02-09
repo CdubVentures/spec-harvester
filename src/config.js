@@ -136,7 +136,9 @@ export function loadConfig(overrides = {}) {
     graphqlReplayEnabled: parseBoolEnv('GRAPHQL_REPLAY_ENABLED', true),
     maxGraphqlReplays: parseIntEnv('MAX_GRAPHQL_REPLAYS', 5),
     allowBelowPassTargetFill: parseBoolEnv('ALLOW_BELOW_PASS_TARGET_FILL', false),
-    selfImproveEnabled: parseBoolEnv('SELF_IMPROVE_ENABLED', true)
+    selfImproveEnabled: parseBoolEnv('SELF_IMPROVE_ENABLED', true),
+    maxHypothesisItems: parseIntEnv('MAX_HYPOTHESIS_ITEMS', 50),
+    batchStrategy: (process.env.BATCH_STRATEGY || 'mixed').toLowerCase()
   };
 
   const filtered = Object.fromEntries(

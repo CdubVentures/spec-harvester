@@ -13,13 +13,16 @@ node src/cli/spec.js <command>
 Commands:
 
 - `run-one --s3key <key>`
+- `run-ad-hoc <category> <brand> <model> [<variant>]`
 - `run-ad-hoc --category <category> --brand <brand> --model <model>`
-- `run-batch --category mouse [--brand <brand>]`
+- `run-batch --category mouse [--brand <brand>] [--strategy <explore|exploit|mixed>]`
 - `discover --category mouse [--brand <brand>]`
 - `test-s3 [--fixture <path>] [--s3key <key>] [--dry-run]`
 - `sources-plan --category mouse`
 - `sources-report --category mouse [--top <n>]`
+- `benchmark --category mouse [--fixture <path>] [--max-cases <n>]`
 - `rebuild-index --category mouse`
+- `intel-graph-api --category mouse [--host <host>] [--port <port>]`
 
 ## Category Config Layout
 
@@ -134,6 +137,8 @@ Local toggles:
 - `WRITE_MARKDOWN_SUMMARY=true|false`
 - `ALLOW_BELOW_PASS_TARGET_FILL=true|false` (default `false`)
 - `SELF_IMPROVE_ENABLED=true|false` (default `true`)
+- `MAX_HYPOTHESIS_ITEMS=50`
+- `BATCH_STRATEGY=explore|exploit|mixed` (default `mixed`)
 
 EloShapes adapter (optional, safe default disabled):
 
@@ -186,6 +191,12 @@ Run ad-hoc directly from identity inputs:
 node src/cli/spec.js run-ad-hoc --category mouse --brand Razer --model "Viper V3 Pro" --variant Wireless
 ```
 
+Run ad-hoc in one line (positional form):
+
+```bash
+node src/cli/spec.js run-ad-hoc mouse Razer "Viper V3 Pro" Wireless
+```
+
 Run ad-hoc with seed URLs and explicit key:
 
 ```bash
@@ -196,6 +207,12 @@ Run batch:
 
 ```bash
 node src/cli/spec.js run-batch --category mouse
+```
+
+Run batch with scheduling strategy:
+
+```bash
+node src/cli/spec.js run-batch --category mouse --strategy mixed
 ```
 
 Brand-scoped batch:
@@ -234,6 +251,37 @@ Source expansion plan generation:
 node src/cli/spec.js sources-plan --category mouse
 ```
 
+Run golden benchmark checks:
+
+```bash
+node src/cli/spec.js benchmark --category mouse
+```
+
+Start intel graph API (for agent consumption):
+
+```bash
+node src/cli/spec.js intel-graph-api --category mouse --port 8787
+```
+
+Example graph query:
+
+```bash
+curl -s http://127.0.0.1:8787/graphql \
+  -H 'content-type: application/json' \
+  -d '{"query":"query Q($limit:Int){ topDomains }","variables":{"limit":10}}'
+```
+
+Supported graph operations (query string can include one or multiple):
+
+- `topDomains` (vars: `category`, `limit`, `topPaths`)
+- `domainStats` / `hostStats` (vars: `category`, `rootDomain`, `topPaths`)
+- `product` (vars: `category`, `productId`)
+- `missingCriticalFields` (vars: `category`, `productId`)
+- `bestEvidence` (vars: `category`, `productId`, `field`, `limit`)
+- `whyFieldRejected` (vars: `category`, `productId`, `field`)
+- `nextBestUrls` (vars: `category`, `productId`, `field`, `limit`)
+- `conflictGraph` (vars: `category`, `productId`, `limit`)
+
 ## Tests and Smoke
 
 Unit tests:
@@ -270,6 +318,27 @@ node src/cli/spec.js run-batch --category mouse --brand Razer
 ```
 
 Each run updates learning profiles and latest pointers while preserving strict validation gates.
+
+## One-Line Cloud First Run
+
+If your `.env` is set for cloud (`LOCAL_MODE=false`, `DRY_RUN=false`, valid AWS creds), this is the fastest first-run command:
+
+```bash
+node src/cli/spec.js run-ad-hoc <category> <brand> "<model>" [variant]
+```
+
+Example:
+
+```bash
+node src/cli/spec.js run-ad-hoc mouse Logitech "G Pro X Superlight 2" Wireless
+```
+
+Behavior:
+
+- validates that `categories/<category>/` schema/config files exist
+- creates/updates the product input JSON at `specs/inputs/<category>/products/`
+- runs full crawl+extraction pipeline
+- writes run outputs and latest pointers to `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/...`
 
 ## Self-Improving Accuracy Loop
 

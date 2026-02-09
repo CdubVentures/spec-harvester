@@ -81,6 +81,35 @@ function urlPath(url) {
   }
 }
 
+function isSitemapLikePath(pathname) {
+  const token = String(pathname || '').toLowerCase();
+  return token.includes('sitemap') || token.endsWith('.xml');
+}
+
+function stripLocalePrefix(pathname) {
+  const raw = String(pathname || '').toLowerCase();
+  const match = raw.match(/^\/([a-z]{2}(?:-[a-z]{2})?)\/(.+)$/);
+  if (!match) {
+    return {
+      pathname: raw,
+      hadLocalePrefix: false
+    };
+  }
+  return {
+    pathname: `/${match[2]}`,
+    hadLocalePrefix: true
+  };
+}
+
+function decodeXmlEntities(value) {
+  return String(value || '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
 export class SourcePlanner {
   constructor(job, config, categoryConfig, options = {}) {
     this.job = job;
@@ -125,6 +154,8 @@ export class SourcePlanner {
     this.hostCounts = new Map();
     this.manufacturerHostCounts = new Map();
     this.candidateHostCounts = new Map();
+    this.robotsSitemapsDiscovered = 0;
+    this.sitemapUrlsDiscovered = 0;
 
     this.allowlistHosts = new Set();
     for (const sourceHost of categoryConfig.sourceHosts || []) {
@@ -212,7 +243,11 @@ export class SourcePlanner {
         `https://${host}/support/${modelSlug}`,
         `https://${host}/downloads/${modelSlug}`,
         `https://${host}/manual/${modelSlug}`,
-        `https://${host}/specs/${modelSlug}`
+        `https://${host}/specs/${modelSlug}`,
+        `https://${host}/robots.txt`,
+        `https://${host}/sitemap.xml`,
+        `https://${host}/sitemap_index.xml`,
+        `https://${host}/sitemaps.xml`
       ];
 
       for (const url of seeds) {
@@ -281,6 +316,10 @@ export class SourcePlanner {
     }
 
     if (this.queue.find((item) => item.url === normalizedUrl)) {
+      return;
+    }
+
+    if (this.manufacturerQueue.find((item) => item.url === normalizedUrl)) {
       return;
     }
 
@@ -470,18 +509,115 @@ export class SourcePlanner {
     }
   }
 
+  discoverFromRobots(baseUrl, body) {
+    if (!body) {
+      return 0;
+    }
+
+    const matches = String(body).matchAll(/^\s*sitemap:\s*(\S+)\s*$/gim);
+    let discovered = 0;
+    for (const match of matches) {
+      const raw = decodeXmlEntities(match[1] || '');
+      if (!raw) {
+        continue;
+      }
+      try {
+        const sitemapUrl = new URL(raw, baseUrl).toString();
+        const before =
+          this.queue.length + this.manufacturerQueue.length + this.candidateQueue.length;
+        this.enqueue(sitemapUrl, `robots:${baseUrl}`, { forceApproved: true });
+        const after =
+          this.queue.length + this.manufacturerQueue.length + this.candidateQueue.length;
+        if (after > before) {
+          discovered += 1;
+        }
+      } catch {
+        // ignore invalid sitemap URL
+      }
+    }
+
+    this.robotsSitemapsDiscovered += discovered;
+    return discovered;
+  }
+
+  discoverFromSitemap(baseUrl, body) {
+    if (!body) {
+      return 0;
+    }
+
+    const baseHost = getHost(baseUrl);
+    const manufacturerContext =
+      baseHost && resolveTierNameForHost(baseHost, this.categoryConfig) === 'manufacturer';
+    if (!manufacturerContext) {
+      return 0;
+    }
+
+    const locRegex = /<loc>\s*([\s\S]*?)\s*<\/loc>/gi;
+    const seen = new Set();
+    let discovered = 0;
+    let scanned = 0;
+    for (const match of String(body).matchAll(locRegex)) {
+      if (scanned >= 3000) {
+        break;
+      }
+      scanned += 1;
+
+      const decoded = decodeXmlEntities(match[1] || '').trim();
+      if (!decoded || seen.has(decoded)) {
+        continue;
+      }
+      seen.add(decoded);
+
+      let parsed;
+      try {
+        parsed = new URL(decoded, baseUrl);
+      } catch {
+        continue;
+      }
+
+      const host = normalizeHost(parsed.hostname);
+      if (!host) {
+        continue;
+      }
+
+      if (baseHost && host !== baseHost && !host.endsWith(`.${baseHost}`) && !baseHost.endsWith(`.${host}`)) {
+        if (!isApprovedHost(host, this.categoryConfig)) {
+          continue;
+        }
+      }
+
+      if (!isSitemapLikePath(parsed.pathname)) {
+        if (!this.isRelevantDiscoveredUrl(parsed, { manufacturerContext, sitemapContext: true })) {
+          continue;
+        }
+      }
+
+      const before = this.queue.length + this.manufacturerQueue.length + this.candidateQueue.length;
+      this.enqueue(parsed.toString(), `sitemap:${baseUrl}`, { forceApproved: true });
+      const after = this.queue.length + this.manufacturerQueue.length + this.candidateQueue.length;
+      if (after > before) {
+        discovered += 1;
+      }
+    }
+
+    this.sitemapUrlsDiscovered += discovered;
+    return discovered;
+  }
+
   isRelevantDiscoveredUrl(parsed, context = {}) {
-    const pathAndQuery = `${parsed.pathname || ''} ${parsed.search || ''}`.toLowerCase();
-    const pathname = parsed.pathname.toLowerCase();
-    if (/\.(css|js|svg|png|jpe?g|webp|gif|ico|woff2?|ttf|map|xml|json)$/i.test(pathname)) {
+    const localizedPath = stripLocalePrefix(parsed.pathname || '');
+    const hasLocalePrefix = localizedPath.hadLocalePrefix;
+    const effectivePath = localizedPath.pathname;
+    const pathAndQuery = `${effectivePath || ''} ${parsed.search || ''}`.toLowerCase();
+    const pathname = effectivePath.toLowerCase();
+    if (/\.(css|js|svg|png|jpe?g|webp|gif|ico|woff2?|ttf|map|json)$/i.test(pathname)) {
       return false;
     }
-    if (/^\/[a-z]{2}-[a-z]{2}\//.test(parsed.pathname.toLowerCase())) {
+
+    if (hasLocalePrefix && !context.manufacturerContext && !context.sitemapContext) {
       return false;
     }
-    if (/^\/[a-z]{2}\//.test(parsed.pathname.toLowerCase())) {
-      return false;
-    }
+
     if (!pathAndQuery || pathAndQuery === '/') {
       return false;
     }
@@ -494,10 +630,16 @@ export class SourcePlanner {
       '/blog',
       '/newsroom',
       '/store-locator',
-      '/gift-card'
+      '/gift-card',
+      '/forum',
+      '/forums'
     ];
     if (negativeKeywords.some((keyword) => pathAndQuery.includes(keyword))) {
       return false;
+    }
+
+    if (isSitemapLikePath(pathname)) {
+      return true;
     }
 
     const hasModelToken = this.modelTokens.some((token) => pathAndQuery.includes(token));
@@ -509,6 +651,10 @@ export class SourcePlanner {
       'manual',
       'support',
       'spec',
+      'product',
+      'products',
+      'gaming-mice',
+      'mice',
       'datasheet',
       'technical',
       'download',
@@ -524,7 +670,16 @@ export class SourcePlanner {
     }
 
     if (context.manufacturerContext) {
-      const manufacturerSignals = ['support', 'manual', 'spec', 'datasheet', 'technical', 'download'];
+      const manufacturerSignals = [
+        'support',
+        'manual',
+        'spec',
+        'product',
+        'products',
+        'datasheet',
+        'technical',
+        'download'
+      ];
       return (
         manufacturerSignals.some((token) => pathAndQuery.includes(token)) &&
         (
@@ -624,6 +779,8 @@ export class SourcePlanner {
       manufacturer_visited_count: this.manufacturerVisitedCount,
       non_manufacturer_visited_count: this.nonManufacturerVisitedCount,
       candidate_visited_count: this.candidateVisitedCount,
+      robots_sitemaps_discovered: this.robotsSitemapsDiscovered,
+      sitemap_urls_discovered: this.sitemapUrlsDiscovered,
       max_manufacturer_urls: this.maxManufacturerUrls,
       max_urls: this.maxUrls,
       manufacturer_reserve_urls: this.manufacturerReserveUrls

@@ -77,6 +77,50 @@ function topPreferredUrls(sourceResults, limit = 12) {
   )].slice(0, limit);
 }
 
+function topHypothesisUrls(summary, limit = 20) {
+  const urls = [];
+  for (const row of summary?.hypothesis_queue || []) {
+    for (const suggestion of row.suggestions || []) {
+      urls.push({
+        url: suggestion.url,
+        field: row.field,
+        score: suggestion.score || 0,
+        reason: suggestion.reason || 'hypothesis'
+      });
+    }
+  }
+  return urls
+    .sort((a, b) => b.score - a.score || a.url.localeCompare(b.url))
+    .slice(0, Math.max(1, limit));
+}
+
+function topUncertainFields(summary, limit = 12) {
+  return (summary?.constraint_analysis?.top_uncertain_fields || [])
+    .slice(0, Math.max(1, limit))
+    .map((row) => ({
+      field: row.field,
+      uncertainty: row.uncertainty
+    }));
+}
+
+function summarizeParserHealth(sourceResults) {
+  const rows = (sourceResults || [])
+    .map((source) => source.parserHealth)
+    .filter(Boolean);
+  if (!rows.length) {
+    return {
+      average_health_score: 0,
+      source_count: 0
+    };
+  }
+
+  const avg = rows.reduce((sum, row) => sum + (row.health_score || 0), 0) / rows.length;
+  return {
+    average_health_score: Number.parseFloat(avg.toFixed(6)),
+    source_count: rows.length
+  };
+}
+
 function mergeProfiles(previous, next) {
   if (!previous) {
     return next;
@@ -109,15 +153,34 @@ function mergeProfiles(previous, next) {
 
   const mergedPreferredUrls = [...new Set([...(next.preferred_urls || []), ...(previous.preferred_urls || [])])]
     .slice(0, 20);
+  const mergedFeedbackUrls = [
+    ...new Set([
+      ...(next.feedback_urls || []).map((row) => row.url),
+      ...(previous.feedback_urls || []).map((row) => row.url)
+    ])
+  ]
+    .slice(0, 30)
+    .map((url) => {
+      const fromNext = (next.feedback_urls || []).find((row) => row.url === url);
+      if (fromNext) {
+        return fromNext;
+      }
+      const fromPrev = (previous.feedback_urls || []).find((row) => row.url === url);
+      return fromPrev || { url, score: 0, field: '', reason: 'history' };
+    });
 
   return {
     ...next,
     runs_total: (previous.runs_total || 0) + 1,
     validated_runs: (previous.validated_runs || 0) + (next.validated ? 1 : 0),
     preferred_urls: mergedPreferredUrls,
+    feedback_urls: mergedFeedbackUrls,
     host_stats: [...mergedHostStats.values()].sort((a, b) => b.yieldScore - a.yieldScore),
     unknown_field_rate_avg: Number.parseFloat(
       (((previous.unknown_field_rate_avg || 0) * 0.5) + (next.unknown_field_rate * 0.5)).toFixed(4)
+    ),
+    parser_health_avg: Number.parseFloat(
+      (((previous.parser_health_avg || 0) * 0.5) + ((next.parser_health?.average_health_score || 0) * 0.5)).toFixed(6)
     )
   };
 }
@@ -135,10 +198,15 @@ export async function loadLearningProfile({ storage, config, category, job }) {
 }
 
 export function applyLearningSeeds(planner, learningProfile) {
-  if (!learningProfile?.profile?.preferred_urls?.length) {
+  const preferredUrls = learningProfile?.profile?.preferred_urls || [];
+  const feedbackUrls = (learningProfile?.profile?.feedback_urls || [])
+    .map((row) => row.url)
+    .filter(Boolean);
+  const seedUrls = [...new Set([...preferredUrls, ...feedbackUrls])];
+  if (!seedUrls.length) {
     return;
   }
-  planner.seed(learningProfile.profile.preferred_urls);
+  planner.seed(seedUrls);
 }
 
 export async function persistLearningProfile({
@@ -158,6 +226,7 @@ export async function persistLearningProfile({
 
   const totalSchemaFields = (summary?.coverage_overall_percent || 0) / 100;
   const unknownFieldRate = Number.parseFloat((1 - totalSchemaFields).toFixed(4));
+  const parserHealth = summarizeParserHealth(sourceResults);
 
   const current = {
     profile_id: profileId,
@@ -174,6 +243,11 @@ export async function persistLearningProfile({
     unknown_field_rate: unknownFieldRate,
     unknown_field_rate_avg: unknownFieldRate,
     preferred_urls: topPreferredUrls(sourceResults),
+    feedback_urls: topHypothesisUrls(summary),
+    uncertain_fields: topUncertainFields(summary),
+    parser_health: parserHealth,
+    parser_health_avg: parserHealth.average_health_score,
+    critical_fields_below_pass_target: summary?.critical_fields_below_pass_target || [],
     host_stats: buildHostStats(sourceResults),
     last_run: {
       runId,
@@ -182,7 +256,9 @@ export async function persistLearningProfile({
       confidence: summary.confidence,
       completeness_required_percent: summary.completeness_required_percent,
       coverage_overall_percent: summary.coverage_overall_percent,
-      discovery_candidates: discoveryResult?.candidates?.length || 0
+      discovery_candidates: discoveryResult?.candidates?.length || 0,
+      contradiction_count: summary?.constraint_analysis?.contradiction_count || 0,
+      hypothesis_queue_count: (summary?.hypothesis_queue || []).length
     }
   };
 

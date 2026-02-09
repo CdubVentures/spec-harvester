@@ -126,3 +126,96 @@ test('source planner preserves non-manufacturer capacity for manufacturer deep r
 
   assert.deepEqual(hosts, ['manufacturer.com', 'manufacturer.com', 'db-a.com', 'db-b.com']);
 });
+
+test('source planner de-duplicates manufacturer queue URLs', () => {
+  const planner = new SourcePlanner(
+    {
+      seedUrls: [],
+      preferredSources: {},
+      identityLock: { brand: 'Acme', model: 'M100' },
+      productId: 'mouse-acme-m100'
+    },
+    makeConfig({ manufacturerDeepResearchEnabled: false, fetchCandidateSources: false }),
+    makeCategoryConfig()
+  );
+
+  planner.enqueue('https://manufacturer.com/product/m100');
+  planner.enqueue('https://manufacturer.com/product/m100');
+
+  const urls = [];
+  while (planner.hasNext()) {
+    urls.push(planner.next().url);
+  }
+
+  assert.deepEqual(urls, ['https://manufacturer.com/product/m100']);
+});
+
+test('source planner accepts locale-prefixed manufacturer spec paths in manufacturer context', () => {
+  const planner = new SourcePlanner(
+    {
+      seedUrls: [],
+      preferredSources: {},
+      identityLock: { brand: 'Acme', model: 'M100' },
+      productId: 'mouse-acme-m100'
+    },
+    makeConfig({ manufacturerDeepResearchEnabled: false, fetchCandidateSources: false }),
+    makeCategoryConfig()
+  );
+
+  const parsed = new URL('https://manufacturer.com/en/m100/specs');
+  assert.equal(planner.isRelevantDiscoveredUrl(parsed, { manufacturerContext: true }), true);
+});
+
+test('source planner discovers manufacturer URLs from sitemap XML', () => {
+  const planner = new SourcePlanner(
+    {
+      seedUrls: [],
+      preferredSources: {},
+      identityLock: { brand: 'Acme', model: 'M100' },
+      productId: 'mouse-acme-m100'
+    },
+    makeConfig({ manufacturerDeepResearchEnabled: false, fetchCandidateSources: false }),
+    makeCategoryConfig()
+  );
+
+  const discovered = planner.discoverFromSitemap(
+    'https://manufacturer.com/sitemap.xml',
+    [
+      '<urlset>',
+      '<url><loc>https://manufacturer.com/en/m100/specs</loc></url>',
+      '<url><loc>https://manufacturer.com/support/m100</loc></url>',
+      '<url><loc>https://manufacturer.com/sitemap-products.xml</loc></url>',
+      '<url><loc>https://unapproved.com/product/m100</loc></url>',
+      '</urlset>'
+    ].join('')
+  );
+
+  assert.equal(discovered >= 3, true);
+  assert.equal(planner.getStats().sitemap_urls_discovered >= 3, true);
+});
+
+test('source planner discovers sitemap pointers from robots.txt', () => {
+  const planner = new SourcePlanner(
+    {
+      seedUrls: [],
+      preferredSources: {},
+      identityLock: { brand: 'Acme', model: 'M100' },
+      productId: 'mouse-acme-m100'
+    },
+    makeConfig({ manufacturerDeepResearchEnabled: false, fetchCandidateSources: false }),
+    makeCategoryConfig()
+  );
+
+  const discovered = planner.discoverFromRobots(
+    'https://manufacturer.com/robots.txt',
+    [
+      'User-agent: *',
+      'Disallow: /cart',
+      'Sitemap: https://manufacturer.com/sitemap.xml',
+      'Sitemap: https://manufacturer.com/sitemap-support.xml'
+    ].join('\n')
+  );
+
+  assert.equal(discovered, 2);
+  assert.equal(planner.getStats().robots_sitemaps_discovered, 2);
+});

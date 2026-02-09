@@ -1,6 +1,7 @@
 import {
   ANCHOR_FIELDS,
   COMMONLY_WRONG_FIELDS,
+  INSTRUMENTED_HOST_HINTS,
   INSTRUMENTED_FIELDS,
   KNOWN_LIST_VALUES,
   LIST_FIELDS,
@@ -155,6 +156,14 @@ function clusterCandidates(rows) {
   }));
 }
 
+function isInstrumentedEvidenceSource(source) {
+  const rootDomain = String(source.rootDomain || '').toLowerCase();
+  if (source.tierName === 'lab') {
+    return true;
+  }
+  return INSTRUMENTED_HOST_HINTS.has(rootDomain);
+}
+
 export function runConsensusEngine({
   sourceResults,
   categoryConfig,
@@ -213,7 +222,7 @@ export function runConsensusEngine({
         evidenceKey: `${source.url}#${candidate.keyPath}`,
         ts: source.ts || new Date().toISOString(),
         approvedDomain: Boolean(source.approvedDomain),
-        instrumentedHost: Boolean(source.tierName === 'lab' || source.role === 'review'),
+        instrumentedHost: Boolean(isInstrumentedEvidenceSource(source)),
         keyPath: candidate.keyPath,
         url: source.url
       });

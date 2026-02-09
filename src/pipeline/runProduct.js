@@ -36,6 +36,20 @@ import {
   loadSourceIntel,
   persistSourceIntel
 } from '../intel/sourceIntel.js';
+import {
+  aggregateEndpointSignals,
+  mineEndpointSignals
+} from '../intel/endpointMiner.js';
+import {
+  aggregateTemporalSignals,
+  extractTemporalSignals
+} from '../intel/temporalSignals.js';
+import {
+  buildSiteFingerprint,
+  computeParserHealth
+} from '../intel/siteFingerprint.js';
+import { evaluateConstraintGraph } from '../scoring/constraintSolver.js';
+import { buildHypothesisQueue } from '../learning/hypothesisQueue.js';
 
 function bestIdentityFromSources(sourceResults) {
   const sorted = [...sourceResults].sort((a, b) => {
@@ -189,6 +203,12 @@ function isDiscoveryOnlySourceUrl(url) {
     const parsed = new URL(url);
     const path = parsed.pathname.toLowerCase();
     const query = parsed.search.toLowerCase();
+    if (path.endsWith('/robots.txt')) {
+      return true;
+    }
+    if (path.includes('sitemap') || path.endsWith('.xml')) {
+      return true;
+    }
     if (path.includes('/search')) {
       return true;
     }
@@ -202,6 +222,106 @@ function isDiscoveryOnlySourceUrl(url) {
   } catch {
     return false;
   }
+}
+
+function isRobotsTxtUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.pathname.toLowerCase().endsWith('/robots.txt');
+  } catch {
+    return false;
+  }
+}
+
+function isSitemapUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const pathname = parsed.pathname.toLowerCase();
+    return pathname.includes('sitemap') || pathname.endsWith('.xml');
+  } catch {
+    return false;
+  }
+}
+
+function hasSitemapXmlSignals(body) {
+  const text = String(body || '').toLowerCase();
+  return text.includes('<urlset') || text.includes('<sitemapindex') || text.includes('<loc>');
+}
+
+function isLikelyIndexableEndpointUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const path = parsed.pathname.toLowerCase();
+    if (path.endsWith('.json') || path.endsWith('.js')) {
+      return false;
+    }
+    if (path.includes('/api/') || path.includes('/graphql')) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function buildFieldReasoning({
+  fieldOrder,
+  provenance,
+  fieldsBelowPassTarget,
+  criticalFieldsBelowPassTarget,
+  missingRequiredFields,
+  constraintAnalysis
+}) {
+  const fieldsBelowSet = new Set(fieldsBelowPassTarget || []);
+  const criticalBelowSet = new Set(criticalFieldsBelowPassTarget || []);
+  const missingRequiredSet = new Set(missingRequiredFields || []);
+  const contradictionsByField = {};
+
+  for (const contradiction of constraintAnalysis?.contradictions || []) {
+    for (const field of contradiction.fields || []) {
+      if (!contradictionsByField[field]) {
+        contradictionsByField[field] = [];
+      }
+      contradictionsByField[field].push({
+        code: contradiction.code,
+        severity: contradiction.severity,
+        message: contradiction.message
+      });
+    }
+  }
+
+  const output = {};
+  for (const field of fieldOrder || []) {
+    const row = provenance?.[field] || {};
+    const reasons = [];
+    if (fieldsBelowSet.has(field)) {
+      reasons.push('below_pass_target');
+    }
+    if (criticalBelowSet.has(field)) {
+      reasons.push('critical_field_below_pass_target');
+    }
+    if (missingRequiredSet.has(field)) {
+      reasons.push('missing_required_field');
+    }
+    if (row.value === 'unk') {
+      reasons.push('no_accepted_value');
+    }
+    if ((contradictionsByField[field] || []).length > 0) {
+      reasons.push('constraint_conflict');
+    }
+
+    output[field] = {
+      value: row.value ?? 'unk',
+      confidence: row.confidence ?? 0,
+      meets_pass_target: row.meets_pass_target ?? false,
+      approved_confirmations: row.approved_confirmations ?? 0,
+      pass_target: row.pass_target ?? 0,
+      reasons: [...new Set(reasons)],
+      contradictions: contradictionsByField[field] || []
+    };
+  }
+
+  return output;
 }
 
 export async function runProduct({ storage, config, s3Key }) {
@@ -248,6 +368,7 @@ export async function runProduct({ storage, config, s3Key }) {
 
   const sourceResults = [];
   const artifactsByHost = {};
+  let artifactSequence = 0;
   const adapterArtifacts = [];
   let llmCandidatesAccepted = 0;
   let llmSourcesUsed = 0;
@@ -303,9 +424,32 @@ export async function runProduct({ storage, config, s3Key }) {
       }
 
       planner.discoverFromHtml(source.url, pageData.html);
+      if (source.role === 'manufacturer') {
+        if (isRobotsTxtUrl(source.url)) {
+          planner.discoverFromRobots(source.url, pageData.html);
+        }
+        if (isSitemapUrl(source.url) || hasSitemapXmlSignals(pageData.html)) {
+          planner.discoverFromSitemap(source.url, pageData.html);
+        }
+      }
 
       const sourceUrl = pageData.finalUrl || source.url;
       const discoveryOnlySource = isDiscoveryOnlySourceUrl(sourceUrl);
+      const endpointIntel = mineEndpointSignals({
+        source,
+        pageData,
+        criticalFields: [...(categoryConfig.criticalFieldSet || new Set())]
+      });
+      const fingerprint = buildSiteFingerprint({ source, pageData });
+
+      if (source.role === 'manufacturer') {
+        for (const suggestion of endpointIntel.nextBestUrls || []) {
+          if (!isLikelyIndexableEndpointUrl(suggestion.url)) {
+            continue;
+          }
+          planner.enqueue(suggestion.url, `endpoint:${source.url}`, { forceApproved: true });
+        }
+      }
 
       const extraction = discoveryOnlySource
         ? {
@@ -378,6 +522,11 @@ export async function runProduct({ storage, config, s3Key }) {
         ...(adapterExtra.fieldCandidates || []),
         ...llmFieldCandidates
       ]);
+      const temporalSignals = extractTemporalSignals({
+        source,
+        pageData,
+        fieldCandidates: mergedFieldCandidates
+      });
 
       const mergedIdentityCandidates = {
         ...(extraction.identityCandidates || {}),
@@ -410,6 +559,14 @@ export async function runProduct({ storage, config, s3Key }) {
           : anchorCheck.conflicts.length > 0
             ? 'minor_conflicts'
             : 'pass';
+      const parserHealth = computeParserHealth({
+        source,
+        mergedFieldCandidates,
+        identity,
+        anchorCheck,
+        criticalFieldSet: categoryConfig.criticalFieldSet,
+        endpointSignals: endpointIntel.endpointSignals
+      });
 
       sourceResults.push({
         ...source,
@@ -421,7 +578,12 @@ export async function runProduct({ storage, config, s3Key }) {
         identityCandidates: mergedIdentityCandidates,
         fieldCandidates: mergedFieldCandidates,
         anchorCheck,
-        anchorStatus
+        anchorStatus,
+        endpointSignals: endpointIntel.endpointSignals,
+        endpointSuggestions: endpointIntel.nextBestUrls,
+        temporalSignals,
+        fingerprint,
+        parserHealth
       });
 
       if (discoveryOnlySource) {
@@ -444,7 +606,9 @@ export async function runProduct({ storage, config, s3Key }) {
         planner.markFieldsFilled(newlyFilledFields);
       }
 
-      artifactsByHost[source.host] = {
+      const artifactHostKey = `${source.host}__${String(artifactSequence).padStart(4, '0')}`;
+      artifactSequence += 1;
+      artifactsByHost[artifactHostKey] = {
         html: pageData.html,
         ldjsonBlocks: pageData.ldjsonBlocks,
         embeddedState: pageData.embeddedState,
@@ -646,6 +810,42 @@ export async function runProduct({ storage, config, s3Key }) {
     (count, source) => count + ((source.anchorCheck?.majorConflicts || []).length > 0 ? 1 : 0),
     0
   );
+  const endpointMining = aggregateEndpointSignals(sourceResults, 80);
+  const temporalEvidence = aggregateTemporalSignals(sourceResults, 40);
+  const constraintAnalysis = evaluateConstraintGraph({
+    fields: normalized.fields,
+    provenance,
+    criticalFieldSet: categoryConfig.criticalFieldSet
+  });
+  const hypothesisQueue = buildHypothesisQueue({
+    criticalFieldsBelowPassTarget,
+    missingRequiredFields: completenessStats.missingRequiredFields,
+    provenance,
+    sourceResults,
+    sourceIntelDomains: sourceIntel.data?.domains || {},
+    criticalFieldSet: categoryConfig.criticalFieldSet,
+    maxItems: Math.max(1, Number(config.maxHypothesisItems || 50))
+  });
+  const fieldReasoning = buildFieldReasoning({
+    fieldOrder,
+    provenance,
+    fieldsBelowPassTarget,
+    criticalFieldsBelowPassTarget,
+    missingRequiredFields: completenessStats.missingRequiredFields,
+    constraintAnalysis
+  });
+
+  const parserHealthRows = sourceResults
+    .map((source) => source.parserHealth)
+    .filter(Boolean);
+  const parserHealthAverage = parserHealthRows.length
+    ? parserHealthRows.reduce((sum, row) => sum + (row.health_score || 0), 0) / parserHealthRows.length
+    : 0;
+  const fingerprintCount = new Set(
+    sourceResults
+      .map((source) => source.fingerprint?.id)
+      .filter(Boolean)
+  ).size;
 
   const summary = {
     productId,
@@ -700,6 +900,16 @@ export async function runProduct({ storage, config, s3Key }) {
       major_anchor_conflict_sources: manufacturerMajorConflicts,
       planner: planner.getStats()
     },
+    endpoint_mining: endpointMining,
+    temporal_evidence: temporalEvidence,
+    hypothesis_queue: hypothesisQueue,
+    constraint_analysis: constraintAnalysis,
+    field_reasoning: fieldReasoning,
+    parser_health: {
+      source_count: parserHealthRows.length,
+      average_health_score: Number.parseFloat(parserHealthAverage.toFixed(6)),
+      fingerprints_seen: fingerprintCount
+    },
     duration_ms: durationMs,
     generated_at: new Date().toISOString()
   };
@@ -713,6 +923,8 @@ export async function runProduct({ storage, config, s3Key }) {
     completeness_required: summary.completeness_required,
     coverage_overall: summary.coverage_overall,
     llm_candidates_added: llmCandidatesAccepted,
+    hypothesis_queue_count: summary.hypothesis_queue.length,
+    contradiction_count: summary.constraint_analysis.contradiction_count,
     duration_ms: durationMs
   });
 

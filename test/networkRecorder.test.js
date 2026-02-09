@@ -57,3 +57,16 @@ test('network recorder stores replay metadata and redacts secret-like keys', asy
   assert.equal('headers' in row, false);
   assert.equal('request_headers' in row, false);
 });
+
+test('network recorder redacts non-JSON secret-like POST bodies', async () => {
+  const recorder = new NetworkRecorder({ maxJsonBytes: 50000 });
+  await recorder.handleResponse(mockResponse({
+    requestPostData: 'token=secret-token&sku=123&api_key=abc'
+  }));
+
+  assert.equal(recorder.rows.length, 1);
+  const row = recorder.rows[0];
+  assert.equal(row.request_post_json.raw.includes('secret-token'), false);
+  assert.equal(row.request_post_json.raw.includes('api_key=abc'), false);
+  assert.equal(row.request_post_json.raw.includes('token=%5Bredacted%5D'), true);
+});

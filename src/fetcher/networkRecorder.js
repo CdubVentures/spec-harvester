@@ -95,6 +95,38 @@ function sanitizeJsonValue(value) {
   return value;
 }
 
+function sanitizeRawPostData(text) {
+  const raw = String(text || '');
+  if (!raw) {
+    return raw;
+  }
+
+  const maybeQueryString = raw.includes('=');
+  if (maybeQueryString) {
+    try {
+      const params = new URLSearchParams(raw);
+      let touched = false;
+      for (const [key, value] of params.entries()) {
+        if (SECRET_KEY_PATTERN.test(key)) {
+          params.set(key, '[redacted]');
+          touched = true;
+        } else {
+          params.set(key, value);
+        }
+      }
+      if (touched) {
+        return params.toString();
+      }
+    } catch {
+      // fall through to regex redaction
+    }
+  }
+
+  const keyValuePattern =
+    /\b(authorization|token|password|secret|api[_-]?key|cookie|session)\b\s*[:=]\s*([^\s&;,]+)/ig;
+  return raw.replace(keyValuePattern, '$1=[redacted]');
+}
+
 function parseRequestPostJson(request, responseUrl, maxJsonBytes) {
   try {
     const postData = request.postData();
@@ -116,7 +148,7 @@ function parseRequestPostJson(request, responseUrl, maxJsonBytes) {
     }
 
     return {
-      raw: bounded.boundedText.slice(0, 5000),
+      raw: sanitizeRawPostData(bounded.boundedText.slice(0, 5000)),
       truncated: bounded.truncated
     };
   } catch {

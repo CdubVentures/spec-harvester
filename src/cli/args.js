@@ -1,8 +1,9 @@
 export function parseArgs(argv) {
-  const args = {};
+  const args = { _: [] };
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
     if (!token.startsWith('--')) {
+      args._.push(token);
       continue;
     }
 

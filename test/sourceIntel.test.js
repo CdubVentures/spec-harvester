@@ -89,6 +89,8 @@ test('persistSourceIntel writes aggregate stats and promotion suggestion report'
   assert.equal(domain.fields_accepted_count, 1);
   assert.equal(domain.accepted_critical_fields_count, 1);
   assert.equal(domain.products_seen, 1);
+  assert.equal(domain.per_path['/'].attempts, 1);
+  assert.equal(domain.per_path['/'].fields_accepted_count, 1);
   assert.equal(brandStats.attempts, 1);
   assert.equal(brandStats.fields_accepted_count, 1);
   assert.equal(domain.per_field_accept_count.sensor, 1);
@@ -166,4 +168,61 @@ test('generateSourceExpansionPlans emits per-brand candidate suggestions', async
   assert.equal(result.expansionPlanKey.includes('/expansion_plans/'), true);
   assert.equal(result.planCount, 1);
   assert.equal(result.brandPlanKeys.length, 1);
+});
+
+test('persistSourceIntel tracks parser health, fingerprints, and endpoint signal metrics', async () => {
+  const storage = makeMemoryStorage();
+  const config = {
+    s3OutputPrefix: 'specs/outputs'
+  };
+
+  await persistSourceIntel({
+    storage,
+    config,
+    category: 'mouse',
+    productId: 'mouse-health-1',
+    brand: 'Acme',
+    sourceResults: [
+      {
+        host: 'manufacturer.com',
+        rootDomain: 'manufacturer.com',
+        approvedDomain: true,
+        status: 200,
+        identity: { match: true },
+        anchorCheck: { majorConflicts: [] },
+        fieldCandidates: [{ field: 'sensor', value: 'PixArt 3395' }],
+        parserHealth: {
+          candidate_count: 10,
+          identity_match: true,
+          major_anchor_conflicts: 0,
+          health_score: 0.92
+        },
+        fingerprint: { id: 'abc123' },
+        endpointSignals: [
+          { signal_score: 2.4 },
+          { signal_score: 2.1 }
+        ]
+      }
+    ],
+    provenance: {
+      sensor: {
+        value: 'PixArt 3395',
+        evidence: [{ rootDomain: 'manufacturer.com' }]
+      }
+    },
+    categoryConfig: {
+      criticalFieldSet: new Set(['sensor']),
+      approvedRootDomains: new Set(['manufacturer.com'])
+    }
+  });
+
+  const intel = await loadSourceIntel({ storage, config, category: 'mouse' });
+  const row = intel.data.domains['manufacturer.com'];
+
+  assert.equal(row.parser_runs, 1);
+  assert.equal(row.parser_success_count, 1);
+  assert.equal(row.fingerprint_unique_count, 1);
+  assert.equal(row.endpoint_signal_count, 2);
+  assert.equal(row.endpoint_signal_avg_score > 0, true);
+  assert.equal(row.parser_health_score > 0, true);
 });
