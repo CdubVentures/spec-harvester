@@ -1,89 +1,50 @@
-# Spec Harvester Agent Runbook
+# AGENT.md  EG Spec Harvester Rules
 
-## Purpose
-- Produce accurate mouse specs using backend-first extraction and credible sources.
-- Enforce wrong-model prevention with identity lock + anchor checks.
-- Write full evidence and normalized outputs to S3 for every run.
+## Core Rules
+- Preserve category schema field order exactly as defined in `categories/{category}/schema.json`.
+- Never guess values.
+- Use `unk` when uncertain and `n/a` only when truly not applicable.
+- Keep crawling scope narrow (allowlisted domains, limited page budgets, host throttling).
 
-## Non-Negotiables
-- Never guess values. Use `unk` when uncertain and `n/a` only when truly not applicable.
-- Keep canonical mouse field order unchanged.
-- Do not store cookies, auth headers, or sensitive request content.
-- Restrict discovery to allowlisted hosts and keep per-host rate limits.
+## Security and Compliance
+- Do not bypass auth, paywalls, or captcha.
+- Do not store cookies, Authorization headers, or sensitive request headers in logs/artifacts.
+- Keep response artifacts bounded by configured size limits.
+- Collect only what a normal browser session can access.
 
-## S3 Data Contract
-- Input object key format:
-  - `s3://$S3_BUCKET/$S3_INPUT_PREFIX/mouse/products/{productId}.json`
-- Run output prefix format:
-  - `s3://$S3_BUCKET/$S3_OUTPUT_PREFIX/mouse/{productId}/runs/{runId}/...`
-- Latest output prefix format:
-  - `s3://$S3_BUCKET/$S3_OUTPUT_PREFIX/mouse/{productId}/latest/...`
+## Source Confirmation Policy
+- Non-anchor fields require at least 3 credible confirmations from unique approved root domains.
+- Unapproved/newly discovered domains are candidates only and must never count toward confirmation totals.
+- Retailer/marketplace sources are confirmation-only (not sole authority).
 
-## Required Environment
-- `AWS_REGION=us-east-2`
-- `S3_BUCKET=my-spec-harvester-data`
-- `S3_INPUT_PREFIX=specs/inputs`
-- `S3_OUTPUT_PREFIX=specs/outputs`
+## Identity and Anchors
+- `identityLock` and anchor values are do-not-override.
+- Any major anchor conflict downgrades trust and blocks validation.
+- If identity confidence < 0.99, mark run as model ambiguity and withhold non-locked spec filling.
 
-Optional runtime controls:
-- `MAX_URLS_PER_PRODUCT=8`
-- `MAX_PAGES_PER_DOMAIN=2`
-- `MAX_RUN_SECONDS=180`
-- `MAX_JSON_BYTES=2000000`
-- `CONCURRENCY=2`
-- `PER_HOST_MIN_DELAY_MS=800`
-- `USER_AGENT="Mozilla/5.0 (compatible; EGSpecHarvester/1.0; +https://eggear.com)"`
+## Category-Driven Structure
+All category behavior must come from:
+- `categories/{category}/schema.json`
+- `categories/{category}/sources.json`
+- `categories/{category}/required_fields.json`
+- `categories/{category}/search_templates.json`
+- `categories/{category}/anchors.json`
 
-## Identity Lock Rules
-- Treat `identityLock` and `anchors` as lock signals, not override values.
-- If 99% certainty is not met, run must output:
-  - `validated=false`
-  - `reason=MODEL_AMBIGUITY_ALERT`
-  - minimal identity-only normalized fields
+## Required Execution Flow for Agent Changes
+1. Make minimal scoped changes.
+2. Run `npm test`.
+3. Run `npm run smoke` and `npm run smoke:local`.
+4. If S3 behavior changed, run `npm run test:s3`.
+5. Update README and AGENT.md when behavior/contracts change.
 
-## Source Priority
-- Tier 1: manufacturer pages/docs and instrumented labs.
-- Tier 2: trusted review/spec databases.
-- Tier 3: retailer confirmation only; never sole source.
+## Discovery and Domain Approval
+- Use official search APIs only (`bing` or `google_cse`) when discovery is enabled.
+- Write discovery output to `s3://$S3_BUCKET/$S3_INPUT_PREFIX/_sources/candidates/{category}/{runId}.json`.
+- Human approval is required before domains are moved into `categories/{category}/sources.json`.
 
-## Local Validation (Before Cloud Runs)
-1. `npm test`
-2. `npm run smoke`
-
-## Cloud S3 Integration Test (Reusable)
-Use this command to perform a full end-to-end S3 test with a sample mouse fixture:
-
-`npm run test:s3`
-
-What this test does:
-1. Uploads sample input job to `specs/inputs/mouse/products/mouse-razer-viper-v3-pro.json`.
-2. Runs real pipeline (not local mode) against S3.
-3. Verifies required run and latest keys exist.
-4. Verifies raw evidence was written (`raw/pages`, `raw/network`).
-5. Checks `latest/normalized.json` ACL has no public grants.
-6. Prints run ID, summary metrics, and selected mouse fields.
-
-## Scheduled Batch Operation
-Run category batch on a cadence:
-
-`node src/cli/run-batch.js --category mouse`
-
-Optional brand-scoped schedule:
-
-`node src/cli/run-batch.js --category mouse --brand Razer`
-
-Example cron (every 6 hours):
-
-`0 */6 * * * cd /path/to/spec-harvester && node src/cli/run-batch.js --category mouse >> /var/log/spec-harvester.log 2>&1`
-
-## S3 Review Checklist Per Run
-- `logs/summary.json` exists and `reason` is expected.
-- `normalized/mouse.normalized.json` exists and schema is complete.
-- `provenance/fields.provenance.json` exists with field evidence.
-- `raw/pages/*` and `raw/network/*` exist for captured evidence.
-- `latest/*` mirrors current run outputs.
-
-## Failure Handling
-- If model ambiguity is flagged, do not force-fill missing fields.
-- Fix seed URLs / host allowlist / identity anchors, then rerun.
-- Keep evidence artifacts intact for audit and debugging.
+## Main CLI
+Use the single main entrypoint:
+- `node src/cli/spec.js run-one --s3key ...`
+- `node src/cli/spec.js run-batch --category ... [--brand ...]`
+- `node src/cli/spec.js discover --category ... [--brand ...]`
+- `node src/cli/spec.js rebuild-index --category ...`

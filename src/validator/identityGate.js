@@ -210,13 +210,18 @@ export function evaluateSourceIdentity(source, identityLock = {}) {
 
 export function evaluateIdentityGate(sourceResults) {
   const accepted = sourceResults.filter(
-    (s) => s.identity?.match && (s.anchorCheck?.majorConflicts || []).length === 0
+    (s) =>
+      s.identity?.match &&
+      (s.anchorCheck?.majorConflicts || []).length === 0 &&
+      s.approvedDomain
   );
 
-  const manufacturer = accepted.find((s) => s.role === 'manufacturer' && s.tier === 1);
+  const manufacturer = accepted.find(
+    (s) => s.role === 'manufacturer' && s.tier === 1 && s.approvedDomain
+  );
   const credibleAdditionalDomains = new Set(
     accepted
-      .filter((s) => s.tier <= 2)
+      .filter((s) => s.tier <= 2 && s.approvedDomain)
       .filter((s) => !manufacturer || s.rootDomain !== manufacturer.rootDomain)
       .map((s) => s.rootDomain)
   );
@@ -249,6 +254,7 @@ export function evaluateIdentityGate(sourceResults) {
   if (hasAdditional) certainty += 0.2;
   if (noContradictions) certainty += 0.1;
   if (noMajorAnchorConflicts) certainty += 0.1;
+  if (accepted.length >= 3) certainty += 0.05;
   certainty = Math.max(0, Math.min(1, certainty));
 
   if (validated) {

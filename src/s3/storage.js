@@ -4,7 +4,8 @@ import {
   S3Client,
   GetObjectCommand,
   PutObjectCommand,
-  ListObjectsV2Command
+  ListObjectsV2Command,
+  HeadObjectCommand
 } from '@aws-sdk/client-s3';
 
 async function streamToBuffer(stream) {
@@ -68,6 +69,17 @@ class S3Storage {
     return JSON.parse(buffer.toString('utf8'));
   }
 
+  async readJsonOrNull(key) {
+    try {
+      return await this.readJson(key);
+    } catch (error) {
+      if (error?.$metadata?.httpStatusCode === 404 || error?.name === 'NoSuchKey') {
+        return null;
+      }
+      throw error;
+    }
+  }
+
   async writeObject(key, body, metadata = {}) {
     await this.client.send(
       new PutObjectCommand({
@@ -81,8 +93,29 @@ class S3Storage {
     );
   }
 
+  async objectExists(key) {
+    try {
+      await this.client.send(
+        new HeadObjectCommand({
+          Bucket: this.bucket,
+          Key: key
+        })
+      );
+      return true;
+    } catch (error) {
+      if (error?.$metadata?.httpStatusCode === 404 || error?.name === 'NotFound') {
+        return false;
+      }
+      throw error;
+    }
+  }
+
   resolveOutputKey(...parts) {
     return toPosixKey(this.outputPrefix, ...parts);
+  }
+
+  resolveInputKey(...parts) {
+    return toPosixKey(this.inputPrefix, ...parts);
   }
 }
 
@@ -92,6 +125,16 @@ class LocalStorage {
     this.outputRoot = path.resolve(config.localOutputRoot);
     this.inputPrefix = config.s3InputPrefix;
     this.outputPrefix = config.s3OutputPrefix;
+  }
+
+  resolveLocalPath(key) {
+    if (key.startsWith(`${this.inputPrefix}/`)) {
+      return path.join(this.inputRoot, ...key.split('/'));
+    }
+    if (key.startsWith(`${this.outputPrefix}/`)) {
+      return path.join(this.outputRoot, ...key.split('/'));
+    }
+    return path.join(this.outputRoot, ...key.split('/'));
   }
 
   async listInputKeys(category) {
@@ -117,19 +160,47 @@ class LocalStorage {
   }
 
   async readJson(key) {
-    const fullPath = path.join(this.inputRoot, ...key.split('/'));
+    const fullPath = this.resolveLocalPath(key);
     const content = await fs.readFile(fullPath, 'utf8');
     return JSON.parse(content);
   }
 
+  async readJsonOrNull(key) {
+    try {
+      return await this.readJson(key);
+    } catch (err) {
+      if (err.code === 'ENOENT') {
+        return null;
+      }
+      throw err;
+    }
+  }
+
   async writeObject(key, body) {
-    const fullPath = path.join(this.outputRoot, ...key.split('/'));
+    const fullPath = this.resolveLocalPath(key);
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
     await fs.writeFile(fullPath, body);
   }
 
+  async objectExists(key) {
+    const fullPath = this.resolveLocalPath(key);
+    try {
+      await fs.access(fullPath);
+      return true;
+    } catch (err) {
+      if (err.code === 'ENOENT') {
+        return false;
+      }
+      throw err;
+    }
+  }
+
   resolveOutputKey(...parts) {
     return toPosixKey(this.outputPrefix, ...parts);
+  }
+
+  resolveInputKey(...parts) {
+    return toPosixKey(this.inputPrefix, ...parts);
   }
 }
 

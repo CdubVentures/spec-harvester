@@ -17,6 +17,59 @@ function likelyGraphql(url, parsed) {
   return Boolean(parsed && typeof parsed === 'object' && ('data' in parsed || 'errors' in parsed));
 }
 
+function classifyResponse(url, parsed) {
+  const token = String(url || '').toLowerCase();
+
+  if (token.includes('variant') || token.includes('options')) {
+    return 'variant_matrix';
+  }
+  if (token.includes('price')) {
+    return 'pricing';
+  }
+  if (token.includes('review') || token.includes('rating')) {
+    return 'reviews';
+  }
+
+  if (parsed && typeof parsed === 'object') {
+    const text = JSON.stringify(parsed).toLowerCase();
+    if (text.includes('variant') || text.includes('sku') && text.includes('options')) {
+      return 'variant_matrix';
+    }
+    if (text.includes('spec') || text.includes('polling') || text.includes('dpi') || text.includes('sensor')) {
+      return 'specs';
+    }
+    if (text.includes('price') || text.includes('currency')) {
+      return 'pricing';
+    }
+    if (text.includes('review') || text.includes('rating')) {
+      return 'reviews';
+    }
+    if (text.includes('product') || text.includes('model') || text.includes('brand')) {
+      return 'product_payload';
+    }
+  }
+
+  return 'unknown';
+}
+
+function boundedUtf8(text, maxBytes) {
+  const buffer = Buffer.from(text, 'utf8');
+  if (buffer.length <= maxBytes) {
+    return {
+      boundedText: text,
+      boundedByteLen: buffer.length,
+      truncated: false
+    };
+  }
+
+  const truncated = buffer.subarray(0, maxBytes);
+  return {
+    boundedText: truncated.toString('utf8'),
+    boundedByteLen: maxBytes,
+    truncated: true
+  };
+}
+
 export class NetworkRecorder {
   constructor({ maxJsonBytes }) {
     this.maxJsonBytes = maxJsonBytes;
@@ -29,32 +82,41 @@ export class NetworkRecorder {
     const headers = response.headers();
     const contentType = headers['content-type'] || '';
 
-    let text;
     if (!isJsonLikeContentType(contentType) && !url.toLowerCase().includes('graphql')) {
       return;
     }
 
+    let text;
     try {
       text = await response.text();
     } catch {
       return;
     }
 
-    const byteLength = Buffer.byteLength(text, 'utf8');
-    const truncated = byteLength > this.maxJsonBytes;
-    const boundedText = truncated
-      ? text.slice(0, Math.max(0, this.maxJsonBytes))
-      : text;
+    const bounded = boundedUtf8(text, this.maxJsonBytes);
+    const parsed = safeJsonParse(bounded.boundedText, null);
+    const isGraphQl = likelyGraphql(url, parsed);
+    const classification = classifyResponse(url, parsed);
 
-    const parsed = safeJsonParse(boundedText, null);
-    this.rows.push({
+    const row = {
       ts: nowIso(),
       url,
       status,
-      content_type: contentType,
-      is_graphql: likelyGraphql(url, parsed),
-      truncated,
-      body: parsed !== null ? parsed : boundedText
-    });
+      contentType,
+      isGraphQl,
+      classification,
+      boundedByteLen: bounded.boundedByteLen,
+      truncated: bounded.truncated
+    };
+
+    if (parsed !== null && !bounded.truncated) {
+      row.jsonFull = parsed;
+    } else if (parsed !== null) {
+      row.jsonPreview = parsed;
+    } else {
+      row.jsonPreview = bounded.boundedText.slice(0, 5000);
+    }
+
+    this.rows.push(row);
   }
 }

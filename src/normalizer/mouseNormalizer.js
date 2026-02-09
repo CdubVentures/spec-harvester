@@ -1,8 +1,6 @@
-import { MOUSE_FIELD_ORDER } from '../constants.js';
-
-function makeUnknownFieldMap() {
+function makeUnknownFieldMap(fieldOrder) {
   const map = {};
-  for (const field of MOUSE_FIELD_ORDER) {
+  for (const field of fieldOrder) {
     map[field] = 'unk';
   }
   return map;
@@ -33,9 +31,11 @@ export function buildAbortedNormalized({
   sourceSummary,
   notes,
   confidence,
-  completeness
+  completenessRequired,
+  coverageOverall,
+  fieldOrder
 }) {
-  const fields = makeUnknownFieldMap();
+  const fields = makeUnknownFieldMap(fieldOrder);
   fields.id = productId;
   fields.brand = identity.brand;
   fields.model = identity.model;
@@ -52,7 +52,8 @@ export function buildAbortedNormalized({
     quality: {
       validated: false,
       confidence,
-      completeness,
+      completeness_required: completenessRequired,
+      coverage_overall: coverageOverall,
       notes
     },
     sources: sourceSummary

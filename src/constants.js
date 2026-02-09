@@ -134,12 +134,20 @@ export const COMMONLY_WRONG_FIELDS = new Set([
 export const DEFAULT_REQUIRED_FIELDS = [
   'identity.brand',
   'identity.model',
+  'fields.connection',
+  'fields.connectivity',
   'fields.weight',
+  'fields.lngth',
+  'fields.width',
+  'fields.height',
   'fields.sensor',
+  'fields.sensor_brand',
   'fields.polling_rate',
   'fields.dpi',
-  'fields.connection',
-  'fields.side_buttons'
+  'fields.switch',
+  'fields.switch_brand',
+  'fields.side_buttons',
+  'fields.middle_buttons'
 ];
 
 export const BOOLEAN_FIELDS = new Set([

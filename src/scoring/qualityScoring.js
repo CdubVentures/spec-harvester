@@ -1,58 +1,100 @@
 import { clamp, getByPath } from '../utils/common.js';
-import { DEFAULT_REQUIRED_FIELDS } from '../constants.js';
 
 function normalizeRequiredPath(path) {
-  if (path.startsWith('specs.')) {
-    return `fields.${path.slice('specs.'.length)}`;
+  const raw = String(path || '').trim();
+  if (!raw) {
+    return raw;
   }
-  return path;
+  if (raw.startsWith('specs.')) {
+    return `fields.${raw.slice('specs.'.length)}`;
+  }
+  if (raw.startsWith('identity.') || raw.startsWith('fields.')) {
+    return raw;
+  }
+  if (raw.includes('.')) {
+    return raw;
+  }
+  return `fields.${raw}`;
 }
 
 function valueFilled(value) {
-  return value !== undefined && value !== null && value !== '' && value !== 'unk';
+  if (value === undefined || value === null) {
+    return false;
+  }
+  const text = String(value).trim().toLowerCase();
+  if (!text) {
+    return false;
+  }
+  return text !== 'unk';
 }
 
-export function computeCompleteness(normalized, requiredFieldsInput) {
-  const requiredFields = (requiredFieldsInput || DEFAULT_REQUIRED_FIELDS).map(normalizeRequiredPath);
+export function computeCompletenessRequired(normalized, requiredFieldsInput = []) {
+  const requiredFields = requiredFieldsInput
+    .map(normalizeRequiredPath)
+    .filter(Boolean);
+
   const total = requiredFields.length;
+  const missingRequiredFields = [];
   let filled = 0;
 
   for (const fieldPath of requiredFields) {
     const value = getByPath(normalized, fieldPath);
     if (valueFilled(value)) {
       filled += 1;
+    } else {
+      missingRequiredFields.push(fieldPath);
     }
   }
 
+  const completenessRequired = total === 0 ? 0 : filled / total;
+
   return {
     requiredFields,
+    missingRequiredFields,
     filled,
     total,
-    completeness: total === 0 ? 1 : filled / total
+    completenessRequired
+  };
+}
+
+export function computeCoverageOverall({ fields, fieldOrder, editorialFields }) {
+  const editorialSet = new Set(editorialFields || []);
+  const consideredFields = (fieldOrder || []).filter((field) => !editorialSet.has(field));
+
+  let filled = 0;
+  for (const field of consideredFields) {
+    if (valueFilled(fields[field])) {
+      filled += 1;
+    }
+  }
+
+  const total = consideredFields.length;
+  const coverageOverall = total === 0 ? 0 : filled / total;
+
+  return {
+    total,
+    filled,
+    coverageOverall,
+    consideredFields
   };
 }
 
 export function computeConfidence({
-  identityGate,
+  identityConfidence,
   provenance,
-  conflictsCount,
-  validated
+  anchorConflictsCount,
+  agreementScore = 0
 }) {
-  const perFieldConfidence = Object.values(provenance || {})
+  const confidences = Object.values(provenance || {})
     .map((row) => row.confidence)
-    .filter((v) => typeof v === 'number');
+    .filter((value) => typeof value === 'number' && Number.isFinite(value));
 
-  const fieldAvg =
-    perFieldConfidence.length > 0
-      ? perFieldConfidence.reduce((acc, value) => acc + value, 0) / perFieldConfidence.length
-      : 0;
+  const provenanceConfidence = confidences.length
+    ? confidences.reduce((acc, value) => acc + value, 0) / confidences.length
+    : 0;
 
-  let confidence = (identityGate.certainty * 0.55) + (fieldAvg * 0.45);
-  confidence -= Math.min(0.3, conflictsCount * 0.05);
-
-  if (!validated) {
-    confidence = Math.min(confidence, 0.5);
-  }
+  let confidence = (identityConfidence * 0.5) + (provenanceConfidence * 0.35) + (agreementScore * 0.15);
+  confidence -= Math.min(0.4, anchorConflictsCount * 0.06);
 
   return clamp(confidence, 0, 1);
 }

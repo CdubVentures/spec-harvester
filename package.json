@@ -3,19 +3,23 @@
   "version": "1.0.0",
   "description": "Backend-first mouse spec harvester with S3 IO",
   "type": "module",
-  "main": "src/cli/run-one.js",
+  "main": "src/cli/spec.js",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "test": "node --test",
-    "run:one": "node src/cli/run-one.js",
-    "run:batch": "node src/cli/run-batch.js",
-    "smoke": "node src/cli/run-one.js --local --dry-run --s3key specs/inputs/mouse/products/mouse-razer-viper-v3-pro.json",
+    "run:one": "node src/cli/spec.js run-one",
+    "run:batch": "node src/cli/spec.js run-batch",
+    "discover": "node src/cli/spec.js discover",
+    "rebuild-index": "node src/cli/spec.js rebuild-index",
+    "smoke": "node src/cli/spec.js run-one --local --dry-run --s3key specs/inputs/mouse/products/mouse-razer-viper-v3-pro.json",
+    "smoke:local": "node src/cli/smoke-local.js",
     "test:s3": "node src/cli/s3-integration.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.862.0",
+    "pdf-parse": "^1.1.1",
     "playwright": "^1.54.2"
   }
 }

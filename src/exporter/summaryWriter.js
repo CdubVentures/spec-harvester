@@ -1,12 +1,16 @@
 export function buildMarkdownSummary({ normalized, summary }) {
+  const confidence = Number(summary.confidence || 0);
+  const completenessRequired = Number(summary.completeness_required_percent || 0);
+  const coverageOverall = Number(summary.coverage_overall_percent || 0);
   const lines = [];
   lines.push(`# Mouse Spec Summary: ${normalized.productId}`);
   lines.push('');
   lines.push(`- Run ID: ${normalized.runId}`);
   lines.push(`- Validated: ${summary.validated ? 'yes' : 'no'}`);
-  lines.push(`- Reason: ${summary.reason}`);
-  lines.push(`- Confidence: ${summary.confidence.toFixed(3)}`);
-  lines.push(`- Completeness: ${summary.completeness.toFixed(3)}`);
+  lines.push(`- Reason: ${summary.validated_reason || summary.reason}`);
+  lines.push(`- Confidence: ${confidence.toFixed(3)}`);
+  lines.push(`- Completeness Required: ${completenessRequired.toFixed(2)}%`);
+  lines.push(`- Coverage Overall: ${coverageOverall.toFixed(2)}%`);
   lines.push(`- Sources Used: ${normalized.sources.used.length}`);
   lines.push('');
   lines.push('## Identity');

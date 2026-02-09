@@ -128,7 +128,23 @@ export class DryRunFetcher {
       html,
       ldjsonBlocks,
       embeddedState,
-      networkResponses: fixture.networkResponses || []
+      networkResponses: (fixture.networkResponses || []).map((row) => {
+        if (row.jsonFull || row.jsonPreview) {
+          return row;
+        }
+        if (row.body !== undefined) {
+          return {
+            ...row,
+            contentType: row.contentType || row.content_type || 'application/json',
+            isGraphQl: row.isGraphQl ?? row.is_graphql ?? false,
+            classification: row.classification || 'unknown',
+            boundedByteLen: row.boundedByteLen || Buffer.byteLength(JSON.stringify(row.body), 'utf8'),
+            jsonFull: typeof row.body === 'object' ? row.body : undefined,
+            jsonPreview: typeof row.body === 'string' ? row.body : undefined
+          };
+        }
+        return row;
+      })
     };
   }
 }

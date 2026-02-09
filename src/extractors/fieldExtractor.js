@@ -292,7 +292,9 @@ export function extractCandidatesFromPage({
     },
     {
       method: 'network_json',
-      payloads: (networkResponses || []).map((row) => row.body).filter(Boolean)
+      payloads: (networkResponses || [])
+        .map((row) => row.jsonFull ?? row.jsonPreview)
+        .filter(Boolean)
     }
   ];
 

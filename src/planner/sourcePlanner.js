@@ -1,4 +1,11 @@
 import { extractRootDomain } from '../utils/common.js';
+import {
+  inferRoleForHost,
+  isApprovedHost,
+  isDeniedHost,
+  resolveTierForHost,
+  resolveTierNameForHost
+} from '../categories/loader.js';
 
 function normalizeHost(host) {
   return String(host || '').trim().toLowerCase().replace(/^www\./, '');
@@ -24,27 +31,11 @@ function hostInSet(host, hostSet) {
   return false;
 }
 
-function getTierAndRole(host, preferred) {
-  const manufacturerHosts = new Set((preferred?.manufacturerHosts || []).map(normalizeHost));
-  const reviewHosts = new Set((preferred?.reviewHosts || []).map(normalizeHost));
-  const retailerHosts = new Set((preferred?.retailerHosts || []).map(normalizeHost));
-
-  if (hostInSet(host, manufacturerHosts)) {
-    return { tier: 1, role: 'manufacturer' };
-  }
-  if (hostInSet(host, reviewHosts)) {
-    return { tier: 2, role: 'review' };
-  }
-  if (hostInSet(host, retailerHosts)) {
-    return { tier: 3, role: 'retailer' };
-  }
-  return { tier: 2, role: 'other' };
-}
-
 export class SourcePlanner {
-  constructor(job, config) {
+  constructor(job, config, categoryConfig) {
     this.job = job;
     this.config = config;
+    this.categoryConfig = categoryConfig;
     this.preferred = job.preferredSources || {};
     this.maxUrls = config.maxUrlsPerProduct;
     this.maxPagesPerDomain = config.maxPagesPerDomain;
@@ -53,6 +44,11 @@ export class SourcePlanner {
     this.queue = [];
 
     this.allowlistHosts = new Set();
+
+    for (const sourceHost of categoryConfig.sourceHosts || []) {
+      this.allowlistHosts.add(normalizeHost(sourceHost.host));
+    }
+
     for (const arr of [
       this.preferred.manufacturerHosts || [],
       this.preferred.reviewHosts || [],
@@ -76,6 +72,16 @@ export class SourcePlanner {
     }
   }
 
+  hostAllowed(host) {
+    if (!host) {
+      return false;
+    }
+    if (isDeniedHost(host, this.categoryConfig)) {
+      return false;
+    }
+    return hostInSet(host, this.allowlistHosts);
+  }
+
   enqueue(url, discoveredFrom = 'unknown') {
     if (!url || this.visitedUrls.has(url) || this.queue.find((s) => s.url === url)) {
       return;
@@ -97,7 +103,7 @@ export class SourcePlanner {
     }
 
     const host = normalizeHost(parsed.hostname);
-    if (!hostInSet(host, this.allowlistHosts)) {
+    if (!this.hostAllowed(host)) {
       return;
     }
 
@@ -106,14 +112,18 @@ export class SourcePlanner {
       return;
     }
 
-    const { tier, role } = getTierAndRole(host, this.preferred);
+    const tier = resolveTierForHost(host, this.categoryConfig);
+    const tierName = resolveTierNameForHost(host, this.categoryConfig);
+    const role = inferRoleForHost(host, this.categoryConfig);
 
     this.queue.push({
       url: parsed.toString(),
       host,
       rootDomain: extractRootDomain(host),
       tier,
+      tierName,
       role,
+      approvedDomain: isApprovedHost(host, this.categoryConfig),
       discoveredFrom
     });
 
@@ -159,7 +169,9 @@ export function buildSourceSummary(sources) {
       url: s.url,
       host: s.host,
       tier: s.tier,
+      tier_name: s.tierName,
       role: s.role,
+      approved_domain: Boolean(s.approvedDomain),
       anchor_check_status: s.anchorStatus,
       identity: s.identity
     }))
