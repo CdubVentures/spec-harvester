@@ -134,7 +134,7 @@ export const rtingsAdapter = {
 
     for (const payload of payloads) {
       const entries = flatten(payload);
-      const mapped = mapFlattenedEntries(entries, 'adapter_api');
+      const mapped = mapFlattenedEntries(entries, 'instrumented_api');
       fieldCandidates.push(...mapped.fieldCandidates);
       Object.assign(identityCandidates, mapped.identityCandidates);
     }

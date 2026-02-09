@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
   S3Client,
   PutObjectCommand,
@@ -66,8 +67,8 @@ function assertNoPublicGrant(acl) {
   return true;
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
+export async function runS3Integration(argv = process.argv.slice(2)) {
+  const args = parseArgs(argv);
 
   const config = loadConfig({
     localMode: false,
@@ -198,10 +199,17 @@ async function main() {
     }
   };
 
+  return output;
+}
+
+async function main() {
+  const output = await runS3Integration(process.argv.slice(2));
   process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
 }
 
-main().catch((error) => {
-  process.stderr.write(`${error.stack || error.message}\n`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    process.stderr.write(`${error.stack || error.message}\n`);
+    process.exitCode = 1;
+  });
+}

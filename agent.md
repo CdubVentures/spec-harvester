@@ -1,50 +1,65 @@
-# AGENT.md  EG Spec Harvester Rules
+# Agent.md - Spec Harvester Operating Rules
 
-## Core Rules
-- Preserve category schema field order exactly as defined in `categories/{category}/schema.json`.
-- Never guess values.
-- Use `unk` when uncertain and `n/a` only when truly not applicable.
-- Keep crawling scope narrow (allowlisted domains, limited page budgets, host throttling).
+## Mission
+Build accurate, auditable product specs with backend-first evidence collection.
+Current primary category is `mouse`; all logic must remain category-pluggable.
 
-## Security and Compliance
-- Do not bypass auth, paywalls, or captcha.
-- Do not store cookies, Authorization headers, or sensitive request headers in logs/artifacts.
-- Keep response artifacts bounded by configured size limits.
-- Collect only what a normal browser session can access.
+## Non-negotiables
+- Accuracy over completeness.
+- Never guess. Use `unk` when uncertain, and `n/a` only when truly not applicable.
+- Preserve canonical schema field order exactly as category schema defines.
+- Respect identity lock and anchors as do-not-override constraints.
 
-## Source Confirmation Policy
-- Non-anchor fields require at least 3 credible confirmations from unique approved root domains.
-- Unapproved/newly discovered domains are candidates only and must never count toward confirmation totals.
-- Retailer/marketplace sources are confirmation-only (not sole authority).
+## Domain policy
+- Approved domains are defined in `categories/{category}/sources.json`.
+- Candidate domains discovered at runtime are evidence-only.
+- Candidate domains must never count toward pass-target confirmations.
+- Candidate promotion requires explicit human update to category sources config.
 
-## Identity and Anchors
-- `identityLock` and anchor values are do-not-override.
-- Any major anchor conflict downgrades trust and blocks validation.
-- If identity confidence < 0.99, mark run as model ambiguity and withhold non-locked spec filling.
+## Identity and validation gates
+- Mouse identity gate must enforce 99% certainty.
+- If identity is ambiguous, output `MODEL_AMBIGUITY_ALERT` behavior and avoid filling specs.
+- `validated=true` only when identity gate, confidence threshold, completeness target, and anchor checks all pass.
+- Metrics must stay honest:
+  - `completeness_required` over required fields only
+  - `coverage_overall` over full schema (excluding configured editorial fields)
 
-## Category-Driven Structure
-All category behavior must come from:
-- `categories/{category}/schema.json`
-- `categories/{category}/sources.json`
-- `categories/{category}/required_fields.json`
-- `categories/{category}/search_templates.json`
-- `categories/{category}/anchors.json`
+## Evidence collection and safety
+- Prefer extraction methods in this order:
+  `network_json` -> `embedded_state` -> `ldjson` -> `html_table` -> `dom`.
+- Capture replay-safe request metadata for JSON/GraphQL evidence:
+  `request_url`, `request_method`, `request_post_json`, `resource_type`.
+- Do not store cookies, Authorization headers, or other sensitive headers.
+- Keep payloads bounded by configured byte limits.
+- Do not broaden crawling scope beyond planner budgets.
 
-## Required Execution Flow for Agent Changes
-1. Make minimal scoped changes.
-2. Run `npm test`.
-3. Run `npm run smoke` and `npm run smoke:local`.
-4. If S3 behavior changed, run `npm run test:s3`.
-5. Update README and AGENT.md when behavior/contracts change.
+## Confirmation policy
+- Default non-anchor fill requires 3 unique approved root domains.
+- Commonly wrong fields target 5 confirmations.
+- Instrumented-only fields require instrumented evidence and cannot use relaxed fill.
+- Optional relaxed mode:
+  `ALLOW_BELOW_PASS_TARGET_FILL=true` can fill with 2 confirmations only if:
+  - one is Tier 1 manufacturer, and
+  - one is Tier <=2 approved source.
+  Provenance must still mark `meets_pass_target=false`.
 
-## Discovery and Domain Approval
-- Use official search APIs only (`bing` or `google_cse`) when discovery is enabled.
-- Write discovery output to `s3://$S3_BUCKET/$S3_INPUT_PREFIX/_sources/candidates/{category}/{runId}.json`.
-- Human approval is required before domains are moved into `categories/{category}/sources.json`.
+## Self-improving loop
+- Each run must persist a learning profile under output `_learning`.
+- Learning may refine future seed priorities (preferred URLs, host yield stats).
+- Learning must not weaken safety rules, approval rules, or validation gates.
+- New domains discovered by search remain candidates until approved.
 
-## Main CLI
-Use the single main entrypoint:
-- `node src/cli/spec.js run-one --s3key ...`
-- `node src/cli/spec.js run-batch --category ... [--brand ...]`
-- `node src/cli/spec.js discover --category ... [--brand ...]`
-- `node src/cli/spec.js rebuild-index --category ...`
+## Debug and deployment loop
+- Every run must emit structured logs and summary reasons for failure analysis.
+- Deployment cadence should run `run-batch` on schedule and reuse learning profiles.
+- Improvements must come from better source selection, adapter coverage, and approved domain updates, not unsafe crawling.
+
+## Execution standards for Codex tasks
+- Keep changes scoped and backward compatible.
+- Maintain CLI compatibility wrappers.
+- Run tests and smoke checks before finalizing:
+  - `npm test`
+  - `npm run smoke`
+  - `npm run smoke:local`
+- For S3 pipeline checks use:
+  - `node src/cli/spec.js test-s3`

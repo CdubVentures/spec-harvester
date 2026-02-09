@@ -15,6 +15,7 @@ Commands:
 - `run-one --s3key <key>`
 - `run-batch --category mouse [--brand <brand>]`
 - `discover --category mouse [--brand <brand>]`
+- `test-s3 [--fixture <path>] [--s3key <key>] [--dry-run]`
 - `rebuild-index --category mouse`
 
 ## Category Config Layout
@@ -41,6 +42,7 @@ Run outputs:
 - `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/{category}/{productId}/runs/{runId}/raw/pages/{host}/ldjson.json`
 - `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/{category}/{productId}/runs/{runId}/raw/pages/{host}/embedded_state.json`
 - `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/{category}/{productId}/runs/{runId}/raw/network/{host}/responses.ndjson.gz`
+- `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/{category}/{productId}/runs/{runId}/extracted/{host}/candidates.json`
 - `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/{category}/{productId}/runs/{runId}/raw/pdfs/{host}/*` (manufacturer PDFs, when found)
 - `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/{category}/{productId}/runs/{runId}/raw/adapters/*.json`
 - `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/{category}/{productId}/runs/{runId}/normalized/{category}.normalized.json`
@@ -61,7 +63,13 @@ Latest pointers:
 
 Discovery candidates (manual approval queue):
 
+- `s3://{S3_BUCKET}/{S3_INPUT_PREFIX}/_discovery/{category}/{runId}.json`
 - `s3://{S3_BUCKET}/{S3_INPUT_PREFIX}/_sources/candidates/{category}/{runId}.json`
+
+Learning artifacts:
+
+- `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_learning/{category}/profiles/{profileId}.json`
+- `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/{category}/{productId}/runs/{runId}/logs/learning.json`
 
 ## Environment Variables
 
@@ -75,9 +83,11 @@ Core:
 Budgets/throttles:
 
 - `MAX_URLS_PER_PRODUCT=10`
+- `MAX_CANDIDATE_URLS=50`
 - `MAX_PAGES_PER_DOMAIN=2`
 - `MAX_RUN_SECONDS=180`
 - `MAX_JSON_BYTES=2000000`
+- `MAX_PDF_BYTES=8000000`
 - `CONCURRENCY=2`
 - `PER_HOST_MIN_DELAY_MS=900`
 - `USER_AGENT="Mozilla/5.0 (compatible; EGSpecHarvester/1.0; +https://eggear.com)"`
@@ -96,6 +106,8 @@ Local toggles:
 - `LOCAL_S3_ROOT=fixtures/s3`
 - `LOCAL_OUTPUT_ROOT=out`
 - `WRITE_MARKDOWN_SUMMARY=true|false`
+- `ALLOW_BELOW_PASS_TARGET_FILL=true|false` (default `false`)
+- `SELF_IMPROVE_ENABLED=true|false` (default `true`)
 
 EloShapes adapter (optional, safe default disabled):
 
@@ -143,6 +155,12 @@ Rebuild category index:
 node src/cli/spec.js rebuild-index --category mouse
 ```
 
+S3 integration test through the main CLI:
+
+```bash
+node src/cli/spec.js test-s3
+```
+
 ## Tests and Smoke
 
 Unit tests:
@@ -163,6 +181,32 @@ S3 integration test:
 ```bash
 npm run test:s3
 ```
+
+## Scheduling
+
+Run a repeatable batch on a cadence (cron, GitHub Actions, ECS scheduled task, etc):
+
+```bash
+node src/cli/spec.js run-batch --category mouse
+```
+
+Optional brand-scoped scheduled run:
+
+```bash
+node src/cli/spec.js run-batch --category mouse --brand Razer
+```
+
+Each run updates learning profiles and latest pointers while preserving strict validation gates.
+
+## Self-Improving Accuracy Loop
+
+Each run records reusable learning artifacts:
+
+- host yield stats (`identityMatchRate`, conflicts, candidate yield)
+- preferred URLs for the exact brand/model/variant
+- unknown-field rate trend
+
+On the next run, the planner reuses high-yield URLs first, so evidence quality improves over time without relaxing validation or safety controls.
 
 ## Domain Approval Workflow
 

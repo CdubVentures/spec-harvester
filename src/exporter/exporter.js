@@ -70,6 +70,16 @@ async function writePageArtifacts({ writes, storage, runBase, host, artifact }) 
     )
   );
 
+  writes.push(
+    storage.writeObject(
+      `${runBase}/extracted/${host}/candidates.json`,
+      jsonBuffer(artifact.extractedCandidates || []),
+      {
+        contentType: 'application/json'
+      }
+    )
+  );
+
   for (const pdf of artifact.pdfDocs || []) {
     const filename = safeName(pdf.filename || path.basename(pdf.url || '') || 'doc.pdf');
     writes.push(

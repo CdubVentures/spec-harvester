@@ -1,4 +1,7 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { mapPairsToFieldCandidates, extractTablePairs, extractIdentityFromPairs } from './tableParsing.js';
 import { normalizeWhitespace } from '../utils/common.js';
 
@@ -29,7 +32,7 @@ function findSupportLikeUrls(html, baseUrl) {
   const regex = /href\s*=\s*["']([^"']+)["'][^>]*>/gi;
   for (const match of String(html || '').matchAll(regex)) {
     const href = match[1];
-    if (!/support|manual|spec|datasheet/i.test(href)) {
+    if (!/support|manual|spec|datasheet|documentation/i.test(href)) {
       continue;
     }
     try {
@@ -42,21 +45,99 @@ function findSupportLikeUrls(html, baseUrl) {
   return [...new Set(urls)];
 }
 
-async function parsePdfText(buffer) {
+function sameDomainFamily(sourceHost, targetUrl) {
   try {
-    let parser;
-    try {
-      const mod = await import('pdf-parse/lib/pdf-parse.js');
-      parser = mod.default || mod;
-    } catch {
-      const mod = await import('pdf-parse');
-      parser = mod.default || mod;
-    }
-
-    const result = await parser(buffer);
-    return normalizeWhitespace(result?.text || '');
+    const host = new URL(targetUrl).hostname.toLowerCase();
+    return (
+      host === sourceHost ||
+      host.endsWith(`.${sourceHost}`) ||
+      sourceHost.endsWith(`.${host}`)
+    );
   } catch {
-    return '';
+    return false;
+  }
+}
+
+function runCommand(command, args, timeoutMs = 120000) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let finished = false;
+
+    const timer = setTimeout(() => {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      child.kill('SIGKILL');
+      reject(new Error(`Command timeout: ${command}`));
+    }, timeoutMs);
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on('error', (error) => {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      clearTimeout(timer);
+      reject(error);
+    });
+
+    child.on('close', (code) => {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new Error(stderr || stdout || `command failed with code ${code}`));
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
+async function parsePdfViaPython(buffer) {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-pdf-'));
+  const pdfPath = path.join(tmpRoot, 'input.pdf');
+  const outPath = path.join(tmpRoot, 'output.json');
+
+  try {
+    await fs.writeFile(pdfPath, buffer);
+    await runCommand('python', [
+      path.resolve('scripts', 'pdf_extract_tables.py'),
+      '--pdf',
+      pdfPath,
+      '--out',
+      outPath
+    ]);
+
+    const parsed = JSON.parse(await fs.readFile(outPath, 'utf8'));
+    return {
+      ok: Boolean(parsed?.ok),
+      pairs: parsed?.pairs || [],
+      textPreview: normalizeWhitespace(parsed?.text_preview || '')
+    };
+  } catch {
+    return {
+      ok: false,
+      pairs: [],
+      textPreview: ''
+    };
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
   }
 }
 
@@ -94,59 +175,51 @@ export const manufacturerAdapter = {
     return source.role === 'manufacturer';
   },
 
-  async extractFromPage({ source, pageData }) {
+  async extractFromPage({ source, pageData, config }) {
     const pairs = extractTablePairs(pageData.html || '');
     const fieldCandidates = mapPairsToFieldCandidates(pairs, 'html_table');
     const identityCandidates = extractIdentityFromPairs(pairs);
 
     const additionalUrls = findSupportLikeUrls(pageData.html, source.url)
-      .filter((url) => {
-        try {
-          const host = new URL(url).hostname.toLowerCase();
-          return host === source.host || host.endsWith(`.${source.host}`) || source.host.endsWith(`.${host}`);
-        } catch {
-          return false;
-        }
-      });
+      .filter((url) => sameDomainFamily(source.host, url));
 
     const pdfUrls = findPdfUrls(pageData.html, source.url)
-      .filter((url) => {
-        try {
-          const host = new URL(url).hostname.toLowerCase();
-          return host === source.host || host.endsWith(`.${source.host}`) || source.host.endsWith(`.${host}`);
-        } catch {
-          return false;
-        }
-      });
+      .filter((url) => sameDomainFamily(source.host, url));
 
     const pdfDocs = [];
     const pdfFieldCandidates = [];
 
-    for (const pdfUrl of pdfUrls.slice(0, 3)) {
+    for (const pdfUrl of pdfUrls.slice(0, 4)) {
       try {
         const response = await fetch(pdfUrl, {
           method: 'GET',
           headers: {
-            'User-Agent': 'Mozilla/5.0 (compatible; EGSpecHarvester/1.0; +https://eggear.com)'
+            'User-Agent': config.userAgent
           }
         });
+
         if (!response.ok) {
           continue;
         }
 
         const bytes = Buffer.from(await response.arrayBuffer());
-        const text = await parsePdfText(bytes);
-        const candidatesFromPdf = mapPdfTextToCandidates(text);
-        pdfFieldCandidates.push(...candidatesFromPdf);
+        if (bytes.length > config.maxPdfBytes) {
+          continue;
+        }
+
+        const parsed = await parsePdfViaPython(bytes);
+        const tableCandidates = mapPairsToFieldCandidates(parsed.pairs, 'pdf_table');
+        const textCandidates = mapPdfTextToCandidates(parsed.textPreview);
+        pdfFieldCandidates.push(...tableCandidates, ...textCandidates);
 
         pdfDocs.push({
           url: pdfUrl,
           filename: filenameFromUrl(pdfUrl),
           bytes,
-          textPreview: text.slice(0, 8000)
+          textPreview: parsed.textPreview.slice(0, 8000)
         });
       } catch {
-        // best effort for manufacturer PDFs
+        // best effort only
       }
     }
 

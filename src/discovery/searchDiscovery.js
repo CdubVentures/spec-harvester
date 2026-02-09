@@ -12,17 +12,40 @@ function fillTemplate(template, variables) {
     .replaceAll('{brand}', variables.brand || '')
     .replaceAll('{model}', variables.model || '')
     .replaceAll('{variant}', variables.variant || '')
-    .replaceAll('{category}', variables.category || '');
+    .replaceAll('{category}', variables.category || '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function normalizeHost(hostname) {
   return String(hostname || '').toLowerCase().replace(/^www\./, '');
 }
 
+function classifyUrlCandidate(result, categoryConfig) {
+  const parsed = new URL(result.url);
+  const host = normalizeHost(parsed.hostname);
+  const approvedDomain = isApprovedHost(host, categoryConfig);
+
+  return {
+    url: parsed.toString(),
+    host,
+    rootDomain: host.split('.').slice(-2).join('.'),
+    title: result.title || '',
+    snippet: result.snippet || '',
+    query: result.query || '',
+    provider: result.source || result.provider || 'plan',
+    approvedDomain,
+    tier: resolveTierForHost(host, categoryConfig),
+    tierName: resolveTierNameForHost(host, categoryConfig),
+    role: inferRoleForHost(host, categoryConfig)
+  };
+}
+
 async function searchBing({ endpoint, key, query, limit }) {
   if (!endpoint || !key) {
     return [];
   }
+
   const url = new URL(endpoint);
   if (!url.pathname || url.pathname === '/') {
     url.pathname = '/v7.0/search';
@@ -74,14 +97,39 @@ async function searchGoogleCse({ key, cx, query, limit }) {
   }));
 }
 
-function rankCandidate(candidate, categoryConfig) {
-  const tier = resolveTierForHost(candidate.host, categoryConfig);
+function buildPlanOnlyResults({ categoryConfig, queries }) {
+  const planned = [];
+
+  for (const sourceHost of categoryConfig.sourceHosts || []) {
+    for (const query of queries.slice(0, 3)) {
+      planned.push({
+        url: `https://${sourceHost.host}/search?q=${encodeURIComponent(query)}`,
+        title: `${sourceHost.host} search`,
+        snippet: 'planned source search URL',
+        source: 'plan',
+        query
+      });
+    }
+  }
+
+  return planned;
+}
+
+function rankCandidate(candidate) {
   let score = 0;
-  if (tier === 1) score += 100;
-  if (tier === 2) score += 70;
-  if (tier === 3) score += 30;
-  if (candidate.approvedDomain) score += 30;
-  if (candidate.role === 'manufacturer') score += 40;
+  if (candidate.approvedDomain) {
+    score += 30;
+  }
+  if (candidate.tier === 1) {
+    score += 100;
+  } else if (candidate.tier === 2) {
+    score += 70;
+  } else if (candidate.tier === 3) {
+    score += 30;
+  }
+  if (candidate.role === 'manufacturer') {
+    score += 40;
+  }
   return score;
 }
 
@@ -93,11 +141,14 @@ export async function discoverCandidateSources({
   runId,
   logger
 }) {
-  if (!config.discoveryEnabled || config.searchProvider === 'none') {
+  if (!config.discoveryEnabled) {
     return {
       enabled: false,
+      discoveryKey: null,
       candidatesKey: null,
-      candidates: []
+      candidates: [],
+      approvedUrls: [],
+      candidateUrls: []
     };
   }
 
@@ -112,34 +163,38 @@ export async function discoverCandidateSources({
   const queries = templates.map((template) => fillTemplate(template, variables)).filter(Boolean);
 
   const rawResults = [];
-  for (const query of queries.slice(0, 6)) {
-    try {
-      let results = [];
-      if (config.searchProvider === 'bing') {
-        results = await searchBing({
-          endpoint: config.bingSearchEndpoint,
-          key: config.bingSearchKey,
-          query,
-          limit: 10
-        });
-      } else if (config.searchProvider === 'google_cse') {
-        results = await searchGoogleCse({
-          key: config.googleCseKey,
-          cx: config.googleCseCx,
-          query,
-          limit: 10
-        });
+  if (config.searchProvider === 'bing' || config.searchProvider === 'google_cse') {
+    for (const query of queries.slice(0, 8)) {
+      try {
+        let results = [];
+        if (config.searchProvider === 'bing') {
+          results = await searchBing({
+            endpoint: config.bingSearchEndpoint,
+            key: config.bingSearchKey,
+            query,
+            limit: 10
+          });
+        } else {
+          results = await searchGoogleCse({
+            key: config.googleCseKey,
+            cx: config.googleCseCx,
+            query,
+            limit: 10
+          });
+        }
+        rawResults.push(...results.map((result) => ({ ...result, query })));
+      } catch (error) {
+        logger?.warn?.('discovery_query_failed', { query, message: error.message });
       }
-      rawResults.push(...results.map((item) => ({ ...item, query })));
-    } catch (error) {
-      logger?.warn?.('discovery_query_failed', { query, message: error.message });
     }
+  } else {
+    rawResults.push(...buildPlanOnlyResults({ categoryConfig, queries }));
   }
 
   const byUrl = new Map();
-  for (const result of rawResults) {
+  for (const raw of rawResults) {
     try {
-      const parsed = new URL(result.url);
+      const parsed = new URL(raw.url);
       if (parsed.protocol !== 'https:') {
         continue;
       }
@@ -148,30 +203,28 @@ export async function discoverCandidateSources({
         continue;
       }
 
-      if (!byUrl.has(parsed.toString())) {
-        const approvedDomain = isApprovedHost(host, categoryConfig);
-        byUrl.set(parsed.toString(), {
-          url: parsed.toString(),
-          host,
-          rootDomain: host.split('.').slice(-2).join('.'),
-          title: result.title,
-          snippet: result.snippet,
-          query: result.query,
-          provider: result.source,
-          approvedDomain,
-          tier: resolveTierForHost(host, categoryConfig),
-          tierName: resolveTierNameForHost(host, categoryConfig),
-          role: inferRoleForHost(host, categoryConfig)
-        });
+      const normalized = classifyUrlCandidate(raw, categoryConfig);
+      if (!byUrl.has(normalized.url)) {
+        byUrl.set(normalized.url, normalized);
       }
     } catch {
-      // skip invalid url
+      // ignore malformed URL
     }
   }
 
-  const candidates = [...byUrl.values()]
-    .sort((a, b) => rankCandidate(b, categoryConfig) - rankCandidate(a, categoryConfig))
-    .slice(0, 80);
+  const discovered = [...byUrl.values()]
+    .sort((a, b) => rankCandidate(b) - rankCandidate(a))
+    .slice(0, 120);
+
+  const candidateOnly = discovered.filter((item) => !item.approvedDomain);
+  const approvedOnly = discovered.filter((item) => item.approvedDomain);
+
+  const discoveryKey = toPosixKey(
+    config.s3InputPrefix,
+    '_discovery',
+    categoryConfig.category,
+    `${runId}.json`
+  );
 
   const candidatesKey = toPosixKey(
     config.s3InputPrefix,
@@ -181,27 +234,43 @@ export async function discoverCandidateSources({
     `${runId}.json`
   );
 
-  const payload = {
+  const discoveryPayload = {
     category: categoryConfig.category,
     productId: job.productId,
     runId,
     generated_at: new Date().toISOString(),
     provider: config.searchProvider,
-    candidate_count: candidates.length,
-    candidates
+    query_count: queries.length,
+    discovered_count: discovered.length,
+    approved_count: approvedOnly.length,
+    candidate_count: candidateOnly.length,
+    queries,
+    discovered
   };
 
-  await storage.writeObject(
-    candidatesKey,
-    Buffer.from(JSON.stringify(payload, null, 2), 'utf8'),
-    {
-      contentType: 'application/json'
-    }
-  );
+  const candidatePayload = {
+    category: categoryConfig.category,
+    productId: job.productId,
+    runId,
+    generated_at: new Date().toISOString(),
+    candidate_count: candidateOnly.length,
+    candidates: candidateOnly
+  };
+
+  await storage.writeObject(discoveryKey, Buffer.from(JSON.stringify(discoveryPayload, null, 2), 'utf8'), {
+    contentType: 'application/json'
+  });
+
+  await storage.writeObject(candidatesKey, Buffer.from(JSON.stringify(candidatePayload, null, 2), 'utf8'), {
+    contentType: 'application/json'
+  });
 
   return {
     enabled: true,
+    discoveryKey,
     candidatesKey,
-    candidates
+    candidates: discovered,
+    approvedUrls: approvedOnly.map((item) => item.url),
+    candidateUrls: candidateOnly.map((item) => item.url)
   };
 }

@@ -8,6 +8,7 @@ import { discoverCandidateSources } from '../discovery/searchDiscovery.js';
 import { rebuildCategoryIndex } from '../indexer/rebuildIndex.js';
 import { buildRunId } from '../utils/common.js';
 import { EventLogger } from '../logger.js';
+import { runS3Integration } from './s3-integration.js';
 
 function usage() {
   return [
@@ -17,6 +18,7 @@ function usage() {
     '  run-one --s3key <key> [--local] [--dry-run]',
     '  run-batch --category <category> [--brand <brand>] [--local] [--dry-run]',
     '  discover --category <category> [--brand <brand>] [--local]',
+    '  test-s3 [--fixture <path>] [--s3key <key>] [--dry-run]',
     '  rebuild-index --category <category> [--local]'
   ].join('\n');
 }
@@ -179,6 +181,14 @@ async function commandRebuildIndex(config, storage, args) {
   };
 }
 
+async function commandTestS3() {
+  const output = await runS3Integration(process.argv.slice(3));
+  return {
+    command: 'test-s3',
+    ...output
+  };
+}
+
 async function main() {
   const [command, ...rest] = process.argv.slice(2);
   if (!command) {
@@ -198,6 +208,8 @@ async function main() {
     output = await commandRunBatch(config, storage, args);
   } else if (command === 'discover') {
     output = await commandDiscover(config, storage, args);
+  } else if (command === 'test-s3') {
+    output = await commandTestS3();
   } else if (command === 'rebuild-index') {
     output = await commandRebuildIndex(config, storage, args);
   } else {

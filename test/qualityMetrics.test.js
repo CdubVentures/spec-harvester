@@ -51,6 +51,7 @@ test('computeCoverageOverall excludes editorial fields and counts unknown as mis
 
 test('evaluateValidationGate requires all strict checks', () => {
   const gate = evaluateValidationGate({
+    identityGateValidated: true,
     identityConfidence: 1,
     anchorMajorConflictsCount: 0,
     completenessRequired: 0.85,
@@ -62,4 +63,20 @@ test('evaluateValidationGate requires all strict checks', () => {
 
   assert.equal(gate.validated, false);
   assert.equal(gate.validatedReason, 'BELOW_CONFIDENCE_THRESHOLD');
+});
+
+test('evaluateValidationGate fails when identity gate is not validated', () => {
+  const gate = evaluateValidationGate({
+    identityGateValidated: false,
+    identityConfidence: 1,
+    anchorMajorConflictsCount: 0,
+    completenessRequired: 1,
+    targetCompleteness: 0.8,
+    confidence: 0.95,
+    targetConfidence: 0.8,
+    criticalFieldsBelowPassTarget: []
+  });
+
+  assert.equal(gate.validated, false);
+  assert.equal(gate.validatedReason, 'MODEL_AMBIGUITY_ALERT');
 });

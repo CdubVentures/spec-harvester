@@ -3,6 +3,7 @@ function toPercent(value) {
 }
 
 export function evaluateValidationGate({
+  identityGateValidated = true,
   identityConfidence,
   anchorMajorConflictsCount,
   completenessRequired,
@@ -14,6 +15,7 @@ export function evaluateValidationGate({
   const criticalMissing = criticalFieldsBelowPassTarget || [];
 
   const checks = {
+    identity_gate_ok: Boolean(identityGateValidated),
     identity_confidence_ok: identityConfidence >= 0.99,
     anchor_conflicts_ok: anchorMajorConflictsCount === 0,
     required_completeness_ok: completenessRequired >= targetCompleteness,
@@ -22,11 +24,14 @@ export function evaluateValidationGate({
   };
 
   const reasons = [];
+  if (!checks.identity_gate_ok) {
+    reasons.push('MODEL_AMBIGUITY_ALERT');
+  }
   if (!checks.identity_confidence_ok) {
     reasons.push('MODEL_AMBIGUITY_ALERT');
   }
   if (!checks.anchor_conflicts_ok) {
-    reasons.push('ANCHOR_CONFLICT_ALERT');
+    reasons.push('HAS_ANCHOR_CONFLICTS');
   }
   if (!checks.required_completeness_ok) {
     reasons.push('BELOW_REQUIRED_COMPLETENESS');
@@ -38,10 +43,12 @@ export function evaluateValidationGate({
     reasons.push('CRITICAL_FIELDS_BELOW_PASS_TARGET');
   }
 
+  const uniqueReasons = [...new Set(reasons)];
+
   return {
-    validated: reasons.length === 0,
-    validatedReason: reasons.length === 0 ? 'OK' : reasons[0],
-    reasons,
+    validated: uniqueReasons.length === 0,
+    validatedReason: uniqueReasons.length === 0 ? 'OK' : uniqueReasons[0],
+    reasons: uniqueReasons,
     checks,
     targetCompleteness,
     targetConfidence,

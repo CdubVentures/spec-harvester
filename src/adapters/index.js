@@ -12,6 +12,20 @@ function mergeIdentity(into, extra) {
   };
 }
 
+function redactSecrets(message, config) {
+  const secrets = [
+    config?.eloSupabaseAnonKey,
+    config?.bingSearchKey,
+    config?.googleCseKey
+  ].filter(Boolean);
+
+  let output = String(message || '');
+  for (const secret of secrets) {
+    output = output.split(secret).join('[redacted]');
+  }
+  return output;
+}
+
 export function createAdapterManager(config, logger) {
   return {
     adapters: ADAPTERS,
@@ -56,7 +70,7 @@ export function createAdapterManager(config, logger) {
           logger?.warn?.('adapter_extract_failed', {
             adapter: adapter.name,
             host: source.host,
-            message: error.message
+            message: redactSecrets(error.message, config)
           });
         }
       }
@@ -65,7 +79,7 @@ export function createAdapterManager(config, logger) {
       return combined;
     },
 
-    async runDedicatedAdapters({ job, runId }) {
+    async runDedicatedAdapters({ job, runId, storage }) {
       const syntheticSources = [];
       const adapterArtifacts = [];
 
@@ -74,7 +88,7 @@ export function createAdapterManager(config, logger) {
           continue;
         }
         try {
-          const result = await adapter.runDedicatedFetch({ config, job, runId, logger });
+          const result = await adapter.runDedicatedFetch({ config, job, runId, logger, storage });
           if (!result) {
             continue;
           }
@@ -83,7 +97,7 @@ export function createAdapterManager(config, logger) {
         } catch (error) {
           logger?.warn?.('adapter_dedicated_failed', {
             adapter: adapter.name,
-            message: error.message
+            message: redactSecrets(error.message, config)
           });
         }
       }

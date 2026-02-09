@@ -15,7 +15,7 @@
     "rebuild-index": "node src/cli/spec.js rebuild-index",
     "smoke": "node src/cli/spec.js run-one --local --dry-run --s3key specs/inputs/mouse/products/mouse-razer-viper-v3-pro.json",
     "smoke:local": "node src/cli/smoke-local.js",
-    "test:s3": "node src/cli/s3-integration.js"
+    "test:s3": "node src/cli/spec.js test-s3"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.862.0",

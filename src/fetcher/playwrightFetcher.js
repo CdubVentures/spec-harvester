@@ -129,21 +129,48 @@ export class DryRunFetcher {
       ldjsonBlocks,
       embeddedState,
       networkResponses: (fixture.networkResponses || []).map((row) => {
-        if (row.jsonFull || row.jsonPreview) {
-          return row;
+        const jsonFull =
+          row.jsonFull !== undefined
+            ? row.jsonFull
+            : (typeof row.body === 'object' && row.body !== null ? row.body : undefined);
+        const jsonPreview =
+          row.jsonPreview !== undefined
+            ? row.jsonPreview
+            : (typeof row.body === 'string' ? row.body : undefined);
+
+        const boundedByteLen =
+          row.boundedByteLen ||
+          row.bounded_byte_len ||
+          Buffer.byteLength(
+            typeof row.body === 'string' ? row.body : JSON.stringify(row.body || jsonFull || jsonPreview || {}),
+            'utf8'
+          );
+
+        const normalized = {
+          ts: row.ts || '2026-02-09T00:00:00.000Z',
+          url: row.url || source.url,
+          status: row.status || 200,
+          contentType: row.contentType || row.content_type || 'application/json',
+          isGraphQl: row.isGraphQl ?? row.is_graphql ?? false,
+          classification: row.classification || 'unknown',
+          boundedByteLen,
+          truncated: Boolean(row.truncated),
+          request_url: row.request_url || row.url || source.url,
+          request_method: row.request_method || row.method || 'GET',
+          resource_type: row.resource_type || 'fetch'
+        };
+
+        if (row.request_post_json !== undefined) {
+          normalized.request_post_json = row.request_post_json;
         }
-        if (row.body !== undefined) {
-          return {
-            ...row,
-            contentType: row.contentType || row.content_type || 'application/json',
-            isGraphQl: row.isGraphQl ?? row.is_graphql ?? false,
-            classification: row.classification || 'unknown',
-            boundedByteLen: row.boundedByteLen || Buffer.byteLength(JSON.stringify(row.body), 'utf8'),
-            jsonFull: typeof row.body === 'object' ? row.body : undefined,
-            jsonPreview: typeof row.body === 'string' ? row.body : undefined
-          };
+        if (jsonFull !== undefined) {
+          normalized.jsonFull = jsonFull;
         }
-        return row;
+        if (jsonPreview !== undefined) {
+          normalized.jsonPreview = jsonPreview;
+        }
+
+        return normalized;
       })
     };
   }

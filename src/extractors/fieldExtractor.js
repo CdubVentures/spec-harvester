@@ -5,6 +5,7 @@ import {
 } from '../constants.js';
 import {
   formatDateMmDdYyyy,
+  getByPath,
   normalizeBooleanValue,
   normalizeToken,
   normalizeWhitespace,
@@ -100,6 +101,25 @@ const IDENTITY_ALIAS = {
   sku: ['sku', 'partnumber'],
   mpn: ['mpn', 'manufacturerpartnumber'],
   gtin: ['gtin', 'upc', 'ean']
+};
+
+const HOST_HINT_PATHS = {
+  'rtings.com': [
+    'data.mouse',
+    'data.product',
+    'data.review',
+    'review'
+  ],
+  'techpowerup.com': [
+    'data.product',
+    'product',
+    'specs'
+  ],
+  'razer.com': [
+    'props.pageProps',
+    'data.product',
+    'product'
+  ]
 };
 
 function normalizeKey(key) {
@@ -272,7 +292,87 @@ function inferVariantFromText(text) {
   return 'unk';
 }
 
+function hostHintPayloads(host, payload) {
+  const normalizedHost = String(host || '').toLowerCase();
+  const hintEntry = Object.entries(HOST_HINT_PATHS).find(([domain]) => normalizedHost.endsWith(domain));
+  if (!hintEntry || !payload || typeof payload !== 'object') {
+    return [];
+  }
+
+  const hintPaths = hintEntry[1];
+  const out = [];
+  for (const hintPath of hintPaths) {
+    const hit = getByPath(payload, hintPath);
+    if (hit && typeof hit === 'object') {
+      out.push(hit);
+    }
+  }
+  return out;
+}
+
+function buildPayloadBuckets({ host, ldjsonBlocks, embeddedState, networkResponses }) {
+  const buckets = [];
+
+  buckets.push({ method: 'ldjson', payloads: ldjsonBlocks || [] });
+
+  const embeddedPayloads = [
+    embeddedState?.nextData?.props?.pageProps,
+    embeddedState?.nextData,
+    embeddedState?.nuxtState?.data,
+    embeddedState?.nuxtState,
+    embeddedState?.apolloState
+  ].filter(Boolean);
+  buckets.push({ method: 'embedded_state', payloads: embeddedPayloads });
+
+  const networkPayloads = [];
+  for (const row of networkResponses || []) {
+    const payload = row.jsonFull ?? row.jsonPreview;
+    if (!payload || typeof payload !== 'object') {
+      continue;
+    }
+    networkPayloads.push(payload);
+    if (payload.data && typeof payload.data === 'object') {
+      networkPayloads.push(payload.data);
+    }
+    if (payload.product && typeof payload.product === 'object') {
+      networkPayloads.push(payload.product);
+    }
+    networkPayloads.push(...hostHintPayloads(host, payload));
+  }
+  buckets.push({ method: 'network_json', payloads: networkPayloads });
+
+  return buckets;
+}
+
+function extractHtmlLinkCandidates(html) {
+  const candidates = [];
+  if (!html) {
+    return candidates;
+  }
+
+  for (const match of html.matchAll(/<a[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+    const href = normalizeWhitespace(match[1]);
+    const label = normalizeWhitespace(match[2]).toLowerCase();
+    if (!/^https?:\/\//i.test(href)) {
+      continue;
+    }
+
+    if (label.includes('sensor')) {
+      candidates.push({ field: 'sensor_link', value: href, method: 'dom', keyPath: 'html.a.sensor' });
+    }
+    if (label.includes('switch')) {
+      candidates.push({ field: 'switches_link', value: href, method: 'dom', keyPath: 'html.a.switch' });
+    }
+    if (label.includes('encoder')) {
+      candidates.push({ field: 'encoder_link', value: href, method: 'dom', keyPath: 'html.a.encoder' });
+    }
+  }
+
+  return candidates;
+}
+
 export function extractCandidatesFromPage({
+  host,
   html,
   title,
   ldjsonBlocks,
@@ -282,41 +382,37 @@ export function extractCandidatesFromPage({
   const candidateRows = [];
   const identity = {};
 
-  const sourceBuckets = [
-    { method: 'ldjson', payloads: ldjsonBlocks || [] },
-    {
-      method: 'embedded_state',
-      payloads: [embeddedState?.nextData, embeddedState?.nuxtState, embeddedState?.apolloState].filter(
-        Boolean
-      )
-    },
-    {
-      method: 'network_json',
-      payloads: (networkResponses || [])
-        .map((row) => row.jsonFull ?? row.jsonPreview)
-        .filter(Boolean)
-    }
-  ];
+  const buckets = buildPayloadBuckets({
+    host,
+    ldjsonBlocks,
+    embeddedState,
+    networkResponses
+  });
 
-  for (const bucket of sourceBuckets) {
+  for (const bucket of buckets) {
     for (const payload of bucket.payloads) {
       const flattened = flattenObject(payload);
-      const id = gatherIdentityCandidates(flattened);
-      Object.assign(identity, id);
+      const identityFromPayload = gatherIdentityCandidates(flattened);
+      Object.assign(identity, identityFromPayload);
 
       for (const item of flattened) {
         const field = pickFieldFromPath(item.path);
         if (!field) {
           continue;
         }
-        const normalizedValue = normalizeByField(field, item.value);
-        if (normalizedValue === 'unk') {
+
+        const value = normalizeByField(field, item.value);
+        if (value === 'unk') {
+          continue;
+        }
+
+        if (field.endsWith('_link') && !/^https?:\/\//i.test(String(value))) {
           continue;
         }
 
         candidateRows.push({
           field,
-          value: normalizedValue,
+          value,
           method: bucket.method,
           keyPath: item.path
         });
@@ -336,6 +432,8 @@ export function extractCandidatesFromPage({
       });
     }
   }
+
+  candidateRows.push(...extractHtmlLinkCandidates(html));
 
   const identityText = [title, html?.slice(0, 4000)].filter(Boolean).join(' ');
   if (!identity.variant || identity.variant === 'unk') {

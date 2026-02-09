@@ -161,7 +161,8 @@ export function runConsensusEngine({
   anchors,
   identityLock,
   productId,
-  category
+  category,
+  config = {}
 }) {
   const fields = unknownFieldMap(fieldOrder);
   const provenance = {};
@@ -286,13 +287,34 @@ export function runConsensusEngine({
     const { best, second } = selectBestCluster(clusters);
     const weightedMajority = !second || best.score >= (second.score * 1.1);
 
-    const minimumRequired = INSTRUMENTED_FIELDS.has(field) ? 3 : 3;
+    const minimumRequired = 3;
     const approvedDomainCount = best?.approvedDomainCount || 0;
     const instrumentedCount = best?.instrumentedDomainCount || 0;
 
-    let accepted = approvedDomainCount >= minimumRequired && weightedMajority;
+    const strictAccepted = approvedDomainCount >= minimumRequired && weightedMajority;
+    const relaxedCandidate = Boolean(config.allowBelowPassTargetFill) && !INSTRUMENTED_FIELDS.has(field);
+
+    let relaxedAccepted = false;
+    if (relaxedCandidate && approvedDomainCount >= 2 && weightedMajority) {
+      const approvedEvidence = (best?.evidence || []).filter((item) => item.approvedDomain);
+      const hasTier1Manufacturer = approvedEvidence.some(
+        (item) => item.tier === 1 && item.tierName === 'manufacturer'
+      );
+
+      const additionalCredibleDomains = new Set(
+        approvedEvidence
+          .filter((item) => item.tier <= 2)
+          .filter((item) => !(item.tier === 1 && item.tierName === 'manufacturer'))
+          .map((item) => item.rootDomain)
+      );
+
+      relaxedAccepted = hasTier1Manufacturer && additionalCredibleDomains.size >= 1;
+    }
+
+    let accepted = strictAccepted || relaxedAccepted;
     if (INSTRUMENTED_FIELDS.has(field)) {
-      accepted = accepted && instrumentedCount >= 3;
+      accepted = strictAccepted && instrumentedCount >= 3;
+      relaxedAccepted = false;
     }
 
     const value = accepted ? best.display : 'unk';
@@ -322,6 +344,7 @@ export function runConsensusEngine({
       instrumented_confirmations: instrumentedCount,
       pass_target: passTarget,
       meets_pass_target: meetsPassTarget,
+      accepted_below_pass_target: relaxedAccepted && !meetsPassTarget,
       weighted_majority: weightedMajority,
       confidence: confidenceScore,
       domains: [...best.domains],

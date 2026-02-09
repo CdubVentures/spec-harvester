@@ -3,7 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { extractTablePairs, mapPairsToFieldCandidates, extractIdentityFromPairs } from './tableParsing.js';
-import { normalizeWhitespace } from '../utils/common.js';
+import { gzipBuffer, normalizeWhitespace } from '../utils/common.js';
+import { toPosixKey } from '../s3/storage.js';
 
 function hostMatches(source) {
   return source.host === 'eloshapes.com' || source.host.endsWith('.eloshapes.com');
@@ -58,6 +59,17 @@ function runCommand(command, args, timeoutMs = 120000) {
       }
     });
   });
+}
+
+function redactSecret(value, secret) {
+  if (!secret) {
+    return value;
+  }
+  return String(value || '').split(secret).join('[redacted]');
+}
+
+export function sanitizeEloErrorMessage(message, config) {
+  return redactSecret(message, config.eloSupabaseAnonKey || '');
 }
 
 function flattenObject(value, prefix = '', out = []) {
@@ -162,7 +174,7 @@ export const eloShapesAdapter = {
     };
   },
 
-  async runDedicatedFetch({ config, job, runId }) {
+  async runDedicatedFetch({ config, job, runId, storage }) {
     if (!config.eloSupabaseAnonKey || !config.eloSupabaseEndpoint) {
       return null;
     }
@@ -186,8 +198,20 @@ export const eloShapesAdapter = {
         '--out',
         outPath
       ]);
-    } catch {
-      return null;
+    } catch (error) {
+      return {
+        syntheticSources: [],
+        adapterArtifacts: [
+          {
+            name: 'eloshapes',
+            runId,
+            payload: {
+              ok: false,
+              error: sanitizeEloErrorMessage(error.message, config)
+            }
+          }
+        ]
+      };
     }
 
     let payload;
@@ -198,6 +222,21 @@ export const eloShapesAdapter = {
     }
 
     const rows = payload?.rows || [];
+
+    const today = new Date().toISOString().slice(0, 10);
+    const cacheKey = toPosixKey(
+      config.s3OutputPrefix,
+      '_cache',
+      'eloshapes',
+      today,
+      'mouse.json.gz'
+    );
+
+    await storage.writeObject(cacheKey, gzipBuffer(JSON.stringify(payload)), {
+      contentType: 'application/json',
+      contentEncoding: 'gzip'
+    });
+
     if (!rows.length) {
       return {
         syntheticSources: [],
@@ -205,7 +244,10 @@ export const eloShapesAdapter = {
           {
             name: 'eloshapes',
             runId,
-            payload
+            payload: {
+              ...payload,
+              cacheKey
+            }
           }
         ]
       };
@@ -234,7 +276,10 @@ export const eloShapesAdapter = {
         {
           name: 'eloshapes',
           runId,
-          payload
+          payload: {
+            ...payload,
+            cacheKey
+          }
         }
       ]
     };

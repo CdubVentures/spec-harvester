@@ -23,9 +23,11 @@ export function loadConfig(overrides = {}) {
     s3InputPrefix: (process.env.S3_INPUT_PREFIX || 'specs/inputs').replace(/\/+$/, ''),
     s3OutputPrefix: (process.env.S3_OUTPUT_PREFIX || 'specs/outputs').replace(/\/+$/, ''),
     maxUrlsPerProduct: parseIntEnv('MAX_URLS_PER_PRODUCT', 10),
+    maxCandidateUrls: parseIntEnv('MAX_CANDIDATE_URLS', 50),
     maxPagesPerDomain: parseIntEnv('MAX_PAGES_PER_DOMAIN', 2),
     maxRunSeconds: parseIntEnv('MAX_RUN_SECONDS', 180),
     maxJsonBytes: parseIntEnv('MAX_JSON_BYTES', 2_000_000),
+    maxPdfBytes: parseIntEnv('MAX_PDF_BYTES', 8_000_000),
     concurrency: parseIntEnv('CONCURRENCY', 2),
     perHostMinDelayMs: parseIntEnv('PER_HOST_MIN_DELAY_MS', 900),
     userAgent:
@@ -43,7 +45,9 @@ export function loadConfig(overrides = {}) {
     googleCseKey: process.env.GOOGLE_CSE_KEY || '',
     googleCseCx: process.env.GOOGLE_CSE_CX || '',
     eloSupabaseAnonKey: process.env.ELO_SUPABASE_ANON_KEY || '',
-    eloSupabaseEndpoint: process.env.ELO_SUPABASE_ENDPOINT || ''
+    eloSupabaseEndpoint: process.env.ELO_SUPABASE_ENDPOINT || '',
+    allowBelowPassTargetFill: parseBoolEnv('ALLOW_BELOW_PASS_TARGET_FILL', false),
+    selfImproveEnabled: parseBoolEnv('SELF_IMPROVE_ENABLED', true)
   };
 
   const filtered = Object.fromEntries(

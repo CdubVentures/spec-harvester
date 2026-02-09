@@ -18,6 +18,11 @@ import { buildMarkdownSummary } from '../exporter/summaryWriter.js';
 import { EventLogger } from '../logger.js';
 import { createAdapterManager } from '../adapters/index.js';
 import { discoverCandidateSources } from '../discovery/searchDiscovery.js';
+import {
+  applyLearningSeeds,
+  loadLearningProfile,
+  persistLearningProfile
+} from '../learning/selfImproveLoop.js';
 
 function bestIdentityFromSources(sourceResults) {
   const sorted = [...sourceResults].sort((a, b) => {
@@ -101,6 +106,18 @@ export async function runProduct({ storage, config, s3Key }) {
 
   const adapterManager = createAdapterManager(config, logger);
   const planner = new SourcePlanner(job, config, categoryConfig);
+
+  let learningProfile = null;
+  if (config.selfImproveEnabled) {
+    learningProfile = await loadLearningProfile({
+      storage,
+      config,
+      category,
+      job
+    });
+    applyLearningSeeds(planner, learningProfile);
+  }
+
   const adapterSeedUrls = adapterManager.collectSeedUrls({ job });
   planner.seed(adapterSeedUrls);
 
@@ -120,6 +137,9 @@ export async function runProduct({ storage, config, s3Key }) {
     runId,
     logger
   });
+
+  planner.seed(discoveryResult.approvedUrls || []);
+  planner.seedCandidates(discoveryResult.candidateUrls || []);
 
   await fetcher.start();
 
@@ -157,6 +177,7 @@ export async function runProduct({ storage, config, s3Key }) {
       planner.discoverFromHtml(source.url, pageData.html);
 
       const extraction = extractCandidatesFromPage({
+        host: source.host,
         html: pageData.html,
         title: pageData.title,
         ldjsonBlocks: pageData.ldjsonBlocks,
@@ -222,7 +243,8 @@ export async function runProduct({ storage, config, s3Key }) {
         ldjsonBlocks: pageData.ldjsonBlocks,
         embeddedState: pageData.embeddedState,
         networkResponses: pageData.networkResponses,
-        pdfDocs: adapterExtra.pdfDocs || []
+        pdfDocs: adapterExtra.pdfDocs || [],
+        extractedCandidates: mergedFieldCandidates
       };
 
       adapterArtifacts.push(...(adapterExtra.adapterArtifacts || []));
@@ -233,7 +255,8 @@ export async function runProduct({ storage, config, s3Key }) {
         identity_match: identity.match,
         identity_score: identity.score,
         anchor_status: anchorStatus,
-        candidate_count: mergedFieldCandidates.length
+        candidate_count: mergedFieldCandidates.length,
+        candidate_source: source.candidateSource
       });
     }
   } finally {
@@ -242,7 +265,8 @@ export async function runProduct({ storage, config, s3Key }) {
 
   const dedicated = await adapterManager.runDedicatedAdapters({
     job,
-    runId
+    runId,
+    storage
   });
 
   adapterArtifacts.push(...(dedicated.adapterArtifacts || []));
@@ -291,7 +315,8 @@ export async function runProduct({ storage, config, s3Key }) {
     anchors,
     identityLock: job.identityLock || {},
     productId,
-    category
+    category,
+    config
   });
 
   let normalized;
@@ -301,7 +326,7 @@ export async function runProduct({ storage, config, s3Key }) {
   let criticalFieldsBelowPassTarget;
   let newValuesProposed;
 
-  if (identityConfidence < 0.99) {
+  if (!identityGate.validated || identityConfidence < 0.99) {
     normalized = buildAbortedNormalized({
       productId,
       runId,
@@ -372,6 +397,7 @@ export async function runProduct({ storage, config, s3Key }) {
   });
 
   const gate = evaluateValidationGate({
+    identityGateValidated: identityGate.validated,
     identityConfidence,
     anchorMajorConflictsCount,
     completenessRequired: completenessStats.completenessRequired,
@@ -416,6 +442,7 @@ export async function runProduct({ storage, config, s3Key }) {
     anchor_conflicts: allAnchorConflicts,
     anchor_major_conflicts_count: anchorMajorConflictsCount,
     identity_confidence: identityConfidence,
+    identity_gate_validated: identityGate.validated,
     identity_gate: identityGate,
     fields_below_pass_target: fieldsBelowPassTarget,
     critical_fields_below_pass_target: criticalFieldsBelowPassTarget,
@@ -424,6 +451,7 @@ export async function runProduct({ storage, config, s3Key }) {
     sources_identity_matched: sourceResults.filter((s) => s.identity.match).length,
     discovery: {
       enabled: discoveryResult.enabled,
+      discovery_key: discoveryResult.discoveryKey,
       candidates_key: discoveryResult.candidatesKey,
       candidate_count: discoveryResult.candidates.length
     },
@@ -446,6 +474,30 @@ export async function runProduct({ storage, config, s3Key }) {
   const markdownSummary = config.writeMarkdownSummary
     ? buildMarkdownSummary({ normalized, summary })
     : '';
+
+  const runBase = storage.resolveOutputKey(category, productId, 'runs', runId);
+  let learning = null;
+  if (config.selfImproveEnabled) {
+    learning = await persistLearningProfile({
+      storage,
+      config,
+      category,
+      job,
+      sourceResults,
+      summary,
+      learningProfile,
+      discoveryResult,
+      runBase,
+      runId
+    });
+  }
+
+  if (learning) {
+    summary.learning = {
+      profile_key: learning.profileKey,
+      run_log_key: learning.learningRunKey
+    };
+  }
 
   const exportInfo = await exportRunArtifacts({
     storage,
@@ -471,6 +523,7 @@ export async function runProduct({ storage, config, s3Key }) {
     summary,
     runId,
     productId,
-    exportInfo
+    exportInfo,
+    learning
   };
 }
