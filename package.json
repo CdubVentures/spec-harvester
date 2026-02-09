@@ -1,0 +1,20 @@
+{
+  "name": "spec-harvester",
+  "version": "1.0.0",
+  "description": "Backend-first mouse spec harvester with S3 IO",
+  "type": "module",
+  "main": "src/cli/run-one.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "run:one": "node src/cli/run-one.js",
+    "run:batch": "node src/cli/run-batch.js",
+    "smoke": "node src/cli/run-one.js --local --dry-run --s3key specs/inputs/mouse/products/mouse-razer-viper-v3-pro.json"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.862.0",
+    "playwright": "^1.54.2"
+  }
+}

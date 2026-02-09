@@ -1,0 +1,66 @@
+{
+  "productId": "mouse-razer-viper-v3-pro",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Razer",
+    "model": "Viper V3 Pro",
+    "variant": "Wireless",
+    "mpn": "",
+    "sku": "RZ01-05120100-R3U1",
+    "gtin": ""
+  },
+  "seedUrls": [
+    "https://www.razer.com/gaming-mice/razer-viper-v3-pro",
+    "https://www.rtings.com/mouse/reviews/razer/viper-v3-pro",
+    "https://www.techpowerup.com/review/razer-viper-v3-pro/"
+  ],
+  "preferredSources": {
+    "manufacturerHosts": [
+      "razer.com"
+    ],
+    "retailerHosts": [
+      "bestbuy.com",
+      "amazon.com"
+    ],
+    "reviewHosts": [
+      "rtings.com",
+      "techpowerup.com",
+      "eloshapes.com",
+      "mousespecs.org"
+    ]
+  },
+  "requirements": {
+    "requiredFields": [
+      "identity.brand",
+      "identity.model",
+      "fields.weight",
+      "fields.sensor",
+      "fields.polling_rate"
+    ],
+    "targetCompleteness": 0.9,
+    "targetConfidence": 0.8
+  },
+  "anchors": {
+    "weight": "54",
+    "material": "plastic",
+    "lngth": "127",
+    "width": "64",
+    "height": "40",
+    "form_factor": "symmetrical",
+    "shape": "low",
+    "hump": "rear",
+    "front_flare": "mild",
+    "thumb_rest": "no",
+    "sensor": "Focus Pro 35K",
+    "sensor_brand": "Razer",
+    "polling_rate": "8000, 4000, 2000, 1000, 500, 250, 125",
+    "dpi": "35000",
+    "ips": "750",
+    "acceleration": "70",
+    "switch": "Optical Mouse Switches Gen-3",
+    "switch_brand": "Razer",
+    "hot_swappable": "no",
+    "side_buttons": "2",
+    "middle_buttons": "1"
+  }
+}

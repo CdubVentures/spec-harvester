@@ -1,0 +1,36 @@
+{
+  "status": 200,
+  "title": "Razer Viper V3 Pro Mouse Review",
+  "html": "<!doctype html><html><head><title>Razer Viper V3 Pro Mouse Review</title><script type='application/ld+json'>{\"@context\":\"https://schema.org\",\"@type\":\"Review\",\"name\":\"Razer Viper V3 Pro review\",\"itemReviewed\":{\"@type\":\"Product\",\"name\":\"Razer Viper V3 Pro\",\"brand\":\"Razer\"}}</script></head><body><script>window.__APOLLO_STATE__ = {\"review\":{\"brand\":\"Razer\",\"model\":\"Viper V3 Pro\",\"variant\":\"Wireless\",\"weight\":54,\"lngth\":127,\"width\":64,\"height\":40,\"form_factor\":\"symmetrical\",\"shape\":\"low\",\"hump\":\"rear\",\"front_flare\":\"mild\",\"thumb_rest\":\"no\",\"sensor\":\"Focus Pro 35K\",\"sensor_brand\":\"Razer\",\"polling_rate\":[8000,4000,2000,1000,500,250,125],\"dpi\":35000,\"ips\":750,\"acceleration\":70,\"switch\":\"Optical Mouse Switches Gen-3\",\"switch_brand\":\"Razer\",\"hot_swappable\":\"no\",\"side_buttons\":2,\"middle_buttons\":1,\"sensor_latency\":0.58,\"click_latency\":1.11,\"click_force\":61}};</script></body></html>",
+  "networkResponses": [
+    {
+      "ts": "2026-02-09T00:00:00.000Z",
+      "url": "https://www.rtings.com/api/graphql",
+      "status": 200,
+      "content_type": "application/json",
+      "is_graphql": true,
+      "truncated": false,
+      "body": {
+        "data": {
+          "mouse": {
+            "brand": "Razer",
+            "model": "Viper V3 Pro",
+            "connection": "wireless",
+            "weight": 54,
+            "sensor": "Focus Pro 35K",
+            "sensor_brand": "Razer",
+            "polling_rate": [8000, 4000, 2000, 1000, 500, 250, 125],
+            "dpi": 35000,
+            "ips": 750,
+            "acceleration": 70,
+            "sensor_latency": 0.58,
+            "click_latency": 1.11,
+            "click_force": 61,
+            "side_buttons": 2,
+            "middle_buttons": 1
+          }
+        }
+      }
+    }
+  ]
+}

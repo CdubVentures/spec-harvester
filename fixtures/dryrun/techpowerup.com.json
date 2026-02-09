@@ -1,0 +1,47 @@
+{
+  "status": 200,
+  "title": "TechPowerUp Razer Viper V3 Pro Review",
+  "html": "<!doctype html><html><head><title>TechPowerUp Razer Viper V3 Pro Review</title><script type='application/ld+json'>{\"@context\":\"https://schema.org\",\"@type\":\"Article\",\"headline\":\"Razer Viper V3 Pro review\"}</script></head><body><script>window.__NUXT__ = {\"brand\":\"Razer\",\"model\":\"Viper V3 Pro\",\"variant\":\"Wireless\",\"connection\":\"wireless\",\"weight\":54,\"lngth\":127,\"width\":64,\"height\":40,\"material\":\"plastic\",\"sensor\":\"Focus Pro 35K\",\"sensor_brand\":\"Razer\",\"polling_rate\":[8000,4000,2000,1000,500,250,125],\"dpi\":35000,\"ips\":750,\"acceleration\":70,\"switch\":\"Optical Mouse Switches Gen-3\",\"switch_brand\":\"Razer\",\"hot_swappable\":\"no\",\"side_buttons\":2,\"middle_buttons\":1,\"sensor_latency\":0.6,\"click_latency\":1.13,\"click_force\":60};</script></body></html>",
+  "networkResponses": [
+    {
+      "ts": "2026-02-09T00:00:00.000Z",
+      "url": "https://www.techpowerup.com/api/mouse/viper-v3-pro.json",
+      "status": 200,
+      "content_type": "application/json",
+      "is_graphql": false,
+      "truncated": false,
+      "body": {
+        "brand": "Razer",
+        "model": "Viper V3 Pro",
+        "sku": "RZ01-05120100-R3U1",
+        "connection": "wireless",
+        "weight": 54,
+        "lngth": 127,
+        "width": 64,
+        "height": 40,
+        "form_factor": "symmetrical",
+        "shape": "low",
+        "hump": "rear",
+        "front_flare": "mild",
+        "thumb_rest": "no",
+        "material": "plastic",
+        "sensor": "Focus Pro 35K",
+        "sensor_brand": "Razer",
+        "polling_rate": [8000, 4000, 2000, 1000, 500, 250, 125],
+        "dpi": 35000,
+        "ips": 750,
+        "acceleration": 70,
+        "switch": "Optical Mouse Switches Gen-3",
+        "switch_brand": "Razer",
+        "hot_swappable": "no",
+        "side_buttons": 2,
+        "middle_buttons": 1,
+        "sensor_latency": 0.6,
+        "click_latency": 1.13,
+        "click_force": 60,
+        "onboard_memory": true,
+        "onboard_memory_value": 5
+      }
+    }
+  ]
+}
