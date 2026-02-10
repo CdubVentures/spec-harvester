@@ -16,6 +16,7 @@ import {
 } from '../intel/sourceIntel.js';
 import { startIntelGraphApi } from '../api/intelGraphApi.js';
 import { runGoldenBenchmark } from '../benchmark/goldenBenchmark.js';
+import { rankBatchWithBandit } from '../learning/banditScheduler.js';
 
 function usage() {
   return [
@@ -25,7 +26,7 @@ function usage() {
     '  run-one --s3key <key> [--local] [--dry-run]',
     '  run-ad-hoc <category> <brand> <model> [<variant>] [--seed-urls <csv>] [--local]',
     '  run-ad-hoc --category <category> --brand <brand> --model <model> [--variant <variant>] [--seed-urls <csv>] [--local]',
-    '  run-batch --category <category> [--brand <brand>] [--strategy <explore|exploit|mixed>] [--local] [--dry-run]',
+    '  run-batch --category <category> [--brand <brand>] [--strategy <explore|exploit|mixed|bandit>] [--local] [--dry-run]',
     '  discover --category <category> [--brand <brand>] [--local]',
     '  test-s3 [--fixture <path>] [--s3key <key>] [--dry-run]',
     '  sources-plan --category <category> [--local]',
@@ -35,11 +36,16 @@ function usage() {
     '  intel-graph-api --category <category> [--host <host>] [--port <port>] [--local]',
     '',
     'Global options:',
-    '  --env <path>   Path to dotenv file (default: .env)'
+    '  --env <path>   Path to dotenv file (default: .env)',
+    '  --profile <standard|thorough|fast>   Runtime crawl profile (default: standard)',
+    '  --thorough    Shortcut for --profile thorough'
   ].join('\n');
 }
 
 function buildConfig(args) {
+  const profileOverride = asBool(args.thorough, false)
+    ? 'thorough'
+    : (args.profile || args['run-profile'] || undefined);
   return loadConfig({
     localMode: asBool(args.local, undefined),
     dryRun: asBool(args['dry-run'], undefined),
@@ -49,7 +55,8 @@ function buildConfig(args) {
     discoveryEnabled: asBool(args['discovery-enabled'], undefined),
     searchProvider: args['search-provider'] || undefined,
     fetchCandidateSources: asBool(args['fetch-candidate-sources'], undefined),
-    batchStrategy: args.strategy || undefined
+    batchStrategy: args.strategy || undefined,
+    runProfile: profileOverride
   });
 }
 
@@ -95,7 +102,7 @@ async function runWithConcurrency(items, concurrency, worker) {
 
 function normalizeBatchStrategy(value) {
   const token = String(value || '').trim().toLowerCase();
-  if (token === 'explore' || token === 'exploit' || token === 'mixed') {
+  if (token === 'explore' || token === 'exploit' || token === 'mixed' || token === 'bandit') {
     return token;
   }
   return 'mixed';
@@ -111,10 +118,14 @@ async function collectBatchMetadata({ storage, config, category, key }) {
       key,
       productId: '',
       brand,
+      brandKey: slug(brand),
       hasHistory: false,
       validated: false,
       confidence: 0,
-      missingCriticalCount: 0
+      missingCriticalCount: 0,
+      fieldsBelowPassCount: 0,
+      contradictionCount: 0,
+      hypothesisQueueCount: 0
     };
   }
 
@@ -124,11 +135,45 @@ async function collectBatchMetadata({ storage, config, category, key }) {
     key,
     productId,
     brand,
+    brandKey: slug(brand),
     hasHistory: Boolean(summary),
     validated: Boolean(summary?.validated),
     confidence: Number.parseFloat(String(summary?.confidence || 0)) || 0,
-    missingCriticalCount: (summary?.critical_fields_below_pass_target || []).length
+    missingCriticalCount: (summary?.critical_fields_below_pass_target || []).length,
+    fieldsBelowPassCount: (summary?.fields_below_pass_target || []).length,
+    contradictionCount: summary?.constraint_analysis?.contradiction_count || 0,
+    hypothesisQueueCount: (summary?.hypothesis_queue || []).length
   };
+}
+
+function buildBrandRewardIndex(domains) {
+  const buckets = new Map();
+
+  for (const domain of Object.values(domains || {})) {
+    for (const [brandKey, brandEntry] of Object.entries(domain?.per_brand || {})) {
+      if (!buckets.has(brandKey)) {
+        buckets.set(brandKey, {
+          weighted: 0,
+          weight: 0
+        });
+      }
+      const bucket = buckets.get(brandKey);
+      const attempts = Math.max(1, Number.parseFloat(String(brandEntry?.attempts || 0)) || 1);
+      const fieldRewardStrength = Number.parseFloat(String(brandEntry?.field_reward_strength || 0)) || 0;
+      const plannerScore = Number.parseFloat(String(brandEntry?.planner_score || 0)) || 0;
+      const blended = (fieldRewardStrength * 0.7) + ((plannerScore - 0.5) * 0.3);
+      bucket.weighted += blended * attempts;
+      bucket.weight += attempts;
+    }
+  }
+
+  const index = {};
+  for (const [brandKey, bucket] of buckets.entries()) {
+    index[brandKey] = bucket.weight > 0
+      ? Number.parseFloat((bucket.weighted / bucket.weight).toFixed(6))
+      : 0;
+  }
+  return index;
 }
 
 function scoreForExploit(meta) {
@@ -163,19 +208,37 @@ function interleaveLists(left, right) {
   return output;
 }
 
-function orderBatchKeysByStrategy(keys, metadata, strategy) {
+function orderBatchKeysByStrategy(keys, metadata, strategy, options = {}) {
   const rows = keys.map((key) => metadata.get(key)).filter(Boolean);
+  if (strategy === 'bandit') {
+    const ranked = rankBatchWithBandit({
+      metadataRows: rows,
+      brandRewardIndex: options.brandRewardIndex || {},
+      seed: options.seed || new Date().toISOString().slice(0, 10),
+      mode: 'balanced'
+    });
+    return {
+      orderedKeys: ranked.orderedKeys,
+      diagnostics: ranked.scored
+    };
+  }
 
   if (strategy === 'exploit') {
-    return rows
+    return {
+      orderedKeys: rows
       .sort((a, b) => scoreForExploit(b) - scoreForExploit(a) || a.key.localeCompare(b.key))
-      .map((row) => row.key);
+      .map((row) => row.key),
+      diagnostics: []
+    };
   }
 
   if (strategy === 'explore') {
-    return rows
+    return {
+      orderedKeys: rows
       .sort((a, b) => scoreForExplore(b) - scoreForExplore(a) || a.key.localeCompare(b.key))
-      .map((row) => row.key);
+      .map((row) => row.key),
+      diagnostics: []
+    };
   }
 
   const exploit = rows
@@ -194,7 +257,10 @@ function orderBatchKeysByStrategy(keys, metadata, strategy) {
     seen.add(row.key);
     mixed.push(row.key);
   }
-  return mixed;
+  return {
+    orderedKeys: mixed,
+    diagnostics: []
+  };
 }
 
 function slug(value) {
@@ -336,7 +402,13 @@ async function commandRunBatch(config, storage, args) {
     collectBatchMetadata({ storage, config, category, key })
   );
   const metadataByKey = new Map(metadataRows.map((row) => [row.key, row]));
-  const orderedKeys = orderBatchKeysByStrategy(keys, metadataByKey, strategy);
+  const intel = await loadSourceIntel({ storage, config, category });
+  const brandRewardIndex = buildBrandRewardIndex(intel.data.domains || {});
+  const schedule = orderBatchKeysByStrategy(keys, metadataByKey, strategy, {
+    brandRewardIndex,
+    seed: `${category}:${new Date().toISOString().slice(0, 10)}`
+  });
+  const orderedKeys = schedule.orderedKeys;
 
   const runs = await runWithConcurrency(orderedKeys, config.concurrency, async (key) => {
     try {
@@ -365,6 +437,18 @@ async function commandRunBatch(config, storage, args) {
     selected_inputs: keys.length,
     concurrency: config.concurrency,
     scheduled_order: orderedKeys,
+    bandit_preview: strategy === 'bandit'
+      ? (schedule.diagnostics || []).slice(0, 25).map((row) => ({
+        key: row.key,
+        productId: row.productId,
+        bandit_score: row.bandit_score,
+        thompson: row.thompson,
+        ucb: row.ucb,
+        info_need: row.info_need,
+        mean_reward: row.mean_reward,
+        brand_reward: row.brandReward
+      }))
+      : [],
     runs
   };
 }
@@ -583,6 +667,10 @@ async function main() {
     output = await commandIntelGraphApi(config, storage, args);
   } else {
     throw new Error(`Unknown command: ${command}`);
+  }
+
+  if (output && typeof output === 'object') {
+    output.run_profile = config.runProfile;
   }
 
   process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);

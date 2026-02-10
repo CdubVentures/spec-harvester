@@ -10,6 +10,51 @@ function includesAllTokens(haystack, needles) {
   return needles.every((token) => haystack.includes(token));
 }
 
+function tokenOverlapScore(expectedTokens, candidateText) {
+  const candidateTokens = tokenize(candidateText);
+  if (!expectedTokens.length || !candidateTokens.length) {
+    return 0;
+  }
+  const expectedSet = new Set(expectedTokens);
+  const matched = expectedTokens.filter((token) => candidateTokens.includes(token));
+  const coverage = matched.length / expectedSet.size;
+
+  const expectedNumeric = expectedTokens.filter((token) => /^\d+$/.test(token));
+  const matchedNumeric = expectedNumeric.filter((token) => candidateTokens.includes(token));
+  const numericBoost = expectedNumeric.length > 0 && matchedNumeric.length > 0 ? 0.1 : 0;
+  return Math.min(1, coverage + numericBoost);
+}
+
+function likelyProductSpecificSource(source) {
+  const url = String(source?.url || '').toLowerCase();
+  const title = normalizeToken(source?.title || '');
+  const signals = [
+    '/product',
+    '/products/',
+    '/support/',
+    '/manual',
+    '/spec',
+    '/download'
+  ];
+  if (signals.some((signal) => url.includes(signal))) {
+    return true;
+  }
+  return title.includes('spec') || title.includes('support') || title.includes('manual');
+}
+
+function dynamicMatchThreshold(identityLock = {}) {
+  const hasVariant = str(identityLock.variant) !== '';
+  const hasStrongId = str(identityLock.sku) !== '' || str(identityLock.mpn) !== '' || str(identityLock.gtin) !== '';
+  let threshold = 0.8;
+  if (!hasVariant) {
+    threshold -= 0.1;
+  }
+  if (!hasStrongId) {
+    threshold -= 0.05;
+  }
+  return Math.max(0.65, Math.min(0.85, threshold));
+}
+
 function detectConnectionClass(value) {
   const token = normalizeToken(value);
   if (!token) {
@@ -134,13 +179,31 @@ export function evaluateSourceIdentity(source, identityLock = {}) {
 
   if (expectedModel) {
     const modelTokens = tokenize(expectedModel);
+    const titleToken = normalizeToken(source.title || '');
+    const urlToken = normalizeToken(source.url || '');
+    const candidateModelOverlap = tokenOverlapScore(modelTokens, candidateModelToken);
+    const titleOverlap = tokenOverlapScore(modelTokens, titleToken);
+    const urlOverlap = tokenOverlapScore(modelTokens, urlToken);
+    const bestModelOverlap = Math.max(candidateModelOverlap, titleOverlap, urlOverlap);
+
     if (
       includesAllTokens(candidateModelToken, modelTokens) ||
-      includesAllTokens(normalizeToken(source.title || ''), modelTokens)
+      includesAllTokens(titleToken, modelTokens) ||
+      includesAllTokens(urlToken, modelTokens) ||
+      bestModelOverlap >= 0.72 ||
+      (
+        bestModelOverlap >= 0.55 &&
+        modelTokens.some((token) => /^\d+$/.test(token)) &&
+        (
+          candidateModelToken.includes(modelTokens.find((token) => /^\d+$/.test(token)) || '') ||
+          titleToken.includes(modelTokens.find((token) => /^\d+$/.test(token)) || '') ||
+          urlToken.includes(modelTokens.find((token) => /^\d+$/.test(token)) || '')
+        )
+      )
     ) {
       score += 0.35;
       reasons.push('model_match');
-    } else if (candidateModelToken) {
+    } else if (candidateModelToken && likelyProductSpecificSource(source)) {
       criticalConflicts.push('model_mismatch');
     }
   } else {
@@ -198,11 +261,13 @@ export function evaluateSourceIdentity(source, identityLock = {}) {
   }
 
   score = Math.max(0, Math.min(1, score));
-  const match = score >= 0.8 && criticalConflicts.length === 0;
+  const matchThreshold = dynamicMatchThreshold(identityLock);
+  const match = score >= matchThreshold && criticalConflicts.length === 0;
 
   return {
     match,
     score,
+    matchThreshold,
     reasons,
     criticalConflicts
   };
@@ -226,12 +291,19 @@ export function evaluateIdentityGate(sourceResults) {
       .map((s) => s.rootDomain)
   );
 
-  const directContradictions = sourceResults.flatMap((s) =>
-    (s.identity?.criticalConflicts || []).map((conflict) => ({
-      source: s.url,
-      conflict
-    }))
-  );
+  const directContradictions = sourceResults
+    .filter((s) => (s.identity?.criticalConflicts || []).length > 0)
+    .filter((s) =>
+      (s.identity?.score || 0) >= 0.45 ||
+      (s.identity?.reasons || []).includes('model_match') ||
+      likelyProductSpecificSource(s)
+    )
+    .flatMap((s) =>
+      (s.identity?.criticalConflicts || []).map((conflict) => ({
+        source: s.url,
+        conflict
+      }))
+    );
   const crossSourceContradictions = buildIdentityCriticalContradictions(sourceResults);
   const contradictions = [...directContradictions, ...crossSourceContradictions];
 

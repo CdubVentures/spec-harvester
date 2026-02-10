@@ -2,6 +2,27 @@ function normalizeBaseUrl(value) {
   return String(value || 'https://api.openai.com').replace(/\/+$/, '');
 }
 
+function normalizeModel(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isDeepSeekRequest({ baseUrl, model }) {
+  const url = normalizeBaseUrl(baseUrl).toLowerCase();
+  const modelToken = normalizeModel(model);
+  return url.includes('deepseek.com') || modelToken.startsWith('deepseek');
+}
+
+function shouldRetryWithoutJsonSchema(error) {
+  const token = String(error?.message || '').toLowerCase();
+  return (
+    token.includes('response_format') ||
+    token.includes('json_schema') ||
+    token.includes('unsupported') ||
+    token.includes('invalid parameter') ||
+    token.includes('invalid_request_error')
+  );
+}
+
 function sanitizeText(message, secrets = []) {
   let output = String(message || '');
   for (const secret of secrets.filter(Boolean)) {
@@ -26,6 +47,129 @@ function extractMessageContent(message) {
   return '';
 }
 
+function extractJsonCandidate(text) {
+  const raw = String(text || '').trim();
+  if (!raw) {
+    return '';
+  }
+
+  const codeBlockMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (codeBlockMatch?.[1]) {
+    return codeBlockMatch[1].trim();
+  }
+
+  const startIndexes = [];
+  const objectStart = raw.indexOf('{');
+  const arrayStart = raw.indexOf('[');
+  if (objectStart >= 0) {
+    startIndexes.push(objectStart);
+  }
+  if (arrayStart >= 0) {
+    startIndexes.push(arrayStart);
+  }
+  if (!startIndexes.length) {
+    return raw;
+  }
+
+  const start = Math.min(...startIndexes);
+  const openChar = raw[start];
+  const closeChar = openChar === '{' ? '}' : ']';
+  let depth = 0;
+  let inString = false;
+  let escaping = false;
+  for (let i = start; i < raw.length; i += 1) {
+    const ch = raw[i];
+    if (inString) {
+      if (escaping) {
+        escaping = false;
+      } else if (ch === '\\') {
+        escaping = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === openChar) {
+      depth += 1;
+      continue;
+    }
+    if (ch === closeChar) {
+      depth -= 1;
+      if (depth === 0) {
+        return raw.slice(start, i + 1).trim();
+      }
+    }
+  }
+
+  return raw;
+}
+
+function parseJsonContent(content) {
+  const direct = String(content || '').trim();
+  if (!direct) {
+    return null;
+  }
+  try {
+    return JSON.parse(direct);
+  } catch {
+    // continue with relaxed extraction
+  }
+
+  const extracted = extractJsonCandidate(direct);
+  if (!extracted) {
+    return null;
+  }
+  try {
+    return JSON.parse(extracted);
+  } catch {
+    return null;
+  }
+}
+
+async function requestChatCompletion({
+  endpoint,
+  apiKey,
+  body,
+  controller
+}) {
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify(body),
+    signal: controller.signal
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`OpenAI API error ${response.status}: ${text.slice(0, 1000)}`);
+  }
+
+  let parsedBody;
+  try {
+    parsedBody = JSON.parse(text);
+  } catch {
+    throw new Error('OpenAI API returned non-JSON payload');
+  }
+
+  const message = parsedBody?.choices?.[0]?.message;
+  const content = extractMessageContent(message);
+  if (!content) {
+    throw new Error('OpenAI API response missing message content');
+  }
+
+  return {
+    message,
+    content
+  };
+}
+
 export function redactOpenAiError(message, apiKey) {
   return sanitizeText(message, [apiKey]);
 }
@@ -37,6 +181,8 @@ export async function callOpenAI({
   jsonSchema,
   apiKey,
   baseUrl,
+  reasoningMode = false,
+  reasoningBudget = 0,
   timeoutMs = 40_000,
   logger
 }) {
@@ -45,70 +191,90 @@ export async function callOpenAI({
   }
 
   const endpoint = `${normalizeBaseUrl(baseUrl)}/v1/chat/completions`;
+  const deepSeekMode = isDeepSeekRequest({ baseUrl, model });
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-  const body = {
-    model,
-    temperature: 0,
-    messages: [
-      { role: 'system', content: String(system || '') },
-      { role: 'user', content: String(user || '') }
-    ]
+  const forceJsonOutput = Boolean(jsonSchema && deepSeekMode);
+  const effectiveSystem = [
+    String(system || ''),
+    reasoningMode ? 'Use deliberate internal reasoning before finalizing output.' : '',
+    forceJsonOutput ? 'Return strict JSON only. Do not include markdown or explanations.' : ''
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const buildBody = ({ useJsonSchema }) => {
+    const body = {
+      model,
+      temperature: 0,
+      messages: [
+        { role: 'system', content: effectiveSystem },
+        { role: 'user', content: String(user || '') }
+      ]
+    };
+
+    if (reasoningMode && Number(reasoningBudget || 0) > 0) {
+      body.max_tokens = Math.max(256, Number(reasoningBudget || 0));
+    }
+
+    if (useJsonSchema && jsonSchema) {
+      body.response_format = {
+        type: 'json_schema',
+        json_schema: {
+          name: 'structured_output',
+          strict: true,
+          schema: jsonSchema
+        }
+      };
+    }
+
+    return body;
   };
 
-  if (jsonSchema) {
-    body.response_format = {
-      type: 'json_schema',
-      json_schema: {
-        name: 'structured_output',
-        strict: true,
-        schema: jsonSchema
-      }
-    };
-  }
-
-  try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal
-    });
-
-    const text = await response.text();
-    if (!response.ok) {
-      throw new Error(`OpenAI API error ${response.status}: ${text.slice(0, 1000)}`);
-    }
-
-    let parsedBody;
-    try {
-      parsedBody = JSON.parse(text);
-    } catch {
-      throw new Error('OpenAI API returned non-JSON payload');
-    }
-
-    const message = parsedBody?.choices?.[0]?.message;
-    const content = extractMessageContent(message);
-    if (!content) {
-      throw new Error('OpenAI API response missing message content');
-    }
-
-    try {
-      return JSON.parse(content);
-    } catch {
+  const parseStructuredResult = (content) => {
+    const parsed = parseJsonContent(content);
+    if (parsed === null) {
       throw new Error('OpenAI API content was not valid JSON');
     }
-  } catch (error) {
-    const safeMessage = sanitizeText(error.message, [apiKey]);
-    logger?.warn?.('openai_call_failed', {
-      model,
-      message: safeMessage
+    return parsed;
+  };
+
+  try {
+    const useJsonSchema = Boolean(jsonSchema && !deepSeekMode);
+    const first = await requestChatCompletion({
+      endpoint,
+      apiKey,
+      body: buildBody({ useJsonSchema }),
+      controller
     });
-    throw new Error(safeMessage);
+    return parseStructuredResult(first.content);
+  } catch (firstError) {
+    if (!jsonSchema || !shouldRetryWithoutJsonSchema(firstError)) {
+      const safeMessage = sanitizeText(firstError.message, [apiKey]);
+      logger?.warn?.('openai_call_failed', {
+        model,
+        message: safeMessage
+      });
+      throw new Error(safeMessage);
+    }
+
+    try {
+      const retry = await requestChatCompletion({
+        endpoint,
+        apiKey,
+        body: buildBody({ useJsonSchema: false }),
+        controller
+      });
+      return parseStructuredResult(retry.content);
+    } catch (retryError) {
+      const safeMessage = sanitizeText(retryError.message, [apiKey]);
+      logger?.warn?.('openai_call_failed', {
+        model,
+        message: safeMessage
+      });
+      throw new Error(safeMessage);
+    }
   } finally {
     clearTimeout(timer);
   }

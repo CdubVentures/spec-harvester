@@ -206,7 +206,11 @@ export function applyLearningSeeds(planner, learningProfile) {
   if (!seedUrls.length) {
     return;
   }
-  planner.seed(seedUrls);
+  if (typeof planner.seedLearning === 'function') {
+    planner.seedLearning(seedUrls);
+    return;
+  }
+  planner.seed(seedUrls, { forceBrandBypass: false });
 }
 
 export async function persistLearningProfile({

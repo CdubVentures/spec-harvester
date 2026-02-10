@@ -117,17 +117,45 @@ function endpointLooksIndexable(url) {
   }
 }
 
+function sameRootDomain(url, rootDomain) {
+  try {
+    const parsed = new URL(url);
+    return extractRootDomain(toHost(parsed.hostname)) === String(rootDomain || '').toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+function sourceRootDomain(source) {
+  const direct = String(source?.rootDomain || '').toLowerCase();
+  if (direct) {
+    return direct;
+  }
+  const host = String(source?.host || '').toLowerCase();
+  if (host) {
+    return extractRootDomain(toHost(host));
+  }
+  try {
+    const parsed = new URL(String(source?.url || ''));
+    return extractRootDomain(toHost(parsed.hostname));
+  } catch {
+    return '';
+  }
+}
+
 export function mineEndpointSignals({
   source,
   pageData,
   criticalFields = [],
+  networkScanLimit = 600,
   limit = 30,
   suggestionLimit = 12
 }) {
   const rows = pageData?.networkResponses || [];
   const bySignature = new Map();
+  const boundedScanLimit = Math.max(50, Number(networkScanLimit || 0) || 600);
 
-  for (const row of rows.slice(0, 600)) {
+  for (const row of rows.slice(0, boundedScanLimit)) {
     const endpointUrl = row.request_url || row.url;
     if (!endpointUrl) {
       continue;
@@ -241,9 +269,11 @@ export function mineEndpointSignals({
       return (b.hit_count || 0) - (a.hit_count || 0);
     })
     .slice(0, Math.max(1, limit));
+  const srcRootDomain = sourceRootDomain(source);
 
   const nextBestUrls = endpointSignals
     .filter((row) => endpointLooksIndexable(row.sample_url))
+    .filter((row) => sameRootDomain(row.sample_url, srcRootDomain))
     .map((row) => ({
       url: row.sample_url,
       score: endpointSuggestionScore(row),

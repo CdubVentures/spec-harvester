@@ -271,3 +271,69 @@ test('source planner discovers sitemap pointers from robots.txt', () => {
   assert.equal(discovered, 2);
   assert.equal(planner.getStats().robots_sitemaps_discovered, 2);
 });
+
+test('source planner manufacturer deep seeds are brand-targeted', () => {
+  const categoryConfig = {
+    sourceHosts: [
+      { host: 'razer.com', tierName: 'manufacturer' },
+      { host: 'logitechg.com', tierName: 'manufacturer' }
+    ],
+    denylist: []
+  };
+  const planner = new SourcePlanner(
+    {
+      seedUrls: [],
+      preferredSources: {},
+      identityLock: { brand: 'Logitech', model: 'G Pro X Superlight 2' },
+      productId: 'mouse-logitech-g-pro-x-superlight-2'
+    },
+    makeConfig({ fetchCandidateSources: false }),
+    categoryConfig
+  );
+
+  const stats = planner.getStats();
+  assert.deepEqual(stats.brand_manufacturer_hosts, ['logitechg.com']);
+});
+
+test('source planner can block a mismatched manufacturer host and remove queued URLs', () => {
+  const planner = new SourcePlanner(
+    {
+      seedUrls: [],
+      preferredSources: {},
+      identityLock: { brand: 'Acme', model: 'M100' },
+      productId: 'mouse-acme-m100'
+    },
+    makeConfig({ manufacturerDeepResearchEnabled: false, fetchCandidateSources: false }),
+    makeCategoryConfig()
+  );
+
+  planner.enqueue('https://manufacturer.com/product/m100');
+  planner.enqueue('https://manufacturer.com/support/m100');
+  const removed = planner.blockHost('manufacturer.com', 'brand_mismatch');
+
+  assert.equal(removed >= 2, true);
+  assert.equal(planner.hasNext(), false);
+  assert.equal(planner.getStats().blocked_host_count, 1);
+});
+
+test('source planner avoids manufacturer category hubs without model signal in broad mode', () => {
+  const planner = new SourcePlanner(
+    {
+      seedUrls: [],
+      preferredSources: {},
+      identityLock: { brand: 'Logitech', model: 'G Pro X Superlight 2' },
+      productId: 'mouse-logitech-g-pro-x-superlight-2'
+    },
+    makeConfig({
+      manufacturerDeepResearchEnabled: false,
+      fetchCandidateSources: false,
+      manufacturerBroadDiscovery: true
+    }),
+    makeCategoryConfig()
+  );
+
+  const categoryHub = new URL('https://manufacturer.com/en-us/shop/c/gaming-mice');
+  const productLike = new URL('https://manufacturer.com/en-us/products/gaming-mice/pro-x-superlight-2.html');
+  assert.equal(planner.isRelevantDiscoveredUrl(categoryHub, { manufacturerContext: true }), false);
+  assert.equal(planner.isRelevantDiscoveredUrl(productLike, { manufacturerContext: true }), true);
+});

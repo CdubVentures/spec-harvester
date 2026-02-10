@@ -13,9 +13,9 @@ node src/cli/spec.js <command>
 Commands:
 
 - `run-one --s3key <key>`
-- `run-ad-hoc <category> <brand> <model> [<variant>]`
-- `run-ad-hoc --category <category> --brand <brand> --model <model>`
-- `run-batch --category mouse [--brand <brand>] [--strategy <explore|exploit|mixed>]`
+- `run-ad-hoc <category> <brand> <model> [<variant>] [--profile <standard|thorough|fast>] [--thorough]`
+- `run-ad-hoc --category <category> --brand <brand> --model <model> [--profile <standard|thorough|fast>] [--thorough]`
+- `run-batch --category mouse [--brand <brand>] [--strategy <explore|exploit|mixed|bandit>]`
 - `discover --category mouse [--brand <brand>]`
 - `test-s3 [--fixture <path>] [--s3key <key>] [--dry-run]`
 - `sources-plan --category mouse`
@@ -106,11 +106,28 @@ Budgets/throttles:
 - `CONCURRENCY=2`
 - `PER_HOST_MIN_DELAY_MS=900`
 - `USER_AGENT="Mozilla/5.0 (compatible; EGSpecHarvester/1.0; +https://eggear.com)"`
+- `RUN_PROFILE=standard|thorough|fast` (default `standard`; `thorough` targets deep ~1h runs)
+- `HYPOTHESIS_AUTO_FOLLOWUP_ROUNDS=0`
+- `HYPOTHESIS_FOLLOWUP_URLS_PER_ROUND=12`
+- `ENDPOINT_SIGNAL_LIMIT=30`
+- `ENDPOINT_SUGGESTION_LIMIT=12`
+- `ENDPOINT_NETWORK_SCAN_LIMIT=600`
+- `MAX_NETWORK_RESPONSES_PER_PAGE=1200`
+- `PAGE_GOTO_TIMEOUT_MS=30000`
+- `PAGE_NETWORK_IDLE_TIMEOUT_MS=6000`
+- `POST_LOAD_WAIT_MS=0`
+- `AUTO_SCROLL_ENABLED=true|false` (default `false`)
+- `AUTO_SCROLL_PASSES=0`
+- `AUTO_SCROLL_DELAY_MS=900`
+- `MANUFACTURER_BROAD_DISCOVERY=true|false` (default `false`)
 
 Discovery (optional):
 
 - `DISCOVERY_ENABLED=true|false` (default `false`)
 - `FETCH_CANDIDATE_SOURCES=true|false` (default `true`)
+- `DISCOVERY_MAX_QUERIES=8`
+- `DISCOVERY_RESULTS_PER_QUERY=10`
+- `DISCOVERY_MAX_DISCOVERED=120`
 - `SEARCH_PROVIDER=bing|google_cse|none` (default `none`)
 - `BING_SEARCH_KEY`, `BING_SEARCH_ENDPOINT`
 - `GOOGLE_CSE_KEY`, `GOOGLE_CSE_CX`
@@ -120,6 +137,9 @@ LLM / OpenAI (optional):
 - `LLM_ENABLED=true|false` (default `false`)
 - `LLM_WRITE_SUMMARY=true|false` (default `false`)
 - `LLM_PLAN_DISCOVERY_QUERIES=true|false` (default `false`)
+- `LLM_REASONING_MODE=true|false` (default `false`)
+- `LLM_REASONING_BUDGET=2048` (token budget hint for reasoning-mode calls)
+- `DEEPSEEK_API_KEY=...` (supported alias for `OPENAI_API_KEY`)
 - `OPENAI_API_KEY=...`
 - `OPENAI_BASE_URL=...` (default `https://api.openai.com`)
 - `OPENAI_MODEL_EXTRACT=...`
@@ -139,7 +159,7 @@ Local toggles:
 - `SELF_IMPROVE_ENABLED=true|false` (default `true`)
 - `MAX_HYPOTHESIS_ITEMS=50`
 - `FIELD_REWARD_HALF_LIFE_DAYS=45` (decay window for field reward memory)
-- `BATCH_STRATEGY=explore|exploit|mixed` (default `mixed`)
+- `BATCH_STRATEGY=explore|exploit|mixed|bandit` (default `bandit`)
 
 EloShapes adapter (optional, safe default disabled):
 
@@ -192,6 +212,12 @@ Run ad-hoc directly from identity inputs:
 node src/cli/spec.js run-ad-hoc --category mouse --brand Razer --model "Viper V3 Pro" --variant Wireless
 ```
 
+Run ad-hoc in deep/thorough profile:
+
+```bash
+node src/cli/spec.js run-ad-hoc mouse Logitech "G Pro X Superlight 2" --thorough
+```
+
 Run ad-hoc in one line (positional form):
 
 ```bash
@@ -213,7 +239,7 @@ node src/cli/spec.js run-batch --category mouse
 Run batch with scheduling strategy:
 
 ```bash
-node src/cli/spec.js run-batch --category mouse --strategy mixed
+node src/cli/spec.js run-batch --category mouse --strategy bandit
 ```
 
 Brand-scoped batch:
@@ -326,6 +352,12 @@ If your `.env` is set for cloud (`LOCAL_MODE=false`, `DRY_RUN=false`, valid AWS 
 
 ```bash
 node src/cli/spec.js run-ad-hoc <category> <brand> "<model>" [variant]
+```
+
+For a deep cloud run (long budget + aggressive backend data capture), use:
+
+```bash
+node src/cli/spec.js run-ad-hoc <category> <brand> "<model>" [variant] --thorough
 ```
 
 Example:

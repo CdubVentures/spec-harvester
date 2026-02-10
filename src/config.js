@@ -19,6 +19,109 @@ function parseBoolEnv(name, defaultValue = false) {
   return norm === '1' || norm === 'true' || norm === 'yes' || norm === 'on';
 }
 
+function normalizeBaseUrl(value) {
+  return String(value || '').trim().replace(/\/+$/, '');
+}
+
+function inferLlmProvider(baseUrl, model, hasDeepSeekKey) {
+  const baseToken = normalizeBaseUrl(baseUrl).toLowerCase();
+  const modelToken = String(model || '').toLowerCase();
+  if (baseToken.includes('deepseek.com') || modelToken.startsWith('deepseek') || hasDeepSeekKey) {
+    return 'deepseek';
+  }
+  return 'openai';
+}
+
+export function normalizeRunProfile(value) {
+  const token = String(value || '').trim().toLowerCase();
+  if (['thorough', 'deep', 'full', 'max'].includes(token)) {
+    return 'thorough';
+  }
+  if (['fast', 'quick', 'lean'].includes(token)) {
+    return 'fast';
+  }
+  return 'standard';
+}
+
+function intMax(current, floor) {
+  return Math.max(Number.parseInt(String(current || 0), 10) || 0, floor);
+}
+
+function intMin(current, ceiling) {
+  const parsed = Number.parseInt(String(current || 0), 10) || 0;
+  return Math.min(parsed, ceiling);
+}
+
+export function applyRunProfile(config, profile) {
+  const normalizedProfile = normalizeRunProfile(profile || config.runProfile);
+  const next = {
+    ...config,
+    runProfile: normalizedProfile
+  };
+
+  if (normalizedProfile === 'thorough') {
+    next.maxRunSeconds = intMax(next.maxRunSeconds, 3600);
+    next.maxUrlsPerProduct = intMax(next.maxUrlsPerProduct, 220);
+    next.maxCandidateUrls = intMax(next.maxCandidateUrls, 280);
+    next.maxPagesPerDomain = intMax(next.maxPagesPerDomain, 8);
+    next.maxManufacturerUrlsPerProduct = intMax(next.maxManufacturerUrlsPerProduct, 140);
+    next.maxManufacturerPagesPerDomain = intMax(next.maxManufacturerPagesPerDomain, 50);
+    next.manufacturerReserveUrls = intMax(next.manufacturerReserveUrls, 100);
+    next.maxJsonBytes = intMax(next.maxJsonBytes, 6_000_000);
+    next.maxGraphqlReplays = intMax(next.maxGraphqlReplays, 20);
+    next.maxHypothesisItems = intMax(next.maxHypothesisItems, 120);
+    next.maxNetworkResponsesPerPage = intMax(next.maxNetworkResponsesPerPage, 2500);
+    next.endpointNetworkScanLimit = intMax(next.endpointNetworkScanLimit, 1800);
+    next.endpointSignalLimit = intMax(next.endpointSignalLimit, 120);
+    next.endpointSuggestionLimit = intMax(next.endpointSuggestionLimit, 36);
+    next.hypothesisAutoFollowupRounds = intMax(next.hypothesisAutoFollowupRounds, 2);
+    next.hypothesisFollowupUrlsPerRound = intMax(next.hypothesisFollowupUrlsPerRound, 24);
+    next.pageGotoTimeoutMs = intMax(next.pageGotoTimeoutMs, 45_000);
+    next.pageNetworkIdleTimeoutMs = intMax(next.pageNetworkIdleTimeoutMs, 15_000);
+    next.postLoadWaitMs = intMax(next.postLoadWaitMs, 10_000);
+    next.autoScrollEnabled = true;
+    next.autoScrollPasses = intMax(next.autoScrollPasses, 3);
+    next.autoScrollDelayMs = intMax(next.autoScrollDelayMs, 1200);
+    next.discoveryEnabled = true;
+    next.fetchCandidateSources = true;
+    next.discoveryMaxQueries = intMax(next.discoveryMaxQueries, 24);
+    next.discoveryResultsPerQuery = intMax(next.discoveryResultsPerQuery, 20);
+    next.discoveryMaxDiscovered = intMax(next.discoveryMaxDiscovered, 300);
+    next.llmPlanDiscoveryQueries = true;
+    next.manufacturerBroadDiscovery = true;
+  } else if (normalizedProfile === 'fast') {
+    next.maxRunSeconds = intMin(next.maxRunSeconds, 180);
+    next.maxUrlsPerProduct = intMin(next.maxUrlsPerProduct, 12);
+    next.maxCandidateUrls = intMin(next.maxCandidateUrls, 20);
+    next.maxPagesPerDomain = intMin(next.maxPagesPerDomain, 2);
+    next.maxManufacturerUrlsPerProduct = intMin(next.maxManufacturerUrlsPerProduct, 10);
+    next.maxManufacturerPagesPerDomain = intMin(next.maxManufacturerPagesPerDomain, 5);
+    next.manufacturerReserveUrls = intMin(next.manufacturerReserveUrls, 4);
+    next.discoveryMaxQueries = intMin(next.discoveryMaxQueries, 4);
+    next.discoveryResultsPerQuery = intMin(next.discoveryResultsPerQuery, 6);
+    next.discoveryMaxDiscovered = intMin(next.discoveryMaxDiscovered, 60);
+    next.endpointSignalLimit = intMin(next.endpointSignalLimit, 24);
+    next.endpointSuggestionLimit = intMin(next.endpointSuggestionLimit, 8);
+    next.endpointNetworkScanLimit = intMin(next.endpointNetworkScanLimit, 400);
+    next.hypothesisAutoFollowupRounds = intMin(next.hypothesisAutoFollowupRounds, 0);
+    next.hypothesisFollowupUrlsPerRound = intMin(next.hypothesisFollowupUrlsPerRound, 8);
+    next.postLoadWaitMs = intMin(next.postLoadWaitMs, 0);
+    next.autoScrollEnabled = false;
+    next.autoScrollPasses = 0;
+  }
+
+  next.manufacturerReserveUrls = Math.max(
+    0,
+    Math.min(next.maxUrlsPerProduct, next.manufacturerReserveUrls)
+  );
+  next.maxManufacturerUrlsPerProduct = Math.max(
+    1,
+    Math.min(next.maxUrlsPerProduct, next.maxManufacturerUrlsPerProduct)
+  );
+
+  return next;
+}
+
 function parseDotEnvValue(rawValue) {
   const trimmed = String(rawValue || '').trim();
   if (!trimmed) {
@@ -88,6 +191,11 @@ export function loadConfig(overrides = {}) {
     process.env.MAX_CANDIDATE_URLS;
 
   const parsedCandidateUrls = Number.parseInt(String(maxCandidateUrlsFromEnv || ''), 10);
+  const hasDeepSeekKey = Boolean(process.env.DEEPSEEK_API_KEY);
+  const resolvedApiKey = process.env.OPENAI_API_KEY || process.env.DEEPSEEK_API_KEY || '';
+  const resolvedBaseUrl = process.env.OPENAI_BASE_URL ||
+    (hasDeepSeekKey ? 'https://api.deepseek.com' : 'https://api.openai.com');
+  const defaultModel = hasDeepSeekKey ? 'deepseek-reasoner' : 'gpt-4.1-mini';
 
   const cfg = {
     awsRegion: process.env.AWS_REGION || 'us-east-2',
@@ -114,8 +222,12 @@ export function loadConfig(overrides = {}) {
     localInputRoot: process.env.LOCAL_S3_ROOT || 'fixtures/s3',
     localOutputRoot: process.env.LOCAL_OUTPUT_ROOT || 'out',
     writeMarkdownSummary: parseBoolEnv('WRITE_MARKDOWN_SUMMARY', true),
+    runProfile: normalizeRunProfile(process.env.RUN_PROFILE || 'standard'),
     discoveryEnabled: parseBoolEnv('DISCOVERY_ENABLED', false),
     fetchCandidateSources: parseBoolEnv('FETCH_CANDIDATE_SOURCES', true),
+    discoveryMaxQueries: parseIntEnv('DISCOVERY_MAX_QUERIES', 8),
+    discoveryResultsPerQuery: parseIntEnv('DISCOVERY_RESULTS_PER_QUERY', 10),
+    discoveryMaxDiscovered: parseIntEnv('DISCOVERY_MAX_DISCOVERED', 120),
     searchProvider: process.env.SEARCH_PROVIDER || 'none',
     bingSearchKey: process.env.BING_SEARCH_KEY || '',
     bingSearchEndpoint: process.env.BING_SEARCH_ENDPOINT || '',
@@ -126,28 +238,58 @@ export function loadConfig(overrides = {}) {
     llmEnabled: parseBoolEnv('LLM_ENABLED', false),
     llmWriteSummary: parseBoolEnv('LLM_WRITE_SUMMARY', false),
     llmPlanDiscoveryQueries: parseBoolEnv('LLM_PLAN_DISCOVERY_QUERIES', false),
-    openaiApiKey: process.env.OPENAI_API_KEY || '',
-    openaiBaseUrl: process.env.OPENAI_BASE_URL || 'https://api.openai.com',
-    openaiModelExtract: process.env.OPENAI_MODEL_EXTRACT || 'gpt-4.1-mini',
-    openaiModelPlan: process.env.OPENAI_MODEL_PLAN || process.env.OPENAI_MODEL_EXTRACT || 'gpt-4.1-mini',
-    openaiModelWrite: process.env.OPENAI_MODEL_WRITE || process.env.OPENAI_MODEL_EXTRACT || 'gpt-4.1-mini',
+    openaiApiKey: resolvedApiKey,
+    openaiBaseUrl: resolvedBaseUrl,
+    openaiModelExtract: process.env.OPENAI_MODEL_EXTRACT || defaultModel,
+    openaiModelPlan: process.env.OPENAI_MODEL_PLAN || process.env.OPENAI_MODEL_EXTRACT || defaultModel,
+    openaiModelWrite: process.env.OPENAI_MODEL_WRITE || process.env.OPENAI_MODEL_EXTRACT || defaultModel,
     openaiMaxInputChars: parseIntEnv('OPENAI_MAX_INPUT_CHARS', 50_000),
     openaiTimeoutMs: parseIntEnv('OPENAI_TIMEOUT_MS', 40_000),
+    llmReasoningMode: parseBoolEnv('LLM_REASONING_MODE', hasDeepSeekKey),
+    llmReasoningBudget: parseIntEnv('LLM_REASONING_BUDGET', 2048),
     graphqlReplayEnabled: parseBoolEnv('GRAPHQL_REPLAY_ENABLED', true),
     maxGraphqlReplays: parseIntEnv('MAX_GRAPHQL_REPLAYS', 5),
+    maxNetworkResponsesPerPage: parseIntEnv('MAX_NETWORK_RESPONSES_PER_PAGE', 1200),
+    pageGotoTimeoutMs: parseIntEnv('PAGE_GOTO_TIMEOUT_MS', 30_000),
+    pageNetworkIdleTimeoutMs: parseIntEnv('PAGE_NETWORK_IDLE_TIMEOUT_MS', 6_000),
+    postLoadWaitMs: parseIntEnv('POST_LOAD_WAIT_MS', 0),
+    autoScrollEnabled: parseBoolEnv('AUTO_SCROLL_ENABLED', false),
+    autoScrollPasses: parseIntEnv('AUTO_SCROLL_PASSES', 0),
+    autoScrollDelayMs: parseIntEnv('AUTO_SCROLL_DELAY_MS', 900),
+    endpointSignalLimit: parseIntEnv('ENDPOINT_SIGNAL_LIMIT', 30),
+    endpointSuggestionLimit: parseIntEnv('ENDPOINT_SUGGESTION_LIMIT', 12),
+    endpointNetworkScanLimit: parseIntEnv('ENDPOINT_NETWORK_SCAN_LIMIT', 600),
+    manufacturerBroadDiscovery: parseBoolEnv('MANUFACTURER_BROAD_DISCOVERY', false),
     allowBelowPassTargetFill: parseBoolEnv('ALLOW_BELOW_PASS_TARGET_FILL', false),
     selfImproveEnabled: parseBoolEnv('SELF_IMPROVE_ENABLED', true),
     maxHypothesisItems: parseIntEnv('MAX_HYPOTHESIS_ITEMS', 50),
+    hypothesisAutoFollowupRounds: parseIntEnv('HYPOTHESIS_AUTO_FOLLOWUP_ROUNDS', 0),
+    hypothesisFollowupUrlsPerRound: parseIntEnv('HYPOTHESIS_FOLLOWUP_URLS_PER_ROUND', 12),
     fieldRewardHalfLifeDays: parseIntEnv('FIELD_REWARD_HALF_LIFE_DAYS', 45),
-    batchStrategy: (process.env.BATCH_STRATEGY || 'mixed').toLowerCase()
+    batchStrategy: (process.env.BATCH_STRATEGY || 'bandit').toLowerCase(),
+    llmProvider: inferLlmProvider(
+      resolvedBaseUrl,
+      process.env.OPENAI_MODEL_EXTRACT || defaultModel,
+      hasDeepSeekKey
+    )
   };
 
   const filtered = Object.fromEntries(
     Object.entries(overrides).filter(([, value]) => value !== undefined)
   );
 
-  return {
+  const merged = {
     ...cfg,
     ...filtered
   };
+  merged.llmProvider = inferLlmProvider(
+    merged.openaiBaseUrl,
+    merged.openaiModelExtract,
+    Boolean(process.env.DEEPSEEK_API_KEY)
+  );
+
+  return applyRunProfile(
+    merged,
+    filtered.runProfile || cfg.runProfile
+  );
 }

@@ -23,6 +23,76 @@ function normalizeHost(hostname) {
   return String(hostname || '').toLowerCase().replace(/^www\./, '');
 }
 
+function tokenize(value) {
+  return String(value || '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/g)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2);
+}
+
+function buildDiscoveryRelevanceTokens(job = {}) {
+  const brand = tokenize(job.identityLock?.brand || '');
+  const model = tokenize(job.identityLock?.model || '');
+  const variant = tokenize(job.identityLock?.variant || '');
+
+  const stopwords = new Set([
+    'gaming',
+    'mouse',
+    'wireless',
+    'wired',
+    'edition',
+    'black',
+    'white',
+    'for',
+    'the'
+  ]);
+
+  return [...new Set([...brand, ...model, ...variant])]
+    .filter((token) => !stopwords.has(token));
+}
+
+function relevanceScore(candidate, tokens = []) {
+  if (!tokens.length) {
+    return 0;
+  }
+
+  const searchable = [
+    candidate.url,
+    candidate.title,
+    candidate.snippet,
+    candidate.query
+  ]
+    .map((value) => String(value || '').toLowerCase())
+    .join(' ');
+  const hitCount = tokens.reduce(
+    (count, token) => (searchable.includes(token) ? count + 1 : count),
+    0
+  );
+
+  let score = hitCount * 8;
+  let path = '';
+  try {
+    path = new URL(candidate.url).pathname.toLowerCase();
+  } catch {
+    path = '';
+  }
+
+  if (/\/products?\//.test(path) && hitCount > 0) {
+    score += 12;
+  }
+  if (path.includes('/support') || path.includes('/manual') || path.includes('/spec')) {
+    score += 8;
+  }
+  if (path.includes('/shop/c/') || path.includes('/category/')) {
+    score -= hitCount >= 2 ? 5 : 30;
+  }
+  if (path.endsWith('.pdf')) {
+    score += 6;
+  }
+  return score;
+}
+
 function classifyUrlCandidate(result, categoryConfig) {
   const parsed = new URL(result.url);
   const host = normalizeHost(parsed.hostname);
@@ -99,11 +169,11 @@ async function searchGoogleCse({ key, cx, query, limit }) {
   }));
 }
 
-function buildPlanOnlyResults({ categoryConfig, queries }) {
+function buildPlanOnlyResults({ categoryConfig, queries, maxQueries = 3 }) {
   const planned = [];
 
   for (const sourceHost of categoryConfig.sourceHosts || []) {
-    for (const query of queries.slice(0, 3)) {
+    for (const query of queries.slice(0, Math.max(1, maxQueries))) {
       planned.push({
         url: `https://${sourceHost.host}/search?q=${encodeURIComponent(query)}`,
         title: `${sourceHost.host} search`,
@@ -117,7 +187,7 @@ function buildPlanOnlyResults({ categoryConfig, queries }) {
   return planned;
 }
 
-function rankCandidate(candidate) {
+function rankCandidate(candidate, relevanceTokens = []) {
   let score = 0;
   if (candidate.approvedDomain) {
     score += 30;
@@ -132,6 +202,7 @@ function rankCandidate(candidate) {
   if (candidate.role === 'manufacturer') {
     score += 40;
   }
+  score += relevanceScore(candidate, relevanceTokens);
   return score;
 }
 
@@ -173,10 +244,14 @@ export async function discoverCandidateSources({
     logger
   });
   const queries = [...new Set([...baseQueries, ...llmQueries])];
+  const relevanceTokens = buildDiscoveryRelevanceTokens(job);
+  const queryLimit = Math.max(1, Number(config.discoveryMaxQueries || 8));
+  const resultsPerQuery = Math.max(1, Number(config.discoveryResultsPerQuery || 10));
+  const discoveryCap = Math.max(1, Number(config.discoveryMaxDiscovered || 120));
 
   const rawResults = [];
   if (config.searchProvider === 'bing' || config.searchProvider === 'google_cse') {
-    for (const query of queries.slice(0, 8)) {
+    for (const query of queries.slice(0, queryLimit)) {
       try {
         let results = [];
         if (config.searchProvider === 'bing') {
@@ -184,14 +259,14 @@ export async function discoverCandidateSources({
             endpoint: config.bingSearchEndpoint,
             key: config.bingSearchKey,
             query,
-            limit: 10
+            limit: resultsPerQuery
           });
         } else {
           results = await searchGoogleCse({
             key: config.googleCseKey,
             cx: config.googleCseCx,
             query,
-            limit: 10
+            limit: resultsPerQuery
           });
         }
         rawResults.push(...results.map((result) => ({ ...result, query })));
@@ -200,7 +275,11 @@ export async function discoverCandidateSources({
       }
     }
   } else {
-    rawResults.push(...buildPlanOnlyResults({ categoryConfig, queries }));
+    rawResults.push(...buildPlanOnlyResults({
+      categoryConfig,
+      queries,
+      maxQueries: Math.min(queryLimit, 12)
+    }));
   }
 
   const byUrl = new Map();
@@ -225,8 +304,11 @@ export async function discoverCandidateSources({
   }
 
   const discovered = [...byUrl.values()]
-    .sort((a, b) => rankCandidate(b) - rankCandidate(a))
-    .slice(0, 120);
+    .sort((a, b) =>
+      rankCandidate(b, relevanceTokens) - rankCandidate(a, relevanceTokens) ||
+      String(a.url || '').localeCompare(String(b.url || ''))
+    )
+    .slice(0, discoveryCap);
 
   const candidateOnly = discovered.filter((item) => !item.approvedDomain);
   const approvedOnly = discovered.filter((item) => item.approvedDomain);

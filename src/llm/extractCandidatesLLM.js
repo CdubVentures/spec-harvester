@@ -135,6 +135,8 @@ export async function extractCandidatesLLM({
       jsonSchema: llmSchema(),
       apiKey: config.openaiApiKey,
       baseUrl: config.openaiBaseUrl,
+      reasoningMode: Boolean(config.llmReasoningMode),
+      reasoningBudget: Number(config.llmReasoningBudget || 0),
       timeoutMs: config.openaiTimeoutMs,
       logger
     });

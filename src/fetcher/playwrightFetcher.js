@@ -54,7 +54,10 @@ export class PlaywrightFetcher {
   async fetch(source) {
     await this.waitForHostSlot(source.host);
     const page = await this.context.newPage();
-    const recorder = new NetworkRecorder({ maxJsonBytes: this.config.maxJsonBytes });
+    const recorder = new NetworkRecorder({
+      maxJsonBytes: this.config.maxJsonBytes,
+      maxRows: this.config.maxNetworkResponsesPerPage
+    });
 
     page.on('response', async (response) => {
       await recorder.handleResponse(response);
@@ -68,16 +71,20 @@ export class PlaywrightFetcher {
     try {
       const response = await page.goto(source.url, {
         waitUntil: 'domcontentloaded',
-        timeout: 30_000
+        timeout: this.config.pageGotoTimeoutMs || 30_000
       });
       status = response?.status() || 0;
       finalUrl = page.url();
 
       try {
-        await page.waitForLoadState('networkidle', { timeout: 6_000 });
+        await page.waitForLoadState('networkidle', {
+          timeout: this.config.pageNetworkIdleTimeoutMs || 6_000
+        });
       } catch {
         // Best effort only.
       }
+
+      await this.captureInteractiveSignals(page);
 
       if (this.config.graphqlReplayEnabled) {
         const replayRows = await replayGraphqlRequests({
@@ -111,6 +118,40 @@ export class PlaywrightFetcher {
       embeddedState,
       networkResponses: recorder.rows
     };
+  }
+
+  async captureInteractiveSignals(page) {
+    const autoScrollPasses = Math.max(0, Number(this.config.autoScrollPasses || 0));
+    const autoScrollDelayMs = Math.max(100, Number(this.config.autoScrollDelayMs || 900));
+    const shouldScroll = Boolean(this.config.autoScrollEnabled && autoScrollPasses > 0);
+
+    if (shouldScroll) {
+      for (let i = 0; i < autoScrollPasses; i += 1) {
+        try {
+          await page.evaluate(() => {
+            const maxY = Math.max(
+              document.body?.scrollHeight || 0,
+              document.documentElement?.scrollHeight || 0
+            );
+            window.scrollTo(0, maxY);
+          });
+        } catch {
+          break;
+        }
+        await page.waitForTimeout(autoScrollDelayMs);
+      }
+
+      try {
+        await page.evaluate(() => window.scrollTo(0, 0));
+      } catch {
+        // ignore
+      }
+    }
+
+    const postLoadWaitMs = Math.max(0, Number(this.config.postLoadWaitMs || 0));
+    if (postLoadWaitMs > 0) {
+      await page.waitForTimeout(postLoadWaitMs);
+    }
   }
 }
 

@@ -2,6 +2,13 @@ function round(value, digits = 4) {
   return Number.parseFloat(Number(value || 0).toFixed(digits));
 }
 
+function slug(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 function hasValue(value) {
   const token = String(value || '').trim().toLowerCase();
   return token !== '' && token !== 'unk';
@@ -83,6 +90,12 @@ function methodWeight(method) {
 
 function collectFromSourceCandidates({ field, sourceResults, suggestionMap }) {
   for (const source of sourceResults || []) {
+    if (
+      source.role === 'manufacturer' &&
+      (source.identity?.criticalConflicts || []).includes('brand_mismatch')
+    ) {
+      continue;
+    }
     const quality = sourceQualityScore(source);
     for (const candidate of source.fieldCandidates || []) {
       if (candidate.field !== field || !hasValue(candidate.value)) {
@@ -105,6 +118,12 @@ function collectFromSourceCandidates({ field, sourceResults, suggestionMap }) {
 
 function collectFromEndpointSignals({ field, sourceResults, suggestionMap }) {
   for (const source of sourceResults || []) {
+    if (
+      source.role === 'manufacturer' &&
+      (source.identity?.criticalConflicts || []).includes('brand_mismatch')
+    ) {
+      continue;
+    }
     for (const endpoint of source.endpointSuggestions || []) {
       const hints = endpoint.field_hints || [];
       if (!hints.includes(field)) {
@@ -124,14 +143,22 @@ function collectFromEndpointSignals({ field, sourceResults, suggestionMap }) {
   }
 }
 
-function collectFromSourceIntel({ field, sourceIntelDomains, suggestionMap }) {
+function collectFromSourceIntel({ field, sourceIntelDomains, suggestionMap, brandKey = '' }) {
   for (const domain of Object.values(sourceIntelDomains || {})) {
-    const helpfulness = Number.parseFloat(String(domain.per_field_helpfulness?.[field] || 0));
+    const brandStats = brandKey && domain?.per_brand?.[brandKey]
+      ? domain.per_brand[brandKey]
+      : null;
+    if (brandKey && !brandStats) {
+      continue;
+    }
+    const activeStats = brandStats || domain;
+
+    const helpfulness = Number.parseFloat(String(activeStats.per_field_helpfulness?.[field] || 0));
     if (!Number.isFinite(helpfulness) || helpfulness <= 0) {
       continue;
     }
 
-    const plannerScore = Number.parseFloat(String(domain.planner_score || 0));
+    const plannerScore = Number.parseFloat(String(activeStats.planner_score || domain.planner_score || 0));
     const topPaths = Object.values(domain.per_path || {})
       .filter((pathRow) => Number.parseFloat(String(pathRow.per_field_helpfulness?.[field] || 0)) > 0)
       .sort((a, b) => (b.planner_score || 0) - (a.planner_score || 0))
@@ -185,6 +212,7 @@ export function buildHypothesisQueue({
   provenance = {},
   sourceResults = [],
   sourceIntelDomains = {},
+  brand = '',
   criticalFieldSet = new Set(),
   maxItems = 40,
   perFieldLimit = 8
@@ -194,13 +222,14 @@ export function buildHypothesisQueue({
     ...(missingRequiredFields || [])
   ])]
     .filter(Boolean);
+  const brandKey = slug(brand);
 
   const suggestionMap = new Map();
 
   for (const field of targetFields) {
     collectFromSourceCandidates({ field, sourceResults, suggestionMap });
     collectFromEndpointSignals({ field, sourceResults, suggestionMap });
-    collectFromSourceIntel({ field, sourceIntelDomains, suggestionMap });
+    collectFromSourceIntel({ field, sourceIntelDomains, suggestionMap, brandKey });
   }
 
   const queue = [];

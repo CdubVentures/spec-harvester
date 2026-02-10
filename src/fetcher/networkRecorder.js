@@ -157,12 +157,17 @@ function parseRequestPostJson(request, responseUrl, maxJsonBytes) {
 }
 
 export class NetworkRecorder {
-  constructor({ maxJsonBytes }) {
+  constructor({ maxJsonBytes, maxRows = Number.POSITIVE_INFINITY }) {
     this.maxJsonBytes = maxJsonBytes;
+    this.maxRows = Number.isFinite(maxRows) ? Math.max(1, maxRows) : Number.POSITIVE_INFINITY;
     this.rows = [];
   }
 
   async handleResponse(response) {
+    if (this.rows.length >= this.maxRows) {
+      return;
+    }
+
     const responseUrl = response.url();
     const status = response.status();
     const headers = response.headers();

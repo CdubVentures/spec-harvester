@@ -49,7 +49,7 @@ import {
   computeParserHealth
 } from '../intel/siteFingerprint.js';
 import { evaluateConstraintGraph } from '../scoring/constraintSolver.js';
-import { buildHypothesisQueue } from '../learning/hypothesisQueue.js';
+import { buildHypothesisQueue, nextBestUrlsFromHypotheses } from '../learning/hypothesisQueue.js';
 
 function bestIdentityFromSources(sourceResults) {
   const sorted = [...sourceResults].sort((a, b) => {
@@ -264,6 +264,34 @@ function isLikelyIndexableEndpointUrl(url) {
   }
 }
 
+function isSafeManufacturerFollowupUrl(source, url) {
+  try {
+    const parsed = new URL(url);
+    const sourceRootDomain = String(source?.rootDomain || source?.host || '').toLowerCase();
+    if (!sourceRootDomain) {
+      return false;
+    }
+    const host = String(parsed.hostname || '').toLowerCase().replace(/^www\./, '');
+    if (!host || (!host.endsWith(sourceRootDomain) && sourceRootDomain !== host)) {
+      return false;
+    }
+
+    const path = parsed.pathname.toLowerCase();
+    const signal = [
+      '/support',
+      '/manual',
+      '/spec',
+      '/product',
+      '/products',
+      '/download',
+      '/sitemap'
+    ];
+    return signal.some((token) => path.includes(token));
+  } catch {
+    return false;
+  }
+}
+
 function buildFieldReasoning({
   fieldOrder,
   provenance,
@@ -324,6 +352,60 @@ function buildFieldReasoning({
   return output;
 }
 
+function buildProvisionalHypothesisQueue({
+  sourceResults,
+  categoryConfig,
+  fieldOrder,
+  anchors,
+  identityLock,
+  productId,
+  category,
+  config,
+  requiredFields,
+  sourceIntelDomains,
+  brand
+}) {
+  const consensus = runConsensusEngine({
+    sourceResults,
+    categoryConfig,
+    fieldOrder,
+    anchors,
+    identityLock,
+    productId,
+    category,
+    config
+  });
+
+  const provisionalFields = {};
+  for (const field of fieldOrder || []) {
+    provisionalFields[field] = consensus.fields?.[field] ?? 'unk';
+  }
+
+  const provisionalNormalized = {
+    fields: provisionalFields
+  };
+
+  const completenessStats = computeCompletenessRequired(provisionalNormalized, requiredFields);
+  const criticalFieldsBelowPassTarget = consensus.criticalFieldsBelowPassTarget || [];
+
+  const hypothesisQueue = buildHypothesisQueue({
+    criticalFieldsBelowPassTarget,
+    missingRequiredFields: completenessStats.missingRequiredFields,
+    provenance: consensus.provenance || {},
+    sourceResults,
+    sourceIntelDomains,
+    brand: brand || '',
+    criticalFieldSet: categoryConfig.criticalFieldSet,
+    maxItems: Math.max(1, Number(config.maxHypothesisItems || 50))
+  });
+
+  return {
+    hypothesisQueue,
+    missingRequiredFields: completenessStats.missingRequiredFields,
+    criticalFieldsBelowPassTarget
+  };
+}
+
 export async function runProduct({ storage, config, s3Key }) {
   const runId = buildRunId();
   const logger = new EventLogger();
@@ -372,6 +454,8 @@ export async function runProduct({ storage, config, s3Key }) {
   const adapterArtifacts = [];
   let llmCandidatesAccepted = 0;
   let llmSourcesUsed = 0;
+  let hypothesisFollowupRoundsExecuted = 0;
+  let hypothesisFollowupSeededUrls = 0;
 
   const discoveryResult = await discoverCandidateSources({
     config,
@@ -392,7 +476,7 @@ export async function runProduct({ storage, config, s3Key }) {
 
   await fetcher.start();
 
-  try {
+  const processPlannerQueue = async () => {
     while (planner.hasNext()) {
       const elapsedSeconds = (Date.now() - startMs) / 1000;
       if (elapsedSeconds >= config.maxRunSeconds) {
@@ -438,7 +522,10 @@ export async function runProduct({ storage, config, s3Key }) {
       const endpointIntel = mineEndpointSignals({
         source,
         pageData,
-        criticalFields: [...(categoryConfig.criticalFieldSet || new Set())]
+        criticalFields: [...(categoryConfig.criticalFieldSet || new Set())],
+        networkScanLimit: Math.max(50, Number(config.endpointNetworkScanLimit || 600)),
+        limit: Math.max(1, Number(config.endpointSignalLimit || 30)),
+        suggestionLimit: Math.max(1, Number(config.endpointSuggestionLimit || 12))
       });
       const fingerprint = buildSiteFingerprint({ source, pageData });
 
@@ -447,7 +534,10 @@ export async function runProduct({ storage, config, s3Key }) {
           if (!isLikelyIndexableEndpointUrl(suggestion.url)) {
             continue;
           }
-          planner.enqueue(suggestion.url, `endpoint:${source.url}`, { forceApproved: true });
+          if (!isSafeManufacturerFollowupUrl(source, suggestion.url)) {
+            continue;
+          }
+          planner.enqueue(suggestion.url, `endpoint:${source.url}`);
         }
       }
 
@@ -559,6 +649,12 @@ export async function runProduct({ storage, config, s3Key }) {
           : anchorCheck.conflicts.length > 0
             ? 'minor_conflicts'
             : 'pass';
+      const manufacturerBrandMismatch =
+        source.role === 'manufacturer' &&
+        source.approvedDomain &&
+        Array.isArray(identity.criticalConflicts) &&
+        identity.criticalConflicts.includes('brand_mismatch') &&
+        !(identity.reasons || []).includes('brand_match');
       const parserHealth = computeParserHealth({
         source,
         mergedFieldCandidates,
@@ -585,6 +681,16 @@ export async function runProduct({ storage, config, s3Key }) {
         fingerprint,
         parserHealth
       });
+
+      if (manufacturerBrandMismatch) {
+        const removedCount = planner.blockHost(source.host, 'brand_mismatch');
+        logger.warn('manufacturer_host_blocked', {
+          host: source.host,
+          url: source.url,
+          reason: 'brand_mismatch',
+          removed_count: removedCount
+        });
+      }
 
       if (discoveryOnlySource) {
         logger.info('source_discovery_only', {
@@ -646,6 +752,91 @@ export async function runProduct({ storage, config, s3Key }) {
         candidate_source: source.candidateSource,
         llm_candidate_count: llmFieldCandidates.length
       });
+    }
+  };
+
+  try {
+    await processPlannerQueue();
+
+    const maxFollowupRounds = Math.max(0, Number(config.hypothesisAutoFollowupRounds || 0));
+    const followupPerRound = Math.max(1, Number(config.hypothesisFollowupUrlsPerRound || 12));
+    for (let round = 1; round <= maxFollowupRounds; round += 1) {
+      const elapsedSeconds = (Date.now() - startMs) / 1000;
+      if (elapsedSeconds >= config.maxRunSeconds) {
+        logger.warn('max_run_seconds_reached', { maxRunSeconds: config.maxRunSeconds });
+        break;
+      }
+
+      const provisional = buildProvisionalHypothesisQueue({
+        sourceResults,
+        categoryConfig,
+        fieldOrder,
+        anchors,
+        identityLock: job.identityLock || {},
+        productId,
+        category,
+        config,
+        requiredFields,
+        sourceIntelDomains: sourceIntel.data?.domains || {},
+        brand: job.identityLock?.brand || ''
+      });
+
+      const consideredUrls = new Set(
+        sourceResults
+          .map((source) => source.finalUrl || source.url)
+          .filter(Boolean)
+      );
+      const roundSeedUrls = [];
+      for (const suggestion of nextBestUrlsFromHypotheses({
+        hypothesisQueue: provisional.hypothesisQueue,
+        limit: followupPerRound * 4
+      })) {
+        const url = String(suggestion.url || '').trim();
+        if (!url || consideredUrls.has(url)) {
+          continue;
+        }
+        consideredUrls.add(url);
+        roundSeedUrls.push(url);
+        if (roundSeedUrls.length >= followupPerRound) {
+          break;
+        }
+      }
+
+      if (!roundSeedUrls.length) {
+        logger.info('hypothesis_followup_skipped', {
+          round,
+          reason: 'no_candidate_urls',
+          missing_required_count: provisional.missingRequiredFields.length,
+          critical_fields_remaining: provisional.criticalFieldsBelowPassTarget.length
+        });
+        break;
+      }
+
+      let enqueuedCount = 0;
+      for (const url of roundSeedUrls) {
+        if (planner.enqueue(url, `hypothesis_followup:${round}`)) {
+          enqueuedCount += 1;
+        }
+      }
+
+      if (!enqueuedCount) {
+        logger.info('hypothesis_followup_skipped', {
+          round,
+          reason: 'queue_rejected_all',
+          requested_urls: roundSeedUrls.length
+        });
+        break;
+      }
+
+      hypothesisFollowupRoundsExecuted += 1;
+      hypothesisFollowupSeededUrls += enqueuedCount;
+      logger.info('hypothesis_followup_round_started', {
+        round,
+        enqueued_urls: enqueuedCount,
+        missing_required_count: provisional.missingRequiredFields.length,
+        critical_fields_remaining: provisional.criticalFieldsBelowPassTarget.length
+      });
+      await processPlannerQueue();
     }
   } finally {
     await fetcher.stop();
@@ -823,6 +1014,7 @@ export async function runProduct({ storage, config, s3Key }) {
     provenance,
     sourceResults,
     sourceIntelDomains: sourceIntel.data?.domains || {},
+    brand: job.identityLock?.brand || identity.brand || '',
     criticalFieldSet: categoryConfig.criticalFieldSet,
     maxItems: Math.max(1, Number(config.maxHypothesisItems || 50))
   });
@@ -851,6 +1043,7 @@ export async function runProduct({ storage, config, s3Key }) {
     productId,
     runId,
     category,
+    run_profile: config.runProfile || 'standard',
     validated: gate.validated,
     reason: validatedReason,
     validated_reason: validatedReason,
@@ -894,6 +1087,16 @@ export async function runProduct({ storage, config, s3Key }) {
     source_registry: {
       override_key: categoryConfig.sources_override_key || null
     },
+    crawl_profile: {
+      max_run_seconds: config.maxRunSeconds,
+      max_urls_per_product: config.maxUrlsPerProduct,
+      max_manufacturer_urls_per_product: config.maxManufacturerUrlsPerProduct,
+      max_pages_per_domain: config.maxPagesPerDomain,
+      max_manufacturer_pages_per_domain: config.maxManufacturerPagesPerDomain,
+      endpoint_signal_limit: config.endpointSignalLimit,
+      endpoint_suggestion_limit: config.endpointSuggestionLimit,
+      endpoint_network_scan_limit: config.endpointNetworkScanLimit
+    },
     manufacturer_research: {
       attempted_sources: manufacturerSources.length,
       identity_matched_sources: manufacturerSources.filter((source) => source.identity?.match).length,
@@ -903,6 +1106,12 @@ export async function runProduct({ storage, config, s3Key }) {
     endpoint_mining: endpointMining,
     temporal_evidence: temporalEvidence,
     hypothesis_queue: hypothesisQueue,
+    hypothesis_followup: {
+      configured_rounds: Math.max(0, Number(config.hypothesisAutoFollowupRounds || 0)),
+      urls_per_round: Math.max(1, Number(config.hypothesisFollowupUrlsPerRound || 12)),
+      rounds_executed: hypothesisFollowupRoundsExecuted,
+      seeded_urls: hypothesisFollowupSeededUrls
+    },
     constraint_analysis: constraintAnalysis,
     field_reasoning: fieldReasoning,
     parser_health: {
@@ -917,6 +1126,7 @@ export async function runProduct({ storage, config, s3Key }) {
   logger.info('run_completed', {
     productId,
     runId,
+    run_profile: config.runProfile || 'standard',
     validated: summary.validated,
     validated_reason: summary.validated_reason,
     confidence,
@@ -924,6 +1134,8 @@ export async function runProduct({ storage, config, s3Key }) {
     coverage_overall: summary.coverage_overall,
     llm_candidates_added: llmCandidatesAccepted,
     hypothesis_queue_count: summary.hypothesis_queue.length,
+    hypothesis_followup_rounds: hypothesisFollowupRoundsExecuted,
+    hypothesis_followup_seeded_urls: hypothesisFollowupSeededUrls,
     contradiction_count: summary.constraint_analysis.contradiction_count,
     duration_ms: durationMs
   });

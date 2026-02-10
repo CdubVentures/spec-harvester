@@ -56,6 +56,33 @@ function tokenize(value) {
     .filter((token) => token.length >= 3);
 }
 
+const BRAND_HOST_HINTS = {
+  logitech: ['logitech', 'logitechg', 'logi'],
+  razer: ['razer'],
+  steelseries: ['steelseries'],
+  zowie: ['zowie', 'benq'],
+  benq: ['benq', 'zowie'],
+  finalmouse: ['finalmouse'],
+  lamzu: ['lamzu'],
+  pulsar: ['pulsar'],
+  corsair: ['corsair'],
+  glorious: ['glorious'],
+  endgame: ['endgamegear', 'endgame-gear']
+};
+
+function manufacturerHostHintsForBrand(brand) {
+  const hints = new Set(tokenize(brand));
+  const brandSlug = slug(brand);
+  for (const [key, aliases] of Object.entries(BRAND_HOST_HINTS)) {
+    if (brandSlug.includes(key) || hints.has(key)) {
+      for (const alias of aliases) {
+        hints.add(alias);
+      }
+    }
+  }
+  return [...hints];
+}
+
 function slug(value) {
   return String(value || '')
     .toLowerCase()
@@ -125,6 +152,34 @@ function decodeXmlEntities(value) {
     .replace(/&#39;/g, "'");
 }
 
+function urlContainsAnyToken(url, tokens) {
+  if (!tokens || !tokens.length) {
+    return false;
+  }
+  try {
+    const parsed = new URL(url);
+    const text = `${parsed.pathname || ''} ${parsed.search || ''}`.toLowerCase();
+    return tokens.some((token) => text.includes(String(token || '').toLowerCase()));
+  } catch {
+    return false;
+  }
+}
+
+function countTokenHits(text, tokens) {
+  const haystack = String(text || '').toLowerCase();
+  let hits = 0;
+  for (const token of tokens || []) {
+    const norm = String(token || '').toLowerCase().trim();
+    if (!norm) {
+      continue;
+    }
+    if (haystack.includes(norm)) {
+      hits += 1;
+    }
+  }
+  return hits;
+}
+
 export class SourcePlanner {
   constructor(job, config, categoryConfig, options = {}) {
     this.job = job;
@@ -139,6 +194,7 @@ export class SourcePlanner {
       .filter(Boolean);
     this.sourceIntelDomains = options.sourceIntel?.domains || {};
     this.brandKey = slug(job.identityLock?.brand || '');
+    this.brandHostHints = manufacturerHostHintsForBrand(job.identityLock?.brand || '');
 
     this.maxUrls = config.maxUrlsPerProduct;
     this.maxCandidateUrls = config.maxCandidateUrls;
@@ -161,6 +217,8 @@ export class SourcePlanner {
     this.candidateQueue = [];
 
     this.visitedUrls = new Set();
+    this.blockedHosts = new Set();
+    this.blockedHostReasons = {};
     this.approvedVisitedCount = 0;
     this.manufacturerVisitedCount = 0;
     this.nonManufacturerVisitedCount = 0;
@@ -186,6 +244,8 @@ export class SourcePlanner {
       }
     }
 
+    this.brandManufacturerHostSet = this.selectManufacturerHostsForBrand();
+
     this.brandTokens = [...new Set(tokenize(job.identityLock?.brand))];
     const genericModelTokens = new Set([
       'gaming',
@@ -196,9 +256,7 @@ export class SourcePlanner {
       'black',
       'white',
       'mini',
-      'ultra',
-      'superlight',
-      'pro'
+      'ultra'
     ]);
     this.modelTokens = [...new Set([
       ...tokenize(job.identityLock?.model),
@@ -208,6 +266,74 @@ export class SourcePlanner {
 
     this.seed(job.seedUrls || []);
     this.seedManufacturerDeepUrls();
+  }
+
+  manufacturerHostsFromConfig() {
+    const hosts = new Set();
+    for (const sourceHost of this.categoryConfig.sourceHosts || []) {
+      if (sourceHost.tierName === 'manufacturer') {
+        hosts.add(normalizeHost(sourceHost.host));
+      }
+    }
+    for (const host of this.preferred.manufacturerHosts || []) {
+      hosts.add(normalizeHost(host));
+    }
+    return hosts;
+  }
+
+  manufacturerHostScore(host) {
+    const normalizedHost = normalizeHost(host);
+    if (!normalizedHost) {
+      return 0;
+    }
+
+    let score = 0;
+    for (const hint of this.brandHostHints || []) {
+      if (!hint) {
+        continue;
+      }
+      if (normalizedHost.includes(hint)) {
+        score += 1.2;
+      }
+    }
+
+    const rootDomain = extractRootDomain(normalizedHost);
+    const domainIntel = this.sourceIntelDomains[rootDomain];
+    const brandIntel =
+      this.brandKey && domainIntel?.per_brand?.[this.brandKey]
+        ? domainIntel.per_brand[this.brandKey]
+        : null;
+    if (brandIntel) {
+      score += Math.max(0, Number.parseFloat(String(brandIntel.identity_match_rate || 0)) * 1.5);
+      score += Math.max(0, Number.parseFloat(String(brandIntel.fields_accepted_count || 0)) / 30);
+    }
+    return score;
+  }
+
+  selectManufacturerHostsForBrand() {
+    const candidates = [...this.manufacturerHostsFromConfig()].filter(Boolean);
+    if (!candidates.length) {
+      return new Set();
+    }
+    if (!this.brandHostHints.length) {
+      return new Set(candidates);
+    }
+
+    const scored = candidates
+      .map((host) => ({ host, score: this.manufacturerHostScore(host) }))
+      .filter((row) => row.score > 0)
+      .sort((a, b) => b.score - a.score || a.host.localeCompare(b.host));
+
+    if (!scored.length) {
+      return new Set(candidates);
+    }
+
+    const topScore = scored[0].score;
+    const selected = scored
+      .filter((row) => row.score >= Math.max(0.1, topScore * 0.45))
+      .slice(0, 5)
+      .map((row) => row.host);
+    return new Set(selected);
   }
 
   seedManufacturerDeepUrls() {
@@ -231,19 +357,15 @@ export class SourcePlanner {
     const encodedQuery = encodeURIComponent(queryText);
     const modelSlug = slug(this.job.identityLock?.model || this.job.productId || '');
 
-    const manufacturerHosts = new Set();
-    for (const sourceHost of this.categoryConfig.sourceHosts || []) {
-      if (sourceHost.tierName === 'manufacturer') {
-        manufacturerHosts.add(normalizeHost(sourceHost.host));
-      }
-    }
-    for (const host of this.preferred.manufacturerHosts || []) {
-      manufacturerHosts.add(normalizeHost(host));
-    }
+    const manufacturerHosts = new Set(this.brandManufacturerHostSet.size
+      ? [...this.brandManufacturerHostSet]
+      : [...this.manufacturerHostsFromConfig()]);
     for (const seedUrl of this.job.seedUrls || []) {
       const host = getHost(seedUrl);
       if (host && resolveTierNameForHost(host, this.categoryConfig) === 'manufacturer') {
-        manufacturerHosts.add(host);
+        if (!this.brandManufacturerHostSet.size || hostInSet(host, this.brandManufacturerHostSet)) {
+          manufacturerHosts.add(host);
+        }
       }
     }
 
@@ -254,6 +376,11 @@ export class SourcePlanner {
 
       const seeds = [
         `https://${host}/search?q=${encodedQuery}`,
+        `https://${host}/search?query=${encodedQuery}`,
+        `https://${host}/shop/search?q=${encodedQuery}`,
+        `https://${host}/products/${modelSlug}`,
+        `https://${host}/product/${modelSlug}`,
+        `https://${host}/gaming-mice/${modelSlug}`,
         `https://${host}/support/search?query=${encodedQuery}`,
         `https://${host}/support/${modelSlug}`,
         `https://${host}/downloads/${modelSlug}`,
@@ -271,13 +398,28 @@ export class SourcePlanner {
     }
   }
 
-  seed(urls) {
+  seed(urls, options = {}) {
+    const { forceBrandBypass = true } = options;
     for (const url of urls) {
       const host = getHost(url);
       if (host) {
         this.allowlistHosts.add(host);
       }
-      this.enqueue(url, 'seed', { forceApproved: true });
+      this.enqueue(url, 'seed', { forceApproved: true, forceBrandBypass });
+    }
+  }
+
+  seedLearning(urls) {
+    for (const url of urls || []) {
+      const modelMatch = this.modelTokens.length > 0 && urlContainsAnyToken(url, this.modelTokens);
+      const fallbackBrandMatch =
+        this.modelTokens.length === 0 &&
+        this.brandTokens.length > 0 &&
+        urlContainsAnyToken(url, this.brandTokens);
+      if (!modelMatch && !fallbackBrandMatch) {
+        continue;
+      }
+      this.enqueue(url, 'learning_seed', { forceApproved: true, forceBrandBypass: false });
     }
   }
 
@@ -308,43 +450,46 @@ export class SourcePlanner {
   }
 
   enqueue(url, discoveredFrom = 'unknown', options = {}) {
-    const { forceApproved = false, forceCandidate = false } = options;
+    const { forceApproved = false, forceCandidate = false, forceBrandBypass = false } = options;
 
     if (!url) {
-      return;
+      return false;
     }
 
     let parsed;
     try {
       parsed = new URL(url);
     } catch {
-      return;
+      return false;
     }
 
     if (!['http:', 'https:'].includes(parsed.protocol)) {
-      return;
+      return false;
     }
 
     const normalizedUrl = parsed.toString();
     if (this.visitedUrls.has(normalizedUrl)) {
-      return;
+      return false;
     }
 
     if (this.queue.find((item) => item.url === normalizedUrl)) {
-      return;
+      return false;
     }
 
     if (this.manufacturerQueue.find((item) => item.url === normalizedUrl)) {
-      return;
+      return false;
     }
 
     if (this.candidateQueue.find((item) => item.url === normalizedUrl)) {
-      return;
+      return false;
     }
 
     const host = normalizeHost(parsed.hostname);
     if (!host || isDeniedHost(host, this.categoryConfig)) {
-      return;
+      return false;
+    }
+    if (hostInSet(host, this.blockedHosts)) {
+      return false;
     }
 
     const approvedDomain = this.shouldUseApprovedQueue(host, forceApproved, forceCandidate);
@@ -352,6 +497,13 @@ export class SourcePlanner {
     const tier = resolveTierForHost(host, this.categoryConfig);
     const tierName = resolveTierNameForHost(host, this.categoryConfig);
     const role = inferRoleForHost(host, this.categoryConfig);
+    const manufacturerBrandRestricted =
+      role === 'manufacturer' &&
+      this.brandManufacturerHostSet.size > 0 &&
+      !hostInSet(host, this.brandManufacturerHostSet);
+    if (manufacturerBrandRestricted && !forceBrandBypass) {
+      return false;
+    }
     const totalApprovedPlanned =
       this.manufacturerQueue.length +
       this.queue.length +
@@ -361,23 +513,23 @@ export class SourcePlanner {
 
     if (approvedDomain) {
       if (totalApprovedPlanned >= this.maxUrls) {
-        return;
+        return false;
       }
 
       if (isManufacturerSource) {
         const plannedCount =
           countQueueHost(this.manufacturerQueue, host) + (this.manufacturerHostCounts.get(host) || 0);
         if (plannedCount >= this.maxManufacturerPagesPerDomain) {
-          return;
+          return false;
         }
         const manufacturerPlanned = this.manufacturerQueue.length + this.manufacturerVisitedCount;
         if (manufacturerPlanned >= this.maxManufacturerUrls) {
-          return;
+          return false;
         }
       } else {
         const plannedCount = countQueueHost(this.queue, host) + (this.hostCounts.get(host) || 0);
         if (plannedCount >= this.maxPagesPerDomain) {
-          return;
+          return false;
         }
         if (this.manufacturerReserveUrls > 0) {
           const reservedRemaining = Math.max(
@@ -389,7 +541,7 @@ export class SourcePlanner {
           const currentNonManufacturerPlan =
             this.queue.length + this.nonManufacturerVisitedCount;
           if (currentNonManufacturerPlan >= maxNonManufacturerPlan) {
-            return;
+            return false;
           }
         }
       }
@@ -415,20 +567,20 @@ export class SourcePlanner {
         this.queue.push(row);
       }
       this.sortApprovedQueue();
-      return;
+      return true;
     }
 
     if (!this.fetchCandidateSources) {
-      return;
+      return false;
     }
 
     if (this.candidateQueue.length + this.candidateVisitedCount >= this.maxCandidateUrls) {
-      return;
+      return false;
     }
 
     const domainCount = this.candidateHostCounts.get(host) || 0;
     if (domainCount >= this.maxPagesPerDomain) {
-      return;
+      return false;
     }
 
     this.candidateQueue.push({
@@ -455,6 +607,7 @@ export class SourcePlanner {
     });
 
     this.sortCandidateQueue();
+    return true;
   }
 
   hasNext() {
@@ -635,6 +788,11 @@ export class SourcePlanner {
     const effectivePath = localizedPath.pathname;
     const pathAndQuery = `${effectivePath || ''} ${parsed.search || ''}`.toLowerCase();
     const pathname = effectivePath.toLowerCase();
+    const modelTokenHits = countTokenHits(pathAndQuery, this.modelTokens);
+    const minModelHits = this.modelTokens.length >= 3 ? 2 : 1;
+    const hasModelToken = this.modelTokens.length > 0 && modelTokenHits >= minModelHits;
+    const hasBrandToken = this.brandTokens.some((token) => pathAndQuery.includes(token));
+
     if (/\.(css|js|svg|png|jpe?g|webp|gif|ico|woff2?|ttf|map|json)$/i.test(pathname)) {
       return false;
     }
@@ -657,17 +815,18 @@ export class SourcePlanner {
       '/store-locator',
       '/gift-card',
       '/forum',
-      '/forums'
+      '/forums',
+      '/shop/c/',
+      '/category/',
+      '/collections/'
     ];
-    if (negativeKeywords.some((keyword) => pathAndQuery.includes(keyword))) {
+    if (negativeKeywords.some((keyword) => pathAndQuery.includes(keyword)) && !hasModelToken) {
       return false;
     }
 
     if (isSitemapLikePath(pathname)) {
       return true;
     }
-
-    const hasModelToken = this.modelTokens.some((token) => pathAndQuery.includes(token));
     if (hasModelToken) {
       return true;
     }
@@ -678,8 +837,6 @@ export class SourcePlanner {
       'spec',
       'product',
       'products',
-      'gaming-mice',
-      'mice',
       'datasheet',
       'technical',
       'download',
@@ -689,8 +846,13 @@ export class SourcePlanner {
       if (hasModelToken) {
         return true;
       }
+      if (this.config.manufacturerBroadDiscovery && context.manufacturerContext) {
+        if (/\/products?\//.test(pathname) && !/\/shop\/c\//.test(pathname)) {
+          return true;
+        }
+      }
       if (this.modelTokens.length === 0) {
-        return this.brandTokens.some((token) => pathAndQuery.includes(token));
+        return hasBrandToken;
       }
     }
 
@@ -705,14 +867,36 @@ export class SourcePlanner {
         'technical',
         'download'
       ];
-      return (
-        manufacturerSignals.some((token) => pathAndQuery.includes(token)) &&
-        (
-          hasModelToken ||
-          this.brandTokens.some((token) => pathAndQuery.includes(token)) ||
-          this.modelTokens.length === 0
-        )
-      );
+      const hasManufacturerSignal = manufacturerSignals.some((token) => pathAndQuery.includes(token));
+      if (!hasManufacturerSignal) {
+        return false;
+      }
+
+      if (hasModelToken) {
+        return true;
+      }
+
+      if (this.modelTokens.length === 0) {
+        if (hasBrandToken) {
+          return true;
+        }
+        if (this.config.manufacturerBroadDiscovery) {
+          return (
+            pathAndQuery.includes('support') ||
+            pathAndQuery.includes('manual') ||
+            pathAndQuery.includes('spec') ||
+            pathAndQuery.includes('download')
+          );
+        }
+      }
+
+      if (this.config.manufacturerBroadDiscovery) {
+        return (
+          /\/products?\//.test(pathname) &&
+          !/\/shop\/c\//.test(pathname)
+        );
+      }
+      return false;
     }
 
     return false;
@@ -763,6 +947,30 @@ export class SourcePlanner {
 
   sortCandidateQueue() {
     this.candidateQueue.sort((a, b) => b.priorityScore - a.priorityScore || a.url.localeCompare(b.url));
+  }
+
+  blockHost(host, reason = 'blocked') {
+    const normalized = normalizeHost(host);
+    if (!normalized) {
+      return 0;
+    }
+
+    this.blockedHosts.add(normalized);
+    this.blockedHostReasons[normalized] = reason;
+
+    let removed = 0;
+    const filterFn = (row) => {
+      const shouldKeep = !hostInSet(row.host, this.blockedHosts);
+      if (!shouldKeep) {
+        removed += 1;
+      }
+      return shouldKeep;
+    };
+
+    this.manufacturerQueue = this.manufacturerQueue.filter(filterFn);
+    this.queue = this.queue.filter(filterFn);
+    this.candidateQueue = this.candidateQueue.filter(filterFn);
+    return removed;
   }
 
   getIntelBundle(rootDomain) {
@@ -900,6 +1108,9 @@ export class SourcePlanner {
       manufacturer_visited_count: this.manufacturerVisitedCount,
       non_manufacturer_visited_count: this.nonManufacturerVisitedCount,
       candidate_visited_count: this.candidateVisitedCount,
+      blocked_host_count: this.blockedHosts.size,
+      blocked_hosts: [...this.blockedHosts].slice(0, 50),
+      brand_manufacturer_hosts: [...this.brandManufacturerHostSet].slice(0, 20),
       robots_sitemaps_discovered: this.robotsSitemapsDiscovered,
       sitemap_urls_discovered: this.sitemapUrlsDiscovered,
       max_manufacturer_urls: this.maxManufacturerUrls,
