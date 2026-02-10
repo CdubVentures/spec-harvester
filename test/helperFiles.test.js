@@ -242,3 +242,59 @@ test('syncJobsFromActiveFiltering creates jobs and queue records once', async ()
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
+
+test('resolveHelperProductContext prefers no-variant supportive row when variant is not locked', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-helper-variant-'));
+  const helperRoot = path.join(tempRoot, 'helper_files');
+  const supportiveDir = path.join(helperRoot, 'mouse', 'accurate-supportive-product-information');
+  await fs.mkdir(supportiveDir, { recursive: true });
+
+  await fs.writeFile(
+    path.join(supportiveDir, 'trusted.json'),
+    JSON.stringify([
+      {
+        brand: 'Logitech',
+        model: 'G Pro X Superlight 2',
+        variant: 'SE',
+        weight: '60'
+      },
+      {
+        brand: 'Logitech',
+        model: 'G Pro X Superlight 2',
+        variant: '',
+        weight: '60'
+      }
+    ], null, 2),
+    'utf8'
+  );
+
+  try {
+    const config = {
+      helperFilesEnabled: true,
+      helperFilesRoot: helperRoot
+    };
+    const categoryConfig = mouseCategoryConfig();
+    const loaded = await loadHelperCategoryData({
+      config,
+      category: 'mouse',
+      categoryConfig,
+      forceRefresh: true
+    });
+    const context = resolveHelperProductContext({
+      helperData: loaded,
+      job: {
+        category: 'mouse',
+        identityLock: {
+          brand: 'Logitech',
+          model: 'G Pro X Superlight 2',
+          variant: ''
+        }
+      }
+    });
+
+    assert.equal(context.supportive_matches.length >= 2, true);
+    assert.equal(context.supportive_matches[0].variant, '');
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});

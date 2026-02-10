@@ -2,6 +2,7 @@ import { runProduct } from '../pipeline/runProduct.js';
 import { applyRunProfile } from '../config.js';
 import { loadCategoryConfig } from '../categories/loader.js';
 import { evaluateSearchLoopStop } from '../search/searchLoop.js';
+import { EventLogger } from '../logger.js';
 import {
   markQueueRunning,
   recordQueueRunResult,
@@ -184,6 +185,19 @@ export async function runUntilComplete({
   if (!productId) {
     throw new Error(`Job at ${s3key} is missing productId`);
   }
+  const logger = new EventLogger({
+    storage,
+    runtimeEventsKey: config.runtimeEventsKey || '_runtime/events.jsonl',
+    context: {
+      category,
+      productId
+    }
+  });
+  logger.info('queue_transition', {
+    from: 'none',
+    to: 'pending',
+    reason: 'run_until_complete_started'
+  });
 
   const categoryConfig = await loadCategoryConfig(category, { storage, config });
   const normalizedModeValue = normalizedMode(mode, config.accuracyMode || 'balanced');
@@ -223,6 +237,12 @@ export async function runUntilComplete({
       s3key,
       nextActionHint: roundHint
     });
+    logger.info('queue_transition', {
+      from: 'pending',
+      to: 'running',
+      round,
+      next_action_hint: roundHint
+    });
 
     const roundConfig = buildRoundConfig(config, {
       round,
@@ -246,6 +266,14 @@ export async function runUntilComplete({
       }
     });
     finalResult = roundResult;
+    logger.info('round_completed', {
+      round,
+      run_id: roundResult.runId,
+      validated: Boolean(roundResult.summary?.validated),
+      confidence: Number(roundResult.summary?.confidence || 0),
+      missing_required_count: (roundResult.summary?.missing_required_fields || []).length,
+      critical_missing_count: (roundResult.summary?.critical_fields_below_pass_target || []).length
+    });
 
     const progress = summaryProgress(roundResult.summary);
     const delta = calcProgressDelta(previousProgress, progress);
@@ -356,7 +384,14 @@ export async function runUntilComplete({
         next_action_hint: completed ? 'none' : 'manual_or_retry'
       }
     });
+    logger.info('queue_transition', {
+      from: 'running',
+      to: finalStatus,
+      reason: stopReason || (completed ? 'complete' : 'stopped')
+    });
   }
+
+  await logger.flush();
 
   return {
     s3key,

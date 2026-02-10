@@ -26,6 +26,56 @@ function normalizeHost(hostname) {
   return String(hostname || '').toLowerCase().replace(/^www\./, '');
 }
 
+function slug(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function tokenize(value) {
+  return String(value || '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/g)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3);
+}
+
+const BRAND_HOST_HINTS = {
+  logitech: ['logitech', 'logitechg', 'logi'],
+  razer: ['razer'],
+  steelseries: ['steelseries'],
+  zowie: ['zowie', 'benq'],
+  benq: ['benq', 'zowie'],
+  finalmouse: ['finalmouse'],
+  lamzu: ['lamzu'],
+  pulsar: ['pulsar'],
+  corsair: ['corsair'],
+  glorious: ['glorious'],
+  endgame: ['endgamegear', 'endgame-gear']
+};
+
+function manufacturerHostHintsForBrand(brand) {
+  const hints = new Set(tokenize(brand));
+  const brandSlug = slug(brand);
+  for (const [key, aliases] of Object.entries(BRAND_HOST_HINTS)) {
+    if (brandSlug.includes(key) || hints.has(key)) {
+      for (const alias of aliases) {
+        hints.add(alias);
+      }
+    }
+  }
+  return [...hints];
+}
+
+function manufacturerHostMatchesBrand(host, hints) {
+  const normalizedHost = normalizeHost(host);
+  if (!normalizedHost || !hints.length) {
+    return true;
+  }
+  return hints.some((hint) => hint && normalizedHost.includes(hint));
+}
+
 function classifyUrlCandidate(result, categoryConfig) {
   const parsed = new URL(result.url);
   const host = normalizeHost(parsed.hostname);
@@ -171,6 +221,10 @@ export async function discoverCandidateSources({
 
   if (canSearchInternet) {
     for (const query of queries.slice(0, queryLimit)) {
+      logger?.info?.('discovery_query_started', {
+        query,
+        provider: config.searchProvider
+      });
       const providerResults = await runSearchProviders({
         config,
         query,
@@ -179,6 +233,11 @@ export async function discoverCandidateSources({
       });
       rawResults.push(...providerResults.map((row) => ({ ...row, query })));
       searchAttempts.push({
+        query,
+        provider: config.searchProvider,
+        result_count: providerResults.length
+      });
+      logger?.info?.('discovery_query_completed', {
         query,
         provider: config.searchProvider,
         result_count: providerResults.length
@@ -199,6 +258,7 @@ export async function discoverCandidateSources({
   }
 
   const byUrl = new Map();
+  const manufacturerHostHints = manufacturerHostHintsForBrand(job.identityLock?.brand || '');
   for (const raw of rawResults) {
     try {
       const parsed = new URL(raw.url);
@@ -209,8 +269,16 @@ export async function discoverCandidateSources({
       if (!host || isDeniedHost(host, categoryConfig)) {
         continue;
       }
+      const classified = classifyUrlCandidate(raw, categoryConfig);
+      if (
+        classified.role === 'manufacturer' &&
+        manufacturerHostHints.length > 0 &&
+        !manufacturerHostMatchesBrand(classified.host, manufacturerHostHints)
+      ) {
+        continue;
+      }
       if (!byUrl.has(parsed.toString())) {
-        byUrl.set(parsed.toString(), classifyUrlCandidate(raw, categoryConfig));
+        byUrl.set(parsed.toString(), classified);
       }
     } catch {
       // ignore malformed URL
@@ -224,6 +292,10 @@ export async function discoverCandidateSources({
     fieldYieldMap: learning.fieldYield
   });
   const discovered = reranked.slice(0, discoveryCap);
+  logger?.info?.('discovery_results_reranked', {
+    discovered_count: discovered.length,
+    approved_count: discovered.filter((item) => item.approved_domain || item.approvedDomain).length
+  });
 
   const approvedOnly = discovered.filter((item) => item.approved_domain || item.approvedDomain);
   const candidateOnly = discovered.filter((item) => !(item.approved_domain || item.approvedDomain));

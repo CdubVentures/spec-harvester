@@ -319,6 +319,13 @@ export class SourcePlanner {
       return new Set(candidates);
     }
 
+    const strictMatches = candidates.filter((host) =>
+      this.brandHostHints.some((hint) => hint && host.includes(hint))
+    );
+    if (strictMatches.length > 0) {
+      return new Set(strictMatches);
+    }
+
     const scored = candidates
       .map((host) => ({ host, score: this.manufacturerHostScore(host) }))
       .filter((row) => row.score > 0)
@@ -399,7 +406,7 @@ export class SourcePlanner {
   }
 
   seed(urls, options = {}) {
-    const { forceBrandBypass = true } = options;
+    const { forceBrandBypass = false } = options;
     for (const url of urls) {
       const host = getHost(url);
       if (host) {

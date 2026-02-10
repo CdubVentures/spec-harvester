@@ -84,13 +84,26 @@ function normalizeState(category, input = {}) {
   return output;
 }
 
-export function queueStateKey({ storage, category }) {
+function modernQueueStateKey(category) {
+  return `_queue/${String(category || '').trim()}/state.json`;
+}
+
+function legacyQueueStateKey(storage, category) {
   return storage.resolveOutputKey('_queue', category, 'state.json');
+}
+
+export function queueStateKey({ storage, category }) {
+  const token = String(category || '').trim();
+  if (!token) {
+    return '_queue/unknown/state.json';
+  }
+  return modernQueueStateKey(token);
 }
 
 export async function loadQueueState({ storage, category }) {
   const key = queueStateKey({ storage, category });
-  const existing = await storage.readJsonOrNull(key);
+  const legacyKey = legacyQueueStateKey(storage, category);
+  const existing = (await storage.readJsonOrNull(key)) || (await storage.readJsonOrNull(legacyKey));
   return {
     key,
     state: normalizeState(category, existing || {})
@@ -99,11 +112,18 @@ export async function loadQueueState({ storage, category }) {
 
 export async function saveQueueState({ storage, category, state }) {
   const key = queueStateKey({ storage, category });
+  const legacyKey = legacyQueueStateKey(storage, category);
   const normalized = normalizeState(category, state);
   normalized.updated_at = nowIso();
+  const payload = Buffer.from(JSON.stringify(normalized, null, 2), 'utf8');
   await storage.writeObject(
     key,
-    Buffer.from(JSON.stringify(normalized, null, 2), 'utf8'),
+    payload,
+    { contentType: 'application/json' }
+  );
+  await storage.writeObject(
+    legacyKey,
+    payload,
     { contentType: 'application/json' }
   );
   return { key, state: normalized };

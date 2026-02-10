@@ -1,7 +1,7 @@
 import { buildRunId } from '../utils/common.js';
 import { loadCategoryConfig } from '../categories/loader.js';
 import { SourcePlanner, buildSourceSummary } from '../planner/sourcePlanner.js';
-import { PlaywrightFetcher, DryRunFetcher } from '../fetcher/playwrightFetcher.js';
+import { PlaywrightFetcher, DryRunFetcher, HttpFetcher } from '../fetcher/playwrightFetcher.js';
 import { extractCandidatesFromPage } from '../extractors/fieldExtractor.js';
 import { evaluateAnchorConflicts, mergeAnchorConflictLists } from '../validator/anchors.js';
 import { evaluateSourceIdentity, evaluateIdentityGate } from '../validator/identityGate.js';
@@ -14,6 +14,7 @@ import { evaluateValidationGate } from '../validator/qualityGate.js';
 import { runConsensusEngine } from '../scoring/consensusEngine.js';
 import { buildIdentityObject, buildAbortedNormalized, buildValidatedNormalized } from '../normalizer/mouseNormalizer.js';
 import { exportRunArtifacts } from '../exporter/exporter.js';
+import { writeFinalOutputs } from '../exporter/finalExporter.js';
 import { buildMarkdownSummary } from '../exporter/summaryWriter.js';
 import { EventLogger } from '../logger.js';
 import { createAdapterManager } from '../adapters/index.js';
@@ -29,6 +30,7 @@ import {
 import {
   extractCandidatesLLM
 } from '../llm/extractCandidatesLLM.js';
+import { retrieveGoldenExamples } from '../llm/goldenExamples.js';
 import {
   writeSummaryMarkdownLLM
 } from '../llm/writeSummaryLLM.js';
@@ -53,20 +55,66 @@ import { buildHypothesisQueue, nextBestUrlsFromHypotheses } from '../learning/hy
 import { appendCostLedgerEntry, readBillingSnapshot } from '../billing/costLedger.js';
 import { createBudgetGuard } from '../billing/budgetGuard.js';
 import { normalizeCostRates } from '../billing/costRates.js';
-import { updateCategoryBrain } from '../learning/categoryBrain.js';
+import { loadCategoryBrain, updateCategoryBrain } from '../learning/categoryBrain.js';
 import {
   applySupportiveFillToResult,
   buildSupportiveSyntheticSources,
   loadHelperCategoryData,
   resolveHelperProductContext
 } from '../helperFiles/index.js';
+import {
+  applyComponentLibraryPriors,
+  loadComponentLibrary,
+  updateComponentLibrary
+} from '../components/library.js';
+import { runDeterministicCritic } from '../validator/critic.js';
+import { buildTrafficLight } from '../validator/trafficLight.js';
 
-function bestIdentityFromSources(sourceResults) {
-  const sorted = [...sourceResults].sort((a, b) => {
+function normalizeIdentityToken(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function bestIdentityFromSources(sourceResults, identityLock = {}) {
+  const expectedVariant = normalizeIdentityToken(identityLock?.variant);
+  const identityMatched = (sourceResults || []).filter((source) => source.identity?.match);
+  const pool = identityMatched.length > 0 ? identityMatched : (sourceResults || []);
+  const sorted = [...pool].sort((a, b) => {
+    const aMatched = a.identity?.match ? 1 : 0;
+    const bMatched = b.identity?.match ? 1 : 0;
+    if (bMatched !== aMatched) {
+      return bMatched - aMatched;
+    }
     if ((b.identity?.score || 0) !== (a.identity?.score || 0)) {
       return (b.identity?.score || 0) - (a.identity?.score || 0);
     }
-    return a.tier - b.tier;
+
+    const aVariant = normalizeIdentityToken(a.identityCandidates?.variant);
+    const bVariant = normalizeIdentityToken(b.identityCandidates?.variant);
+    const variantScore = (variant) => {
+      if (expectedVariant) {
+        if (variant === expectedVariant) {
+          return 2;
+        }
+        if (variant && (variant.includes(expectedVariant) || expectedVariant.includes(variant))) {
+          return 1;
+        }
+        if (!variant) {
+          return 0.25;
+        }
+        return 0;
+      }
+      return variant ? 0 : 1;
+    };
+    const aVariantScore = variantScore(aVariant);
+    const bVariantScore = variantScore(bVariant);
+    if (bVariantScore !== aVariantScore) {
+      return bVariantScore - aVariantScore;
+    }
+
+    return (a.tier || 99) - (b.tier || 99);
   });
   return sorted[0]?.identityCandidates || {};
 }
@@ -459,6 +507,69 @@ function buildTopEvidenceReferences(provenance, limit = 60) {
   return rows;
 }
 
+function helperSupportsProvisionalFill(helperContext, identityLock = {}) {
+  const topMatch = helperContext?.supportive_matches?.[0] || helperContext?.active_match || null;
+  if (!topMatch) {
+    return false;
+  }
+
+  const expectedBrand = normalizeIdentityToken(identityLock?.brand);
+  const expectedModel = normalizeIdentityToken(identityLock?.model);
+  if (!expectedBrand || !expectedModel) {
+    return false;
+  }
+
+  const matchBrand = normalizeIdentityToken(topMatch.brand);
+  const matchModel = normalizeIdentityToken(topMatch.model);
+  if (matchBrand !== expectedBrand || matchModel !== expectedModel) {
+    return false;
+  }
+
+  const expectedVariant = normalizeIdentityToken(identityLock?.variant);
+  if (!expectedVariant) {
+    return true;
+  }
+
+  const matchVariant = normalizeIdentityToken(topMatch.variant);
+  if (!matchVariant) {
+    return true;
+  }
+
+  return (
+    matchVariant === expectedVariant ||
+    matchVariant.includes(expectedVariant) ||
+    expectedVariant.includes(matchVariant)
+  );
+}
+
+function emitFieldDecisionEvents({
+  logger,
+  fieldOrder,
+  normalized,
+  provenance,
+  fieldReasoning,
+  trafficLight
+}) {
+  for (const field of fieldOrder || []) {
+    const value = String(normalized?.fields?.[field] ?? 'unk');
+    const reasoning = fieldReasoning?.[field] || {};
+    const traffic = trafficLight?.by_field?.[field] || {};
+    const row = provenance?.[field] || {};
+
+    logger.info('field_decision', {
+      field,
+      value,
+      decision: value.toLowerCase() === 'unk' ? 'unknown' : 'accepted',
+      unknown_reason: reasoning.unknown_reason || null,
+      reasons: reasoning.reasons || [],
+      confidence: row.confidence || 0,
+      evidence_count: (row.evidence || []).length,
+      traffic_color: traffic.color || null,
+      traffic_reason: traffic.reason || null
+    });
+  }
+}
+
 function buildProvisionalHypothesisQueue({
   sourceResults,
   categoryConfig,
@@ -515,7 +626,13 @@ function buildProvisionalHypothesisQueue({
 
 export async function runProduct({ storage, config, s3Key, jobOverride = null, roundContext = null }) {
   const runId = buildRunId();
-  const logger = new EventLogger();
+  const logger = new EventLogger({
+    storage,
+    runtimeEventsKey: config.runtimeEventsKey || '_runtime/events.jsonl',
+    context: {
+      runId
+    }
+  });
   const startMs = Date.now();
 
   logger.info('run_started', { s3Key, runId, round: roundContext?.round ?? 0 });
@@ -523,12 +640,24 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
   const job = jobOverride || (await storage.readJson(s3Key));
   const productId = job.productId;
   const category = job.category || 'mouse';
+  logger.setContext({
+    category,
+    productId
+  });
   const categoryConfig = await loadCategoryConfig(category, { storage, config });
   const billingMonth = new Date().toISOString().slice(0, 7);
 
   const fieldOrder = categoryConfig.fieldOrder;
   const requiredFields = job.requirements?.requiredFields || categoryConfig.requiredFields;
   const llmTargetFields = resolveLlmTargetFields(job, categoryConfig);
+  const goldenExamples = config.llmEnabled
+    ? await retrieveGoldenExamples({
+      storage,
+      category,
+      job,
+      limit: 5
+    })
+    : [];
   const targets = resolveTargets(job, categoryConfig);
   const anchors = job.anchors || {};
   let helperData = {
@@ -579,6 +708,11 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       });
     }
   }
+  const categoryBrainLoaded = await loadCategoryBrain({
+    storage,
+    category
+  });
+  const learnedConstraints = categoryBrainLoaded?.artifacts?.constraints?.value || {};
 
   const adapterManager = createAdapterManager(config, logger);
   const sourceIntel = await loadSourceIntel({ storage, config, category });
@@ -599,12 +733,14 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
   }
 
   const adapterSeedUrls = adapterManager.collectSeedUrls({ job });
-  planner.seed(adapterSeedUrls);
-  planner.seed(helperContext.seed_urls || []);
+  planner.seed(adapterSeedUrls, { forceBrandBypass: false });
+  planner.seed(helperContext.seed_urls || [], { forceBrandBypass: false });
 
-  const fetcher = config.dryRun
+  let fetcher = config.dryRun
     ? new DryRunFetcher(config, logger)
     : new PlaywrightFetcher(config, logger);
+  let fetcherMode = config.dryRun ? 'dryrun' : 'playwright';
+  let fetcherStartFallbackReason = '';
 
   const sourceResults = [];
   const helperSupportiveSyntheticSources = config.helperSupportiveEnabled
@@ -621,6 +757,21 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
   const adapterArtifacts = [];
   let helperFilledFields = [];
   let helperMismatches = [];
+  let componentPriorFilledFields = [];
+  let componentPriorMatches = [];
+  let criticDecisions = {
+    accept: [],
+    reject: [],
+    unknown: []
+  };
+  let trafficLight = {
+    by_field: {},
+    counts: {
+      green: 0,
+      yellow: 0,
+      red: 0
+    }
+  };
   let llmCandidatesAccepted = 0;
   let llmSourcesUsed = 0;
   let hypothesisFollowupRoundsExecuted = 0;
@@ -691,12 +842,29 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     llmContext
   });
 
-  planner.seed(discoveryResult.approvedUrls || []);
+  planner.seed(discoveryResult.approvedUrls || [], { forceBrandBypass: false });
   if (discoveryResult.enabled && config.maxCandidateUrls > 0 && config.fetchCandidateSources) {
     planner.seedCandidates(discoveryResult.candidateUrls || []);
   }
 
-  await fetcher.start();
+  try {
+    await fetcher.start();
+  } catch (error) {
+    fetcherStartFallbackReason = error.message;
+    if (config.dryRun) {
+      throw error;
+    }
+    logger.warn('fetcher_start_failed', {
+      fetcher_mode: fetcherMode,
+      message: error.message
+    });
+    fetcher = new HttpFetcher(config, logger);
+    fetcherMode = 'http';
+    await fetcher.start();
+    logger.info('fetcher_fallback_enabled', {
+      fetcher_mode: fetcherMode
+    });
+  }
 
   const processPlannerQueue = async () => {
     while (planner.hasNext()) {
@@ -815,6 +983,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
           job,
           categoryConfig,
           evidencePack,
+          goldenExamples,
           targetFields: llmTargetFields,
           config,
           logger,
@@ -894,6 +1063,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         ts: new Date().toISOString(),
         status: pageData.status,
         finalUrl: pageData.finalUrl,
+        discoveryOnly: discoveryOnlySource,
         title: pageData.title,
         identity,
         identityCandidates: mergedIdentityCandidates,
@@ -903,6 +1073,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         endpointSignals: endpointIntel.endpointSignals,
         endpointSuggestions: endpointIntel.nextBestUrls,
         temporalSignals,
+        llmEvidencePack: evidencePack,
         fingerprint,
         parserHealth
       });
@@ -1109,8 +1280,10 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
 
   const identityGate = evaluateIdentityGate(sourceResults);
   const identityConfidence = identityGate.certainty;
-  const extractedIdentity = bestIdentityFromSources(sourceResults);
-  const identity = buildIdentityObject(job, extractedIdentity);
+  const extractedIdentity = bestIdentityFromSources(sourceResults, job.identityLock || {});
+  const identity = buildIdentityObject(job, extractedIdentity, {
+    allowDerivedVariant: Boolean(identityGate.validated)
+  });
 
   const sourceSummary = buildSourceSummary(sourceResults);
   const allAnchorConflicts = mergeAnchorConflictLists(sourceResults.map((s) => s.anchorCheck));
@@ -1133,6 +1306,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
   let fieldsBelowPassTarget;
   let criticalFieldsBelowPassTarget;
   let newValuesProposed;
+  const allowHelperProvisionalFill = helperSupportsProvisionalFill(helperContext, job.identityLock || {});
 
   if (!identityGate.validated || identityConfidence < 0.99) {
     normalized = buildAbortedNormalized({
@@ -1143,7 +1317,9 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       sourceSummary,
       notes: [
         'MODEL_AMBIGUITY_ALERT',
-        'Identity certainty below 99%: spec fields withheld.'
+        allowHelperProvisionalFill
+          ? 'Identity certainty below 99%: helper-assisted provisional fields allowed.'
+          : 'Identity certainty below 99%: spec fields withheld.'
       ],
       confidence: identityConfidence,
       completenessRequired: 0,
@@ -1190,7 +1366,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     newValuesProposed = consensus.newValuesProposed;
   }
 
-  if (config.helperSupportiveFillMissing && identityGate.validated) {
+  if (config.helperSupportiveFillMissing && (identityGate.validated || allowHelperProvisionalFill)) {
     const helperFill = applySupportiveFillToResult({
       helperContext,
       normalized,
@@ -1204,6 +1380,57 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     fieldsBelowPassTarget = helperFill.fields_below_pass_target || fieldsBelowPassTarget;
     criticalFieldsBelowPassTarget =
       helperFill.critical_fields_below_pass_target || criticalFieldsBelowPassTarget;
+    logger.info('helper_supportive_fill_applied', {
+      fields_filled: helperFilledFields.length,
+      identity_gate_validated: identityGate.validated,
+      provisional_mode: !identityGate.validated && allowHelperProvisionalFill
+    });
+  }
+
+  if (identityGate.validated) {
+    const componentLibrary = await loadComponentLibrary({ storage });
+    const componentPrior = applyComponentLibraryPriors({
+      normalized,
+      provenance,
+      library: componentLibrary,
+      fieldOrder,
+      logger
+    });
+    componentPriorFilledFields = componentPrior.filled_fields || [];
+    componentPriorMatches = componentPrior.matched_components || [];
+    if (componentPriorFilledFields.length > 0) {
+      const belowSet = new Set(fieldsBelowPassTarget || []);
+      const criticalSet = new Set(criticalFieldsBelowPassTarget || []);
+      for (const field of componentPriorFilledFields) {
+        belowSet.delete(field);
+        criticalSet.delete(field);
+      }
+      fieldsBelowPassTarget = [...belowSet];
+      criticalFieldsBelowPassTarget = [...criticalSet];
+    }
+  }
+
+  criticDecisions = runDeterministicCritic({
+    normalized,
+    provenance,
+    fieldReasoning: {},
+    categoryConfig,
+    constraints: learnedConstraints
+  });
+  if ((criticDecisions.reject || []).length > 0) {
+    const belowSet = new Set(fieldsBelowPassTarget || []);
+    const criticalSet = new Set(criticalFieldsBelowPassTarget || []);
+    for (const row of criticDecisions.reject || []) {
+      if (!row?.field) {
+        continue;
+      }
+      belowSet.add(row.field);
+      if (categoryConfig.criticalFieldSet.has(row.field)) {
+        criticalSet.add(row.field);
+      }
+    }
+    fieldsBelowPassTarget = [...belowSet];
+    criticalFieldsBelowPassTarget = [...criticalSet];
   }
 
   const completenessStats = computeCompletenessRequired(normalized, requiredFields);
@@ -1276,6 +1503,11 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     identityGateValidated: identityGate.validated,
     llmBudgetBlockedReason,
     sourceResults: hypothesisSourceResults
+  });
+  trafficLight = buildTrafficLight({
+    fieldOrder,
+    provenance,
+    fieldReasoning
   });
 
   const parserHealthRows = sourceResults
@@ -1355,6 +1587,17 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       supportive_mismatch_count: helperMismatches.length,
       supportive_mismatches: helperMismatches.slice(0, 50)
     },
+    components: {
+      prior_fields_filled_count: componentPriorFilledFields.length,
+      prior_fields_filled: componentPriorFilledFields,
+      matched_components: componentPriorMatches
+    },
+    critic: {
+      accept_count: (criticDecisions.accept || []).length,
+      reject_count: (criticDecisions.reject || []).length,
+      unknown_count: (criticDecisions.unknown || []).length,
+      decisions: criticDecisions
+    },
     llm: {
       enabled: Boolean(config.llmEnabled && config.llmApiKey),
       provider: config.llmProvider || 'openai',
@@ -1363,6 +1606,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       model_validate: config.llmEnabled ? config.llmModelValidate : null,
       target_field_count: llmTargetFields.length,
       target_fields: llmTargetFields.slice(0, 80),
+      golden_examples_count: goldenExamples.length,
       candidates_added: llmCandidatesAccepted,
       sources_with_llm_candidates: llmSourcesUsed,
       call_count_run: llmCallCount,
@@ -1383,6 +1627,8 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       override_key: categoryConfig.sources_override_key || null
     },
     crawl_profile: {
+      fetcher_mode: fetcherMode,
+      fetcher_fallback_reason: fetcherStartFallbackReason || null,
       max_run_seconds: config.maxRunSeconds,
       max_urls_per_product: config.maxUrlsPerProduct,
       max_manufacturer_urls_per_product: config.maxManufacturerUrlsPerProduct,
@@ -1409,6 +1655,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     },
     constraint_analysis: constraintAnalysis,
     field_reasoning: fieldReasoning,
+    traffic_light: trafficLight,
     top_evidence_references: buildTopEvidenceReferences(provenance, 100),
     parser_health: {
       source_count: parserHealthRows.length,
@@ -1436,6 +1683,11 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     helper_active_match: Boolean(helperContext.active_match),
     helper_supportive_matches: helperContext.supportive_matches?.length || 0,
     helper_supportive_fields_filled: helperFilledFields.length,
+    component_prior_fields_filled: componentPriorFilledFields.length,
+    critic_reject_count: (criticDecisions.reject || []).length,
+    traffic_green_count: trafficLight.counts.green,
+    traffic_yellow_count: trafficLight.counts.yellow,
+    traffic_red_count: trafficLight.counts.red,
     hypothesis_queue_count: summary.hypothesis_queue.length,
     hypothesis_followup_rounds: hypothesisFollowupRoundsExecuted,
     hypothesis_followup_seeded_urls: hypothesisFollowupSeededUrls,
@@ -1495,6 +1747,13 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     keys: categoryBrain.keys,
     promotion_update: categoryBrain.promotion_update
   };
+  const componentUpdate = await updateComponentLibrary({
+    storage,
+    normalized,
+    summary,
+    provenance
+  });
+  summary.component_library = componentUpdate;
 
   let learning = null;
   if (config.selfImproveEnabled) {
@@ -1535,6 +1794,28 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     rowTsv,
     writeMarkdownSummary: config.writeMarkdownSummary
   });
+  const finalExport = await writeFinalOutputs({
+    storage,
+    category,
+    productId,
+    runId,
+    normalized,
+    summary,
+    provenance,
+    trafficLight,
+    sourceResults
+  });
+  summary.final_export = finalExport;
+  emitFieldDecisionEvents({
+    logger,
+    fieldOrder,
+    normalized,
+    provenance,
+    fieldReasoning,
+    trafficLight
+  });
+
+  await logger.flush();
 
   return {
     job,
@@ -1544,6 +1825,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     runId,
     productId,
     exportInfo,
+    finalExport,
     learning,
     categoryBrain
   };

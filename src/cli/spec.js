@@ -40,6 +40,7 @@ function usage() {
     '  daemon [--imports-root <path>] [--category <category>|--all] [--mode aggressive|balanced] [--once] [--local]',
     '  billing-report [--month YYYY-MM] [--local]',
     '  learning-report --category <category> [--local]',
+    '  explain-unk --category <category> --brand <brand> --model <model> [--variant <variant>] [--product-id <id>] [--local]',
     '  test-s3 [--fixture <path>] [--s3key <key>] [--dry-run]',
     '  sources-plan --category <category> [--local]',
     '  sources-report --category <category> [--top <n>] [--top-paths <n>] [--local]',
@@ -64,6 +65,9 @@ function buildConfig(args) {
     writeMarkdownSummary: asBool(args['write-md'], true),
     localInputRoot: args['local-input-root'] || undefined,
     localOutputRoot: args['local-output-root'] || undefined,
+    outputMode: args['output-mode'] || undefined,
+    mirrorToS3: asBool(args['mirror-to-s3'], undefined),
+    mirrorToS3Input: asBool(args['mirror-to-s3-input'], undefined),
     discoveryEnabled: asBool(args['discovery-enabled'], undefined),
     searchProvider: args['search-provider'] || undefined,
     fetchCandidateSources: asBool(args['fetch-candidate-sources'], undefined),
@@ -334,7 +338,8 @@ async function commandRunOne(config, storage, args) {
     completeness_required_percent: result.summary.completeness_required_percent,
     coverage_overall_percent: result.summary.coverage_overall_percent,
     runBase: result.exportInfo.runBase,
-    latestBase: result.exportInfo.latestBase
+    latestBase: result.exportInfo.latestBase,
+    finalBase: result.finalExport?.final_base || null
   };
 }
 
@@ -420,7 +425,8 @@ async function commandRunAdHoc(config, storage, args) {
     completeness_required_percent: result.summary.completeness_required_percent,
     coverage_overall_percent: result.summary.coverage_overall_percent,
     runBase: result.exportInfo.runBase,
-    latestBase: result.exportInfo.latestBase
+    latestBase: result.exportInfo.latestBase,
+    finalBase: result.finalExport?.final_base || null
   };
 }
 
@@ -472,7 +478,13 @@ async function commandWatchImports(config, storage, args) {
   const category = args.category || null;
   const all = asBool(args.all, !category);
   const once = asBool(args.once, false);
-  const logger = new EventLogger();
+  const logger = new EventLogger({
+    storage,
+    runtimeEventsKey: config.runtimeEventsKey || '_runtime/events.jsonl',
+    context: {
+      category
+    }
+  });
   const result = await runWatchImports({
     storage,
     config,
@@ -482,6 +494,7 @@ async function commandWatchImports(config, storage, args) {
     once,
     logger
   });
+  await logger.flush();
   return {
     command: 'watch-imports',
     ...result,
@@ -495,7 +508,13 @@ async function commandDaemon(config, storage, args) {
   const all = asBool(args.all, !category);
   const mode = String(args.mode || config.accuracyMode || 'balanced').toLowerCase();
   const once = asBool(args.once, false);
-  const logger = new EventLogger();
+  const logger = new EventLogger({
+    storage,
+    runtimeEventsKey: config.runtimeEventsKey || '_runtime/events.jsonl',
+    context: {
+      category: category || 'all'
+    }
+  });
 
   const result = await runDaemon({
     storage,
@@ -507,6 +526,7 @@ async function commandDaemon(config, storage, args) {
     once,
     logger
   });
+  await logger.flush();
   return {
     command: 'daemon',
     ...result,
@@ -601,7 +621,13 @@ async function commandDiscover(config, storage, args) {
   }
   const allKeys = await storage.listInputKeys(category);
   const keys = await filterKeysByBrand(storage, allKeys, args.brand);
-  const logger = new EventLogger();
+  const logger = new EventLogger({
+    storage,
+    runtimeEventsKey: config.runtimeEventsKey || '_runtime/events.jsonl',
+    context: {
+      category
+    }
+  });
 
   const runs = [];
   for (const key of keys) {
@@ -630,6 +656,7 @@ async function commandDiscover(config, storage, args) {
       candidate_count: result.candidates.length
     });
   }
+  await logger.flush();
 
   return {
     command: 'discover',
@@ -792,6 +819,57 @@ async function commandLearningReport(_config, storage, args) {
   };
 }
 
+async function commandExplainUnk(_config, storage, args) {
+  const category = String(args.category || 'mouse').trim();
+  const brand = String(args.brand || '').trim();
+  const model = String(args.model || '').trim();
+  const variant = String(args.variant || '').trim();
+  const productId = String(
+    args['product-id'] ||
+    [category, slug(brand), slug(model), slug(variant)].filter(Boolean).join('-')
+  ).trim();
+
+  if (!productId) {
+    throw new Error('explain-unk requires --product-id or --category/--brand/--model');
+  }
+
+  const latestBase = storage.resolveOutputKey(category, productId, 'latest');
+  const summary = await storage.readJsonOrNull(`${latestBase}/summary.json`);
+  const normalized = await storage.readJsonOrNull(`${latestBase}/normalized.json`);
+  if (!summary && !normalized) {
+    throw new Error(`No latest run found for productId '${productId}' in category '${category}'`);
+  }
+
+  const fieldReasoning = summary?.field_reasoning || {};
+  const fields = normalized?.fields || {};
+  const unknownFields = [];
+  for (const [field, value] of Object.entries(fields)) {
+    if (String(value || '').trim().toLowerCase() !== 'unk') {
+      continue;
+    }
+    const row = fieldReasoning[field] || {};
+    unknownFields.push({
+      field,
+      unknown_reason: row.unknown_reason || 'not_found_after_search',
+      reasons: row.reasons || [],
+      contradictions: row.contradictions || []
+    });
+  }
+
+  return {
+    command: 'explain-unk',
+    category,
+    productId,
+    run_id: summary?.runId || summary?.run_id || null,
+    validated: Boolean(summary?.validated),
+    unknown_field_count: unknownFields.length,
+    unknown_fields: unknownFields,
+    searches_attempted: summary?.searches_attempted || [],
+    urls_fetched_count: (summary?.urls_fetched || []).length,
+    top_evidence_references: summary?.top_evidence_references || []
+  };
+}
+
 async function commandTestS3() {
   const output = await runS3Integration(process.argv.slice(3));
   return {
@@ -834,6 +912,8 @@ async function main() {
     output = await commandBillingReport(config, storage, args);
   } else if (command === 'learning-report') {
     output = await commandLearningReport(config, storage, args);
+  } else if (command === 'explain-unk') {
+    output = await commandExplainUnk(config, storage, args);
   } else if (command === 'test-s3') {
     output = await commandTestS3();
   } else if (command === 'sources-plan') {

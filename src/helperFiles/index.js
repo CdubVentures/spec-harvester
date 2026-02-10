@@ -65,7 +65,7 @@ function normalizeModel(value) {
 
 function normalizeModelLoose(value) {
   return normalizeModel(value)
-    .replace(/\b(mouse|gaming|wireless|wired|pro|ultra|max|mini|se|edition|series|version|aim|lab)\b/g, ' ')
+    .replace(/\b(mouse|gaming|wireless|wired|edition|series|version|aim|lab)\b/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -533,8 +533,23 @@ export function resolveHelperProductContext({
     const aVariant = normalizeVariant(a.variant);
     const bVariant = normalizeVariant(b.variant);
     const expectedVariant = normalizeVariant(identityLock.variant);
-    const aScore = expectedVariant && aVariant === expectedVariant ? 1 : aVariant ? 0.5 : 0;
-    const bScore = expectedVariant && bVariant === expectedVariant ? 1 : bVariant ? 0.5 : 0;
+    const variantScore = (variant) => {
+      if (expectedVariant) {
+        if (variant === expectedVariant) {
+          return 1;
+        }
+        if (variant && (variant.includes(expectedVariant) || expectedVariant.includes(variant))) {
+          return 0.7;
+        }
+        if (!variant) {
+          return 0.1;
+        }
+        return 0;
+      }
+      return variant ? 0 : 0.6;
+    };
+    const aScore = variantScore(aVariant);
+    const bScore = variantScore(bVariant);
     return bScore - aScore || a.source.localeCompare(b.source);
   });
 

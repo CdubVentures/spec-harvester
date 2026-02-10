@@ -89,6 +89,7 @@ export async function extractCandidatesLLM({
   job,
   categoryConfig,
   evidencePack,
+  goldenExamples = [],
   targetFields = null,
   config,
   logger,
@@ -148,9 +149,17 @@ export async function extractCandidatesLLM({
     schemaFields: categoryConfig.fieldOrder || [],
     targetFields: effectiveFieldOrder,
     anchors: job.anchors || {},
+    golden_examples: (goldenExamples || []).slice(0, 5),
     references: evidencePack.references || [],
     snippets: evidencePack.snippets || []
   };
+  logger?.info?.('llm_call_started', {
+    purpose: 'extract',
+    model: config.llmModelExtract,
+    provider: config.llmProvider || 'openai',
+    target_field_count: effectiveFieldOrder.length,
+    reference_count: (evidencePack.references || []).length
+  });
 
   try {
     const result = await callOpenAI({
@@ -177,6 +186,18 @@ export async function extractCandidatesLLM({
         if (typeof llmContext.recordUsage === 'function') {
           await llmContext.recordUsage(usageRow);
         }
+        logger?.info?.('llm_call_usage', {
+          purpose: 'extract',
+          provider: usageRow.provider,
+          model: usageRow.model,
+          prompt_tokens: usageRow.prompt_tokens,
+          completion_tokens: usageRow.completion_tokens,
+          cached_prompt_tokens: usageRow.cached_prompt_tokens || 0,
+          total_tokens: usageRow.total_tokens || 0,
+          cost_usd: usageRow.cost_usd,
+          evidence_chars: usageRow.evidence_chars || 0,
+          url_count: usageRow.url_count || 0
+        });
       },
       reasoningMode: Boolean(config.llmReasoningMode),
       reasoningBudget: Number(config.llmReasoningBudget || 0),
@@ -224,6 +245,12 @@ export async function extractCandidatesLLM({
       });
     }
 
+    logger?.info?.('llm_call_completed', {
+      purpose: 'extract',
+      model: config.llmModelExtract,
+      candidate_count: fieldCandidates.length,
+      conflict_count: conflicts.length
+    });
     return {
       identityCandidates,
       fieldCandidates,

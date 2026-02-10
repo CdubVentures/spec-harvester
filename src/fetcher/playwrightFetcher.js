@@ -155,6 +155,122 @@ export class PlaywrightFetcher {
   }
 }
 
+function extractHtmlTitle(html) {
+  const match = String(html || '').match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  return match ? String(match[1] || '').trim() : '';
+}
+
+async function fetchTextWithTimeout(url, timeoutMs, headers = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.max(1_000, Number(timeoutMs || 30_000)));
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      redirect: 'follow',
+      headers,
+      signal: controller.signal
+    });
+    const bodyText = await response.text();
+    return {
+      response,
+      bodyText
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export class HttpFetcher {
+  constructor(config, logger) {
+    this.config = config;
+    this.logger = logger;
+    this.hostLastAccess = new Map();
+  }
+
+  async start() {}
+
+  async stop() {}
+
+  async waitForHostSlot(host) {
+    const now = Date.now();
+    const last = this.hostLastAccess.get(host) || 0;
+    const delta = now - last;
+    if (delta < this.config.perHostMinDelayMs) {
+      await wait(this.config.perHostMinDelayMs - delta);
+    }
+    this.hostLastAccess.set(host, Date.now());
+  }
+
+  async fetch(source) {
+    await this.waitForHostSlot(source.host);
+
+    let result;
+    try {
+      result = await fetchTextWithTimeout(
+        source.url,
+        this.config.pageGotoTimeoutMs || 30_000,
+        {
+          'user-agent': this.config.userAgent || 'SpecHarvester/1.0',
+          accept: '*/*'
+        }
+      );
+    } catch (error) {
+      throw new Error(`HTTP fetch failed: ${error.message}`);
+    }
+
+    const { response, bodyText } = result;
+    const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+    const finalUrl = response.url || source.url;
+    const status = response.status || 0;
+    const html = bodyText || '';
+    const title = contentType.includes('text/html') ? extractHtmlTitle(html) : '';
+    const ldjsonBlocks = extractLdJsonBlocks(html);
+    const embeddedState = extractEmbeddedState(html);
+
+    const isJsonPayload =
+      contentType.includes('application/json') ||
+      contentType.includes('+json') ||
+      finalUrl.toLowerCase().endsWith('.json');
+
+    const networkResponses = [];
+    if (isJsonPayload || finalUrl.toLowerCase().includes('/graphql')) {
+      let jsonFull;
+      let jsonPreview = '';
+      try {
+        jsonFull = JSON.parse(bodyText);
+      } catch {
+        jsonPreview = String(bodyText || '').slice(0, 8_000);
+      }
+      networkResponses.push({
+        ts: new Date().toISOString(),
+        url: finalUrl,
+        status,
+        contentType: contentType || 'application/json',
+        isGraphQl: finalUrl.toLowerCase().includes('/graphql'),
+        classification: 'fetch_json',
+        boundedByteLen: Buffer.byteLength(String(bodyText || ''), 'utf8'),
+        truncated: false,
+        request_url: source.url,
+        request_method: 'GET',
+        resource_type: 'fetch',
+        jsonFull,
+        jsonPreview
+      });
+    }
+
+    return {
+      url: source.url,
+      finalUrl,
+      status,
+      title,
+      html,
+      ldjsonBlocks,
+      embeddedState,
+      networkResponses
+    };
+  }
+}
+
 export class DryRunFetcher {
   constructor(config, logger) {
     this.config = config;

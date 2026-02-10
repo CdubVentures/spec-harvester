@@ -24,6 +24,14 @@ function toPosixKey(...parts) {
     .replace(/\/+/g, '/');
 }
 
+function normalizeOutputMode(value, fallback = 'local') {
+  const token = String(value || '').trim().toLowerCase();
+  if (token === 'local' || token === 'dual' || token === 's3') {
+    return token;
+  }
+  return fallback;
+}
+
 class S3Storage {
   constructor(config) {
     this.bucket = config.s3Bucket;
@@ -131,6 +139,16 @@ class S3Storage {
         ContentEncoding: metadata.contentEncoding,
         CacheControl: metadata.cacheControl
       })
+    );
+  }
+
+  async appendText(key, text, metadata = {}) {
+    const existing = await this.readTextOrNull(key);
+    const next = `${existing || ''}${String(text || '')}`;
+    await this.writeObject(
+      key,
+      Buffer.from(next, 'utf8'),
+      metadata
     );
   }
 
@@ -268,6 +286,12 @@ class LocalStorage {
     await fs.writeFile(fullPath, body);
   }
 
+  async appendText(key, text) {
+    const fullPath = this.resolveLocalPath(key);
+    await fs.mkdir(path.dirname(fullPath), { recursive: true });
+    await fs.appendFile(fullPath, String(text || ''), 'utf8');
+  }
+
   async objectExists(key) {
     const fullPath = this.resolveLocalPath(key);
     try {
@@ -290,9 +314,129 @@ class LocalStorage {
   }
 }
 
+class DualMirroredStorage {
+  constructor(config) {
+    this.config = config;
+    this.local = new LocalStorage(config);
+    this.s3 = new S3Storage(config);
+    this.inputPrefix = config.s3InputPrefix || 'specs/inputs';
+    this.outputPrefix = config.s3OutputPrefix || 'specs/outputs';
+    this.mirrorOutputEnabled = Boolean(config.mirrorToS3);
+    this.mirrorInputEnabled = Boolean(config.mirrorToS3Input && config.mirrorToS3);
+    this._mirrorErrors = 0;
+  }
+
+  mapMirrorKey(key) {
+    const token = String(key || '').replace(/\\/g, '/');
+    if (!token) {
+      return '';
+    }
+    if (token.startsWith(`${this.inputPrefix}/`) || token === this.inputPrefix) {
+      if (!this.mirrorInputEnabled) {
+        return '';
+      }
+      return token;
+    }
+    if (token.startsWith(`${this.outputPrefix}/`) || token === this.outputPrefix) {
+      if (!this.mirrorOutputEnabled) {
+        return '';
+      }
+      return token;
+    }
+    if (!this.mirrorOutputEnabled) {
+      return '';
+    }
+    return toPosixKey(this.outputPrefix, token);
+  }
+
+  async mirrorWriteObject(key, body, metadata = {}) {
+    const mirrorKey = this.mapMirrorKey(key);
+    if (!mirrorKey) {
+      return;
+    }
+    try {
+      await this.s3.writeObject(mirrorKey, body, metadata);
+    } catch (error) {
+      this._mirrorErrors += 1;
+      process.stderr.write(
+        `[spec-harvester] mirror_write_failed key=${mirrorKey} message=${error.message}\n`
+      );
+    }
+  }
+
+  async mirrorAppendText(key, text, metadata = {}) {
+    const mirrorKey = this.mapMirrorKey(key);
+    if (!mirrorKey) {
+      return;
+    }
+    try {
+      await this.s3.appendText(mirrorKey, text, metadata);
+    } catch (error) {
+      this._mirrorErrors += 1;
+      process.stderr.write(
+        `[spec-harvester] mirror_append_failed key=${mirrorKey} message=${error.message}\n`
+      );
+    }
+  }
+
+  async listInputKeys(category) {
+    return this.local.listInputKeys(category);
+  }
+
+  async listKeys(prefix) {
+    return this.local.listKeys(prefix);
+  }
+
+  async readJson(key) {
+    return this.local.readJson(key);
+  }
+
+  async readText(key) {
+    return this.local.readText(key);
+  }
+
+  async readJsonOrNull(key) {
+    return this.local.readJsonOrNull(key);
+  }
+
+  async readTextOrNull(key) {
+    return this.local.readTextOrNull(key);
+  }
+
+  async writeObject(key, body, metadata = {}) {
+    await this.local.writeObject(key, body, metadata);
+    await this.mirrorWriteObject(key, body, metadata);
+  }
+
+  async appendText(key, text, metadata = {}) {
+    await this.local.appendText(key, text, metadata);
+    await this.mirrorAppendText(key, text, metadata);
+  }
+
+  async objectExists(key) {
+    return this.local.objectExists(key);
+  }
+
+  resolveOutputKey(...parts) {
+    return this.local.resolveOutputKey(...parts);
+  }
+
+  resolveInputKey(...parts) {
+    return this.local.resolveInputKey(...parts);
+  }
+}
+
 export function createStorage(config) {
-  if (config.localMode) {
+  const mode = normalizeOutputMode(
+    config.outputMode || (config.localMode ? 'local' : 's3'),
+    config.localMode ? 'local' : 's3'
+  );
+
+  if (mode === 'local') {
     return new LocalStorage(config);
+  }
+  if (mode === 'dual') {
+    return new DualMirroredStorage(config);
   }
   return new S3Storage(config);
 }

@@ -295,6 +295,31 @@ test('source planner manufacturer deep seeds are brand-targeted', () => {
   assert.deepEqual(stats.brand_manufacturer_hosts, ['logitechg.com']);
 });
 
+test('source planner does not bypass brand manufacturer filtering for seeded discovery URLs', () => {
+  const categoryConfig = {
+    sourceHosts: [
+      { host: 'razer.com', tierName: 'manufacturer' },
+      { host: 'logitechg.com', tierName: 'manufacturer' }
+    ],
+    denylist: []
+  };
+  const planner = new SourcePlanner(
+    {
+      seedUrls: [],
+      preferredSources: {},
+      identityLock: { brand: 'Logitech', model: 'G Pro X Superlight 2' },
+      productId: 'mouse-logitech-g-pro-x-superlight-2'
+    },
+    makeConfig({ manufacturerDeepResearchEnabled: false, fetchCandidateSources: false }),
+    categoryConfig
+  );
+
+  planner.seed(['https://razer.com/specs/g-pro-x-superlight-2']);
+  const stats = planner.getStats();
+  assert.equal(stats.manufacturer_queue_count, 0);
+  assert.equal(stats.brand_manufacturer_hosts.includes('logitechg.com'), true);
+});
+
 test('source planner can block a mismatched manufacturer host and remove queued URLs', () => {
   const planner = new SourcePlanner(
     {

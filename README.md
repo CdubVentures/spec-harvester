@@ -23,12 +23,32 @@ Commands:
 - `daemon [--imports-root <path>] [--category <category>|--all] [--mode aggressive|balanced] [--once]`
 - `billing-report [--month YYYY-MM]`
 - `learning-report --category <category>`
+- `explain-unk --category <category> --brand <brand> --model <model> [--variant <variant>] [--product-id <id>]`
 - `test-s3 [--fixture <path>] [--s3key <key>] [--dry-run]`
 - `sources-plan --category mouse`
 - `sources-report --category mouse [--top <n>]`
 - `benchmark --category mouse [--fixture <path>] [--max-cases <n>]`
 - `rebuild-index --category mouse`
 - `intel-graph-api --category mouse [--host <host>] [--port <port>]`
+
+## Local-First Output Mode
+
+The stack is now local-first by default:
+
+- `OUTPUT_MODE=dual` (default): local source-of-truth + best-effort S3 mirror
+- `OUTPUT_MODE=local`: local only
+- `OUTPUT_MODE=s3`: direct S3 mode
+
+Key env vars:
+
+- `LOCAL_INPUT_ROOT=fixtures/s3`
+- `LOCAL_OUTPUT_ROOT=out`
+- `MIRROR_TO_S3=true|false`
+- `MIRROR_TO_S3_INPUT=true|false` (optional job-input mirror)
+
+Runtime events stream:
+
+- `<LOCAL_OUTPUT_ROOT>/_runtime/events.jsonl`
 
 ## Category Config Layout
 
@@ -114,6 +134,29 @@ Learning artifacts:
 - `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_billing/monthly/YYYY-MM.json`
 - `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_billing/monthly/YYYY-MM.txt` (human-readable digest)
 - `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_billing/latest.txt` (latest digest pointer)
+
+## Final Site Layout (Local + Mirror)
+
+Final site-ready outputs are written to:
+
+- `<LOCAL_OUTPUT_ROOT>/final/<category>/<brand_slug>/<model_slug>/<variant_slug_optional>/`
+
+Files:
+
+- `spec.json`
+- `summary.json`
+- `provenance.json`
+- `traffic_light.json`
+- `meta.json`
+- `history/runs.jsonl`
+- `evidence/evidence_pack.json`
+- `evidence/sources.jsonl`
+
+Debug run artifacts are also written to:
+
+- `<LOCAL_OUTPUT_ROOT>/runs/<category>/<productId>/<runId>/...`
+
+When `OUTPUT_MODE=dual` and `MIRROR_TO_S3=true`, these paths are mirrored best-effort to S3 under `S3_OUTPUT_PREFIX`.
 
 ## Environment Variables
 
@@ -203,8 +246,12 @@ Local toggles:
 
 - `LOCAL_MODE=true|false`
 - `DRY_RUN=true|false`
-- `LOCAL_S3_ROOT=fixtures/s3`
+- `LOCAL_INPUT_ROOT=fixtures/s3` (legacy alias: `LOCAL_S3_ROOT`)
 - `LOCAL_OUTPUT_ROOT=out`
+- `OUTPUT_MODE=local|dual|s3` (default `dual`)
+- `MIRROR_TO_S3=true|false` (default `true` when AWS creds exist)
+- `MIRROR_TO_S3_INPUT=true|false` (default `false`)
+- `RUNTIME_EVENTS_KEY=_runtime/events.jsonl`
 - `WRITE_MARKDOWN_SUMMARY=true|false`
 - `ALLOW_BELOW_PASS_TARGET_FILL=true|false` (default `false`)
 - `SELF_IMPROVE_ENABLED=true|false` (default `true`)
@@ -325,7 +372,39 @@ Billing and learning reports:
 ```bash
 node src/cli/spec.js billing-report --month 2026-02 --local
 node src/cli/spec.js learning-report --category mouse --local
+node src/cli/spec.js explain-unk --category mouse --brand Logitech --model "G Pro X Superlight 2" --local
 ```
+
+## Python GUI Dashboard
+
+Streamlit dashboard:
+
+```bash
+pip install -r requirements.txt
+streamlit run tools/gui/app.py
+```
+
+Windows double-click launcher:
+
+- Use `SpecFactoryGUI.exe` in repo root.
+- It starts `tools/gui/app.py` and reads/writes the same local `out/` artifacts.
+
+Rebuild the `.exe`:
+
+```powershell
+python -m pip install --upgrade streamlit pyinstaller
+python -m PyInstaller --noconfirm --onefile --name SpecFactoryGUI tools\gui\launch_gui.py
+Copy-Item .\dist\SpecFactoryGUI.exe .\SpecFactoryGUI.exe -Force
+```
+
+The dashboard provides:
+
+- live tail of `_runtime/events.jsonl`
+- queue status view
+- one-click run actions (`run-ad-hoc`, `run-until-complete`, `daemon`)
+- billing rollups
+- learning artifact snapshot
+- component library growth counters
 
 Run batch with scheduling strategy:
 

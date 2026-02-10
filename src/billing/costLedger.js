@@ -22,24 +22,44 @@ function dayFromTs(ts = nowIso()) {
   return String(ts).slice(0, 10);
 }
 
-function ledgerKey(storage, month) {
+function legacyLedgerKey(storage, month) {
   return storage.resolveOutputKey('_billing', 'ledger', `${month}.jsonl`);
 }
 
-function flatLedgerKey(storage) {
+function legacyFlatLedgerKey(storage) {
   return storage.resolveOutputKey('_billing', 'ledger.jsonl');
 }
 
-function monthlyRollupKey(storage, month) {
+function legacyMonthlyRollupKey(storage, month) {
   return storage.resolveOutputKey('_billing', 'monthly', `${month}.json`);
 }
 
-function monthlyDigestKey(storage, month) {
+function legacyMonthlyDigestKey(storage, month) {
   return storage.resolveOutputKey('_billing', 'monthly', `${month}.txt`);
 }
 
-function latestDigestKey(storage) {
+function legacyLatestDigestKey(storage) {
   return storage.resolveOutputKey('_billing', 'latest.txt');
+}
+
+function ledgerKey(_storage, month) {
+  return `_billing/ledger/${month}.jsonl`;
+}
+
+function flatLedgerKey(_storage) {
+  return '_billing/ledger.jsonl';
+}
+
+function monthlyRollupKey(_storage, month) {
+  return `_billing/monthly/${month}.json`;
+}
+
+function monthlyDigestKey(_storage, month) {
+  return `_billing/monthly/${month}.txt`;
+}
+
+function latestDigestKey(_storage) {
+  return '_billing/latest.txt';
 }
 
 function formatUsd(value) {
@@ -348,6 +368,8 @@ async function writeBillingDigest({
   });
   const digestKey = monthlyDigestKey(storage, month);
   const latestKey = latestDigestKey(storage);
+  const legacyDigestKey = legacyMonthlyDigestKey(storage, month);
+  const legacyLatestKey = legacyLatestDigestKey(storage);
   await storage.writeObject(
     digestKey,
     Buffer.from(text, 'utf8'),
@@ -358,27 +380,49 @@ async function writeBillingDigest({
     Buffer.from(text, 'utf8'),
     { contentType: 'text/plain; charset=utf-8' }
   );
+  await storage.writeObject(
+    legacyDigestKey,
+    Buffer.from(text, 'utf8'),
+    { contentType: 'text/plain; charset=utf-8' }
+  );
+  await storage.writeObject(
+    legacyLatestKey,
+    Buffer.from(text, 'utf8'),
+    { contentType: 'text/plain; charset=utf-8' }
+  );
   return {
     digestKey,
+    legacyDigestKey,
     latestDigestKey: latestKey
   };
 }
 
 export async function readMonthlyRollup({ storage, month }) {
   const key = monthlyRollupKey(storage, month);
-  return (await storage.readJsonOrNull(key)) || emptyRollup(month);
+  const legacyKey = legacyMonthlyRollupKey(storage, month);
+  return (await storage.readJsonOrNull(key)) ||
+    (await storage.readJsonOrNull(legacyKey)) ||
+    emptyRollup(month);
 }
 
 export async function readLedgerMonth({ storage, month }) {
   const key = ledgerKey(storage, month);
-  const text = await storage.readTextOrNull(key);
+  const legacyKey = legacyLedgerKey(storage, month);
+  const text = await storage.readTextOrNull(key) ||
+    await storage.readTextOrNull(legacyKey);
   return parseLedgerText(text);
 }
 
 export async function writeMonthlyRollup({ storage, month, rollup }) {
   const key = monthlyRollupKey(storage, month);
+  const legacyKey = legacyMonthlyRollupKey(storage, month);
   await storage.writeObject(
     key,
+    Buffer.from(JSON.stringify(rollup, null, 2), 'utf8'),
+    { contentType: 'application/json' }
+  );
+  await storage.writeObject(
+    legacyKey,
     Buffer.from(JSON.stringify(rollup, null, 2), 'utf8'),
     { contentType: 'application/json' }
   );
@@ -397,8 +441,11 @@ export async function appendCostLedgerEntry({
   const normalized = normalizeEntry(entry);
   const month = monthFromTs(normalized.ts);
   const key = ledgerKey(storage, month);
+  const legacyKey = legacyLedgerKey(storage, month);
   const flatKey = flatLedgerKey(storage);
-  const previous = await storage.readTextOrNull(key);
+  const legacyFlatKey = legacyFlatLedgerKey(storage);
+  const previous = await storage.readTextOrNull(key) ||
+    await storage.readTextOrNull(legacyKey);
   const existingRows = parseLedgerText(previous);
   existingRows.push(normalized);
   await storage.writeObject(
@@ -406,11 +453,22 @@ export async function appendCostLedgerEntry({
     Buffer.from(serializeLedgerRows(existingRows), 'utf8'),
     { contentType: 'application/x-ndjson' }
   );
-  const previousFlat = await storage.readTextOrNull(flatKey);
+  await storage.writeObject(
+    legacyKey,
+    Buffer.from(serializeLedgerRows(existingRows), 'utf8'),
+    { contentType: 'application/x-ndjson' }
+  );
+  const previousFlat = await storage.readTextOrNull(flatKey) ||
+    await storage.readTextOrNull(legacyFlatKey);
   const flatRows = parseLedgerText(previousFlat);
   flatRows.push(normalized);
   await storage.writeObject(
     flatKey,
+    Buffer.from(serializeLedgerRows(flatRows), 'utf8'),
+    { contentType: 'application/x-ndjson' }
+  );
+  await storage.writeObject(
+    legacyFlatKey,
     Buffer.from(serializeLedgerRows(flatRows), 'utf8'),
     { contentType: 'application/x-ndjson' }
   );
@@ -429,7 +487,9 @@ export async function appendCostLedgerEntry({
   return {
     entry: normalized,
     ledgerKey: key,
+    legacyLedgerKey: legacyKey,
     flatLedgerKey: flatKey,
+    legacyFlatLedgerKey: legacyFlatKey,
     monthlyRollupKey: rollupKey,
     digestKey: digest.digestKey,
     latestDigestKey: digest.latestDigestKey

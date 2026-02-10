@@ -26,7 +26,30 @@ function tokenOverlapScore(expectedTokens, candidateText) {
 }
 
 function likelyProductSpecificSource(source) {
-  const url = String(source?.url || '').toLowerCase();
+  const rawUrl = String(source?.url || '');
+  const url = rawUrl.toLowerCase();
+  try {
+    const parsed = new URL(rawUrl);
+    const path = parsed.pathname.toLowerCase();
+    const query = parsed.search.toLowerCase();
+    const categoryHubSignals = [
+      '/products/gaming-mice',
+      '/products/mice',
+      '/shop/c/',
+      '/search',
+      '/sitemap',
+      '/robots.txt'
+    ];
+    if (categoryHubSignals.some((token) => path.includes(token))) {
+      return false;
+    }
+    if (query.includes('q=') || query.includes('query=')) {
+      return false;
+    }
+  } catch {
+    // continue with heuristic fallback
+  }
+
   const title = normalizeToken(source?.title || '');
   const signals = [
     '/product',
@@ -102,7 +125,7 @@ function dimensionConflict(values) {
 
 function buildIdentityCriticalContradictions(sources) {
   const contradictions = [];
-  const accepted = sources.filter((s) => s.identity?.match);
+  const accepted = sources.filter((s) => s.identity?.match && !s.discoveryOnly);
 
   const connectionValues = new Set(
     accepted
@@ -276,6 +299,7 @@ export function evaluateSourceIdentity(source, identityLock = {}) {
 export function evaluateIdentityGate(sourceResults) {
   const accepted = sourceResults.filter(
     (s) =>
+      !s.discoveryOnly &&
       s.identity?.match &&
       (s.anchorCheck?.majorConflicts || []).length === 0 &&
       s.approvedDomain
@@ -292,11 +316,16 @@ export function evaluateIdentityGate(sourceResults) {
   );
 
   const directContradictions = sourceResults
+    .filter((s) => !s.discoveryOnly)
     .filter((s) => (s.identity?.criticalConflicts || []).length > 0)
     .filter((s) =>
       (s.identity?.score || 0) >= 0.45 ||
       (s.identity?.reasons || []).includes('model_match') ||
-      likelyProductSpecificSource(s)
+      (
+        (s.identity?.reasons || []).includes('brand_match') &&
+        (s.identity?.reasons || []).includes('variant_match') &&
+        likelyProductSpecificSource(s)
+      )
     )
     .flatMap((s) =>
       (s.identity?.criticalConflicts || []).map((conflict) => ({

@@ -28,6 +28,21 @@ function parseBoolEnv(name, defaultValue = false) {
   return norm === '1' || norm === 'true' || norm === 'yes' || norm === 'on';
 }
 
+function hasS3EnvCreds() {
+  return Boolean(
+    process.env.AWS_ACCESS_KEY_ID &&
+    process.env.AWS_SECRET_ACCESS_KEY
+  );
+}
+
+function normalizeOutputMode(value, fallback = 'dual') {
+  const token = String(value || '').trim().toLowerCase();
+  if (token === 'local' || token === 'dual' || token === 's3') {
+    return token;
+  }
+  return fallback;
+}
+
 function normalizeBaseUrl(value) {
   return String(value || '').trim().replace(/\/+$/, '');
 }
@@ -206,6 +221,9 @@ export function loadConfig(overrides = {}) {
     (hasDeepSeekKey ? 'https://api.deepseek.com' : 'https://api.openai.com');
   const defaultModel = process.env.LLM_MODEL_EXTRACT || (hasDeepSeekKey ? 'deepseek-reasoner' : 'gpt-4.1-mini');
   const timeoutMs = parseIntEnv('LLM_TIMEOUT_MS', parseIntEnv('OPENAI_TIMEOUT_MS', 40_000));
+  const envOutputMode = normalizeOutputMode(process.env.OUTPUT_MODE || 'dual', 'dual');
+  const hasS3Creds = hasS3EnvCreds();
+  const defaultMirrorToS3 = envOutputMode !== 'local' && hasS3Creds;
 
   const cfg = {
     awsRegion: process.env.AWS_REGION || 'us-east-2',
@@ -229,8 +247,12 @@ export function loadConfig(overrides = {}) {
       'Mozilla/5.0 (compatible; EGSpecHarvester/1.0; +https://eggear.com)',
     localMode: parseBoolEnv('LOCAL_MODE', false),
     dryRun: parseBoolEnv('DRY_RUN', false),
-    localInputRoot: process.env.LOCAL_S3_ROOT || 'fixtures/s3',
+    outputMode: envOutputMode,
+    mirrorToS3: parseBoolEnv('MIRROR_TO_S3', defaultMirrorToS3),
+    mirrorToS3Input: parseBoolEnv('MIRROR_TO_S3_INPUT', false),
+    localInputRoot: process.env.LOCAL_INPUT_ROOT || process.env.LOCAL_S3_ROOT || 'fixtures/s3',
     localOutputRoot: process.env.LOCAL_OUTPUT_ROOT || 'out',
+    runtimeEventsKey: process.env.RUNTIME_EVENTS_KEY || '_runtime/events.jsonl',
     writeMarkdownSummary: parseBoolEnv('WRITE_MARKDOWN_SUMMARY', true),
     runProfile: normalizeRunProfile(process.env.RUN_PROFILE || 'standard'),
     discoveryEnabled: parseBoolEnv('DISCOVERY_ENABLED', false),
@@ -345,6 +367,17 @@ export function loadConfig(overrides = {}) {
     ...cfg,
     ...filtered
   };
+  if (merged.localMode === true && !filtered.outputMode) {
+    merged.outputMode = 'local';
+  }
+  merged.outputMode = normalizeOutputMode(merged.outputMode, merged.localMode ? 'local' : 'dual');
+  if (merged.outputMode === 'local') {
+    merged.mirrorToS3 = false;
+  }
+  if (!merged.s3Bucket) {
+    merged.mirrorToS3 = false;
+  }
+
   merged.llmProvider = merged.llmProvider || inferLlmProvider(
     merged.llmBaseUrl || merged.openaiBaseUrl,
     merged.llmModelExtract || merged.openaiModelExtract,

@@ -6,17 +6,20 @@ function makeUnknownFieldMap(fieldOrder) {
   return map;
 }
 
-export function buildIdentityObject(job, extractedIdentity = {}) {
+export function buildIdentityObject(job, extractedIdentity = {}, options = {}) {
   const lock = job.identityLock || {};
+  const allowDerivedVariant = Boolean(options.allowDerivedVariant);
   const brand = lock.brand || extractedIdentity.brand || 'unk';
   const model = lock.model || extractedIdentity.model || 'unk';
   const sku = lock.sku || extractedIdentity.sku || 'unk';
+  const extractedVariant = String(extractedIdentity.variant || '').trim();
+  const variant = lock.variant || (allowDerivedVariant && extractedVariant ? extractedVariant : 'unk');
 
   return {
     brand,
     model,
     base_model: lock.model || extractedIdentity.base_model || model,
-    variant: lock.variant || extractedIdentity.variant || 'unk',
+    variant,
     sku,
     mpn: lock.mpn || extractedIdentity.mpn || 'unk',
     gtin: lock.gtin || extractedIdentity.gtin || 'unk'

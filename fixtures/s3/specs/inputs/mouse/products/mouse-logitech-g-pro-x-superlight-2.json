@@ -9,9 +9,6 @@
     "mpn": "",
     "gtin": ""
   },
-  "seedUrls": [
-    "https://www.logitechg.com/en-us/products/gaming-mice/pro-x-superlight-2.910-006628.html",
-    "https://www.rtings.com/mouse/reviews/logitech/g-pro-x-superlight-2"
-  ],
+  "seedUrls": [],
   "anchors": {}
 }
