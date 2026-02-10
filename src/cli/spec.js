@@ -767,11 +767,12 @@ async function commandIntelGraphApi(config, storage, args) {
   };
 }
 
-async function commandBillingReport(_config, storage, args) {
+async function commandBillingReport(config, storage, args) {
   const month = args.month || new Date().toISOString().slice(0, 7);
   const report = await buildBillingReport({
     storage,
-    month
+    month,
+    config
   });
   return {
     command: 'billing-report',

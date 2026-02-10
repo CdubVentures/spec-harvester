@@ -112,6 +112,8 @@ Learning artifacts:
 - `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_queue/{category}/state.json`
 - `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_billing/ledger/YYYY-MM.jsonl`
 - `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_billing/monthly/YYYY-MM.json`
+- `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_billing/monthly/YYYY-MM.txt` (human-readable digest)
+- `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_billing/latest.txt` (latest digest pointer)
 
 ## Environment Variables
 
@@ -185,6 +187,12 @@ LLM pricing/budget guard:
 - `LLM_COST_INPUT_PER_1M=0.28`
 - `LLM_COST_OUTPUT_PER_1M=0.42`
 - `LLM_COST_CACHED_INPUT_PER_1M=0.00`
+- `LLM_COST_INPUT_PER_1M_DEEPSEEK_CHAT=...` (optional override)
+- `LLM_COST_OUTPUT_PER_1M_DEEPSEEK_CHAT=...` (optional override)
+- `LLM_COST_CACHED_INPUT_PER_1M_DEEPSEEK_CHAT=...` (optional override)
+- `LLM_COST_INPUT_PER_1M_DEEPSEEK_REASONER=...` (optional override)
+- `LLM_COST_OUTPUT_PER_1M_DEEPSEEK_REASONER=...` (optional override)
+- `LLM_COST_CACHED_INPUT_PER_1M_DEEPSEEK_REASONER=...` (optional override)
 - `LLM_MONTHLY_BUDGET_USD=200`
 - `LLM_PER_PRODUCT_BUDGET_USD=0.10`
 - `LLM_MAX_CALLS_PER_PRODUCT_TOTAL=10`
@@ -501,6 +509,8 @@ Every LLM call writes a ledger line with tokens, cost, model, reason, category, 
 
 - `.../_billing/ledger/YYYY-MM.jsonl`
 - `.../_billing/monthly/YYYY-MM.json`
+- `.../_billing/monthly/YYYY-MM.txt` (easy-to-read run/date/cost digest)
+- `.../_billing/latest.txt`
 
 When budget is exceeded:
 

@@ -11,6 +11,7 @@ function makeMemoryStorage() {
   const map = new Map();
 
   return {
+    map,
     resolveOutputKey(...parts) {
       return ['specs/outputs', ...parts].join('/');
     },
@@ -105,11 +106,17 @@ test('cost ledger appends entries and rolls up month totals', async () => {
 
   const report = await buildBillingReport({
     storage,
-    month: '2026-02'
+    month: '2026-02',
+    config
   });
   assert.equal(report.totals.calls, 2);
   assert.equal(report.by_category.mouse.calls, 2);
   assert.equal(report.by_product['mouse-a'].calls, 2);
   assert.equal(report.by_reason.extract.calls, 1);
   assert.equal(report.by_reason.plan.calls, 1);
+  assert.equal(typeof report.digest_key, 'string');
+  assert.equal(typeof report.latest_digest_key, 'string');
+  const digest = storage.map.get(report.digest_key)?.toString('utf8') || '';
+  assert.equal(digest.includes('Run Totals (Newest First)'), true);
+  assert.equal(digest.includes('run run-a') || digest.includes('run run-b'), true);
 });

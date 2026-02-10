@@ -34,6 +34,23 @@ function monthlyRollupKey(storage, month) {
   return storage.resolveOutputKey('_billing', 'monthly', `${month}.json`);
 }
 
+function monthlyDigestKey(storage, month) {
+  return storage.resolveOutputKey('_billing', 'monthly', `${month}.txt`);
+}
+
+function latestDigestKey(storage) {
+  return storage.resolveOutputKey('_billing', 'latest.txt');
+}
+
+function formatUsd(value) {
+  return `$${round(value, 8).toFixed(8)}`;
+}
+
+function parseIsoMs(value) {
+  const parsed = Date.parse(String(value || ''));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function normalizeEntry(entry = {}) {
   const ts = entry.ts || nowIso();
   return {
@@ -136,6 +153,217 @@ function applyEntryToRollup(rollup, entry) {
   bumpBucket(rollup.by_reason, entry.reason, patch);
 }
 
+function collectRunBuckets(rows = []) {
+  const map = new Map();
+  for (const row of rows) {
+    const runId = String(row.runId || '').trim();
+    const day = dayFromTs(row.ts || nowIso());
+    const productId = String(row.productId || '').trim();
+    const key = runId || `${day}::${productId || 'unknown_product'}`;
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        runId: runId || '(no_run_id)',
+        day,
+        firstTs: row.ts || nowIso(),
+        lastTs: row.ts || nowIso(),
+        productId: productId || '',
+        category: String(row.category || ''),
+        calls: 0,
+        costUsd: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        providers: new Set(),
+        models: new Set(),
+        reasons: new Set()
+      });
+    }
+
+    const bucket = map.get(key);
+    if (parseIsoMs(row.ts) < parseIsoMs(bucket.firstTs)) {
+      bucket.firstTs = row.ts;
+      bucket.day = dayFromTs(row.ts || nowIso());
+    }
+    if (parseIsoMs(row.ts) > parseIsoMs(bucket.lastTs)) {
+      bucket.lastTs = row.ts;
+    }
+    if (!bucket.productId && row.productId) {
+      bucket.productId = String(row.productId);
+    }
+    if (!bucket.category && row.category) {
+      bucket.category = String(row.category);
+    }
+
+    bucket.calls += 1;
+    bucket.costUsd = round(bucket.costUsd + safeNumber(row.cost_usd, 0), 8);
+    bucket.promptTokens += safeInt(row.prompt_tokens, 0);
+    bucket.completionTokens += safeInt(row.completion_tokens, 0);
+    if (row.provider) {
+      bucket.providers.add(String(row.provider));
+    }
+    if (row.model) {
+      bucket.models.add(String(row.model));
+    }
+    if (row.reason) {
+      bucket.reasons.add(String(row.reason));
+    }
+  }
+
+  return [...map.values()]
+    .sort((a, b) => parseIsoMs(b.firstTs) - parseIsoMs(a.firstTs))
+    .map((row) => ({
+      ...row,
+      providers: [...row.providers].sort(),
+      models: [...row.models].sort(),
+      reasons: [...row.reasons].sort()
+    }));
+}
+
+function pushModelDetails(lines, config = {}) {
+  const details = [
+    ['Provider', config.llmProvider || ''],
+    ['Base URL', config.llmBaseUrl || config.openaiBaseUrl || ''],
+    ['Model Version', config.deepseekModelVersion || ''],
+    ['Context Length', config.deepseekContextLength || ''],
+    [
+      'Max Output (deepseek-chat)',
+      config.deepseekChatMaxOutputDefault || config.deepseekChatMaxOutputMaximum
+        ? `default ${config.deepseekChatMaxOutputDefault || '?'} / max ${config.deepseekChatMaxOutputMaximum || '?'}`
+        : ''
+    ],
+    [
+      'Max Output (deepseek-reasoner)',
+      config.deepseekReasonerMaxOutputDefault || config.deepseekReasonerMaxOutputMaximum
+        ? `default ${config.deepseekReasonerMaxOutputDefault || '?'} / max ${config.deepseekReasonerMaxOutputMaximum || '?'}`
+        : ''
+    ],
+    ['Features', config.deepseekFeatures || '']
+  ];
+
+  const pricing = [
+    [
+      'Pricing Default (1M input cache miss)',
+      safeNumber(config.llmCostInputPer1M, 0) > 0 ? `$${safeNumber(config.llmCostInputPer1M, 0)}` : ''
+    ],
+    [
+      'Pricing Default (1M input cache hit)',
+      safeNumber(config.llmCostCachedInputPer1M, 0) > 0 ? `$${safeNumber(config.llmCostCachedInputPer1M, 0)}` : '$0'
+    ],
+    [
+      'Pricing Default (1M output)',
+      safeNumber(config.llmCostOutputPer1M, 0) > 0 ? `$${safeNumber(config.llmCostOutputPer1M, 0)}` : ''
+    ],
+    [
+      'Pricing deepseek-chat',
+      safeNumber(config.llmCostInputPer1MDeepseekChat, -1) >= 0 ||
+      safeNumber(config.llmCostOutputPer1MDeepseekChat, -1) >= 0 ||
+      safeNumber(config.llmCostCachedInputPer1MDeepseekChat, -1) >= 0
+        ? `in $${safeNumber(config.llmCostInputPer1MDeepseekChat, 0)} / out $${safeNumber(config.llmCostOutputPer1MDeepseekChat, 0)} / cache-hit $${safeNumber(config.llmCostCachedInputPer1MDeepseekChat, 0)}`
+        : ''
+    ],
+    [
+      'Pricing deepseek-reasoner',
+      safeNumber(config.llmCostInputPer1MDeepseekReasoner, -1) >= 0 ||
+      safeNumber(config.llmCostOutputPer1MDeepseekReasoner, -1) >= 0 ||
+      safeNumber(config.llmCostCachedInputPer1MDeepseekReasoner, -1) >= 0
+        ? `in $${safeNumber(config.llmCostInputPer1MDeepseekReasoner, 0)} / out $${safeNumber(config.llmCostOutputPer1MDeepseekReasoner, 0)} / cache-hit $${safeNumber(config.llmCostCachedInputPer1MDeepseekReasoner, 0)}`
+        : ''
+    ]
+  ];
+
+  const rows = [...details, ...pricing].filter(([, value]) => String(value || '').trim() !== '');
+  if (!rows.length) {
+    return;
+  }
+  lines.push('Model Details');
+  lines.push('-------------');
+  for (const [label, value] of rows) {
+    lines.push(`${label}: ${value}`);
+  }
+  lines.push('');
+}
+
+function buildBillingDigestText({
+  month,
+  rollup,
+  rows,
+  config = {}
+}) {
+  const runs = collectRunBuckets(rows);
+  const lines = [];
+  lines.push('Spec Harvester Billing Digest');
+  lines.push('============================');
+  lines.push(`Month: ${month}`);
+  lines.push(`Generated At: ${rollup.generated_at || nowIso()}`);
+  lines.push(`Total Cost USD: ${formatUsd(rollup.totals?.cost_usd || 0)}`);
+  lines.push(`Total Calls: ${safeInt(rollup.totals?.calls, 0)}`);
+  lines.push(`Prompt Tokens: ${safeInt(rollup.totals?.prompt_tokens, 0)}`);
+  lines.push(`Completion Tokens: ${safeInt(rollup.totals?.completion_tokens, 0)}`);
+  lines.push('');
+
+  pushModelDetails(lines, config);
+
+  lines.push('Run Totals (Newest First)');
+  lines.push('-------------------------');
+  if (!runs.length) {
+    lines.push('No billable LLM calls recorded for this month.');
+  } else {
+    for (const run of runs) {
+      lines.push(
+        `${run.day} | run ${run.runId} | ${run.productId || 'unknown_product'} | cost ${formatUsd(run.costUsd)} | calls ${run.calls} | prompt ${run.promptTokens} | completion ${run.completionTokens} | models ${run.models.join(', ') || 'unknown'} | reasons ${run.reasons.join(', ') || 'unknown'}`
+      );
+    }
+  }
+  lines.push('');
+
+  lines.push('Daily Totals');
+  lines.push('------------');
+  const dayRows = Object.entries(rollup.by_day || {})
+    .sort((a, b) => b[0].localeCompare(a[0]));
+  if (!dayRows.length) {
+    lines.push('No daily totals yet.');
+  } else {
+    for (const [day, row] of dayRows) {
+      lines.push(
+        `${day} | cost ${formatUsd(row.cost_usd || 0)} | calls ${safeInt(row.calls, 0)} | prompt ${safeInt(row.prompt_tokens, 0)} | completion ${safeInt(row.completion_tokens, 0)}`
+      );
+    }
+  }
+  lines.push('');
+  return `${lines.join('\n')}\n`;
+}
+
+async function writeBillingDigest({
+  storage,
+  month,
+  rollup,
+  rows,
+  config = {}
+}) {
+  const text = buildBillingDigestText({
+    month,
+    rollup,
+    rows,
+    config
+  });
+  const digestKey = monthlyDigestKey(storage, month);
+  const latestKey = latestDigestKey(storage);
+  await storage.writeObject(
+    digestKey,
+    Buffer.from(text, 'utf8'),
+    { contentType: 'text/plain; charset=utf-8' }
+  );
+  await storage.writeObject(
+    latestKey,
+    Buffer.from(text, 'utf8'),
+    { contentType: 'text/plain; charset=utf-8' }
+  );
+  return {
+    digestKey,
+    latestDigestKey: latestKey
+  };
+}
+
 export async function readMonthlyRollup({ storage, month }) {
   const key = monthlyRollupKey(storage, month);
   return (await storage.readJsonOrNull(key)) || emptyRollup(month);
@@ -190,12 +418,21 @@ export async function appendCostLedgerEntry({
   const monthly = await readMonthlyRollup({ storage, month });
   applyEntryToRollup(monthly, normalized);
   const rollupKey = await writeMonthlyRollup({ storage, month, rollup: monthly });
+  const digest = await writeBillingDigest({
+    storage,
+    month,
+    rollup: monthly,
+    rows: existingRows,
+    config
+  });
 
   return {
     entry: normalized,
     ledgerKey: key,
     flatLedgerKey: flatKey,
-    monthlyRollupKey: rollupKey
+    monthlyRollupKey: rollupKey,
+    digestKey: digest.digestKey,
+    latestDigestKey: digest.latestDigestKey
   };
 }
 
@@ -224,9 +461,18 @@ export async function readBillingSnapshot({
 
 export async function buildBillingReport({
   storage,
-  month = monthFromTs(nowIso())
+  month = monthFromTs(nowIso()),
+  config = {}
 }) {
   const monthly = await readMonthlyRollup({ storage, month });
+  const rows = await readLedgerMonth({ storage, month });
+  const digest = await writeBillingDigest({
+    storage,
+    month,
+    rollup: monthly,
+    rows,
+    config
+  });
   return {
     month,
     totals: monthly.totals,
@@ -234,6 +480,8 @@ export async function buildBillingReport({
     by_category: monthly.by_category,
     by_product: monthly.by_product,
     by_model: monthly.by_model,
-    by_reason: monthly.by_reason
+    by_reason: monthly.by_reason,
+    digest_key: digest.digestKey,
+    latest_digest_key: digest.latestDigestKey
   };
 }

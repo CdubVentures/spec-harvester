@@ -268,7 +268,8 @@ export async function callOpenAI({
     const normalizedUsage = normalizeUsage(usage, fallbackUsage);
     const cost = computeLlmCostUsd({
       usage: normalizedUsage,
-      rates: costRates || {}
+      rates: costRates || {},
+      model: responseModel || model
     });
 
     await onUsage({

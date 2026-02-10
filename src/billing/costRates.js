@@ -7,12 +7,42 @@ function round(value, digits = 6) {
   return Number.parseFloat(Number(value || 0).toFixed(digits));
 }
 
-export function normalizeCostRates(config = {}) {
-  return {
-    inputPer1M: toNumber(config.llmCostInputPer1M, 0.28),
-    outputPer1M: toNumber(config.llmCostOutputPer1M, 0.42),
-    cachedInputPer1M: toNumber(config.llmCostCachedInputPer1M, 0)
+function normalizeModel(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function resolveModelSpecificRates(rates = {}, model = '') {
+  const token = normalizeModel(model);
+  const output = {
+    inputPer1M: toNumber(rates.llmCostInputPer1M, 0.28),
+    outputPer1M: toNumber(rates.llmCostOutputPer1M, 0.42),
+    cachedInputPer1M: toNumber(rates.llmCostCachedInputPer1M, 0)
   };
+
+  const applyIfValid = (value, setter) => {
+    const num = toNumber(value, -1);
+    if (num >= 0) {
+      setter(num);
+    }
+  };
+
+  if (token === 'deepseek-chat' || token.startsWith('deepseek-chat')) {
+    applyIfValid(rates.llmCostInputPer1MDeepseekChat, (num) => { output.inputPer1M = num; });
+    applyIfValid(rates.llmCostOutputPer1MDeepseekChat, (num) => { output.outputPer1M = num; });
+    applyIfValid(rates.llmCostCachedInputPer1MDeepseekChat, (num) => { output.cachedInputPer1M = num; });
+  }
+
+  if (token === 'deepseek-reasoner' || token.startsWith('deepseek-reasoner')) {
+    applyIfValid(rates.llmCostInputPer1MDeepseekReasoner, (num) => { output.inputPer1M = num; });
+    applyIfValid(rates.llmCostOutputPer1MDeepseekReasoner, (num) => { output.outputPer1M = num; });
+    applyIfValid(rates.llmCostCachedInputPer1MDeepseekReasoner, (num) => { output.cachedInputPer1M = num; });
+  }
+
+  return output;
+}
+
+export function normalizeCostRates(config = {}) {
+  return resolveModelSpecificRates(config, '');
 }
 
 export function estimateTokensFromText(value) {
@@ -79,8 +109,8 @@ export function normalizeUsage(usage = {}, fallback = {}) {
   };
 }
 
-export function computeLlmCostUsd({ usage = {}, rates = {} }) {
-  const normalizedRates = normalizeCostRates(rates);
+export function computeLlmCostUsd({ usage = {}, rates = {}, model = '' }) {
+  const normalizedRates = resolveModelSpecificRates(rates, model);
   const inputTokens = Math.max(0, usage.promptTokens || 0);
   const outputTokens = Math.max(0, usage.completionTokens || 0);
   const cachedInputTokens = Math.max(0, usage.cachedPromptTokens || 0);
