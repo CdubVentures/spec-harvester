@@ -11,6 +11,7 @@ import { planDiscoveryQueriesLLM } from '../llm/discoveryPlanner.js';
 import { runSearchProviders, searchProviderAvailability } from '../search/searchProviders.js';
 import { rerankSearchResults } from '../search/resultReranker.js';
 import { buildTargetedQueries } from '../search/queryBuilder.js';
+import { normalizeFieldList } from '../utils/fieldKeys.js';
 
 function fillTemplate(template, variables) {
   return String(template || '')
@@ -76,6 +77,127 @@ function manufacturerHostMatchesBrand(host, hints) {
   return hints.some((hint) => hint && normalizedHost.includes(hint));
 }
 
+function productText(variables = {}) {
+  return [variables.brand, variables.model, variables.variant]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+}
+
+function buildModelSlugCandidates(variables = {}) {
+  const entries = [];
+  const brandSlug = slug(variables.brand || '');
+  const modelSlug = slug(variables.model || '');
+  const variantSlug = slug(variables.variant || '');
+  const combinedModel = slug([variables.model, variables.variant].filter(Boolean).join(' '));
+  const brandModel = slug([variables.brand, variables.model, variables.variant].filter(Boolean).join(' '));
+
+  for (const value of [combinedModel, modelSlug, brandModel]) {
+    if (value) {
+      entries.push(value);
+    }
+  }
+  if (modelSlug && variantSlug) {
+    entries.push(`${modelSlug}-${variantSlug}`);
+  }
+  if (brandSlug && modelSlug) {
+    entries.push(`${brandSlug}-${modelSlug}`);
+    if (variantSlug) {
+      entries.push(`${brandSlug}-${modelSlug}-${variantSlug}`);
+    }
+  }
+
+  const unique = [];
+  const seen = new Set();
+  for (const value of entries) {
+    const token = String(value || '').trim();
+    if (!token || seen.has(token)) {
+      continue;
+    }
+    seen.add(token);
+    unique.push(token);
+  }
+  return unique.slice(0, 6);
+}
+
+function categoryPathSegments(category) {
+  const token = slug(category || '');
+  if (!token) {
+    return [];
+  }
+  if (token === 'mouse') {
+    return ['mouse', 'mice', 'gaming-mice'];
+  }
+  if (token === 'keyboard') {
+    return ['keyboard', 'keyboards', 'gaming-keyboards'];
+  }
+  if (token === 'headset') {
+    return ['headset', 'headsets', 'gaming-headsets'];
+  }
+  return [token, `${token}s`];
+}
+
+function buildManufacturerPlanUrls({ host, variables, queries, maxQueries = 3 }) {
+  const urls = [];
+  const product = productText(variables);
+  const queryText = product || queries[0] || '';
+  const slugs = buildModelSlugCandidates(variables);
+  const brandSlug = slug(variables.brand || '');
+  const categorySegments = categoryPathSegments(variables.category);
+
+  const add = (path, query = '') => {
+    const value = `https://${host}${path}`;
+    if (!urls.some((row) => row.url === value)) {
+      urls.push({
+        url: value,
+        title: `${host} planned manufacturer path`,
+        snippet: 'planned manufacturer candidate URL',
+        provider: 'plan',
+        query
+      });
+    }
+  };
+
+  for (const modelSlug of slugs) {
+    add(`/product/${modelSlug}`, queryText);
+    add(`/products/${modelSlug}`, queryText);
+    add(`/p/${modelSlug}`, queryText);
+    add(`/${modelSlug}`, queryText);
+    add(`/support/${modelSlug}`, queryText);
+    add(`/manual/${modelSlug}`, queryText);
+    add(`/downloads/${modelSlug}`, queryText);
+    add(`/specs/${modelSlug}`, queryText);
+    for (const segment of categorySegments) {
+      add(`/${segment}/${modelSlug}`, queryText);
+    }
+    add(`/en-us/product/${modelSlug}`, queryText);
+    add(`/en-us/products/${modelSlug}`, queryText);
+    for (const segment of categorySegments) {
+      add(`/en-us/products/${segment}/${modelSlug}`, queryText);
+    }
+    if (brandSlug && !modelSlug.startsWith(`${brandSlug}-`)) {
+      add(`/product/${brandSlug}-${modelSlug}`, queryText);
+      add(`/products/${brandSlug}-${modelSlug}`, queryText);
+      for (const segment of categorySegments) {
+        add(`/${segment}/${brandSlug}-${modelSlug}`, queryText);
+      }
+      add(`/en-us/products/${brandSlug}-${modelSlug}`, queryText);
+      for (const segment of categorySegments) {
+        add(`/en-us/products/${segment}/${brandSlug}-${modelSlug}`, queryText);
+      }
+    }
+  }
+
+  for (const query of queries.slice(0, Math.max(1, maxQueries))) {
+    add(`/search?q=${encodeURIComponent(query)}`, query);
+    add(`/search?query=${encodeURIComponent(query)}`, query);
+    add(`/support/search?query=${encodeURIComponent(query)}`, query);
+  }
+
+  return urls.slice(0, 40);
+}
+
 function classifyUrlCandidate(result, categoryConfig) {
   const parsed = new URL(result.url);
   const host = normalizeHost(parsed.hostname);
@@ -94,13 +216,34 @@ function classifyUrlCandidate(result, categoryConfig) {
   };
 }
 
-function buildPlanOnlyResults({ categoryConfig, queries, maxQueries = 3 }) {
+function buildPlanOnlyResults({ categoryConfig, queries, variables, maxQueries = 3 }) {
   const planned = [];
   for (const sourceHost of categoryConfig.sourceHosts || []) {
+    const host = sourceHost.host;
+    const role = sourceHost.role || sourceHost.tierName || '';
+    if (String(role).toLowerCase() === 'manufacturer') {
+      planned.push(
+        ...buildManufacturerPlanUrls({
+          host,
+          variables,
+          queries,
+          maxQueries
+        })
+      );
+      continue;
+    }
+
     for (const query of queries.slice(0, Math.max(1, maxQueries))) {
       planned.push({
-        url: `https://${sourceHost.host}/search?q=${encodeURIComponent(query)}`,
-        title: `${sourceHost.host} search`,
+        url: `https://${host}/search?q=${encodeURIComponent(query)}`,
+        title: `${host} search`,
+        snippet: 'planned source search URL',
+        provider: 'plan',
+        query
+      });
+      planned.push({
+        url: `https://${host}/search/?q=${encodeURIComponent(query)}`,
+        title: `${host} search`,
         snippet: 'planned source search URL',
         provider: 'plan',
         query
@@ -113,6 +256,29 @@ function buildPlanOnlyResults({ categoryConfig, queries, maxQueries = 3 }) {
 function dedupeQueries(queries, limit) {
   return [...new Set((queries || []).map((query) => String(query || '').trim()).filter(Boolean))]
     .slice(0, Math.max(1, limit));
+}
+
+function prioritizeQueries(queries, variables = {}) {
+  const brand = String(variables.brand || '').trim().toLowerCase();
+  const model = String(variables.model || '').trim().toLowerCase();
+  const brandToken = brand.replace(/\s+/g, '');
+  const ranked = [...(queries || [])].map((query) => {
+    const text = String(query || '').toLowerCase();
+    let score = 0;
+    if (text.includes('site:')) score += 6;
+    if (/manual|datasheet|support|spec|technical|pdf/.test(text)) score += 5;
+    if (brandToken && text.includes(brandToken)) score += 3;
+    if (brand && text.includes(brand)) score += 2;
+    if (model && text.includes(model)) score += 2;
+    if (/rtings|techpowerup/.test(text)) score += 1;
+    return {
+      query,
+      score
+    };
+  });
+  return ranked
+    .sort((a, b) => b.score - a.score || a.query.localeCompare(b.query))
+    .map((row) => row.query);
 }
 
 function toArray(value) {
@@ -165,13 +331,13 @@ export async function discoverCandidateSources({
     variant: job.identityLock?.variant || '',
     category: job.category || categoryConfig.category
   };
-  const missingFields = [
-    ...new Set([
-      ...toArray(planningHints.missingRequiredFields),
-      ...toArray(planningHints.missingCriticalFields),
-      ...toArray(job.requirements?.llmTargetFields)
-    ])
-  ];
+  const missingFields = normalizeFieldList([
+    ...toArray(planningHints.missingRequiredFields),
+    ...toArray(planningHints.missingCriticalFields),
+    ...toArray(job.requirements?.llmTargetFields)
+  ], {
+    fieldOrder: categoryConfig.fieldOrder || []
+  });
 
   const learning = await loadLearningArtifacts({
     storage,
@@ -200,10 +366,10 @@ export async function discoverCandidateSources({
 
   const extraQueries = toArray(planningHints.extraQueries);
   const queryLimit = Math.max(1, Number(config.discoveryMaxQueries || 8));
-  const queries = dedupeQueries(
+  const queries = prioritizeQueries(dedupeQueries(
     [...baseQueries, ...targetedQueries, ...llmQueries, ...extraQueries],
     Math.max(queryLimit, 6)
-  );
+  ), variables);
   const resultsPerQuery = Math.max(1, Number(config.discoveryResultsPerQuery || 10));
   const discoveryCap = Math.max(1, Number(config.discoveryMaxDiscovered || 120));
 
@@ -247,6 +413,7 @@ export async function discoverCandidateSources({
     const planned = buildPlanOnlyResults({
       categoryConfig,
       queries,
+      variables,
       maxQueries: Math.min(queryLimit, 12)
     });
     rawResults.push(...planned);
@@ -292,6 +459,31 @@ export async function discoverCandidateSources({
     fieldYieldMap: learning.fieldYield
   });
   const discovered = reranked.slice(0, discoveryCap);
+  const discoveredUrlSet = new Set(discovered.map((item) => item.url));
+  const ensureTierCoverage = (tierName) => {
+    const hasTier = discovered.some(
+      (item) => String(item.tier_name || item.tierName || '').toLowerCase() === tierName
+    );
+    if (hasTier) {
+      return;
+    }
+    const candidate = reranked.find(
+      (item) =>
+        String(item.tier_name || item.tierName || '').toLowerCase() === tierName &&
+        !discoveredUrlSet.has(item.url)
+    );
+    if (!candidate) {
+      return;
+    }
+    if (discovered.length >= discoveryCap && discovered.length > 0) {
+      const removed = discovered.pop();
+      discoveredUrlSet.delete(removed.url);
+    }
+    discovered.push(candidate);
+    discoveredUrlSet.add(candidate.url);
+  };
+  ensureTierCoverage('lab');
+  ensureTierCoverage('database');
   logger?.info?.('discovery_results_reranked', {
     discovered_count: discovered.length,
     approved_count: discovered.filter((item) => item.approved_domain || item.approvedDomain).length

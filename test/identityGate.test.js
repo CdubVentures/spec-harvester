@@ -97,3 +97,46 @@ test('evaluateIdentityGate ignores weak contradictions from generic category pag
   assert.equal(gate.requirements.additionalCredibleSources >= 2, true);
   assert.equal(gate.contradictions.length, 0);
 });
+
+test('evaluateIdentityGate allows helper-backed validation with manufacturer + one credible source', () => {
+  const gate = evaluateIdentityGate([
+    {
+      url: 'https://www.razer.com/gaming-mice/razer-basilisk-v3-35k',
+      rootDomain: 'razer.com',
+      host: 'razer.com',
+      tier: 1,
+      role: 'manufacturer',
+      approvedDomain: true,
+      identity: {
+        match: true,
+        score: 0.78,
+        reasons: ['brand_match', 'model_match'],
+        criticalConflicts: []
+      },
+      anchorCheck: { majorConflicts: [] },
+      fieldCandidates: []
+    },
+    {
+      url: 'helper_files://mouse/activeFiltering.json#138',
+      rootDomain: 'helper-files.local',
+      host: 'helper-files.local',
+      tier: 2,
+      role: 'database',
+      approvedDomain: true,
+      helperSource: true,
+      identity: {
+        match: true,
+        score: 0.99,
+        reasons: ['helper_supportive_match'],
+        criticalConflicts: []
+      },
+      anchorCheck: { majorConflicts: [] },
+      fieldCandidates: []
+    }
+  ]);
+
+  assert.equal(gate.validated, true);
+  assert.equal(gate.requirements.hasManufacturer, true);
+  assert.equal(gate.requirements.hasTrustedHelper, true);
+  assert.equal(gate.requirements.additionalCredibleSources, 1);
+});

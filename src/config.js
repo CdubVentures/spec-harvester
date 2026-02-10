@@ -304,6 +304,8 @@ export function loadConfig(overrides = {}) {
     openaiTimeoutMs: timeoutMs,
     llmReasoningMode: parseBoolEnv('LLM_REASONING_MODE', hasDeepSeekKey),
     llmReasoningBudget: parseIntEnv('LLM_REASONING_BUDGET', 2048),
+    llmVerifyMode: parseBoolEnv('LLM_VERIFY_MODE', false),
+    llmVerifySampleRate: parseIntEnv('LLM_VERIFY_SAMPLE_RATE', 10),
     llmMaxOutputTokens: parseIntEnv('LLM_MAX_OUTPUT_TOKENS', 1200),
     llmCostInputPer1M: parseFloatEnv('LLM_COST_INPUT_PER_1M', 0.28),
     llmCostOutputPer1M: parseFloatEnv('LLM_COST_OUTPUT_PER_1M', 0.42),

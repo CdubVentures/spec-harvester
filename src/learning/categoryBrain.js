@@ -6,6 +6,11 @@ import { defaultFieldConstraints, updateFieldConstraints } from './fieldConstrai
 import { defaultFieldYield, updateFieldYield } from './fieldYield.js';
 import { defaultIdentityGrammar, updateIdentityGrammar } from './identityGrammar.js';
 import { defaultQueryLearning, updateQueryLearning } from './queryLearning.js';
+import {
+  defaultFieldAvailability,
+  summarizeAvailability,
+  updateFieldAvailability
+} from './fieldAvailability.js';
 
 function round(value, digits = 6) {
   return Number.parseFloat(Number(value || 0).toFixed(digits));
@@ -191,7 +196,7 @@ export async function loadCategoryBrain({
   storage,
   category
 }) {
-  const [lexicon, constraints, fieldYield, identityGrammar, queryTemplates, sourcePromotions, stats] = await Promise.all([
+  const [lexicon, constraints, fieldYield, identityGrammar, queryTemplates, sourcePromotions, stats, fieldAvailability] = await Promise.all([
     readArtifact(storage, category, 'field_lexicon.json', defaultFieldLexicon),
     readArtifact(storage, category, 'constraints.json', defaultFieldConstraints),
     readArtifact(storage, category, 'field_yield.json', defaultFieldYield),
@@ -202,7 +207,8 @@ export async function loadCategoryBrain({
       updated_at: nowIso(),
       history: []
     })),
-    readArtifact(storage, category, 'stats.json', () => defaultStats(category))
+    readArtifact(storage, category, 'stats.json', () => defaultStats(category)),
+    readArtifact(storage, category, 'field_availability.json', defaultFieldAvailability)
   ]);
 
   return {
@@ -214,7 +220,8 @@ export async function loadCategoryBrain({
       identityGrammar,
       queryTemplates,
       sourcePromotions,
-      stats
+      stats,
+      fieldAvailability
     }
   };
 }
@@ -268,6 +275,15 @@ export async function updateCategoryBrain({
     discoveryResult,
     seenAt
   });
+  const fieldAvailability = updateFieldAvailability({
+    artifact: loaded.artifacts.fieldAvailability?.value,
+    fieldOrder: Object.keys(normalized?.fields || {}),
+    normalized,
+    summary,
+    provenance,
+    validated: Boolean(summary?.validated),
+    seenAt
+  });
   const stats = updateStats(loaded.artifacts.stats.value, summary, runId);
 
   const promotionUpdate = await autoPromoteSources({
@@ -296,7 +312,12 @@ export async function updateCategoryBrain({
     writeArtifact(storage, loaded.artifacts.identityGrammar.key, identityGrammar),
     writeArtifact(storage, loaded.artifacts.queryTemplates.key, queryTemplates),
     writeArtifact(storage, loaded.artifacts.sourcePromotions.key, sourcePromotions),
-    writeArtifact(storage, loaded.artifacts.stats.key, stats)
+    writeArtifact(storage, loaded.artifacts.stats.key, stats),
+    writeArtifact(
+      storage,
+      loaded.artifacts.fieldAvailability?.key || artifactKey(storage, category, 'field_availability.json'),
+      fieldAvailability
+    )
   ]);
 
   return {
@@ -308,7 +329,8 @@ export async function updateCategoryBrain({
       identity_grammar: writes[3],
       query_templates: writes[4],
       source_promotions: writes[5],
-      stats: writes[6]
+      stats: writes[6],
+      field_availability: writes[7]
     },
     promotion_update: promotionUpdate
   };
@@ -329,6 +351,8 @@ export async function buildLearningReport({
   const queryTemplates = loaded.artifacts.queryTemplates.value;
   const sourcePromotions = loaded.artifacts.sourcePromotions.value;
   const stats = loaded.artifacts.stats.value;
+  const fieldAvailability = loaded.artifacts.fieldAvailability?.value || defaultFieldAvailability();
+  const availabilitySummary = summarizeAvailability(fieldAvailability);
 
   return {
     category,
@@ -340,6 +364,12 @@ export async function buildLearningReport({
     brand_grammar_count: Object.keys(identityGrammar.brands || {}).length,
     query_template_count: Object.keys(queryTemplates.queries || {}).length,
     promotion_history_count: toArray(sourcePromotions.history).length,
+    field_availability: {
+      expected_count: availabilitySummary.counts.expected,
+      sometimes_count: availabilitySummary.counts.sometimes,
+      rare_count: availabilitySummary.counts.rare,
+      top_expected_unknown: availabilitySummary.top_expected_unknown
+    },
     top_yield_domains: buildTopYieldRows(fieldYield, 25),
     templates_by_field: queryTemplates.templates_by_field || {},
     latest_promotions: toArray(sourcePromotions.history).slice(-5)

@@ -362,3 +362,28 @@ test('source planner avoids manufacturer category hubs without model signal in b
   assert.equal(planner.isRelevantDiscoveredUrl(categoryHub, { manufacturerContext: true }), false);
   assert.equal(planner.isRelevantDiscoveredUrl(productLike, { manufacturerContext: true }), true);
 });
+
+test('source planner prioritizes manufacturer product pages over generic search URLs', () => {
+  const planner = new SourcePlanner(
+    {
+      seedUrls: [],
+      preferredSources: {},
+      identityLock: { brand: 'Razer', model: 'Basilisk V3 35k' },
+      productId: 'mouse-razer-basilisk-v3-35k'
+    },
+    makeConfig({ manufacturerDeepResearchEnabled: false, fetchCandidateSources: false }),
+    {
+      sourceHosts: [{ host: 'razer.com', tierName: 'manufacturer' }],
+      denylist: []
+    }
+  );
+
+  planner.enqueue('https://razer.com/search?q=Razer%20Basilisk%20V3%2035k');
+  planner.enqueue('https://razer.com/gaming-mice/razer-basilisk-v3-35k');
+
+  const first = planner.next();
+  const second = planner.next();
+
+  assert.equal(first.url, 'https://razer.com/gaming-mice/razer-basilisk-v3-35k');
+  assert.equal(second.url, 'https://razer.com/search?q=Razer%20Basilisk%20V3%2035k');
+});

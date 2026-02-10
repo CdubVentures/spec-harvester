@@ -34,6 +34,7 @@ import { retrieveGoldenExamples } from '../llm/goldenExamples.js';
 import {
   writeSummaryMarkdownLLM
 } from '../llm/writeSummaryLLM.js';
+import { validateCandidatesLLM } from '../llm/validateCandidatesLLM.js';
 import {
   loadSourceIntel,
   persistSourceIntel
@@ -69,6 +70,12 @@ import {
 } from '../components/library.js';
 import { runDeterministicCritic } from '../validator/critic.js';
 import { buildTrafficLight } from '../validator/trafficLight.js';
+import { normalizeFieldList, toRawFieldKey } from '../utils/fieldKeys.js';
+import {
+  availabilityClassForField,
+  undisclosedThresholdForField
+} from '../learning/fieldAvailability.js';
+import { applyInferencePolicies } from '../inference/inferField.js';
 
 function normalizeIdentityToken(value) {
   return String(value || '')
@@ -136,6 +143,47 @@ function parseFirstNumber(value) {
   }
   const num = Number.parseFloat(match[0]);
   return Number.isFinite(num) ? num : null;
+}
+
+function hasKnownFieldValue(value) {
+  const token = String(value || '').trim().toLowerCase();
+  return token !== '' && token !== 'unk' && token !== 'null' && token !== 'undefined' && token !== 'n/a';
+}
+
+function stableHash(value) {
+  let hash = 0;
+  const input = String(value || '');
+  for (let i = 0; i < input.length; i += 1) {
+    hash = ((hash << 5) - hash + input.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+function collectContributionFields({
+  fieldOrder,
+  normalized,
+  provenance
+}) {
+  const llmFields = [];
+  const componentFields = [];
+  for (const field of fieldOrder || []) {
+    if (!hasKnownFieldValue(normalized?.fields?.[field])) {
+      continue;
+    }
+    const evidence = Array.isArray(provenance?.[field]?.evidence)
+      ? provenance[field].evidence
+      : [];
+    if (evidence.some((row) => String(row?.method || '').toLowerCase().includes('llm'))) {
+      llmFields.push(field);
+    }
+    if (evidence.some((row) => String(row?.method || '').toLowerCase() === 'component_db')) {
+      componentFields.push(field);
+    }
+  }
+  return {
+    llmFields: [...new Set(llmFields)],
+    componentFields: [...new Set(componentFields)]
+  };
 }
 
 function plausibilityBoost(field, value) {
@@ -243,6 +291,21 @@ function createEmptyProvenance(fieldOrder, fields) {
   return output;
 }
 
+function ensureProvenanceField(provenance, field, fallbackValue = 'unk') {
+  if (!provenance[field]) {
+    provenance[field] = {
+      value: fallbackValue,
+      confirmations: 0,
+      approved_confirmations: 0,
+      pass_target: 1,
+      meets_pass_target: false,
+      confidence: 0,
+      evidence: []
+    };
+  }
+  return provenance[field];
+}
+
 function tsvRowFromFields(fieldOrder, fields) {
   return fieldOrder.map((field) => fields[field] ?? 'unk').join('\t');
 }
@@ -263,14 +326,14 @@ function resolveLlmTargetFields(job, categoryConfig) {
   const fromRequired = Array.isArray(job.requirements?.requiredFields)
     ? job.requirements.requiredFields
     : [];
-  const base = [
+  const base = normalizeFieldList([
     ...fromRequirements,
     ...fromRequired,
     ...(categoryConfig.requiredFields || []),
     ...(categoryConfig.schema?.critical_fields || [])
-  ]
-    .map((field) => String(field || '').trim())
-    .filter(Boolean);
+  ], {
+    fieldOrder: categoryConfig.fieldOrder || []
+  });
   return [...new Set(base)];
 }
 
@@ -395,7 +458,10 @@ function buildFieldReasoning({
   constraintAnalysis,
   identityGateValidated,
   llmBudgetBlockedReason,
-  sourceResults
+  sourceResults,
+  fieldAvailabilityModel = {},
+  fieldYieldArtifact = {},
+  searchAttemptCount = 0
 }) {
   const fieldsBelowSet = new Set(fieldsBelowPassTarget || []);
   const criticalBelowSet = new Set(criticalFieldsBelowPassTarget || []);
@@ -412,6 +478,22 @@ function buildFieldReasoning({
     (sourceResults || []).length > 0 &&
     (blockedSourceCount + robotsOnlySourceCount) >= Math.max(1, Math.ceil((sourceResults || []).length * 0.7));
   const budgetExhausted = String(llmBudgetBlockedReason || '').includes('budget');
+
+  function highYieldDomainCountForField(field) {
+    let count = 0;
+    for (const row of Object.values(fieldYieldArtifact?.by_domain || {})) {
+      const bucket = row?.fields?.[field];
+      if (!bucket) {
+        continue;
+      }
+      const seen = Number.parseInt(String(bucket.seen || 0), 10) || 0;
+      const yieldValue = Number.parseFloat(String(bucket.yield || 0)) || 0;
+      if (seen >= 4 && yieldValue >= 0.5) {
+        count += 1;
+      }
+    }
+    return count;
+  }
 
   for (const contradiction of constraintAnalysis?.contradictions || []) {
     for (const field of contradiction.fields || []) {
@@ -458,6 +540,20 @@ function buildFieldReasoning({
 
     if (String(output[field].value || '').toLowerCase() === 'unk') {
       let unknownReason = 'not_found_after_search';
+      const normalizedField = toRawFieldKey(field, { fieldOrder });
+      const availabilityClass = availabilityClassForField(fieldAvailabilityModel, normalizedField);
+      const highYieldDomainCount = highYieldDomainCountForField(normalizedField);
+      const undisclosedThreshold = undisclosedThresholdForField({
+        field: normalizedField,
+        artifact: fieldAvailabilityModel,
+        highYieldDomainCount
+      });
+      const searchQueryThreshold = availabilityClass === 'expected'
+        ? 10
+        : availabilityClass === 'rare'
+          ? 4
+          : 6;
+
       if (!identityGateValidated) {
         unknownReason = 'identity_ambiguous';
       } else if (budgetExhausted) {
@@ -468,7 +564,10 @@ function buildFieldReasoning({
         unknownReason = 'blocked_by_robots_or_tos';
       } else if ((row.confirmations || 0) > 0 && (row.approved_confirmations || 0) === 0) {
         unknownReason = 'parse_failure';
-      } else if ((sourceResults || []).length >= 80) {
+      } else if (
+        (sourceResults || []).length >= undisclosedThreshold ||
+        Number(searchAttemptCount || 0) >= searchQueryThreshold
+      ) {
         unknownReason = 'not_publicly_disclosed';
       }
       output[field].unknown_reason = unknownReason;
@@ -713,6 +812,8 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     category
   });
   const learnedConstraints = categoryBrainLoaded?.artifacts?.constraints?.value || {};
+  const learnedFieldYield = categoryBrainLoaded?.artifacts?.fieldYield?.value || {};
+  const learnedFieldAvailability = categoryBrainLoaded?.artifacts?.fieldAvailability?.value || {};
 
   const adapterManager = createAdapterManager(config, logger);
   const sourceIntel = await loadSourceIntel({ storage, config, category });
@@ -756,10 +857,17 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
   let artifactSequence = 0;
   const adapterArtifacts = [];
   let helperFilledFields = [];
+  let helperFilledByMethod = {};
   let helperMismatches = [];
   let componentPriorFilledFields = [];
   let componentPriorMatches = [];
   let criticDecisions = {
+    accept: [],
+    reject: [],
+    unknown: []
+  };
+  let llmValidatorDecisions = {
+    enabled: false,
     accept: [],
     reject: [],
     unknown: []
@@ -791,15 +899,35 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
   const llmCostRates = normalizeCostRates(config);
   let llmCostUsd = 0;
   let llmCallCount = 0;
+  let llmEstimatedUsageCount = 0;
+  let llmRetryWithoutSchemaCount = 0;
   let llmBudgetBlockedReason = '';
+  const llmVerifySampleRate = Math.max(1, Number.parseInt(String(config.llmVerifySampleRate || 10), 10) || 10);
+  const llmVerifySampled = (stableHash(`${productId}:${runId}`) % llmVerifySampleRate) === 0;
+  const llmVerifyForced = Boolean(roundContext?.force_verify_llm);
+  const llmVerifyEnabled = Boolean(config.llmVerifyMode && (llmVerifySampled || llmVerifyForced));
   const llmContext = {
+    storage,
+    category,
+    productId,
     runId,
     round: Number.parseInt(String(roundContext?.round ?? 0), 10) || 0,
+    verification: {
+      enabled: llmVerifyEnabled,
+      done: false,
+      trigger: llmVerifyForced ? 'missing_required_fields' : (llmVerifySampled ? 'sampling' : 'disabled')
+    },
     budgetGuard: llmBudgetGuard,
     costRates: llmCostRates,
     recordUsage: async (usageRow) => {
       llmCallCount += 1;
       llmCostUsd = Number.parseFloat((llmCostUsd + Number(usageRow.cost_usd || 0)).toFixed(8));
+      if (usageRow.estimated_usage) {
+        llmEstimatedUsageCount += 1;
+      }
+      if (usageRow.retry_without_schema) {
+        llmRetryWithoutSchemaCount += 1;
+      }
       await appendCostLedgerEntry({
         storage,
         config,
@@ -822,7 +950,9 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
           evidence_chars: usageRow.evidence_chars || 0,
           estimated_usage: Boolean(usageRow.estimated_usage),
           meta: {
-            retry_without_schema: Boolean(usageRow.retry_without_schema)
+            retry_without_schema: Boolean(usageRow.retry_without_schema),
+            deepseek_mode_detected: Boolean(usageRow.deepseek_mode_detected),
+            json_schema_requested: Boolean(usageRow.json_schema_requested)
           }
         }
       });
@@ -837,7 +967,15 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     runId,
     logger,
     planningHints: {
-      missingCriticalFields: categoryConfig.schema?.critical_fields || []
+      missingRequiredFields: normalizeFieldList(
+        roundContext?.missing_required_fields || requiredFields || [],
+        { fieldOrder: categoryConfig.fieldOrder || [] }
+      ),
+      missingCriticalFields: normalizeFieldList(
+        roundContext?.missing_critical_fields || categoryConfig.schema?.critical_fields || [],
+        { fieldOrder: categoryConfig.fieldOrder || [] }
+      ),
+      extraQueries: Array.isArray(roundContext?.extra_queries) ? roundContext.extra_queries : []
     },
     llmContext
   });
@@ -971,7 +1109,13 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         notes: []
       };
       let evidencePack = null;
-      if (config.llmEnabled) {
+      const sourceStatusCode = Number.parseInt(String(pageData.status || 0), 10) || 0;
+      const llmEligibleSource =
+        config.llmEnabled &&
+        !discoveryOnlySource &&
+        sourceStatusCode > 0 &&
+        sourceStatusCode < 400;
+      if (llmEligibleSource) {
         evidencePack = buildEvidencePack({
           source,
           pageData,
@@ -988,6 +1132,16 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
           config,
           logger,
           llmContext
+        });
+      } else if (config.llmEnabled) {
+        logger.info('llm_extract_skipped_source', {
+          url: source.url,
+          status: sourceStatusCode || null,
+          reason: discoveryOnlySource
+            ? 'discovery_only_source'
+            : sourceStatusCode >= 400
+              ? 'http_status_not_extractable'
+              : 'source_not_extractable'
         });
       }
 
@@ -1376,12 +1530,14 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       categoryConfig
     });
     helperFilledFields = helperFill.filled_fields || [];
+    helperFilledByMethod = helperFill.filled_by_method || {};
     helperMismatches = helperFill.mismatches || [];
     fieldsBelowPassTarget = helperFill.fields_below_pass_target || fieldsBelowPassTarget;
     criticalFieldsBelowPassTarget =
       helperFill.critical_fields_below_pass_target || criticalFieldsBelowPassTarget;
     logger.info('helper_supportive_fill_applied', {
       fields_filled: helperFilledFields.length,
+      fields_filled_by_method: helperFilledByMethod,
       identity_gate_validated: identityGate.validated,
       provisional_mode: !identityGate.validated && allowHelperProvisionalFill
     });
@@ -1433,6 +1589,107 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     criticalFieldsBelowPassTarget = [...criticalSet];
   }
 
+  const uncertainFieldsForValidator = normalizeFieldList([
+    ...(fieldsBelowPassTarget || []),
+    ...(criticalFieldsBelowPassTarget || []),
+    ...((criticDecisions.reject || []).map((row) => row.field).filter(Boolean))
+  ], {
+    fieldOrder
+  });
+  const shouldRunLlmValidator =
+    Boolean(config.llmEnabled && config.llmApiKey) &&
+    uncertainFieldsForValidator.length > 0 &&
+    (
+      (criticDecisions.reject || []).length > 0 ||
+      (criticalFieldsBelowPassTarget || []).length > 0 ||
+      identityConfidence < 0.995
+    );
+  if (shouldRunLlmValidator) {
+    llmValidatorDecisions = await validateCandidatesLLM({
+      job,
+      normalized,
+      provenance,
+      categoryConfig,
+      constraints: learnedConstraints,
+      uncertainFields: uncertainFieldsForValidator,
+      config,
+      logger,
+      llmContext
+    });
+    if ((llmValidatorDecisions.accept || []).length > 0) {
+      const belowSet = new Set(fieldsBelowPassTarget || []);
+      const criticalSet = new Set(criticalFieldsBelowPassTarget || []);
+      for (const row of llmValidatorDecisions.accept || []) {
+        if (!row?.field || !hasKnownFieldValue(row.value)) {
+          continue;
+        }
+        normalized.fields[row.field] = row.value;
+        const bucket = ensureProvenanceField(provenance, row.field, row.value);
+        bucket.value = row.value;
+        bucket.confirmations = Math.max(1, Number.parseInt(String(bucket.confirmations || 0), 10) || 0);
+        bucket.approved_confirmations = Math.max(1, Number.parseInt(String(bucket.approved_confirmations || 0), 10) || 0);
+        bucket.pass_target = Math.max(1, Number.parseInt(String(bucket.pass_target || 1), 10) || 1);
+        bucket.meets_pass_target = true;
+        bucket.confidence = Math.max(Number(bucket.confidence || 0), Number(row.confidence || 0.8));
+        bucket.evidence = [
+          ...(Array.isArray(bucket.evidence) ? bucket.evidence : []),
+          {
+            url: 'llm://validator',
+            host: 'llm.local',
+            rootDomain: 'llm.local',
+            tier: 2,
+            tierName: 'database',
+            method: 'llm_validate',
+            keyPath: `llm.validate.${row.field}`,
+            approvedDomain: false,
+            reason: row.reason
+          }
+        ];
+        belowSet.delete(row.field);
+        criticalSet.delete(row.field);
+      }
+      fieldsBelowPassTarget = [...belowSet];
+      criticalFieldsBelowPassTarget = [...criticalSet];
+    }
+    if ((llmValidatorDecisions.reject || []).length > 0) {
+      const belowSet = new Set(fieldsBelowPassTarget || []);
+      const criticalSet = new Set(criticalFieldsBelowPassTarget || []);
+      for (const row of llmValidatorDecisions.reject || []) {
+        if (!row?.field) {
+          continue;
+        }
+        belowSet.add(row.field);
+        if (categoryConfig.criticalFieldSet.has(row.field)) {
+          criticalSet.add(row.field);
+        }
+      }
+      fieldsBelowPassTarget = [...belowSet];
+      criticalFieldsBelowPassTarget = [...criticalSet];
+    }
+  }
+
+  const temporalEvidence = aggregateTemporalSignals(sourceResults, 40);
+  const inferenceResult = applyInferencePolicies({
+    categoryConfig,
+    normalized,
+    provenance,
+    summaryHint: {
+      temporal_evidence: temporalEvidence
+    },
+    sourceResults,
+    logger
+  });
+  if ((inferenceResult.filled_fields || []).length > 0) {
+    const belowSet = new Set(fieldsBelowPassTarget || []);
+    const criticalSet = new Set(criticalFieldsBelowPassTarget || []);
+    for (const field of inferenceResult.filled_fields) {
+      belowSet.delete(field);
+      criticalSet.delete(field);
+    }
+    fieldsBelowPassTarget = [...belowSet];
+    criticalFieldsBelowPassTarget = [...criticalSet];
+  }
+
   const completenessStats = computeCompletenessRequired(normalized, requiredFields);
   const coverageStats = computeCoverageOverall({
     fields: normalized.fields,
@@ -1474,7 +1731,6 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     0
   );
   const endpointMining = aggregateEndpointSignals(sourceResults, 80);
-  const temporalEvidence = aggregateTemporalSignals(sourceResults, 40);
   const constraintAnalysis = evaluateConstraintGraph({
     fields: normalized.fields,
     provenance,
@@ -1502,7 +1758,10 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     constraintAnalysis,
     identityGateValidated: identityGate.validated,
     llmBudgetBlockedReason,
-    sourceResults: hypothesisSourceResults
+    sourceResults: hypothesisSourceResults,
+    fieldAvailabilityModel: learnedFieldAvailability,
+    fieldYieldArtifact: learnedFieldYield,
+    searchAttemptCount: (discoveryResult.search_attempts || []).length
   });
   trafficLight = buildTrafficLight({
     fieldOrder,
@@ -1521,6 +1780,11 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       .map((source) => source.fingerprint?.id)
       .filter(Boolean)
   ).size;
+  const contribution = collectContributionFields({
+    fieldOrder,
+    normalized,
+    provenance
+  });
 
   const summary = {
     productId,
@@ -1584,6 +1848,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       supportive_fill_missing_enabled: Boolean(config.helperSupportiveFillMissing),
       supportive_fields_filled_count: helperFilledFields.length,
       supportive_fields_filled: helperFilledFields,
+      supportive_fields_filled_by_method: helperFilledByMethod,
       supportive_mismatch_count: helperMismatches.length,
       supportive_mismatches: helperMismatches.slice(0, 50)
     },
@@ -1596,7 +1861,14 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       accept_count: (criticDecisions.accept || []).length,
       reject_count: (criticDecisions.reject || []).length,
       unknown_count: (criticDecisions.unknown || []).length,
-      decisions: criticDecisions
+      decisions: criticDecisions,
+      llm_validator: {
+        enabled: Boolean(llmValidatorDecisions.enabled),
+        accept_count: (llmValidatorDecisions.accept || []).length,
+        reject_count: (llmValidatorDecisions.reject || []).length,
+        unknown_count: (llmValidatorDecisions.unknown || []).length,
+        decisions: llmValidatorDecisions
+      }
     },
     llm: {
       enabled: Boolean(config.llmEnabled && config.llmApiKey),
@@ -1609,6 +1881,16 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       golden_examples_count: goldenExamples.length,
       candidates_added: llmCandidatesAccepted,
       sources_with_llm_candidates: llmSourcesUsed,
+      fields_filled_by_llm_count: contribution.llmFields.length,
+      fields_filled_by_llm: contribution.llmFields,
+      fields_filled_by_component_db_count: contribution.componentFields.length,
+      fields_filled_by_component_db: contribution.componentFields,
+      retry_without_schema_count: llmRetryWithoutSchemaCount,
+      estimated_usage_count: llmEstimatedUsageCount,
+      verify_mode_enabled: Boolean(config.llmVerifyMode),
+      verify_trigger: llmContext.verification?.trigger || 'disabled',
+      verify_performed: Boolean(llmContext.verification?.done),
+      verify_report_key: llmContext.verification?.report_key || null,
       call_count_run: llmCallCount,
       cost_usd_run: Number.parseFloat((llmCostUsd || 0).toFixed(8)),
       budget: {
@@ -1646,6 +1928,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     },
     endpoint_mining: endpointMining,
     temporal_evidence: temporalEvidence,
+    inference: inferenceResult,
     hypothesis_queue: hypothesisQueue,
     hypothesis_followup: {
       configured_rounds: Math.max(0, Number(config.hypothesisAutoFollowupRounds || 0)),
@@ -1679,12 +1962,17 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     llm_candidates_added: llmCandidatesAccepted,
     llm_call_count_run: llmCallCount,
     llm_cost_usd_run: llmCostUsd,
+    llm_fields_filled_count: contribution.llmFields.length,
+    llm_estimated_usage_count: llmEstimatedUsageCount,
+    llm_retry_without_schema_count: llmRetryWithoutSchemaCount,
     llm_budget_blocked_reason: llmBudgetBlockedReason || null,
     helper_active_match: Boolean(helperContext.active_match),
     helper_supportive_matches: helperContext.supportive_matches?.length || 0,
     helper_supportive_fields_filled: helperFilledFields.length,
     component_prior_fields_filled: componentPriorFilledFields.length,
     critic_reject_count: (criticDecisions.reject || []).length,
+    llm_validator_accept_count: (llmValidatorDecisions.accept || []).length,
+    llm_validator_reject_count: (llmValidatorDecisions.reject || []).length,
     traffic_green_count: trafficLight.counts.green,
     traffic_yellow_count: trafficLight.counts.yellow,
     traffic_red_count: trafficLight.counts.red,

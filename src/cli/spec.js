@@ -23,6 +23,7 @@ import { runUntilComplete } from '../runner/runUntilComplete.js';
 import { buildBillingReport } from '../billing/costLedger.js';
 import { buildLearningReport } from '../learning/categoryBrain.js';
 import { syncJobsFromActiveFiltering } from '../helperFiles/index.js';
+import { runLlmHealthCheck } from '../llm/healthCheck.js';
 
 function usage() {
   return [
@@ -41,6 +42,7 @@ function usage() {
     '  billing-report [--month YYYY-MM] [--local]',
     '  learning-report --category <category> [--local]',
     '  explain-unk --category <category> --brand <brand> --model <model> [--variant <variant>] [--product-id <id>] [--local]',
+    '  llm-health [--provider deepseek|openai|gemini] [--model <name>] [--local]',
     '  test-s3 [--fixture <path>] [--s3key <key>] [--dry-run]',
     '  sources-plan --category <category> [--local]',
     '  sources-report --category <category> [--top <n>] [--top-paths <n>] [--local]',
@@ -870,6 +872,21 @@ async function commandExplainUnk(_config, storage, args) {
   };
 }
 
+async function commandLlmHealth(config, storage, args) {
+  const provider = String(args.provider || '').trim().toLowerCase();
+  const model = String(args.model || '').trim();
+  const result = await runLlmHealthCheck({
+    storage,
+    config,
+    provider,
+    model
+  });
+  return {
+    command: 'llm-health',
+    ...result
+  };
+}
+
 async function commandTestS3() {
   const output = await runS3Integration(process.argv.slice(3));
   return {
@@ -914,6 +931,8 @@ async function main() {
     output = await commandLearningReport(config, storage, args);
   } else if (command === 'explain-unk') {
     output = await commandExplainUnk(config, storage, args);
+  } else if (command === 'llm-health') {
+    output = await commandLlmHealth(config, storage, args);
   } else if (command === 'test-s3') {
     output = await commandTestS3();
   } else if (command === 'sources-plan') {

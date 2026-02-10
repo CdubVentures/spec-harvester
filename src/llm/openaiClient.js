@@ -206,6 +206,8 @@ export async function callOpenAI({
   );
   const providerLabel = providerClient.name;
   const deepSeekMode = isDeepSeekRequest({ baseUrl, model });
+  const reason = String(usageContext?.reason || 'extract');
+  const jsonSchemaRequested = Boolean(jsonSchema && !deepSeekMode);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -254,6 +256,25 @@ export async function callOpenAI({
     return parsed;
   };
 
+  const emitFailure = (safeMessage) => {
+    logger?.warn?.('llm_call_failed', {
+      reason,
+      provider: providerLabel,
+      model,
+      message: safeMessage,
+      deepseek_mode_detected: Boolean(deepSeekMode),
+      json_schema_requested: Boolean(jsonSchemaRequested)
+    });
+    // Backward compatibility for existing logs/consumers expecting legacy OpenAI event names.
+    if (providerLabel === 'openai') {
+      logger?.warn?.('openai_call_failed', {
+        reason,
+        model,
+        message: safeMessage
+      });
+    }
+  };
+
   const emitUsage = async ({ usage, content, responseModel, retryWithoutSchema = false }) => {
     if (typeof onUsage !== 'function') {
       return;
@@ -282,12 +303,38 @@ export async function callOpenAI({
       cost_usd: cost.costUsd,
       estimated_usage: Boolean(normalizedUsage.estimated),
       retry_without_schema: Boolean(retryWithoutSchema),
+      deepseek_mode_detected: Boolean(deepSeekMode),
+      json_schema_requested: Boolean(jsonSchemaRequested),
       ...usageContext
+    });
+    logger?.info?.('llm_call_usage', {
+      purpose: reason,
+      reason,
+      provider: providerLabel,
+      model: responseModel || model,
+      prompt_tokens: normalizedUsage.promptTokens,
+      completion_tokens: normalizedUsage.completionTokens,
+      cached_prompt_tokens: normalizedUsage.cachedPromptTokens,
+      total_tokens: normalizedUsage.totalTokens,
+      cost_usd: cost.costUsd,
+      estimated_usage: Boolean(normalizedUsage.estimated),
+      deepseek_mode_detected: Boolean(deepSeekMode),
+      json_schema_requested: Boolean(jsonSchemaRequested),
+      retry_without_schema: Boolean(retryWithoutSchema)
     });
   };
 
+  logger?.info?.('llm_call_started', {
+    purpose: reason,
+    reason,
+    provider: providerLabel,
+    model,
+    deepseek_mode_detected: Boolean(deepSeekMode),
+    json_schema_requested: Boolean(jsonSchemaRequested)
+  });
+
   try {
-    const useJsonSchema = Boolean(jsonSchema && !deepSeekMode);
+    const useJsonSchema = Boolean(jsonSchemaRequested);
     const first = await requestChatCompletion({
       providerClient,
       baseUrl: baseUrlNormalized,
@@ -300,14 +347,21 @@ export async function callOpenAI({
       content: first.content,
       responseModel: first.responseModel
     });
-    return parseStructuredResult(first.content);
+    const parsed = parseStructuredResult(first.content);
+    logger?.info?.('llm_call_completed', {
+      purpose: reason,
+      reason,
+      provider: providerLabel,
+      model: first.responseModel || model,
+      deepseek_mode_detected: Boolean(deepSeekMode),
+      json_schema_requested: Boolean(jsonSchemaRequested),
+      retry_without_schema: false
+    });
+    return parsed;
   } catch (firstError) {
     if (!jsonSchema || !shouldRetryWithoutJsonSchema(firstError)) {
       const safeMessage = sanitizeText(firstError.message, [apiKey]);
-      logger?.warn?.('openai_call_failed', {
-        model,
-        message: safeMessage
-      });
+      emitFailure(safeMessage);
       throw new Error(safeMessage);
     }
 
@@ -325,13 +379,20 @@ export async function callOpenAI({
         responseModel: retry.responseModel,
         retryWithoutSchema: true
       });
-      return parseStructuredResult(retry.content);
+      const parsed = parseStructuredResult(retry.content);
+      logger?.info?.('llm_call_completed', {
+        purpose: reason,
+        reason,
+        provider: providerLabel,
+        model: retry.responseModel || model,
+        deepseek_mode_detected: Boolean(deepSeekMode),
+        json_schema_requested: Boolean(jsonSchemaRequested),
+        retry_without_schema: true
+      });
+      return parsed;
     } catch (retryError) {
       const safeMessage = sanitizeText(retryError.message, [apiKey]);
-      logger?.warn?.('openai_call_failed', {
-        model,
-        message: safeMessage
-      });
+      emitFailure(safeMessage);
       throw new Error(safeMessage);
     }
   } finally {

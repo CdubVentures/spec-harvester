@@ -1,3 +1,5 @@
+import { normalizeFieldList } from '../utils/fieldKeys.js';
+
 function clean(value) {
   return String(value || '')
     .replace(/\s+/g, ' ')
@@ -58,7 +60,9 @@ export function buildTargetedQueries({
     .filter(Boolean);
 
   const queries = new Set(baseTemplates);
-  const focusFields = toArray(missingFields).filter(Boolean);
+  const focusFields = normalizeFieldList(toArray(missingFields), {
+    fieldOrder: categoryConfig?.fieldOrder || []
+  }).filter(Boolean);
 
   for (const field of focusFields) {
     for (const synonym of fieldSynonyms(field, lexicon)) {

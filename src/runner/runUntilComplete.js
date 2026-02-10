@@ -3,6 +3,9 @@ import { applyRunProfile } from '../config.js';
 import { loadCategoryConfig } from '../categories/loader.js';
 import { evaluateSearchLoopStop } from '../search/searchLoop.js';
 import { EventLogger } from '../logger.js';
+import { loadCategoryBrain } from '../learning/categoryBrain.js';
+import { availabilitySearchEffort } from '../learning/fieldAvailability.js';
+import { normalizeFieldList } from '../utils/fieldKeys.js';
 import {
   markQueueRunning,
   recordQueueRunResult,
@@ -57,7 +60,36 @@ function makeRoundHint(round) {
   return 'conflict_resolution_pass';
 }
 
-function buildRoundConfig(baseConfig, { round, mode }) {
+function buildAvailabilityQueries({
+  job,
+  expectedFields = [],
+  sometimesFields = [],
+  criticalFields = []
+}) {
+  const brand = String(job?.identityLock?.brand || '').trim();
+  const model = String(job?.identityLock?.model || '').trim();
+  const variant = String(job?.identityLock?.variant || '').trim();
+  const product = [brand, model, variant].filter(Boolean).join(' ').trim();
+  const fields = [...new Set([
+    ...(expectedFields || []),
+    ...(criticalFields || [])
+  ])];
+  const queries = [];
+  for (const field of fields.slice(0, 8)) {
+    queries.push(`${product} ${field} specification`);
+    queries.push(`${product} ${field} support`);
+    queries.push(`${product} ${field} manual pdf`);
+  }
+  for (const field of (sometimesFields || []).slice(0, 4)) {
+    queries.push(`${product} ${field} specs`);
+  }
+  return [...new Set(queries.map((query) => query.trim()).filter(Boolean))].slice(0, 24);
+}
+
+function buildRoundConfig(baseConfig, { round, mode, availabilityEffort = {} }) {
+  const expectedCount = toInt(availabilityEffort.expected_count, 0);
+  const sometimesCount = toInt(availabilityEffort.sometimes_count, 0);
+  const rareCount = toInt(availabilityEffort.rare_count, 0);
   const profile = round === 0
     ? 'fast'
     : round >= 2 || mode === 'aggressive'
@@ -89,6 +121,17 @@ function buildRoundConfig(baseConfig, { round, mode }) {
     },
     profile
   );
+
+  if (expectedCount > 0) {
+    next.discoveryMaxQueries = Math.max(next.discoveryMaxQueries || 0, 10 + Math.min(14, expectedCount * 2));
+    next.discoveryResultsPerQuery = Math.max(next.discoveryResultsPerQuery || 0, 12);
+    next.maxUrlsPerProduct = Math.max(next.maxUrlsPerProduct || 0, 90 + Math.min(140, expectedCount * 12));
+    next.maxCandidateUrls = Math.max(next.maxCandidateUrls || 0, 130 + Math.min(200, expectedCount * 16));
+  } else if (rareCount > 0 && sometimesCount === 0) {
+    next.discoveryMaxQueries = Math.min(next.discoveryMaxQueries || 8, 6);
+    next.maxUrlsPerProduct = Math.min(next.maxUrlsPerProduct || 60, 70);
+    next.maxCandidateUrls = Math.min(next.maxCandidateUrls || 90, 90);
+  }
 
   return next;
 }
@@ -200,6 +243,8 @@ export async function runUntilComplete({
   });
 
   const categoryConfig = await loadCategoryConfig(category, { storage, config });
+  const categoryBrain = await loadCategoryBrain({ storage, category });
+  const fieldAvailabilityArtifact = categoryBrain?.artifacts?.fieldAvailability?.value || {};
   const normalizedModeValue = normalizedMode(mode, config.accuracyMode || 'balanced');
   const roundsLimit = normalizedRoundCount(maxRounds, normalizedModeValue === 'aggressive' ? 8 : 4);
   const rounds = [];
@@ -244,9 +289,30 @@ export async function runUntilComplete({
       next_action_hint: roundHint
     });
 
+    const missingRequiredForPlanning = normalizeFieldList(
+      previousSummary?.missing_required_fields || categoryConfig.requiredFields || [],
+      { fieldOrder: categoryConfig.fieldOrder || [] }
+    );
+    const missingCriticalForPlanning = normalizeFieldList(
+      previousSummary?.critical_fields_below_pass_target || categoryConfig.schema?.critical_fields || [],
+      { fieldOrder: categoryConfig.fieldOrder || [] }
+    );
+    const availabilityEffort = availabilitySearchEffort({
+      artifact: fieldAvailabilityArtifact,
+      missingFields: missingRequiredForPlanning,
+      fieldOrder: categoryConfig.fieldOrder || []
+    });
+    const extraQueries = buildAvailabilityQueries({
+      job,
+      expectedFields: availabilityEffort.missing_expected_fields || [],
+      sometimesFields: availabilityEffort.missing_sometimes_fields || [],
+      criticalFields: missingCriticalForPlanning
+    });
+
     const roundConfig = buildRoundConfig(config, {
       round,
-      mode: normalizedModeValue
+      mode: normalizedModeValue,
+      availabilityEffort
     });
     const llmTargetFields = makeLlmTargetFields({
       previousSummary,
@@ -262,6 +328,15 @@ export async function runUntilComplete({
       roundContext: {
         round,
         mode: normalizedModeValue,
+        force_verify_llm: Boolean(
+          config.llmVerifyMode &&
+          Array.isArray(previousSummary?.missing_required_fields) &&
+          previousSummary.missing_required_fields.length > 0
+        ),
+        missing_required_fields: missingRequiredForPlanning,
+        missing_critical_fields: missingCriticalForPlanning,
+        availability: availabilityEffort,
+        extra_queries: extraQueries,
         llm_target_fields: llmTargetFields
       }
     });
@@ -325,6 +400,7 @@ export async function runUntilComplete({
       contradiction_count: progress.contradictionCount,
       confidence: progress.confidence,
       llm_budget_blocked_reason: budgetBlockedReason || null,
+      availability_effort: availabilityEffort,
       improved: delta.improved,
       improvement_reasons: delta.reasons
     });
@@ -347,13 +423,14 @@ export async function runUntilComplete({
       noNewFieldsRounds,
       budgetReached: false,
       repeatedLowQualityRounds: lowQualityRounds,
-      maxNoProgressRounds: 2,
+      maxNoProgressRounds: (availabilityEffort.expected_count || 0) > 0 ? 3 : 2,
       maxLowQualityRounds: 3
     });
 
-    if (stopDecision.stop || noProgressStreak >= 2) {
+    const noProgressLimit = (availabilityEffort.expected_count || 0) > 0 ? 3 : 2;
+    if (stopDecision.stop || noProgressStreak >= noProgressLimit) {
       exhausted = true;
-      stopReason = stopDecision.stop ? stopDecision.reason : 'no_progress_two_rounds';
+      stopReason = stopDecision.stop ? stopDecision.reason : `no_progress_${noProgressLimit}_rounds`;
       break;
     }
 

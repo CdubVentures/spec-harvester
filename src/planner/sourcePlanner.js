@@ -1,4 +1,5 @@
 import { extractRootDomain } from '../utils/common.js';
+import { toRawFieldKey } from '../utils/fieldKeys.js';
 import {
   inferRoleForHost,
   isApprovedHost,
@@ -29,23 +30,6 @@ function hostInSet(host, hostSet) {
     }
   }
   return false;
-}
-
-function normalizeRequiredFieldName(value) {
-  const raw = String(value || '').trim();
-  if (!raw) {
-    return '';
-  }
-  if (raw.startsWith('fields.')) {
-    return raw.slice('fields.'.length);
-  }
-  if (raw.startsWith('specs.')) {
-    return raw.slice('specs.'.length);
-  }
-  if (raw.startsWith('identity.')) {
-    return '';
-  }
-  return raw.includes('.') ? '' : raw;
 }
 
 function tokenize(value) {
@@ -152,19 +136,6 @@ function decodeXmlEntities(value) {
     .replace(/&#39;/g, "'");
 }
 
-function urlContainsAnyToken(url, tokens) {
-  if (!tokens || !tokens.length) {
-    return false;
-  }
-  try {
-    const parsed = new URL(url);
-    const text = `${parsed.pathname || ''} ${parsed.search || ''}`.toLowerCase();
-    return tokens.some((token) => text.includes(String(token || '').toLowerCase()));
-  } catch {
-    return false;
-  }
-}
-
 function countTokenHits(text, tokens) {
   const haystack = String(text || '').toLowerCase();
   let hits = 0;
@@ -190,7 +161,7 @@ export class SourcePlanner {
 
     const requiredFieldsRaw = options.requiredFields || [];
     this.requiredFields = requiredFieldsRaw
-      .map((field) => normalizeRequiredFieldName(field))
+      .map((field) => toRawFieldKey(field, { fieldOrder: categoryConfig.fieldOrder || [] }))
       .filter(Boolean);
     this.sourceIntelDomains = options.sourceIntel?.domains || {};
     this.brandKey = slug(job.identityLock?.brand || '');
@@ -256,7 +227,10 @@ export class SourcePlanner {
       'black',
       'white',
       'mini',
-      'ultra'
+      'ultra',
+      'pro',
+      'plus',
+      'max'
     ]);
     this.modelTokens = [...new Set([
       ...tokenize(job.identityLock?.model),
@@ -418,12 +392,27 @@ export class SourcePlanner {
 
   seedLearning(urls) {
     for (const url of urls || []) {
-      const modelMatch = this.modelTokens.length > 0 && urlContainsAnyToken(url, this.modelTokens);
-      const fallbackBrandMatch =
-        this.modelTokens.length === 0 &&
-        this.brandTokens.length > 0 &&
-        urlContainsAnyToken(url, this.brandTokens);
-      if (!modelMatch && !fallbackBrandMatch) {
+      let parsed;
+      try {
+        parsed = new URL(url);
+      } catch {
+        continue;
+      }
+
+      const haystack = `${parsed.hostname || ''} ${parsed.pathname || ''} ${parsed.search || ''}`.toLowerCase();
+      const modelHits = countTokenHits(haystack, this.modelTokens);
+      const brandHits = countTokenHits(haystack, this.brandTokens);
+
+      const modelThreshold = this.modelTokens.length >= 3 ? 2 : 1;
+      const modelMatch = this.modelTokens.length > 0 && modelHits >= modelThreshold;
+      const brandMatch = this.brandTokens.length > 0 && brandHits >= 1;
+
+      if (this.modelTokens.length > 0) {
+        // When model tokens exist, avoid broad cross-brand URLs.
+        if (!modelMatch || (this.brandTokens.length > 0 && !brandMatch)) {
+          continue;
+        }
+      } else if (!brandMatch) {
         continue;
       }
       this.enqueue(url, 'learning_seed', { forceApproved: true, forceBrandBypass: false });
@@ -1077,27 +1066,95 @@ export class SourcePlanner {
     return Number.parseFloat((Math.max(-0.2, Math.min(0.2, avg * 0.35))).toFixed(6));
   }
 
+  sourcePathHeuristicBoost(row) {
+    const rawUrl = String(row?.url || '');
+    if (!rawUrl) {
+      return 0;
+    }
+
+    let parsed;
+    try {
+      parsed = new URL(rawUrl);
+    } catch {
+      return 0;
+    }
+
+    const path = String(parsed.pathname || '/').toLowerCase();
+    const query = String(parsed.search || '').toLowerCase();
+    const role = String(row?.role || '').toLowerCase();
+    let score = 0;
+
+    // De-prioritize generic index/search surfaces that frequently return weak signals.
+    if (
+      path === '/' ||
+      /\/search\/?$/.test(path) ||
+      query.includes('q=') ||
+      query.includes('query=')
+    ) {
+      score -= 0.35;
+    }
+    if (/\/shop\/search/.test(path)) {
+      score -= 0.45;
+    }
+
+    // Crawl robots/sitemaps eventually, but never before likely product/spec pages.
+    if (
+      path.endsWith('/robots.txt') ||
+      isSitemapLikePath(path)
+    ) {
+      score -= 0.4;
+    }
+
+    if (role === 'manufacturer') {
+      if (/\/products?\//.test(path)) {
+        score += 0.28;
+      }
+      if (/\/gaming-mice\//.test(path)) {
+        score += 0.18;
+      }
+      if (/\/support\//.test(path)) {
+        score += 0.08;
+      }
+      if (/\/manual|\/spec|\/download/.test(path)) {
+        score += 0.05;
+      }
+      if (path.endsWith('.pdf')) {
+        score += 0.12;
+      }
+    } else if (role === 'review' || role === 'database') {
+      if (/\/review|\/product|\/products?\//.test(path)) {
+        score += 0.1;
+      }
+      if (path.endsWith('.pdf')) {
+        score += 0.08;
+      }
+    }
+
+    return Number.parseFloat(Math.max(-0.6, Math.min(0.6, score)).toFixed(6));
+  }
+
   sourcePriority(row) {
     const rootDomain = row?.rootDomain;
+    const pathHeuristicBoost = this.sourcePathHeuristicBoost(row);
     if (!rootDomain) {
-      return 0;
+      return pathHeuristicBoost;
     }
 
     const { domainIntel, activeIntel } = this.getIntelBundle(rootDomain);
     if (!domainIntel || !activeIntel) {
-      return 0;
+      return pathHeuristicBoost;
     }
 
     const baseScore = Number.isFinite(activeIntel.planner_score)
       ? activeIntel.planner_score
       : Number.isFinite(domainIntel.planner_score)
         ? domainIntel.planner_score
-        : 0;
+      : 0;
     const missingRequiredFields = this.requiredFields.filter((field) => !this.filledFields.has(field));
     const requiredBoost = this.scoreRequiredFieldBoost(activeIntel, domainIntel, missingRequiredFields);
     const rewardBoost = this.scoreFieldRewardBoost(row, domainIntel, activeIntel, missingRequiredFields);
 
-    return Number.parseFloat((baseScore + requiredBoost + rewardBoost).toFixed(6));
+    return Number.parseFloat((baseScore + requiredBoost + rewardBoost + pathHeuristicBoost).toFixed(6));
   }
 
   domainPriority(rootDomain) {

@@ -5,9 +5,6 @@
     "brand",
     "model",
     "base_model",
-    "category",
-    "cardTags",
-    "featured",
     "release_date",
     "discontinued",
     "sku",
@@ -86,10 +83,7 @@
   ],
   "editorial_fields": [
     "cardTags",
-    "featured",
-    "price_range",
-    "design",
-    "lighting"
+    "featured"
   ],
   "critical_fields": [
     "connection",

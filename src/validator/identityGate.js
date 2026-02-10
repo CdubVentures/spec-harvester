@@ -308,6 +308,11 @@ export function evaluateIdentityGate(sourceResults) {
   const manufacturer = accepted.find(
     (s) => s.role === 'manufacturer' && s.tier === 1 && s.approvedDomain
   );
+  const helperAccepted = accepted.filter((s) =>
+    s.helperSource ||
+    String(s.host || '').toLowerCase() === 'helper-files.local' ||
+    String(s.url || '').startsWith('helper_files://')
+  );
   const credibleAdditionalDomains = new Set(
     accepted
       .filter((s) => s.tier <= 2 && s.approvedDomain)
@@ -344,7 +349,10 @@ export function evaluateIdentityGate(sourceResults) {
   );
 
   const hasManufacturer = Boolean(manufacturer);
-  const hasAdditional = credibleAdditionalDomains.size >= 2;
+  const hasTrustedHelper = helperAccepted.length > 0;
+  const hasAdditional =
+    credibleAdditionalDomains.size >= 2 ||
+    (hasTrustedHelper && credibleAdditionalDomains.size >= 1);
   const noContradictions = contradictions.length === 0;
   const noMajorAnchorConflicts = majorAnchors.length === 0;
 
@@ -353,6 +361,7 @@ export function evaluateIdentityGate(sourceResults) {
   let certainty = 0.4;
   if (hasManufacturer) certainty += 0.25;
   if (hasAdditional) certainty += 0.2;
+  if (hasTrustedHelper) certainty += 0.05;
   if (noContradictions) certainty += 0.1;
   if (noMajorAnchorConflicts) certainty += 0.1;
   if (accepted.length >= 3) certainty += 0.05;
@@ -373,6 +382,7 @@ export function evaluateIdentityGate(sourceResults) {
     certainty,
     requirements: {
       hasManufacturer,
+      hasTrustedHelper,
       additionalCredibleSources: credibleAdditionalDomains.size,
       noContradictions,
       noMajorAnchorConflicts

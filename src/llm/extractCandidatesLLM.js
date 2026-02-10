@@ -1,5 +1,7 @@
 import { normalizeWhitespace } from '../utils/common.js';
+import { normalizeFieldList } from '../utils/fieldKeys.js';
 import { callOpenAI } from './openaiClient.js';
+import { appendLlmVerificationReport } from './verificationReport.js';
 
 const IDENTITY_KEYS = ['brand', 'model', 'sku', 'mpn', 'gtin', 'variant'];
 
@@ -85,6 +87,79 @@ function filterEvidenceRefs(refs, validRefs) {
   return [...new Set((refs || []).filter((id) => validRefs.has(id)))];
 }
 
+function hasKnownValue(value) {
+  const token = String(value || '').trim().toLowerCase();
+  return token !== '' && token !== 'unk' && token !== 'null' && token !== 'undefined' && token !== 'n/a';
+}
+
+function sanitizeExtractionResult({
+  result,
+  job,
+  fieldSet,
+  validRefs
+}) {
+  const identityCandidates = sanitizeIdentity(result?.identityCandidates, job.identityLock || {});
+  const fieldCandidates = [];
+  for (const row of result?.fieldCandidates || []) {
+    const field = String(row.field || '').trim();
+    const value = normalizeWhitespace(row.value);
+    const refs = filterEvidenceRefs(row.evidenceRefs, validRefs);
+
+    if (!fieldSet.has(field)) {
+      continue;
+    }
+    if (!hasKnownValue(value)) {
+      continue;
+    }
+    if (!refs.length) {
+      continue;
+    }
+
+    fieldCandidates.push({
+      field,
+      value,
+      method: 'llm_extract',
+      keyPath: row.keyPath || 'llm.extract',
+      evidenceRefs: refs
+    });
+  }
+
+  const conflicts = [];
+  for (const conflict of result?.conflicts || []) {
+    const refs = filterEvidenceRefs(conflict.evidenceRefs, validRefs);
+    if (!refs.length) {
+      continue;
+    }
+    conflicts.push({
+      field: String(conflict.field || ''),
+      values: (conflict.values || []).map((value) => normalizeWhitespace(value)).filter(Boolean),
+      evidenceRefs: refs
+    });
+  }
+
+  return {
+    identityCandidates,
+    fieldCandidates,
+    conflicts,
+    notes: (result?.notes || []).map((note) => normalizeWhitespace(note)).filter(Boolean)
+  };
+}
+
+function countRequiredFilled(fieldCandidates = [], requiredFieldSet = new Set()) {
+  const filled = new Set();
+  for (const row of fieldCandidates || []) {
+    if (!requiredFieldSet.has(row.field) || !hasKnownValue(row.value)) {
+      continue;
+    }
+    filled.add(row.field);
+  }
+  return filled.size;
+}
+
+function shouldRunVerifyExtraction(llmContext = {}) {
+  return Boolean(llmContext?.verification?.enabled && !llmContext?.verification?.done);
+}
+
 export async function extractCandidatesLLM({
   job,
   categoryConfig,
@@ -153,17 +228,15 @@ export async function extractCandidatesLLM({
     references: evidencePack.references || [],
     snippets: evidencePack.snippets || []
   };
-  logger?.info?.('llm_call_started', {
-    purpose: 'extract',
-    model: config.llmModelExtract,
-    provider: config.llmProvider || 'openai',
-    target_field_count: effectiveFieldOrder.length,
-    reference_count: (evidencePack.references || []).length
-  });
 
-  try {
+  const invokeModel = async ({
+    model,
+    reasoningMode,
+    reason,
+    usageTracker
+  }) => {
     const result = await callOpenAI({
-      model: config.llmModelExtract,
+      model,
       system,
       user: JSON.stringify(userPayload),
       jsonSchema: llmSchema(),
@@ -175,7 +248,7 @@ export async function extractCandidatesLLM({
         productId: job.productId || '',
         runId: llmContext.runId || '',
         round: llmContext.round || 0,
-        reason: 'extract',
+        reason,
         host: evidencePack?.meta?.host || '',
         url_count: Math.max(0, Number(evidencePack?.references?.length || 0)),
         evidence_chars: Math.max(0, Number(evidencePack?.meta?.total_chars || 0))
@@ -186,77 +259,136 @@ export async function extractCandidatesLLM({
         if (typeof llmContext.recordUsage === 'function') {
           await llmContext.recordUsage(usageRow);
         }
-        logger?.info?.('llm_call_usage', {
-          purpose: 'extract',
-          provider: usageRow.provider,
-          model: usageRow.model,
-          prompt_tokens: usageRow.prompt_tokens,
-          completion_tokens: usageRow.completion_tokens,
-          cached_prompt_tokens: usageRow.cached_prompt_tokens || 0,
-          total_tokens: usageRow.total_tokens || 0,
-          cost_usd: usageRow.cost_usd,
-          evidence_chars: usageRow.evidence_chars || 0,
-          url_count: usageRow.url_count || 0
-        });
+        if (usageTracker && typeof usageTracker === 'object') {
+          usageTracker.prompt_tokens += Number(usageRow.prompt_tokens || 0);
+          usageTracker.completion_tokens += Number(usageRow.completion_tokens || 0);
+          usageTracker.cost_usd += Number(usageRow.cost_usd || 0);
+        }
       },
-      reasoningMode: Boolean(config.llmReasoningMode),
+      reasoningMode: Boolean(reasoningMode),
       reasoningBudget: Number(config.llmReasoningBudget || 0),
       timeoutMs: config.llmTimeoutMs || config.openaiTimeoutMs,
       logger
     });
-
-    const identityCandidates = sanitizeIdentity(result.identityCandidates, job.identityLock || {});
-
-    const fieldCandidates = [];
-    for (const row of result.fieldCandidates || []) {
-      const field = String(row.field || '').trim();
-      const value = normalizeWhitespace(row.value);
-      const refs = filterEvidenceRefs(row.evidenceRefs, validRefs);
-
-      if (!fieldSet.has(field)) {
-        continue;
-      }
-      if (!value || value.toLowerCase() === 'unk') {
-        continue;
-      }
-      if (!refs.length) {
-        continue;
-      }
-
-      fieldCandidates.push({
-        field,
-        value,
-        method: 'llm_extract',
-        keyPath: row.keyPath || 'llm.extract',
-        evidenceRefs: refs
-      });
-    }
-
-    const conflicts = [];
-    for (const conflict of result.conflicts || []) {
-      const refs = filterEvidenceRefs(conflict.evidenceRefs, validRefs);
-      if (!refs.length) {
-        continue;
-      }
-      conflicts.push({
-        field: String(conflict.field || ''),
-        values: (conflict.values || []).map((value) => normalizeWhitespace(value)).filter(Boolean),
-        evidenceRefs: refs
-      });
-    }
-
-    logger?.info?.('llm_call_completed', {
-      purpose: 'extract',
-      model: config.llmModelExtract,
-      candidate_count: fieldCandidates.length,
-      conflict_count: conflicts.length
+    return sanitizeExtractionResult({
+      result,
+      job,
+      fieldSet,
+      validRefs
     });
-    return {
-      identityCandidates,
-      fieldCandidates,
-      conflicts,
-      notes: (result.notes || []).map((note) => normalizeWhitespace(note)).filter(Boolean)
-    };
+  };
+
+  try {
+    const primary = await invokeModel({
+      model: config.llmModelExtract,
+      reasoningMode: Boolean(config.llmReasoningMode),
+      reason: 'extract'
+    });
+
+    if (shouldRunVerifyExtraction(llmContext)) {
+      llmContext.verification.done = true;
+      const usageFast = { prompt_tokens: 0, completion_tokens: 0, cost_usd: 0 };
+      const usageReason = { prompt_tokens: 0, completion_tokens: 0, cost_usd: 0 };
+      const fastModel = String(config.llmModelPlan || 'deepseek-chat').trim();
+      const reasonModel = String(config.llmModelExtract || 'deepseek-reasoner').trim();
+      try {
+        let fastResult;
+        let reasonResult;
+
+        if (fastModel && fastModel === config.llmModelExtract) {
+          fastResult = primary;
+        } else if (fastModel) {
+          const canFastCall = budgetGuard?.canCall({
+            reason: 'verify_extract_fast',
+            essential: false
+          }) || { allowed: true };
+          if (canFastCall.allowed) {
+            fastResult = await invokeModel({
+              model: fastModel,
+              reasoningMode: false,
+              reason: 'verify_extract_fast',
+              usageTracker: usageFast
+            });
+          }
+        }
+
+        if (reasonModel && reasonModel === config.llmModelExtract) {
+          reasonResult = primary;
+        } else if (reasonModel) {
+          const canReasonCall = budgetGuard?.canCall({
+            reason: 'verify_extract_reason',
+            essential: false
+          }) || { allowed: true };
+          if (canReasonCall.allowed) {
+            reasonResult = await invokeModel({
+              model: reasonModel,
+              reasoningMode: true,
+              reason: 'verify_extract_reason',
+              usageTracker: usageReason
+            });
+          }
+        }
+
+        if (fastResult || reasonResult) {
+          const requiredSet = new Set(normalizeFieldList(categoryConfig.requiredFields || [], {
+            fieldOrder: categoryConfig.fieldOrder || []
+          }));
+          const fastRequired = countRequiredFilled(fastResult?.fieldCandidates || [], requiredSet);
+          const reasonRequired = countRequiredFilled(reasonResult?.fieldCandidates || [], requiredSet);
+          const reportKey = await appendLlmVerificationReport({
+            storage: llmContext.storage,
+            category: job.category || categoryConfig.category || '',
+            entry: {
+              ts: new Date().toISOString(),
+              category: job.category || categoryConfig.category || '',
+              productId: job.productId || '',
+              runId: llmContext.runId || '',
+              round: llmContext.round || 0,
+              source_url: evidencePack?.meta?.url || '',
+              trigger: llmContext.verification.trigger || 'sampling',
+              fast_model: fastModel || null,
+              reason_model: reasonModel || null,
+              fast_required_filled_count: fastRequired,
+              reason_required_filled_count: reasonRequired,
+              fast_conflict_count: (fastResult?.conflicts || []).length,
+              reason_conflict_count: (reasonResult?.conflicts || []).length,
+              fast_candidate_count: (fastResult?.fieldCandidates || []).length,
+              reason_candidate_count: (reasonResult?.fieldCandidates || []).length,
+              fast_cost_usd: Number(usageFast.cost_usd || 0),
+              reason_cost_usd: Number(usageReason.cost_usd || 0),
+              better_model: reasonRequired > fastRequired
+                ? 'reason_model'
+                : fastRequired > reasonRequired
+                  ? 'fast_model'
+                  : 'tie'
+            }
+          });
+          llmContext.verification.report_key = reportKey;
+          logger?.info?.('llm_verify_report_written', {
+            productId: job.productId,
+            runId: llmContext.runId,
+            report_key: reportKey,
+            fast_model: fastModel,
+            reason_model: reasonModel,
+            fast_required_filled_count: fastRequired,
+            reason_required_filled_count: reasonRequired
+          });
+        }
+      } catch (verifyError) {
+        logger?.warn?.('llm_verify_failed', {
+          productId: job.productId,
+          message: verifyError.message
+        });
+      }
+    }
+
+    logger?.info?.('llm_extract_completed', {
+      model: config.llmModelExtract,
+      candidate_count: primary.fieldCandidates.length,
+      conflict_count: primary.conflicts.length
+    });
+
+    return primary;
   } catch (error) {
     logger?.warn?.('llm_extract_failed', { message: error.message });
     return {

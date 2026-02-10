@@ -1,21 +1,5 @@
 import { clamp, getByPath } from '../utils/common.js';
-
-function normalizeRequiredPath(path) {
-  const raw = String(path || '').trim();
-  if (!raw) {
-    return raw;
-  }
-  if (raw.startsWith('specs.')) {
-    return `fields.${raw.slice('specs.'.length)}`;
-  }
-  if (raw.startsWith('identity.') || raw.startsWith('fields.')) {
-    return raw;
-  }
-  if (raw.includes('.')) {
-    return raw;
-  }
-  return `fields.${raw}`;
-}
+import { normalizeRequiredFieldPath } from '../utils/fieldKeys.js';
 
 function valueFilled(value) {
   if (value === undefined || value === null) {
@@ -30,7 +14,7 @@ function valueFilled(value) {
 
 export function computeCompletenessRequired(normalized, requiredFieldsInput = []) {
   const requiredFields = requiredFieldsInput
-    .map(normalizeRequiredPath)
+    .map((path) => normalizeRequiredFieldPath(path))
     .filter(Boolean);
 
   const total = requiredFields.length;

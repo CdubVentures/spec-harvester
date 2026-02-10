@@ -6,6 +6,7 @@ import {
   resolveTierNameForHost
 } from '../categories/loader.js';
 import { extractRootDomain } from '../utils/common.js';
+import { normalizeFieldList } from '../utils/fieldKeys.js';
 
 function normalizeHost(value) {
   return String(value || '').toLowerCase().replace(/^www\./, '');
@@ -58,6 +59,9 @@ function computeScore(row, { categoryConfig, missingFields, fieldYieldMap }) {
   const role = inferRoleForHost(parsed.host, categoryConfig);
   if (role === 'manufacturer') score += 30;
   if (role === 'review') score += 12;
+  if (role === 'manufacturer' && /manual|datasheet|support|spec|product/.test(parsed.path)) {
+    score += 20;
+  }
 
   if (/manual|datasheet|spec|support|download|technical/.test(parsed.path)) {
     score += 18;
@@ -96,6 +100,9 @@ export function rerankSearchResults({
   missingFields = [],
   fieldYieldMap = {}
 }) {
+  const normalizedMissingFields = normalizeFieldList(missingFields, {
+    fieldOrder: categoryConfig?.fieldOrder || []
+  });
   const rows = [];
   const dedupe = new Set();
   for (const row of results || []) {
@@ -109,7 +116,7 @@ export function rerankSearchResults({
     dedupe.add(parsed.url);
     const score = computeScore(row, {
       categoryConfig,
-      missingFields,
+      missingFields: normalizedMissingFields,
       fieldYieldMap
     });
     if (!Number.isFinite(score)) {

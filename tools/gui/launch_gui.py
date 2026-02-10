@@ -18,20 +18,49 @@ def _pause_with_error(message: str) -> None:
         os.system("pause")
 
 
+def _ensure_streamlit(python_cmd: list[str], root: Path, env: dict[str, str]) -> tuple[bool, str]:
+    check = subprocess.run(
+        [*python_cmd, "-c", "import streamlit"],
+        cwd=str(root),
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if check.returncode == 0:
+        return True, ""
+
+    print(f"[SpecFactoryGUI] Streamlit not found for `{python_cmd[0]}`. Installing...")
+    install = subprocess.run(
+        [*python_cmd, "-m", "pip", "install", "--upgrade", "streamlit"],
+        cwd=str(root),
+        env=env,
+        check=False,
+    )
+    if install.returncode == 0:
+        return True, ""
+    return False, f"Failed to install Streamlit with: {' '.join(python_cmd)}"
+
+
 def _try_streamlit_subprocess(app_path: Path, root: Path) -> int:
     env = os.environ.copy()
     env.setdefault("SPEC_FACTORY_ROOT", str(root))
     env.setdefault("STREAMLIT_BROWSER_GATHER_USAGE_STATS", "false")
     env.setdefault("STREAMLIT_SERVER_HEADLESS", "false")
 
-    commands = [
-        ["python", "-m", "streamlit", "run", str(app_path)],
-        ["py", "-3", "-m", "streamlit", "run", str(app_path)]
+    launchers = [
+        ["python"],
+        ["py", "-3"],
     ]
 
     last_error = None
-    for cmd in commands:
+    for launcher in launchers:
         try:
+            ok, install_error = _ensure_streamlit(launcher, root, env)
+            if not ok:
+                last_error = install_error
+                continue
+            cmd = [*launcher, "-m", "streamlit", "run", str(app_path)]
             completed = subprocess.run(
                 cmd,
                 cwd=str(root),
@@ -66,21 +95,7 @@ def main() -> int:
     os.environ.setdefault("STREAMLIT_BROWSER_GATHER_USAGE_STATS", "false")
     os.environ.setdefault("STREAMLIT_SERVER_HEADLESS", "false")
 
-    if getattr(sys, "frozen", False):
-        return _try_streamlit_subprocess(app_path, root)
-
-    try:
-        from streamlit.web import bootstrap
-    except Exception as exc:  # pragma: no cover
-        _pause_with_error(f"Streamlit is missing or failed to import: {exc}")
-        return 1
-
-    try:
-        bootstrap.run(str(app_path), "", [], {})
-        return 0
-    except Exception as exc:  # pragma: no cover
-        _pause_with_error(f"Failed to start GUI: {exc}")
-        return 1
+    return _try_streamlit_subprocess(app_path, root)
 
 
 if __name__ == "__main__":

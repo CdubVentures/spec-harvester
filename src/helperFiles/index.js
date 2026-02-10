@@ -587,10 +587,36 @@ export function buildSupportiveSyntheticSources({
   if (!helperContext?.enabled) {
     return [];
   }
-  const matches = (helperContext.supportive_matches || []).slice(0, Math.max(1, maxSources));
+  const limit = Math.max(1, maxSources);
+  const matches = [];
+  const seen = new Set();
+  for (const match of (helperContext.supportive_matches || []).slice(0, limit)) {
+    const key = `${match.source}#${match.record_id ?? ''}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    matches.push({
+      ...match,
+      __helper_method: 'helper_supportive',
+      __helper_reason: 'helper_supportive_match'
+    });
+  }
+  if (helperContext.active_match) {
+    const active = helperContext.active_match;
+    const key = `${active.source}#${active.record_id ?? ''}`;
+    if (!seen.has(key)) {
+      matches.push({
+        ...active,
+        __helper_method: 'helper_active_filtering',
+        __helper_reason: 'helper_active_match'
+      });
+    }
+  }
   const output = [];
 
   for (const match of matches) {
+    const helperMethod = match.__helper_method || 'helper_supportive';
     const fieldCandidates = [];
     for (const field of categoryConfig.fieldOrder || []) {
       if (IDENTITY_FIELDS.has(field)) {
@@ -603,8 +629,8 @@ export function buildSupportiveSyntheticSources({
       fieldCandidates.push({
         field,
         value,
-        method: 'helper_supportive',
-        keyPath: `helper_supportive.${field}`
+        method: helperMethod,
+        keyPath: `${helperMethod}.${field}`
       });
     }
 
@@ -624,7 +650,7 @@ export function buildSupportiveSyntheticSources({
       approvedDomain: true,
       candidateSource: false,
       ts: new Date().toISOString(),
-      title: `${match.brand} ${match.model} helper supportive`,
+      title: `${match.brand} ${match.model} ${helperMethod === 'helper_active_filtering' ? 'helper active' : 'helper supportive'}`,
       identityCandidates: {
         brand: match.brand,
         model: match.model,
@@ -642,7 +668,7 @@ export function buildSupportiveSyntheticSources({
       identity: {
         match: true,
         score: 0.99,
-        reasons: ['helper_supportive_match'],
+        reasons: [match.__helper_reason || 'helper_supportive_match'],
         criticalConflicts: []
       },
       endpointSignals: [],
@@ -698,39 +724,71 @@ export function applySupportiveFillToResult({
   criticalFieldsBelowPassTarget,
   categoryConfig
 }) {
-  const supportive = helperContext?.supportive_matches || [];
-  if (!supportive.length) {
+  const supportMatches = [];
+  const seen = new Set();
+  for (const match of helperContext?.supportive_matches || []) {
+    const key = `${match.source}#${match.record_id ?? ''}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    supportMatches.push({
+      match,
+      method: 'helper_supportive',
+      keyPrefix: 'helper_supportive'
+    });
+  }
+  if (helperContext?.active_match) {
+    const active = helperContext.active_match;
+    const key = `${active.source}#${active.record_id ?? ''}`;
+    if (!seen.has(key)) {
+      supportMatches.push({
+        match: active,
+        method: 'helper_active_filtering',
+        keyPrefix: 'helper_active_filtering'
+      });
+    }
+  }
+
+  if (!supportMatches.length) {
     return {
       filled_fields: [],
       mismatches: [],
+      filled_by_method: {},
       fields_below_pass_target: fieldsBelowPassTarget,
       critical_fields_below_pass_target: criticalFieldsBelowPassTarget
     };
   }
 
-  const best = supportive[0];
   const filledFields = [];
+  const filledByMethod = {};
   const mismatches = [];
   const fieldsBelow = new Set(fieldsBelowPassTarget || []);
   const criticalBelow = new Set(criticalFieldsBelowPassTarget || []);
-  const sourceUrl = supportSourceUrl(normalized.category, best);
 
   for (const field of categoryConfig.fieldOrder || []) {
     if (IDENTITY_FIELDS.has(field)) {
       continue;
     }
-    const supportiveValue = normalizeCanonicalValue(best.canonical_fields?.[field]);
-    if (!supportiveValue) {
+    const sourceEntry = supportMatches.find((entry) =>
+      normalizeCanonicalValue(entry.match.canonical_fields?.[field])
+    );
+    if (!sourceEntry) {
       continue;
     }
+    const pickedMatch = sourceEntry.match;
+    const helperMethod = sourceEntry.method;
+    const keyPrefix = sourceEntry.keyPrefix;
+    const pickedValue = normalizeCanonicalValue(pickedMatch.canonical_fields?.[field]);
+    const sourceUrl = supportSourceUrl(normalized.category, pickedMatch);
 
     const current = normalizeCanonicalValue(normalized.fields?.[field]);
     if (!current || current.toLowerCase() === 'unk') {
-      normalized.fields[field] = supportiveValue;
+      normalized.fields[field] = pickedValue;
       const previous = provenance[field] || {};
       provenance[field] = {
         ...previous,
-        value: supportiveValue,
+        value: pickedValue,
         anchor_locked: Boolean(previous.anchor_locked),
         confirmations: Math.max(1, Number.parseInt(String(previous.confirmations || 0), 10) || 0),
         approved_confirmations: Math.max(1, Number.parseInt(String(previous.approved_confirmations || 0), 10) || 0),
@@ -745,8 +803,8 @@ export function applySupportiveFillToResult({
             rootDomain: 'helper-files.local',
             tier: 2,
             tierName: 'database',
-            method: 'helper_supportive',
-            keyPath: `helper_supportive.${field}`,
+            method: helperMethod,
+            keyPath: `${keyPrefix}.${field}`,
             approvedDomain: true
           }
         ]
@@ -754,15 +812,17 @@ export function applySupportiveFillToResult({
       fieldsBelow.delete(field);
       criticalBelow.delete(field);
       filledFields.push(field);
+      filledByMethod[helperMethod] = (filledByMethod[helperMethod] || 0) + 1;
       continue;
     }
 
-    if (comparableValue(current) !== comparableValue(supportiveValue)) {
+    if (comparableValue(current) !== comparableValue(pickedValue)) {
       mismatches.push({
         field,
         pipeline_value: current,
-        supportive_value: supportiveValue,
-        supportive_source: best.source
+        supportive_value: pickedValue,
+        supportive_source: pickedMatch.source,
+        helper_method: helperMethod
       });
     }
   }
@@ -770,6 +830,7 @@ export function applySupportiveFillToResult({
   return {
     filled_fields: filledFields,
     mismatches,
+    filled_by_method: filledByMethod,
     fields_below_pass_target: [...fieldsBelow],
     critical_fields_below_pass_target: [...criticalBelow]
   };
