@@ -26,9 +26,24 @@ export async function planDiscoveryQueriesLLM({
   baseQueries,
   missingCriticalFields = [],
   config,
-  logger
+  logger,
+  llmContext = {}
 }) {
-  if (!config.llmEnabled || !config.llmPlanDiscoveryQueries || !config.openaiApiKey) {
+  if (!config.llmEnabled || !config.llmPlanDiscoveryQueries || !config.llmApiKey) {
+    return [];
+  }
+
+  const budgetGuard = llmContext?.budgetGuard;
+  const budgetDecision = budgetGuard?.canCall({
+    reason: 'plan',
+    essential: false
+  }) || { allowed: true };
+  if (!budgetDecision.allowed) {
+    budgetGuard?.block?.(budgetDecision.reason);
+    logger?.warn?.('llm_discovery_planner_skipped_budget', {
+      reason: budgetDecision.reason,
+      productId: job.productId
+    });
     return [];
   }
 
@@ -53,15 +68,33 @@ export async function planDiscoveryQueriesLLM({
 
   try {
     const result = await callOpenAI({
-      model: config.openaiModelPlan,
+      model: config.llmModelPlan,
       system,
       user: JSON.stringify(payload),
       jsonSchema: querySchema(),
-      apiKey: config.openaiApiKey,
-      baseUrl: config.openaiBaseUrl,
+      apiKey: config.llmApiKey,
+      baseUrl: config.llmBaseUrl,
+      provider: config.llmProvider,
+      usageContext: {
+        category: job.category || categoryConfig.category || '',
+        productId: job.productId || '',
+        runId: llmContext.runId || '',
+        round: llmContext.round || 0,
+        reason: 'plan',
+        host: '',
+        url_count: 0,
+        evidence_chars: JSON.stringify(payload).length
+      },
+      costRates: llmContext.costRates || config,
+      onUsage: async (usageRow) => {
+        budgetGuard?.recordCall({ costUsd: usageRow.cost_usd });
+        if (typeof llmContext.recordUsage === 'function') {
+          await llmContext.recordUsage(usageRow);
+        }
+      },
       reasoningMode: Boolean(config.llmReasoningMode),
       reasoningBudget: Number(config.llmReasoningBudget || 0),
-      timeoutMs: config.openaiTimeoutMs,
+      timeoutMs: config.llmTimeoutMs || config.openaiTimeoutMs,
       logger
     });
 

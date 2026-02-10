@@ -16,7 +16,13 @@ Commands:
 - `run-ad-hoc <category> <brand> <model> [<variant>] [--profile <standard|thorough|fast>] [--thorough]`
 - `run-ad-hoc --category <category> --brand <brand> --model <model> [--profile <standard|thorough|fast>] [--thorough]`
 - `run-batch --category mouse [--brand <brand>] [--strategy <explore|exploit|mixed|bandit>]`
+- `run-until-complete --s3key <key> [--max-rounds <n>] [--mode aggressive|balanced]`
 - `discover --category mouse [--brand <brand>]`
+- `ingest-csv --category <category> --path <csv>`
+- `watch-imports [--imports-root <path>] [--category <category>|--all] [--once]`
+- `daemon [--imports-root <path>] [--category <category>|--all] [--mode aggressive|balanced] [--once]`
+- `billing-report [--month YYYY-MM]`
+- `learning-report --category <category>`
 - `test-s3 [--fixture <path>] [--s3key <key>] [--dry-run]`
 - `sources-plan --category mouse`
 - `sources-report --category mouse [--top <n>]`
@@ -35,6 +41,21 @@ Each category is driven by files in `categories/{category}/`:
 - `anchors.json`
 
 Current category included: `mouse`.
+
+## Helper Files (Local)
+
+Drop trusted targeting and verification files under `helper_files/{category}/`:
+
+- `models-and-schema/activeFiltering.json`
+  - fixed filename used for target discovery (brand/model/variant + optional URLs/schema hints)
+- `accurate-supportive-product-information/*.json`
+  - every JSON file in this folder is loaded and matched by brand/model for supportive verification
+
+Behavior:
+
+- Category schema remains canonical (`categories/{category}/schema.json`).
+- `activeFiltering.json` can auto-seed product jobs for daemon/batch/discover.
+- Supportive JSON data is used as additional evidence and optional missing-field fill with provenance.
 
 ## S3 Layout
 
@@ -81,6 +102,16 @@ Learning artifacts:
 - `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_source_intel/{category}/promotion_suggestions/YYYY-MM-DD.json`
 - `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_source_intel/{category}/expansion_plans/YYYY-MM-DD.json`
 - `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_source_intel/{category}/expansion_plans/brands/{brand}/YYYY-MM-DD.json`
+- `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_learning/{category}/field_lexicon.json`
+- `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_learning/{category}/constraints.json`
+- `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_learning/{category}/field_yield.json`
+- `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_learning/{category}/identity_grammar.json`
+- `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_learning/{category}/query_templates.json`
+- `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_learning/{category}/source_promotions.json`
+- `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_learning/{category}/stats.json`
+- `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_queue/{category}/state.json`
+- `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_billing/ledger/YYYY-MM.jsonl`
+- `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/_billing/monthly/YYYY-MM.json`
 
 ## Environment Variables
 
@@ -128,25 +159,37 @@ Discovery (optional):
 - `DISCOVERY_MAX_QUERIES=8`
 - `DISCOVERY_RESULTS_PER_QUERY=10`
 - `DISCOVERY_MAX_DISCOVERED=120`
-- `SEARCH_PROVIDER=bing|google_cse|none` (default `none`)
+- `SEARCH_PROVIDER=dual|google|bing|none` (default `none`)
 - `BING_SEARCH_KEY`, `BING_SEARCH_ENDPOINT`
 - `GOOGLE_CSE_KEY`, `GOOGLE_CSE_CX`
 
-LLM / OpenAI (optional):
+LLM (optional):
 
 - `LLM_ENABLED=true|false` (default `false`)
+- `LLM_PROVIDER=deepseek|openai|gemini`
+- `LLM_API_KEY=...`
+- `LLM_BASE_URL=...` (OpenAI-compatible endpoint base URL)
+- `LLM_MODEL_EXTRACT=...`
+- `LLM_MODEL_PLAN=...`
+- `LLM_MODEL_VALIDATE=...`
+- `LLM_TIMEOUT_MS=40000`
 - `LLM_WRITE_SUMMARY=true|false` (default `false`)
 - `LLM_PLAN_DISCOVERY_QUERIES=true|false` (default `false`)
 - `LLM_REASONING_MODE=true|false` (default `false`)
 - `LLM_REASONING_BUDGET=2048` (token budget hint for reasoning-mode calls)
-- `DEEPSEEK_API_KEY=...` (supported alias for `OPENAI_API_KEY`)
-- `OPENAI_API_KEY=...`
-- `OPENAI_BASE_URL=...` (default `https://api.openai.com`)
-- `OPENAI_MODEL_EXTRACT=...`
-- `OPENAI_MODEL_PLAN=...`
-- `OPENAI_MODEL_WRITE=...`
-- `OPENAI_MAX_INPUT_CHARS=50000`
-- `OPENAI_TIMEOUT_MS=40000`
+- `LLM_MAX_OUTPUT_TOKENS=1200`
+- `LLM_MAX_EVIDENCE_CHARS=60000`
+
+LLM pricing/budget guard:
+
+- `LLM_COST_INPUT_PER_1M=0.28`
+- `LLM_COST_OUTPUT_PER_1M=0.42`
+- `LLM_COST_CACHED_INPUT_PER_1M=0.00`
+- `LLM_MONTHLY_BUDGET_USD=200`
+- `LLM_PER_PRODUCT_BUDGET_USD=0.10`
+- `LLM_MAX_CALLS_PER_PRODUCT_TOTAL=10`
+- `LLM_MAX_CALLS_PER_PRODUCT_FAST=2`
+- `LLM_MAX_CALLS_PER_ROUND=4`
 
 Local toggles:
 
@@ -160,6 +203,15 @@ Local toggles:
 - `MAX_HYPOTHESIS_ITEMS=50`
 - `FIELD_REWARD_HALF_LIFE_DAYS=45` (decay window for field reward memory)
 - `BATCH_STRATEGY=explore|exploit|mixed|bandit` (default `bandit`)
+- `IMPORTS_ROOT=imports`
+- `IMPORTS_POLL_SECONDS=10`
+- `HELPER_FILES_ENABLED=true|false` (default `true`)
+- `HELPER_FILES_ROOT=helper_files`
+- `HELPER_SUPPORTIVE_ENABLED=true|false` (default `true`)
+- `HELPER_SUPPORTIVE_FILL_MISSING=true|false` (default `true`)
+- `HELPER_SUPPORTIVE_MAX_SOURCES=6`
+- `HELPER_AUTO_SEED_TARGETS=true|false` (default `true`)
+- `HELPER_ACTIVE_SYNC_LIMIT=0` (0 = no row limit)
 
 EloShapes adapter (optional, safe default disabled):
 
@@ -234,6 +286,37 @@ Run batch:
 
 ```bash
 node src/cli/spec.js run-batch --category mouse
+```
+
+Run until complete with multi-round strategy:
+
+```bash
+node src/cli/spec.js run-until-complete --s3key specs/inputs/mouse/products/mouse-logitech-g-pro-x-superlight-2.json --max-rounds 8 --mode aggressive
+```
+
+Ingest one CSV (creates product jobs + queue records):
+
+```bash
+node src/cli/spec.js ingest-csv --category mouse --path imports/mouse/incoming/mouse_batch.csv --local
+```
+
+Watch imports and ingest continuously:
+
+```bash
+node src/cli/spec.js watch-imports --imports-root imports --all --local
+```
+
+Start full daemon (ingest + queue scheduling + run-until-complete):
+
+```bash
+node src/cli/spec.js daemon --imports-root imports --all --mode aggressive --local
+```
+
+Billing and learning reports:
+
+```bash
+node src/cli/spec.js billing-report --month 2026-02 --local
+node src/cli/spec.js learning-report --category mouse --local
 ```
 
 Run batch with scheduling strategy:
@@ -357,7 +440,7 @@ node src/cli/spec.js run-ad-hoc <category> <brand> "<model>" [variant]
 For a deep cloud run (long budget + aggressive backend data capture), use:
 
 ```bash
-node src/cli/spec.js run-ad-hoc <category> <brand> "<model>" [variant] --thorough
+node src/cli/spec.js run-ad-hoc <category> <brand> "<model>" [variant] --until-complete --mode aggressive --max-rounds 8
 ```
 
 Example:
@@ -373,6 +456,33 @@ Behavior:
 - runs full crawl+extraction pipeline
 - writes run outputs and latest pointers to `s3://{S3_BUCKET}/{S3_OUTPUT_PREFIX}/...`
 
+## CSV Imports
+
+Expected folder layout:
+
+```text
+imports/
+  <category>/
+    incoming/
+    processed/
+    failed/
+    state.json
+```
+
+CSV columns:
+
+- Required: `brand`, `model`
+- Optional: `variant`, `sku`, `mpn`, `gtin`, `seed_urls`, `anchors_json`, `requirements_json`
+
+`seed_urls` supports comma/pipe-separated URL values.
+`anchors_json` and `requirements_json` must be JSON strings.
+
+Each row is converted to:
+
+- `productId = slug(category-brand-model-variant)`
+- input job JSON at `specs/inputs/<category>/products/<productId>.json`
+- queue record at `specs/outputs/_queue/<category>/state.json`
+
 ## Self-Improving Accuracy Loop
 
 Each run records reusable learning artifacts:
@@ -384,6 +494,40 @@ Each run records reusable learning artifacts:
 On the next run, the planner reuses high-yield URLs first, so evidence quality improves over time without relaxing validation or safety controls.
 Set `FETCH_CANDIDATE_SOURCES=true` for wider evidence crawl while keeping candidate domains non-counting until approved.
 LLM remains optional and candidate-only; it never bypasses validation gates or anchor locks.
+
+## Budget Guard + Cost Ledger
+
+Every LLM call writes a ledger line with tokens, cost, model, reason, category, productId, and round:
+
+- `.../_billing/ledger/YYYY-MM.jsonl`
+- `.../_billing/monthly/YYYY-MM.json`
+
+When budget is exceeded:
+
+- monthly budget: non-essential LLM calls are skipped; deterministic extraction continues
+- per-product budget or call limit: product is marked `needs_manual`/`exhausted` by the queue runner
+
+Use:
+
+- `node src/cli/spec.js billing-report --month YYYY-MM`
+
+## Unknown Field Reasons
+
+For every `unk` field, `summary.field_reasoning.<field>.unknown_reason` is populated with one of:
+
+- `not_found_after_search`
+- `not_publicly_disclosed`
+- `conflicting_sources_unresolved`
+- `identity_ambiguous`
+- `blocked_by_robots_or_tos`
+- `parse_failure`
+- `budget_exhausted`
+
+Run summary also includes:
+
+- `searches_attempted`
+- `urls_fetched`
+- `top_evidence_references`
 
 Manufacturer-first behavior:
 
@@ -404,7 +548,7 @@ Discovery results do not count toward 3-confirmation until approved.
 ## How to Add a Category
 
 1. Create `categories/{category}/` and add all 5 config files.
-2. Add category sample input under `sample_inputs/specs/inputs/{category}/products/`.
+2. Add category sample input under `fixtures/s3/specs/inputs/{category}/products/`.
 3. Add parser/adapter mappings for category fields.
 4. Add tests for field extraction + consensus + validation gate.
 5. Run `npm test` and `npm run smoke:local`.

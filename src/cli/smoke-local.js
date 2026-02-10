@@ -19,7 +19,7 @@ async function main() {
   const config = loadConfig({
     localMode: true,
     dryRun: true,
-    localInputRoot: 'sample_inputs',
+    localInputRoot: 'fixtures/s3',
     localOutputRoot: 'out',
     writeMarkdownSummary: false,
     discoveryEnabled: false,
@@ -59,7 +59,7 @@ async function main() {
       const llmConfig = loadConfig({
         localMode: true,
         dryRun: true,
-        localInputRoot: 'sample_inputs',
+        localInputRoot: 'fixtures/s3',
         localOutputRoot: 'out',
         writeMarkdownSummary: false,
         discoveryEnabled: false,

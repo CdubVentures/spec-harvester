@@ -10,6 +10,15 @@ function parseIntEnv(name, defaultValue) {
   return Number.isFinite(value) ? value : defaultValue;
 }
 
+function parseFloatEnv(name, defaultValue) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === null || raw === '') {
+    return defaultValue;
+  }
+  const value = Number.parseFloat(raw);
+  return Number.isFinite(value) ? value : defaultValue;
+}
+
 function parseBoolEnv(name, defaultValue = false) {
   const raw = process.env[name];
   if (raw === undefined || raw === null || raw === '') {
@@ -192,10 +201,11 @@ export function loadConfig(overrides = {}) {
 
   const parsedCandidateUrls = Number.parseInt(String(maxCandidateUrlsFromEnv || ''), 10);
   const hasDeepSeekKey = Boolean(process.env.DEEPSEEK_API_KEY);
-  const resolvedApiKey = process.env.OPENAI_API_KEY || process.env.DEEPSEEK_API_KEY || '';
-  const resolvedBaseUrl = process.env.OPENAI_BASE_URL ||
+  const resolvedApiKey = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || process.env.DEEPSEEK_API_KEY || '';
+  const resolvedBaseUrl = process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL ||
     (hasDeepSeekKey ? 'https://api.deepseek.com' : 'https://api.openai.com');
-  const defaultModel = hasDeepSeekKey ? 'deepseek-reasoner' : 'gpt-4.1-mini';
+  const defaultModel = process.env.LLM_MODEL_EXTRACT || (hasDeepSeekKey ? 'deepseek-reasoner' : 'gpt-4.1-mini');
+  const timeoutMs = parseIntEnv('LLM_TIMEOUT_MS', parseIntEnv('OPENAI_TIMEOUT_MS', 40_000));
 
   const cfg = {
     awsRegion: process.env.AWS_REGION || 'us-east-2',
@@ -238,15 +248,60 @@ export function loadConfig(overrides = {}) {
     llmEnabled: parseBoolEnv('LLM_ENABLED', false),
     llmWriteSummary: parseBoolEnv('LLM_WRITE_SUMMARY', false),
     llmPlanDiscoveryQueries: parseBoolEnv('LLM_PLAN_DISCOVERY_QUERIES', false),
+    llmProvider: (process.env.LLM_PROVIDER || '').trim().toLowerCase(),
+    llmApiKey: resolvedApiKey,
+    llmBaseUrl: resolvedBaseUrl,
+    llmModelExtract: process.env.LLM_MODEL_EXTRACT || defaultModel,
+    llmModelPlan: process.env.LLM_MODEL_PLAN || process.env.LLM_MODEL_EXTRACT || defaultModel,
+    llmModelValidate:
+      process.env.LLM_MODEL_VALIDATE ||
+      process.env.LLM_MODEL_PLAN ||
+      process.env.LLM_MODEL_EXTRACT ||
+      defaultModel,
+    llmTimeoutMs: timeoutMs,
     openaiApiKey: resolvedApiKey,
     openaiBaseUrl: resolvedBaseUrl,
-    openaiModelExtract: process.env.OPENAI_MODEL_EXTRACT || defaultModel,
-    openaiModelPlan: process.env.OPENAI_MODEL_PLAN || process.env.OPENAI_MODEL_EXTRACT || defaultModel,
-    openaiModelWrite: process.env.OPENAI_MODEL_WRITE || process.env.OPENAI_MODEL_EXTRACT || defaultModel,
-    openaiMaxInputChars: parseIntEnv('OPENAI_MAX_INPUT_CHARS', 50_000),
-    openaiTimeoutMs: parseIntEnv('OPENAI_TIMEOUT_MS', 40_000),
+    openaiModelExtract: process.env.OPENAI_MODEL_EXTRACT || process.env.LLM_MODEL_EXTRACT || defaultModel,
+    openaiModelPlan:
+      process.env.OPENAI_MODEL_PLAN ||
+      process.env.LLM_MODEL_PLAN ||
+      process.env.OPENAI_MODEL_EXTRACT ||
+      process.env.LLM_MODEL_EXTRACT ||
+      defaultModel,
+    openaiModelWrite:
+      process.env.OPENAI_MODEL_WRITE ||
+      process.env.LLM_MODEL_VALIDATE ||
+      process.env.LLM_MODEL_PLAN ||
+      process.env.LLM_MODEL_EXTRACT ||
+      process.env.OPENAI_MODEL_EXTRACT ||
+      defaultModel,
+    openaiMaxInputChars: parseIntEnv(
+      'OPENAI_MAX_INPUT_CHARS',
+      parseIntEnv('LLM_MAX_EVIDENCE_CHARS', 50_000)
+    ),
+    openaiTimeoutMs: timeoutMs,
     llmReasoningMode: parseBoolEnv('LLM_REASONING_MODE', hasDeepSeekKey),
     llmReasoningBudget: parseIntEnv('LLM_REASONING_BUDGET', 2048),
+    llmMaxOutputTokens: parseIntEnv('LLM_MAX_OUTPUT_TOKENS', 1200),
+    llmCostInputPer1M: parseFloatEnv('LLM_COST_INPUT_PER_1M', 0.28),
+    llmCostOutputPer1M: parseFloatEnv('LLM_COST_OUTPUT_PER_1M', 0.42),
+    llmCostCachedInputPer1M: parseFloatEnv('LLM_COST_CACHED_INPUT_PER_1M', 0),
+    llmMonthlyBudgetUsd: parseFloatEnv('LLM_MONTHLY_BUDGET_USD', 200),
+    llmPerProductBudgetUsd: parseFloatEnv('LLM_PER_PRODUCT_BUDGET_USD', 0.1),
+    llmMaxCallsPerProductTotal: parseIntEnv('LLM_MAX_CALLS_PER_PRODUCT_TOTAL', 10),
+    llmMaxCallsPerProductFast: parseIntEnv('LLM_MAX_CALLS_PER_PRODUCT_FAST', 2),
+    llmMaxCallsPerRound: parseIntEnv('LLM_MAX_CALLS_PER_ROUND', 4),
+    llmMaxEvidenceChars: parseIntEnv('LLM_MAX_EVIDENCE_CHARS', 60_000),
+    accuracyMode: (process.env.ACCURACY_MODE || 'balanced').trim().toLowerCase(),
+    importsRoot: process.env.IMPORTS_ROOT || 'imports',
+    importsPollSeconds: parseIntEnv('IMPORTS_POLL_SECONDS', 10),
+    helperFilesEnabled: parseBoolEnv('HELPER_FILES_ENABLED', true),
+    helperFilesRoot: process.env.HELPER_FILES_ROOT || 'helper_files',
+    helperSupportiveEnabled: parseBoolEnv('HELPER_SUPPORTIVE_ENABLED', true),
+    helperSupportiveFillMissing: parseBoolEnv('HELPER_SUPPORTIVE_FILL_MISSING', true),
+    helperSupportiveMaxSources: parseIntEnv('HELPER_SUPPORTIVE_MAX_SOURCES', 6),
+    helperAutoSeedTargets: parseBoolEnv('HELPER_AUTO_SEED_TARGETS', true),
+    helperActiveSyncLimit: parseIntEnv('HELPER_ACTIVE_SYNC_LIMIT', 0),
     graphqlReplayEnabled: parseBoolEnv('GRAPHQL_REPLAY_ENABLED', true),
     maxGraphqlReplays: parseIntEnv('MAX_GRAPHQL_REPLAYS', 5),
     maxNetworkResponsesPerPage: parseIntEnv('MAX_NETWORK_RESPONSES_PER_PAGE', 1200),
@@ -266,12 +321,7 @@ export function loadConfig(overrides = {}) {
     hypothesisAutoFollowupRounds: parseIntEnv('HYPOTHESIS_AUTO_FOLLOWUP_ROUNDS', 0),
     hypothesisFollowupUrlsPerRound: parseIntEnv('HYPOTHESIS_FOLLOWUP_URLS_PER_ROUND', 12),
     fieldRewardHalfLifeDays: parseIntEnv('FIELD_REWARD_HALF_LIFE_DAYS', 45),
-    batchStrategy: (process.env.BATCH_STRATEGY || 'bandit').toLowerCase(),
-    llmProvider: inferLlmProvider(
-      resolvedBaseUrl,
-      process.env.OPENAI_MODEL_EXTRACT || defaultModel,
-      hasDeepSeekKey
-    )
+    batchStrategy: (process.env.BATCH_STRATEGY || 'bandit').toLowerCase()
   };
 
   const filtered = Object.fromEntries(
@@ -282,11 +332,23 @@ export function loadConfig(overrides = {}) {
     ...cfg,
     ...filtered
   };
-  merged.llmProvider = inferLlmProvider(
-    merged.openaiBaseUrl,
-    merged.openaiModelExtract,
+  merged.llmProvider = merged.llmProvider || inferLlmProvider(
+    merged.llmBaseUrl || merged.openaiBaseUrl,
+    merged.llmModelExtract || merged.openaiModelExtract,
     Boolean(process.env.DEEPSEEK_API_KEY)
   );
+  merged.llmApiKey = merged.llmApiKey || merged.openaiApiKey;
+  merged.llmBaseUrl = merged.llmBaseUrl || merged.openaiBaseUrl;
+  merged.llmModelExtract = merged.llmModelExtract || merged.openaiModelExtract;
+  merged.llmModelPlan = merged.llmModelPlan || merged.openaiModelPlan;
+  merged.llmModelValidate = merged.llmModelValidate || merged.openaiModelWrite;
+  merged.llmTimeoutMs = merged.llmTimeoutMs || merged.openaiTimeoutMs;
+  merged.openaiApiKey = merged.llmApiKey;
+  merged.openaiBaseUrl = merged.llmBaseUrl;
+  merged.openaiModelExtract = merged.llmModelExtract;
+  merged.openaiModelPlan = merged.llmModelPlan;
+  merged.openaiModelWrite = merged.llmModelValidate;
+  merged.openaiTimeoutMs = merged.llmTimeoutMs;
 
   return applyRunProfile(
     merged,

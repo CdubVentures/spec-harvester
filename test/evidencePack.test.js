@@ -47,7 +47,7 @@ test('buildEvidencePack respects max char bound and emits evidence references', 
     }
   });
 
-  assert.equal(pack.usedChars <= 800, true);
+  assert.equal((pack.meta?.total_chars || 0) <= 800, true);
   assert.equal(pack.snippets.length > 0, true);
   assert.equal(pack.references.length > 0, true);
 

@@ -26,6 +26,21 @@ function normalizeSourcePath(url) {
   }
 }
 
+function isHelperDomainToken(value) {
+  const token = String(value || '').trim().toLowerCase();
+  return token === 'helper-files.local' || token.includes('helper_files://');
+}
+
+function isHelperSourceRecord(source = {}) {
+  if (source.helperSource) {
+    return true;
+  }
+  return isHelperDomainToken(source.rootDomain) ||
+    isHelperDomainToken(source.host) ||
+    isHelperDomainToken(source.url) ||
+    isHelperDomainToken(source.finalUrl);
+}
+
 const FIELD_REWARD_MAX_ENTRIES = 1200;
 
 function rewardKey(field, method) {
@@ -211,7 +226,7 @@ function buildAcceptedEvidenceIndex(provenance) {
     }
     for (const evidence of row?.evidence || []) {
       const rootDomain = evidence?.rootDomain || evidence?.host || '';
-      if (!rootDomain) {
+      if (!rootDomain || isHelperDomainToken(rootDomain) || isHelperDomainToken(evidence?.url || '')) {
         continue;
       }
       const path = normalizeSourcePath(evidence?.url || '');
@@ -555,7 +570,7 @@ function collectAcceptedDomainHelpfulness(provenance, criticalFieldSet) {
     const uniqueDomainsForField = new Set();
     for (const item of evidence) {
       const rootDomain = item?.rootDomain || item?.host || '';
-      if (!rootDomain) {
+      if (!rootDomain || isHelperDomainToken(rootDomain) || isHelperDomainToken(item?.url || '')) {
         continue;
       }
       uniqueDomainsForField.add(rootDomain);
@@ -597,7 +612,7 @@ function collectAcceptedPathHelpfulness(provenance, criticalFieldSet) {
     const uniquePathEntries = new Set();
     for (const item of evidence) {
       const rootDomain = item?.rootDomain || item?.host || '';
-      if (!rootDomain) {
+      if (!rootDomain || isHelperDomainToken(rootDomain) || isHelperDomainToken(item?.url || '')) {
         continue;
       }
       const path = normalizeSourcePath(item?.url || '');
@@ -886,6 +901,9 @@ export async function persistSourceIntel({
   );
 
   for (const source of sourceResults || []) {
+    if (isHelperSourceRecord(source)) {
+      continue;
+    }
     const rootDomain = source.rootDomain || source.host;
     if (!rootDomain) {
       continue;

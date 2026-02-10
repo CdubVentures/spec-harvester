@@ -58,7 +58,37 @@ class S3Storage {
     return keys.sort();
   }
 
+  async listKeys(prefix) {
+    const keys = [];
+    let continuationToken;
+
+    do {
+      const result = await this.client.send(
+        new ListObjectsV2Command({
+          Bucket: this.bucket,
+          Prefix: prefix,
+          ContinuationToken: continuationToken
+        })
+      );
+
+      for (const item of result.Contents || []) {
+        if (item.Key) {
+          keys.push(item.Key);
+        }
+      }
+
+      continuationToken = result.IsTruncated ? result.NextContinuationToken : undefined;
+    } while (continuationToken);
+
+    return keys.sort();
+  }
+
   async readJson(key) {
+    const text = await this.readText(key);
+    return JSON.parse(text);
+  }
+
+  async readText(key) {
     const result = await this.client.send(
       new GetObjectCommand({
         Bucket: this.bucket,
@@ -66,12 +96,23 @@ class S3Storage {
       })
     );
     const buffer = await streamToBuffer(result.Body);
-    return JSON.parse(buffer.toString('utf8'));
+    return buffer.toString('utf8');
   }
 
   async readJsonOrNull(key) {
     try {
       return await this.readJson(key);
+    } catch (error) {
+      if (error?.$metadata?.httpStatusCode === 404 || error?.name === 'NoSuchKey') {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async readTextOrNull(key) {
+    try {
+      return await this.readText(key);
     } catch (error) {
       if (error?.$metadata?.httpStatusCode === 404 || error?.name === 'NoSuchKey') {
         return null;
@@ -159,15 +200,60 @@ class LocalStorage {
     return keys.sort();
   }
 
+  async listKeys(prefix) {
+    const root = path.join(this.outputRoot, ...String(prefix || '').split('/'));
+    const keys = [];
+
+    const walk = async (dir) => {
+      let entries = [];
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true });
+      } catch (error) {
+        if (error.code === 'ENOENT') {
+          return;
+        }
+        throw error;
+      }
+
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          await walk(full);
+          continue;
+        }
+        const rel = path.relative(this.outputRoot, full).split(path.sep).join('/');
+        keys.push(rel);
+      }
+    };
+
+    await walk(root);
+    return keys.sort();
+  }
+
   async readJson(key) {
-    const fullPath = this.resolveLocalPath(key);
-    const content = await fs.readFile(fullPath, 'utf8');
+    const content = await this.readText(key);
     return JSON.parse(content);
+  }
+
+  async readText(key) {
+    const fullPath = this.resolveLocalPath(key);
+    return await fs.readFile(fullPath, 'utf8');
   }
 
   async readJsonOrNull(key) {
     try {
       return await this.readJson(key);
+    } catch (err) {
+      if (err.code === 'ENOENT') {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  async readTextOrNull(key) {
+    try {
+      return await this.readText(key);
     } catch (err) {
       if (err.code === 'ENOENT') {
         return null;

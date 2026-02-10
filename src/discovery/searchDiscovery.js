@@ -8,9 +8,12 @@ import {
 } from '../categories/loader.js';
 import { extractRootDomain } from '../utils/common.js';
 import { planDiscoveryQueriesLLM } from '../llm/discoveryPlanner.js';
+import { runSearchProviders, searchProviderAvailability } from '../search/searchProviders.js';
+import { rerankSearchResults } from '../search/resultReranker.js';
+import { buildTargetedQueries } from '../search/queryBuilder.js';
 
 function fillTemplate(template, variables) {
-  return template
+  return String(template || '')
     .replaceAll('{brand}', variables.brand || '')
     .replaceAll('{model}', variables.model || '')
     .replaceAll('{variant}', variables.variant || '')
@@ -23,81 +26,9 @@ function normalizeHost(hostname) {
   return String(hostname || '').toLowerCase().replace(/^www\./, '');
 }
 
-function tokenize(value) {
-  return String(value || '')
-    .toLowerCase()
-    .split(/[^a-z0-9]+/g)
-    .map((token) => token.trim())
-    .filter((token) => token.length >= 2);
-}
-
-function buildDiscoveryRelevanceTokens(job = {}) {
-  const brand = tokenize(job.identityLock?.brand || '');
-  const model = tokenize(job.identityLock?.model || '');
-  const variant = tokenize(job.identityLock?.variant || '');
-
-  const stopwords = new Set([
-    'gaming',
-    'mouse',
-    'wireless',
-    'wired',
-    'edition',
-    'black',
-    'white',
-    'for',
-    'the'
-  ]);
-
-  return [...new Set([...brand, ...model, ...variant])]
-    .filter((token) => !stopwords.has(token));
-}
-
-function relevanceScore(candidate, tokens = []) {
-  if (!tokens.length) {
-    return 0;
-  }
-
-  const searchable = [
-    candidate.url,
-    candidate.title,
-    candidate.snippet,
-    candidate.query
-  ]
-    .map((value) => String(value || '').toLowerCase())
-    .join(' ');
-  const hitCount = tokens.reduce(
-    (count, token) => (searchable.includes(token) ? count + 1 : count),
-    0
-  );
-
-  let score = hitCount * 8;
-  let path = '';
-  try {
-    path = new URL(candidate.url).pathname.toLowerCase();
-  } catch {
-    path = '';
-  }
-
-  if (/\/products?\//.test(path) && hitCount > 0) {
-    score += 12;
-  }
-  if (path.includes('/support') || path.includes('/manual') || path.includes('/spec')) {
-    score += 8;
-  }
-  if (path.includes('/shop/c/') || path.includes('/category/')) {
-    score -= hitCount >= 2 ? 5 : 30;
-  }
-  if (path.endsWith('.pdf')) {
-    score += 6;
-  }
-  return score;
-}
-
 function classifyUrlCandidate(result, categoryConfig) {
   const parsed = new URL(result.url);
   const host = normalizeHost(parsed.hostname);
-  const approvedDomain = isApprovedHost(host, categoryConfig);
-
   return {
     url: parsed.toString(),
     host,
@@ -105,105 +36,54 @@ function classifyUrlCandidate(result, categoryConfig) {
     title: result.title || '',
     snippet: result.snippet || '',
     query: result.query || '',
-    provider: result.source || result.provider || 'plan',
-    approvedDomain,
+    provider: result.provider || result.source || 'plan',
+    approvedDomain: isApprovedHost(host, categoryConfig),
     tier: resolveTierForHost(host, categoryConfig),
     tierName: resolveTierNameForHost(host, categoryConfig),
     role: inferRoleForHost(host, categoryConfig)
   };
 }
 
-async function searchBing({ endpoint, key, query, limit }) {
-  if (!endpoint || !key) {
-    return [];
-  }
-
-  const url = new URL(endpoint);
-  if (!url.pathname || url.pathname === '/') {
-    url.pathname = '/v7.0/search';
-  }
-  url.searchParams.set('q', query);
-  url.searchParams.set('count', String(limit));
-
-  const response = await fetch(url, {
-    headers: {
-      'Ocp-Apim-Subscription-Key': key
-    }
-  });
-
-  if (!response.ok) {
-    return [];
-  }
-
-  const data = await response.json();
-  return (data.webPages?.value || []).map((item) => ({
-    url: item.url,
-    title: item.name || '',
-    snippet: item.snippet || '',
-    source: 'bing'
-  }));
-}
-
-async function searchGoogleCse({ key, cx, query, limit }) {
-  if (!key || !cx) {
-    return [];
-  }
-
-  const url = new URL('https://www.googleapis.com/customsearch/v1');
-  url.searchParams.set('key', key);
-  url.searchParams.set('cx', cx);
-  url.searchParams.set('q', query);
-  url.searchParams.set('num', String(Math.min(10, limit)));
-
-  const response = await fetch(url);
-  if (!response.ok) {
-    return [];
-  }
-
-  const data = await response.json();
-  return (data.items || []).map((item) => ({
-    url: item.link,
-    title: item.title || '',
-    snippet: item.snippet || '',
-    source: 'google_cse'
-  }));
-}
-
 function buildPlanOnlyResults({ categoryConfig, queries, maxQueries = 3 }) {
   const planned = [];
-
   for (const sourceHost of categoryConfig.sourceHosts || []) {
     for (const query of queries.slice(0, Math.max(1, maxQueries))) {
       planned.push({
         url: `https://${sourceHost.host}/search?q=${encodeURIComponent(query)}`,
         title: `${sourceHost.host} search`,
         snippet: 'planned source search URL',
-        source: 'plan',
+        provider: 'plan',
         query
       });
     }
   }
-
   return planned;
 }
 
-function rankCandidate(candidate, relevanceTokens = []) {
-  let score = 0;
-  if (candidate.approvedDomain) {
-    score += 30;
-  }
-  if (candidate.tier === 1) {
-    score += 100;
-  } else if (candidate.tier === 2) {
-    score += 70;
-  } else if (candidate.tier === 3) {
-    score += 30;
-  }
-  if (candidate.role === 'manufacturer') {
-    score += 40;
-  }
-  score += relevanceScore(candidate, relevanceTokens);
-  return score;
+function dedupeQueries(queries, limit) {
+  return [...new Set((queries || []).map((query) => String(query || '').trim()).filter(Boolean))]
+    .slice(0, Math.max(1, limit));
+}
+
+function toArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+async function loadLearningArtifacts({
+  storage,
+  category
+}) {
+  const base = storage.resolveOutputKey('_learning', category);
+  const [lexicon, queryTemplates, fieldYield] = await Promise.all([
+    storage.readJsonOrNull(`${base}/field_lexicon.json`),
+    storage.readJsonOrNull(`${base}/query_templates.json`),
+    storage.readJsonOrNull(`${base}/field_yield.json`)
+  ]);
+  return {
+    lexicon: lexicon || {},
+    queryTemplates: queryTemplates || {},
+    fieldYield: fieldYield || {}
+  };
 }
 
 export async function discoverCandidateSources({
@@ -213,7 +93,8 @@ export async function discoverCandidateSources({
   job,
   runId,
   logger,
-  planningHints = {}
+  planningHints = {},
+  llmContext = {}
 }) {
   if (!config.discoveryEnabled) {
     return {
@@ -222,7 +103,9 @@ export async function discoverCandidateSources({
       candidatesKey: null,
       candidates: [],
       approvedUrls: [],
-      candidateUrls: []
+      candidateUrls: [],
+      queries: [],
+      llm_queries: []
     };
   }
 
@@ -232,54 +115,87 @@ export async function discoverCandidateSources({
     variant: job.identityLock?.variant || '',
     category: job.category || categoryConfig.category
   };
+  const missingFields = [
+    ...new Set([
+      ...toArray(planningHints.missingRequiredFields),
+      ...toArray(planningHints.missingCriticalFields),
+      ...toArray(job.requirements?.llmTargetFields)
+    ])
+  ];
 
-  const templates = categoryConfig.searchTemplates || [];
-  const baseQueries = templates.map((template) => fillTemplate(template, variables)).filter(Boolean);
+  const learning = await loadLearningArtifacts({
+    storage,
+    category: categoryConfig.category
+  });
+  const baseQueries = toArray(categoryConfig.searchTemplates)
+    .map((template) => fillTemplate(template, variables))
+    .filter(Boolean);
+  const targetedQueries = buildTargetedQueries({
+    job,
+    categoryConfig,
+    missingFields,
+    lexicon: learning.lexicon,
+    learnedQueries: learning.queryTemplates,
+    maxQueries: Math.max(6, Number(config.discoveryMaxQueries || 8) * 2)
+  });
   const llmQueries = await planDiscoveryQueriesLLM({
     job,
     categoryConfig,
-    baseQueries,
+    baseQueries: [...baseQueries, ...targetedQueries],
     missingCriticalFields: planningHints.missingCriticalFields || [],
     config,
-    logger
+    logger,
+    llmContext
   });
-  const queries = [...new Set([...baseQueries, ...llmQueries])];
-  const relevanceTokens = buildDiscoveryRelevanceTokens(job);
+
+  const extraQueries = toArray(planningHints.extraQueries);
   const queryLimit = Math.max(1, Number(config.discoveryMaxQueries || 8));
+  const queries = dedupeQueries(
+    [...baseQueries, ...targetedQueries, ...llmQueries, ...extraQueries],
+    Math.max(queryLimit, 6)
+  );
   const resultsPerQuery = Math.max(1, Number(config.discoveryResultsPerQuery || 10));
   const discoveryCap = Math.max(1, Number(config.discoveryMaxDiscovered || 120));
 
+  const providerState = searchProviderAvailability(config);
   const rawResults = [];
-  if (config.searchProvider === 'bing' || config.searchProvider === 'google_cse') {
+  const searchAttempts = [];
+
+  const canSearchInternet =
+    providerState.provider !== 'none' &&
+    (
+      (providerState.provider === 'bing' && providerState.bing_ready) ||
+      (providerState.provider === 'google' && providerState.google_ready) ||
+      (providerState.provider === 'dual' && (providerState.bing_ready || providerState.google_ready))
+    );
+
+  if (canSearchInternet) {
     for (const query of queries.slice(0, queryLimit)) {
-      try {
-        let results = [];
-        if (config.searchProvider === 'bing') {
-          results = await searchBing({
-            endpoint: config.bingSearchEndpoint,
-            key: config.bingSearchKey,
-            query,
-            limit: resultsPerQuery
-          });
-        } else {
-          results = await searchGoogleCse({
-            key: config.googleCseKey,
-            cx: config.googleCseCx,
-            query,
-            limit: resultsPerQuery
-          });
-        }
-        rawResults.push(...results.map((result) => ({ ...result, query })));
-      } catch (error) {
-        logger?.warn?.('discovery_query_failed', { query, message: error.message });
-      }
+      const providerResults = await runSearchProviders({
+        config,
+        query,
+        limit: resultsPerQuery,
+        logger
+      });
+      rawResults.push(...providerResults.map((row) => ({ ...row, query })));
+      searchAttempts.push({
+        query,
+        provider: config.searchProvider,
+        result_count: providerResults.length
+      });
     }
   } else {
-    rawResults.push(...buildPlanOnlyResults({
+    const planned = buildPlanOnlyResults({
       categoryConfig,
       queries,
       maxQueries: Math.min(queryLimit, 12)
-    }));
+    });
+    rawResults.push(...planned);
+    searchAttempts.push({
+      query: '',
+      provider: 'plan',
+      result_count: planned.length
+    });
   }
 
   const byUrl = new Map();
@@ -290,28 +206,27 @@ export async function discoverCandidateSources({
         continue;
       }
       const host = normalizeHost(parsed.hostname);
-      if (isDeniedHost(host, categoryConfig)) {
+      if (!host || isDeniedHost(host, categoryConfig)) {
         continue;
       }
-
-      const normalized = classifyUrlCandidate(raw, categoryConfig);
-      if (!byUrl.has(normalized.url)) {
-        byUrl.set(normalized.url, normalized);
+      if (!byUrl.has(parsed.toString())) {
+        byUrl.set(parsed.toString(), classifyUrlCandidate(raw, categoryConfig));
       }
     } catch {
       // ignore malformed URL
     }
   }
 
-  const discovered = [...byUrl.values()]
-    .sort((a, b) =>
-      rankCandidate(b, relevanceTokens) - rankCandidate(a, relevanceTokens) ||
-      String(a.url || '').localeCompare(String(b.url || ''))
-    )
-    .slice(0, discoveryCap);
+  const reranked = rerankSearchResults({
+    results: [...byUrl.values()],
+    categoryConfig,
+    missingFields,
+    fieldYieldMap: learning.fieldYield
+  });
+  const discovered = reranked.slice(0, discoveryCap);
 
-  const candidateOnly = discovered.filter((item) => !item.approvedDomain);
-  const approvedOnly = discovered.filter((item) => item.approvedDomain);
+  const approvedOnly = discovered.filter((item) => item.approved_domain || item.approvedDomain);
+  const candidateOnly = discovered.filter((item) => !(item.approved_domain || item.approvedDomain));
 
   const discoveryKey = toPosixKey(
     config.s3InputPrefix,
@@ -319,7 +234,6 @@ export async function discoverCandidateSources({
     categoryConfig.category,
     `${runId}.json`
   );
-
   const candidatesKey = toPosixKey(
     config.s3InputPrefix,
     '_sources',
@@ -334,15 +248,18 @@ export async function discoverCandidateSources({
     runId,
     generated_at: new Date().toISOString(),
     provider: config.searchProvider,
+    provider_state: providerState,
     llm_query_planning: Boolean(config.llmEnabled && config.llmPlanDiscoveryQueries),
     query_count: queries.length,
     discovered_count: discovered.length,
     approved_count: approvedOnly.length,
     candidate_count: candidateOnly.length,
     queries,
+    llm_queries: llmQueries,
+    targeted_missing_fields: missingFields,
+    search_attempts: searchAttempts,
     discovered
   };
-
   const candidatePayload = {
     category: categoryConfig.category,
     productId: job.productId,
@@ -352,13 +269,16 @@ export async function discoverCandidateSources({
     candidates: candidateOnly
   };
 
-  await storage.writeObject(discoveryKey, Buffer.from(JSON.stringify(discoveryPayload, null, 2), 'utf8'), {
-    contentType: 'application/json'
-  });
-
-  await storage.writeObject(candidatesKey, Buffer.from(JSON.stringify(candidatePayload, null, 2), 'utf8'), {
-    contentType: 'application/json'
-  });
+  await storage.writeObject(
+    discoveryKey,
+    Buffer.from(JSON.stringify(discoveryPayload, null, 2), 'utf8'),
+    { contentType: 'application/json' }
+  );
+  await storage.writeObject(
+    candidatesKey,
+    Buffer.from(JSON.stringify(candidatePayload, null, 2), 'utf8'),
+    { contentType: 'application/json' }
+  );
 
   return {
     enabled: true,
@@ -366,6 +286,9 @@ export async function discoverCandidateSources({
     candidatesKey,
     candidates: discovered,
     approvedUrls: approvedOnly.map((item) => item.url),
-    candidateUrls: candidateOnly.map((item) => item.url)
+    candidateUrls: candidateOnly.map((item) => item.url),
+    queries,
+    llm_queries: llmQueries,
+    search_attempts: searchAttempts
   };
 }

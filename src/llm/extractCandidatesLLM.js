@@ -89,10 +89,12 @@ export async function extractCandidatesLLM({
   job,
   categoryConfig,
   evidencePack,
+  targetFields = null,
   config,
-  logger
+  logger,
+  llmContext = {}
 }) {
-  if (!config.llmEnabled || !config.openaiApiKey) {
+  if (!config.llmEnabled || !config.llmApiKey) {
     return {
       identityCandidates: {},
       fieldCandidates: [],
@@ -101,12 +103,34 @@ export async function extractCandidatesLLM({
     };
   }
 
-  const fieldSet = new Set(categoryConfig.fieldOrder || []);
+  const effectiveFieldOrder = Array.isArray(targetFields) && targetFields.length
+    ? targetFields
+    : (categoryConfig.fieldOrder || []);
+  const fieldSet = new Set(effectiveFieldOrder);
   const validRefs = new Set((evidencePack.references || []).map((item) => item.id));
+  const budgetGuard = llmContext?.budgetGuard;
+  const budgetDecision = budgetGuard?.canCall({
+    reason: 'extract',
+    essential: false
+  }) || { allowed: true };
+  if (!budgetDecision.allowed) {
+    budgetGuard?.block?.(budgetDecision.reason);
+    logger?.warn?.('llm_extract_skipped_budget', {
+      reason: budgetDecision.reason,
+      productId: job.productId
+    });
+    return {
+      identityCandidates: {},
+      fieldCandidates: [],
+      conflicts: [],
+      notes: ['LLM extraction skipped by budget guard']
+    };
+  }
 
   const system = [
     'You extract structured hardware spec candidates from evidence snippets.',
     'Rules:',
+    '- Focus only on targetFields when provided.',
     '- Only use provided evidence.',
     '- Every proposed field candidate must include evidenceRefs matching provided reference ids.',
     '- If uncertain, omit the candidate.',
@@ -122,6 +146,7 @@ export async function extractCandidatesLLM({
       category: job.category || 'mouse'
     },
     schemaFields: categoryConfig.fieldOrder || [],
+    targetFields: effectiveFieldOrder,
     anchors: job.anchors || {},
     references: evidencePack.references || [],
     snippets: evidencePack.snippets || []
@@ -129,15 +154,33 @@ export async function extractCandidatesLLM({
 
   try {
     const result = await callOpenAI({
-      model: config.openaiModelExtract,
+      model: config.llmModelExtract,
       system,
       user: JSON.stringify(userPayload),
       jsonSchema: llmSchema(),
-      apiKey: config.openaiApiKey,
-      baseUrl: config.openaiBaseUrl,
+      apiKey: config.llmApiKey,
+      baseUrl: config.llmBaseUrl,
+      provider: config.llmProvider,
+      usageContext: {
+        category: job.category || categoryConfig.category || '',
+        productId: job.productId || '',
+        runId: llmContext.runId || '',
+        round: llmContext.round || 0,
+        reason: 'extract',
+        host: evidencePack?.meta?.host || '',
+        url_count: Math.max(0, Number(evidencePack?.references?.length || 0)),
+        evidence_chars: Math.max(0, Number(evidencePack?.meta?.total_chars || 0))
+      },
+      costRates: llmContext.costRates || config,
+      onUsage: async (usageRow) => {
+        budgetGuard?.recordCall({ costUsd: usageRow.cost_usd });
+        if (typeof llmContext.recordUsage === 'function') {
+          await llmContext.recordUsage(usageRow);
+        }
+      },
       reasoningMode: Boolean(config.llmReasoningMode),
       reasoningBudget: Number(config.llmReasoningBudget || 0),
-      timeoutMs: config.openaiTimeoutMs,
+      timeoutMs: config.llmTimeoutMs || config.openaiTimeoutMs,
       logger
     });
 

@@ -50,6 +50,16 @@ import {
 } from '../intel/siteFingerprint.js';
 import { evaluateConstraintGraph } from '../scoring/constraintSolver.js';
 import { buildHypothesisQueue, nextBestUrlsFromHypotheses } from '../learning/hypothesisQueue.js';
+import { appendCostLedgerEntry, readBillingSnapshot } from '../billing/costLedger.js';
+import { createBudgetGuard } from '../billing/budgetGuard.js';
+import { normalizeCostRates } from '../billing/costRates.js';
+import { updateCategoryBrain } from '../learning/categoryBrain.js';
+import {
+  applySupportiveFillToResult,
+  buildSupportiveSyntheticSources,
+  loadHelperCategoryData,
+  resolveHelperProductContext
+} from '../helperFiles/index.js';
 
 function bestIdentityFromSources(sourceResults) {
   const sorted = [...sourceResults].sort((a, b) => {
@@ -198,6 +208,24 @@ function resolveTargets(job, categoryConfig) {
   };
 }
 
+function resolveLlmTargetFields(job, categoryConfig) {
+  const fromRequirements = Array.isArray(job.requirements?.llmTargetFields)
+    ? job.requirements.llmTargetFields
+    : [];
+  const fromRequired = Array.isArray(job.requirements?.requiredFields)
+    ? job.requirements.requiredFields
+    : [];
+  const base = [
+    ...fromRequirements,
+    ...fromRequired,
+    ...(categoryConfig.requiredFields || []),
+    ...(categoryConfig.schema?.critical_fields || [])
+  ]
+    .map((field) => String(field || '').trim())
+    .filter(Boolean);
+  return [...new Set(base)];
+}
+
 function isDiscoveryOnlySourceUrl(url) {
   try {
     const parsed = new URL(url);
@@ -292,18 +320,50 @@ function isSafeManufacturerFollowupUrl(source, url) {
   }
 }
 
+function isHelperSyntheticUrl(url) {
+  const token = String(url || '').trim().toLowerCase();
+  return token.startsWith('helper_files://');
+}
+
+function isHelperSyntheticSource(source) {
+  if (!source) {
+    return false;
+  }
+  if (source.helperSource) {
+    return true;
+  }
+  if (String(source.host || '').trim().toLowerCase() === 'helper-files.local') {
+    return true;
+  }
+  return isHelperSyntheticUrl(source.url) || isHelperSyntheticUrl(source.finalUrl);
+}
+
 function buildFieldReasoning({
   fieldOrder,
   provenance,
   fieldsBelowPassTarget,
   criticalFieldsBelowPassTarget,
   missingRequiredFields,
-  constraintAnalysis
+  constraintAnalysis,
+  identityGateValidated,
+  llmBudgetBlockedReason,
+  sourceResults
 }) {
   const fieldsBelowSet = new Set(fieldsBelowPassTarget || []);
   const criticalBelowSet = new Set(criticalFieldsBelowPassTarget || []);
   const missingRequiredSet = new Set(missingRequiredFields || []);
   const contradictionsByField = {};
+  const blockedStatuses = new Set([401, 403, 429]);
+  const blockedSourceCount = (sourceResults || []).filter((source) =>
+    blockedStatuses.has(Number.parseInt(String(source.status || 0), 10))
+  ).length;
+  const robotsOnlySourceCount = (sourceResults || []).filter((source) =>
+    isDiscoveryOnlySourceUrl(source.finalUrl || source.url || '')
+  ).length;
+  const blockedByRobotsOrTos =
+    (sourceResults || []).length > 0 &&
+    (blockedSourceCount + robotsOnlySourceCount) >= Math.max(1, Math.ceil((sourceResults || []).length * 0.7));
+  const budgetExhausted = String(llmBudgetBlockedReason || '').includes('budget');
 
   for (const contradiction of constraintAnalysis?.contradictions || []) {
     for (const field of contradiction.fields || []) {
@@ -347,9 +407,56 @@ function buildFieldReasoning({
       reasons: [...new Set(reasons)],
       contradictions: contradictionsByField[field] || []
     };
+
+    if (String(output[field].value || '').toLowerCase() === 'unk') {
+      let unknownReason = 'not_found_after_search';
+      if (!identityGateValidated) {
+        unknownReason = 'identity_ambiguous';
+      } else if (budgetExhausted) {
+        unknownReason = 'budget_exhausted';
+      } else if ((contradictionsByField[field] || []).length > 0) {
+        unknownReason = 'conflicting_sources_unresolved';
+      } else if (blockedByRobotsOrTos) {
+        unknownReason = 'blocked_by_robots_or_tos';
+      } else if ((row.confirmations || 0) > 0 && (row.approved_confirmations || 0) === 0) {
+        unknownReason = 'parse_failure';
+      } else if ((sourceResults || []).length >= 80) {
+        unknownReason = 'not_publicly_disclosed';
+      }
+      output[field].unknown_reason = unknownReason;
+    } else {
+      output[field].unknown_reason = null;
+    }
   }
 
   return output;
+}
+
+function buildTopEvidenceReferences(provenance, limit = 60) {
+  const rows = [];
+  const seen = new Set();
+  for (const [field, row] of Object.entries(provenance || {})) {
+    for (const evidence of row?.evidence || []) {
+      const key = `${field}|${evidence.url}|${evidence.keyPath}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      rows.push({
+        field,
+        url: evidence.url,
+        host: evidence.host,
+        method: evidence.method,
+        keyPath: evidence.keyPath,
+        tier: evidence.tier,
+        tier_name: evidence.tierName
+      });
+      if (rows.length >= limit) {
+        return rows;
+      }
+    }
+  }
+  return rows;
 }
 
 function buildProvisionalHypothesisQueue({
@@ -406,22 +513,72 @@ function buildProvisionalHypothesisQueue({
   };
 }
 
-export async function runProduct({ storage, config, s3Key }) {
+export async function runProduct({ storage, config, s3Key, jobOverride = null, roundContext = null }) {
   const runId = buildRunId();
   const logger = new EventLogger();
   const startMs = Date.now();
 
-  logger.info('run_started', { s3Key, runId });
+  logger.info('run_started', { s3Key, runId, round: roundContext?.round ?? 0 });
 
-  const job = await storage.readJson(s3Key);
+  const job = jobOverride || (await storage.readJson(s3Key));
   const productId = job.productId;
   const category = job.category || 'mouse';
   const categoryConfig = await loadCategoryConfig(category, { storage, config });
+  const billingMonth = new Date().toISOString().slice(0, 7);
 
   const fieldOrder = categoryConfig.fieldOrder;
   const requiredFields = job.requirements?.requiredFields || categoryConfig.requiredFields;
+  const llmTargetFields = resolveLlmTargetFields(job, categoryConfig);
   const targets = resolveTargets(job, categoryConfig);
   const anchors = job.anchors || {};
+  let helperData = {
+    enabled: false,
+    active: [],
+    supportive: [],
+    supportive_files: [],
+    active_index: new Map(),
+    supportive_index: new Map()
+  };
+  let helperContext = {
+    enabled: false,
+    active_match: null,
+    supportive_matches: [],
+    seed_urls: [],
+    stats: {
+      active_total: 0,
+      supportive_total: 0,
+      supportive_file_count: 0,
+      active_matched_count: 0,
+      supportive_matched_count: 0
+    }
+  };
+  if (config.helperFilesEnabled) {
+    try {
+      helperData = await loadHelperCategoryData({
+        config,
+        category,
+        categoryConfig
+      });
+      helperContext = resolveHelperProductContext({
+        helperData,
+        job
+      });
+      logger.info('helper_files_context_loaded', {
+        category,
+        helper_enabled: helperData.enabled,
+        active_match: Boolean(helperContext.active_match),
+        supportive_matches: helperContext.supportive_matches?.length || 0,
+        supportive_files: helperData.supportive_files?.length || 0,
+        helper_seed_urls: helperContext.seed_urls?.length || 0
+      });
+    } catch (error) {
+      logger.warn('helper_files_context_failed', {
+        category,
+        productId,
+        message: error.message
+      });
+    }
+  }
 
   const adapterManager = createAdapterManager(config, logger);
   const sourceIntel = await loadSourceIntel({ storage, config, category });
@@ -443,19 +600,83 @@ export async function runProduct({ storage, config, s3Key }) {
 
   const adapterSeedUrls = adapterManager.collectSeedUrls({ job });
   planner.seed(adapterSeedUrls);
+  planner.seed(helperContext.seed_urls || []);
 
   const fetcher = config.dryRun
     ? new DryRunFetcher(config, logger)
     : new PlaywrightFetcher(config, logger);
 
   const sourceResults = [];
+  const helperSupportiveSyntheticSources = config.helperSupportiveEnabled
+    ? buildSupportiveSyntheticSources({
+      helperContext,
+      job,
+      categoryConfig,
+      anchors,
+      maxSources: Math.max(1, Number(config.helperSupportiveMaxSources || 6))
+    })
+    : [];
   const artifactsByHost = {};
   let artifactSequence = 0;
   const adapterArtifacts = [];
+  let helperFilledFields = [];
+  let helperMismatches = [];
   let llmCandidatesAccepted = 0;
   let llmSourcesUsed = 0;
   let hypothesisFollowupRoundsExecuted = 0;
   let hypothesisFollowupSeededUrls = 0;
+  const billingSnapshot = await readBillingSnapshot({
+    storage,
+    month: billingMonth,
+    productId
+  });
+  const llmBudgetGuard = createBudgetGuard({
+    config,
+    monthlySpentUsd: billingSnapshot.monthly_cost_usd,
+    productSpentUsd: billingSnapshot.product_cost_usd,
+    productCallsTotal: billingSnapshot.product_calls
+  });
+  llmBudgetGuard.startRound();
+  const llmCostRates = normalizeCostRates(config);
+  let llmCostUsd = 0;
+  let llmCallCount = 0;
+  let llmBudgetBlockedReason = '';
+  const llmContext = {
+    runId,
+    round: Number.parseInt(String(roundContext?.round ?? 0), 10) || 0,
+    budgetGuard: llmBudgetGuard,
+    costRates: llmCostRates,
+    recordUsage: async (usageRow) => {
+      llmCallCount += 1;
+      llmCostUsd = Number.parseFloat((llmCostUsd + Number(usageRow.cost_usd || 0)).toFixed(8));
+      await appendCostLedgerEntry({
+        storage,
+        config,
+        entry: {
+          ts: new Date().toISOString(),
+          provider: usageRow.provider,
+          model: usageRow.model,
+          category,
+          productId,
+          runId,
+          round: usageRow.round || 0,
+          prompt_tokens: usageRow.prompt_tokens || 0,
+          completion_tokens: usageRow.completion_tokens || 0,
+          cached_prompt_tokens: usageRow.cached_prompt_tokens || 0,
+          total_tokens: usageRow.total_tokens || 0,
+          cost_usd: usageRow.cost_usd || 0,
+          reason: usageRow.reason || 'extract',
+          host: usageRow.host || '',
+          url_count: usageRow.url_count || 0,
+          evidence_chars: usageRow.evidence_chars || 0,
+          estimated_usage: Boolean(usageRow.estimated_usage),
+          meta: {
+            retry_without_schema: Boolean(usageRow.retry_without_schema)
+          }
+        }
+      });
+    }
+  };
 
   const discoveryResult = await discoverCandidateSources({
     config,
@@ -466,7 +687,8 @@ export async function runProduct({ storage, config, s3Key }) {
     logger,
     planningHints: {
       missingCriticalFields: categoryConfig.schema?.critical_fields || []
-    }
+    },
+    llmContext
   });
 
   planner.seed(discoveryResult.approvedUrls || []);
@@ -586,14 +808,17 @@ export async function runProduct({ storage, config, s3Key }) {
           source,
           pageData,
           adapterExtra,
-          config
+          config,
+          targetFields: llmTargetFields
         });
         llmExtraction = await extractCandidatesLLM({
           job,
           categoryConfig,
           evidencePack,
+          targetFields: llmTargetFields,
           config,
-          logger
+          logger,
+          llmContext
         });
       }
 
@@ -768,7 +993,7 @@ export async function runProduct({ storage, config, s3Key }) {
       }
 
       const provisional = buildProvisionalHypothesisQueue({
-        sourceResults,
+        sourceResults: sourceResults.filter((source) => !isHelperSyntheticSource(source)),
         categoryConfig,
         fieldOrder,
         anchors,
@@ -850,7 +1075,11 @@ export async function runProduct({ storage, config, s3Key }) {
 
   adapterArtifacts.push(...(dedicated.adapterArtifacts || []));
 
-  for (const syntheticSource of dedicated.syntheticSources || []) {
+  const allSyntheticSources = [
+    ...(dedicated.syntheticSources || []),
+    ...helperSupportiveSyntheticSources
+  ];
+  for (const syntheticSource of allSyntheticSources) {
     const candidateMap = buildCandidateFieldMap(syntheticSource.fieldCandidates || []);
     const anchorCheck = evaluateAnchorConflicts(anchors, candidateMap);
     const identity = evaluateSourceIdentity(
@@ -961,6 +1190,22 @@ export async function runProduct({ storage, config, s3Key }) {
     newValuesProposed = consensus.newValuesProposed;
   }
 
+  if (config.helperSupportiveFillMissing && identityGate.validated) {
+    const helperFill = applySupportiveFillToResult({
+      helperContext,
+      normalized,
+      provenance,
+      fieldsBelowPassTarget,
+      criticalFieldsBelowPassTarget,
+      categoryConfig
+    });
+    helperFilledFields = helperFill.filled_fields || [];
+    helperMismatches = helperFill.mismatches || [];
+    fieldsBelowPassTarget = helperFill.fields_below_pass_target || fieldsBelowPassTarget;
+    criticalFieldsBelowPassTarget =
+      helperFill.critical_fields_below_pass_target || criticalFieldsBelowPassTarget;
+  }
+
   const completenessStats = computeCompletenessRequired(normalized, requiredFields);
   const coverageStats = computeCoverageOverall({
     fields: normalized.fields,
@@ -1008,23 +1253,29 @@ export async function runProduct({ storage, config, s3Key }) {
     provenance,
     criticalFieldSet: categoryConfig.criticalFieldSet
   });
+  const hypothesisSourceResults = sourceResults.filter((source) => !isHelperSyntheticSource(source));
   const hypothesisQueue = buildHypothesisQueue({
     criticalFieldsBelowPassTarget,
     missingRequiredFields: completenessStats.missingRequiredFields,
     provenance,
-    sourceResults,
+    sourceResults: hypothesisSourceResults,
     sourceIntelDomains: sourceIntel.data?.domains || {},
     brand: job.identityLock?.brand || identity.brand || '',
     criticalFieldSet: categoryConfig.criticalFieldSet,
     maxItems: Math.max(1, Number(config.maxHypothesisItems || 50))
   });
+  const llmBudgetSnapshot = llmBudgetGuard.snapshot();
+  llmBudgetBlockedReason = llmBudgetSnapshot.state.blockedReason || '';
   const fieldReasoning = buildFieldReasoning({
     fieldOrder,
     provenance,
     fieldsBelowPassTarget,
     criticalFieldsBelowPassTarget,
     missingRequiredFields: completenessStats.missingRequiredFields,
-    constraintAnalysis
+    constraintAnalysis,
+    identityGateValidated: identityGate.validated,
+    llmBudgetBlockedReason,
+    sourceResults: hypothesisSourceResults
   });
 
   const parserHealthRows = sourceResults
@@ -1078,11 +1329,55 @@ export async function runProduct({ storage, config, s3Key }) {
       candidates_key: discoveryResult.candidatesKey,
       candidate_count: discoveryResult.candidates.length
     },
+    searches_attempted: discoveryResult.search_attempts || [],
+    urls_fetched: [...new Set(
+      sourceResults
+        .filter((source) => !isHelperSyntheticSource(source))
+        .map((source) => source.finalUrl || source.url)
+        .filter(Boolean)
+    )],
+    helper_files: {
+      enabled: Boolean(config.helperFilesEnabled),
+      root: config.helperFilesRoot || 'helper_files',
+      active_filtering_match: Boolean(helperContext.active_match),
+      active_filtering_source: helperContext.active_match?.source || null,
+      active_filtering_record_id: helperContext.active_match?.record_id ?? null,
+      seed_urls_from_active_count: (helperContext.seed_urls || []).length,
+      seed_urls_from_active: (helperContext.seed_urls || []).slice(0, 25),
+      active_total_rows: helperContext.stats?.active_total || 0,
+      supportive_total_rows: helperContext.stats?.supportive_total || 0,
+      supportive_file_count: helperContext.stats?.supportive_file_count || 0,
+      supportive_match_count: helperContext.stats?.supportive_matched_count || 0,
+      supportive_synthetic_sources_used: helperSupportiveSyntheticSources.length,
+      supportive_fill_missing_enabled: Boolean(config.helperSupportiveFillMissing),
+      supportive_fields_filled_count: helperFilledFields.length,
+      supportive_fields_filled: helperFilledFields,
+      supportive_mismatch_count: helperMismatches.length,
+      supportive_mismatches: helperMismatches.slice(0, 50)
+    },
     llm: {
-      enabled: Boolean(config.llmEnabled && config.openaiApiKey),
-      model_extract: config.llmEnabled ? config.openaiModelExtract : null,
+      enabled: Boolean(config.llmEnabled && config.llmApiKey),
+      provider: config.llmProvider || 'openai',
+      model_extract: config.llmEnabled ? config.llmModelExtract : null,
+      model_plan: config.llmEnabled ? config.llmModelPlan : null,
+      model_validate: config.llmEnabled ? config.llmModelValidate : null,
+      target_field_count: llmTargetFields.length,
+      target_fields: llmTargetFields.slice(0, 80),
       candidates_added: llmCandidatesAccepted,
-      sources_with_llm_candidates: llmSourcesUsed
+      sources_with_llm_candidates: llmSourcesUsed,
+      call_count_run: llmCallCount,
+      cost_usd_run: Number.parseFloat((llmCostUsd || 0).toFixed(8)),
+      budget: {
+        monthly_budget_usd: llmBudgetSnapshot.limits.monthlyBudgetUsd,
+        monthly_spent_usd_after_run: llmBudgetSnapshot.state.monthlySpentUsd,
+        per_product_budget_usd: llmBudgetSnapshot.limits.productBudgetUsd,
+        per_product_spent_usd_after_run: llmBudgetSnapshot.state.productSpentUsd,
+        max_calls_per_product_total: llmBudgetSnapshot.limits.maxCallsPerProductTotal,
+        calls_per_product_total_after_run: llmBudgetSnapshot.state.productCallsTotal,
+        max_calls_per_round: llmBudgetSnapshot.limits.maxCallsPerRound,
+        calls_used_current_round: llmBudgetSnapshot.state.roundCalls,
+        blocked_reason: llmBudgetBlockedReason || null
+      }
     },
     source_registry: {
       override_key: categoryConfig.sources_override_key || null
@@ -1114,12 +1409,14 @@ export async function runProduct({ storage, config, s3Key }) {
     },
     constraint_analysis: constraintAnalysis,
     field_reasoning: fieldReasoning,
+    top_evidence_references: buildTopEvidenceReferences(provenance, 100),
     parser_health: {
       source_count: parserHealthRows.length,
       average_health_score: Number.parseFloat(parserHealthAverage.toFixed(6)),
       fingerprints_seen: fingerprintCount
     },
     duration_ms: durationMs,
+    round_context: roundContext || null,
     generated_at: new Date().toISOString()
   };
 
@@ -1133,6 +1430,12 @@ export async function runProduct({ storage, config, s3Key }) {
     completeness_required: summary.completeness_required,
     coverage_overall: summary.coverage_overall,
     llm_candidates_added: llmCandidatesAccepted,
+    llm_call_count_run: llmCallCount,
+    llm_cost_usd_run: llmCostUsd,
+    llm_budget_blocked_reason: llmBudgetBlockedReason || null,
+    helper_active_match: Boolean(helperContext.active_match),
+    helper_supportive_matches: helperContext.supportive_matches?.length || 0,
+    helper_supportive_fields_filled: helperFilledFields.length,
     hypothesis_queue_count: summary.hypothesis_queue.length,
     hypothesis_followup_rounds: hypothesisFollowupRoundsExecuted,
     hypothesis_followup_seeded_urls: hypothesisFollowupSeededUrls,
@@ -1149,7 +1452,8 @@ export async function runProduct({ storage, config, s3Key }) {
         provenance,
         summary,
         config,
-        logger
+        logger,
+        llmContext
       }) || buildMarkdownSummary({ normalized, summary });
     } else {
       markdownSummary = buildMarkdownSummary({ normalized, summary });
@@ -1174,6 +1478,22 @@ export async function runProduct({ storage, config, s3Key }) {
     promotion_suggestions_key: intelResult.promotionSuggestionsKey,
     expansion_plan_key: intelResult.expansionPlanKey,
     brand_expansion_plan_count: intelResult.brandExpansionPlanCount
+  };
+  const categoryBrain = await updateCategoryBrain({
+    storage,
+    config,
+    category,
+    job,
+    normalized,
+    summary,
+    provenance,
+    sourceResults,
+    discoveryResult,
+    runId
+  });
+  summary.category_brain = {
+    keys: categoryBrain.keys,
+    promotion_update: categoryBrain.promotion_update
   };
 
   let learning = null;
@@ -1224,6 +1544,7 @@ export async function runProduct({ storage, config, s3Key }) {
     runId,
     productId,
     exportInfo,
-    learning
+    learning,
+    categoryBrain
   };
 }

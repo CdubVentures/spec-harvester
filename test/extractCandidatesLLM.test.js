@@ -65,10 +65,11 @@ test('extractCandidatesLLM keeps only candidates with valid evidenceRefs', async
       },
       config: {
         llmEnabled: true,
-        openaiApiKey: 'sk-test',
-        openaiBaseUrl: 'https://api.openai.com',
-        openaiModelExtract: 'test-model',
-        openaiTimeoutMs: 5_000
+        llmApiKey: 'sk-test',
+        llmBaseUrl: 'https://api.openai.com',
+        llmProvider: 'openai',
+        llmModelExtract: 'test-model',
+        llmTimeoutMs: 5_000
       }
     });
 

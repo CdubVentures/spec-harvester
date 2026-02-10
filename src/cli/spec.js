@@ -17,6 +17,12 @@ import {
 import { startIntelGraphApi } from '../api/intelGraphApi.js';
 import { runGoldenBenchmark } from '../benchmark/goldenBenchmark.js';
 import { rankBatchWithBandit } from '../learning/banditScheduler.js';
+import { ingestCsvFile } from '../ingest/csvIngestor.js';
+import { runWatchImports, runDaemon } from '../daemon/daemon.js';
+import { runUntilComplete } from '../runner/runUntilComplete.js';
+import { buildBillingReport } from '../billing/costLedger.js';
+import { buildLearningReport } from '../learning/categoryBrain.js';
+import { syncJobsFromActiveFiltering } from '../helperFiles/index.js';
 
 function usage() {
   return [
@@ -24,10 +30,16 @@ function usage() {
     '',
     'Commands:',
     '  run-one --s3key <key> [--local] [--dry-run]',
-    '  run-ad-hoc <category> <brand> <model> [<variant>] [--seed-urls <csv>] [--local]',
-    '  run-ad-hoc --category <category> --brand <brand> --model <model> [--variant <variant>] [--seed-urls <csv>] [--local]',
+    '  run-ad-hoc <category> <brand> <model> [<variant>] [--seed-urls <csv>] [--until-complete] [--mode aggressive|balanced] [--max-rounds <n>] [--local]',
+    '  run-ad-hoc --category <category> --brand <brand> --model <model> [--variant <variant>] [--seed-urls <csv>] [--until-complete] [--mode aggressive|balanced] [--max-rounds <n>] [--local]',
     '  run-batch --category <category> [--brand <brand>] [--strategy <explore|exploit|mixed|bandit>] [--local] [--dry-run]',
+    '  run-until-complete --s3key <key> [--max-rounds <n>] [--mode aggressive|balanced] [--local]',
     '  discover --category <category> [--brand <brand>] [--local]',
+    '  ingest-csv --category <category> --path <csv> [--imports-root <path>] [--local]',
+    '  watch-imports [--imports-root <path>] [--category <category>|--all] [--once] [--local]',
+    '  daemon [--imports-root <path>] [--category <category>|--all] [--mode aggressive|balanced] [--once] [--local]',
+    '  billing-report [--month YYYY-MM] [--local]',
+    '  learning-report --category <category> [--local]',
     '  test-s3 [--fixture <path>] [--s3key <key>] [--dry-run]',
     '  sources-plan --category <category> [--local]',
     '  sources-report --category <category> [--top <n>] [--top-paths <n>] [--local]',
@@ -377,6 +389,25 @@ async function commandRunAdHoc(config, storage, args) {
     { contentType: 'application/json' }
   );
 
+  if (asBool(args['until-complete'], false)) {
+    const mode = String(args.mode || config.accuracyMode || 'balanced').toLowerCase();
+    const maxRounds = Math.max(1, Number.parseInt(String(args['max-rounds'] || '0'), 10) || 0);
+    const completed = await runUntilComplete({
+      storage,
+      config,
+      s3key: s3Key,
+      maxRounds: maxRounds || undefined,
+      mode
+    });
+    return {
+      command: 'run-ad-hoc',
+      until_complete: true,
+      s3Key,
+      productId: completed.productId,
+      ...completed
+    };
+  }
+
   const result = await runProduct({ storage, config, s3Key });
   return {
     command: 'run-ad-hoc',
@@ -393,8 +424,109 @@ async function commandRunAdHoc(config, storage, args) {
   };
 }
 
+async function commandRunUntilComplete(config, storage, args) {
+  const s3key = String(args.s3key || '').trim();
+  if (!s3key) {
+    throw new Error('run-until-complete requires --s3key <key>');
+  }
+  const maxRounds = Math.max(1, Number.parseInt(String(args['max-rounds'] || '0'), 10) || 0);
+  const mode = String(args.mode || config.accuracyMode || 'balanced').toLowerCase();
+  const result = await runUntilComplete({
+    storage,
+    config,
+    s3key,
+    maxRounds: maxRounds || undefined,
+    mode
+  });
+  return {
+    command: 'run-until-complete',
+    ...result
+  };
+}
+
+async function commandIngestCsv(config, storage, args) {
+  const category = String(args.category || '').trim();
+  const csvPath = String(args.path || '').trim();
+  if (!category) {
+    throw new Error('ingest-csv requires --category <category>');
+  }
+  if (!csvPath) {
+    throw new Error('ingest-csv requires --path <csv>');
+  }
+  await assertCategorySchemaReady({ category, storage, config });
+  const result = await ingestCsvFile({
+    storage,
+    config,
+    category,
+    csvPath,
+    importsRoot: args['imports-root'] || config.importsRoot
+  });
+  return {
+    command: 'ingest-csv',
+    ...result
+  };
+}
+
+async function commandWatchImports(config, storage, args) {
+  const importsRoot = args['imports-root'] || config.importsRoot;
+  const category = args.category || null;
+  const all = asBool(args.all, !category);
+  const once = asBool(args.once, false);
+  const logger = new EventLogger();
+  const result = await runWatchImports({
+    storage,
+    config,
+    importsRoot,
+    category,
+    all,
+    once,
+    logger
+  });
+  return {
+    command: 'watch-imports',
+    ...result,
+    events: logger.events.slice(-100)
+  };
+}
+
+async function commandDaemon(config, storage, args) {
+  const importsRoot = args['imports-root'] || config.importsRoot;
+  const category = args.category || null;
+  const all = asBool(args.all, !category);
+  const mode = String(args.mode || config.accuracyMode || 'balanced').toLowerCase();
+  const once = asBool(args.once, false);
+  const logger = new EventLogger();
+
+  const result = await runDaemon({
+    storage,
+    config,
+    importsRoot,
+    category,
+    all,
+    mode,
+    once,
+    logger
+  });
+  return {
+    command: 'daemon',
+    ...result,
+    events: logger.events.slice(-200)
+  };
+}
+
 async function commandRunBatch(config, storage, args) {
   const category = args.category || 'mouse';
+  const categoryConfig = await loadCategoryConfig(category, { storage, config });
+  let helperSync = null;
+  if (config.helperFilesEnabled && config.helperAutoSeedTargets) {
+    helperSync = await syncJobsFromActiveFiltering({
+      storage,
+      config,
+      category,
+      categoryConfig,
+      limit: Math.max(0, Number.parseInt(String(config.helperActiveSyncLimit || '0'), 10) || 0)
+    });
+  }
   const allKeys = await storage.listInputKeys(category);
   const keys = await filterKeysByBrand(storage, allKeys, args.brand);
   const strategy = normalizeBatchStrategy(args.strategy || config.batchStrategy || 'mixed');
@@ -432,6 +564,7 @@ async function commandRunBatch(config, storage, args) {
     command: 'run-batch',
     category,
     brand: args.brand || null,
+    helper_sync: helperSync,
     strategy,
     total_inputs: allKeys.length,
     selected_inputs: keys.length,
@@ -456,6 +589,16 @@ async function commandRunBatch(config, storage, args) {
 async function commandDiscover(config, storage, args) {
   const category = args.category || 'mouse';
   const categoryConfig = await loadCategoryConfig(category, { storage, config });
+  let helperSync = null;
+  if (config.helperFilesEnabled && config.helperAutoSeedTargets) {
+    helperSync = await syncJobsFromActiveFiltering({
+      storage,
+      config,
+      category,
+      categoryConfig,
+      limit: Math.max(0, Number.parseInt(String(config.helperActiveSyncLimit || '0'), 10) || 0)
+    });
+  }
   const allKeys = await storage.listInputKeys(category);
   const keys = await filterKeysByBrand(storage, allKeys, args.brand);
   const logger = new EventLogger();
@@ -492,6 +635,7 @@ async function commandDiscover(config, storage, args) {
     command: 'discover',
     category,
     brand: args.brand || null,
+    helper_sync: helperSync,
     total_inputs: allKeys.length,
     selected_inputs: keys.length,
     runs
@@ -623,6 +767,30 @@ async function commandIntelGraphApi(config, storage, args) {
   };
 }
 
+async function commandBillingReport(_config, storage, args) {
+  const month = args.month || new Date().toISOString().slice(0, 7);
+  const report = await buildBillingReport({
+    storage,
+    month
+  });
+  return {
+    command: 'billing-report',
+    ...report
+  };
+}
+
+async function commandLearningReport(_config, storage, args) {
+  const category = String(args.category || 'mouse').trim();
+  const report = await buildLearningReport({
+    storage,
+    category
+  });
+  return {
+    command: 'learning-report',
+    ...report
+  };
+}
+
 async function commandTestS3() {
   const output = await runS3Integration(process.argv.slice(3));
   return {
@@ -649,10 +817,22 @@ async function main() {
     output = await commandRunOne(config, storage, args);
   } else if (command === 'run-ad-hoc') {
     output = await commandRunAdHoc(config, storage, args);
+  } else if (command === 'run-until-complete') {
+    output = await commandRunUntilComplete(config, storage, args);
   } else if (command === 'run-batch') {
     output = await commandRunBatch(config, storage, args);
   } else if (command === 'discover') {
     output = await commandDiscover(config, storage, args);
+  } else if (command === 'ingest-csv') {
+    output = await commandIngestCsv(config, storage, args);
+  } else if (command === 'watch-imports') {
+    output = await commandWatchImports(config, storage, args);
+  } else if (command === 'daemon') {
+    output = await commandDaemon(config, storage, args);
+  } else if (command === 'billing-report') {
+    output = await commandBillingReport(config, storage, args);
+  } else if (command === 'learning-report') {
+    output = await commandLearningReport(config, storage, args);
   } else if (command === 'test-s3') {
     output = await commandTestS3();
   } else if (command === 'sources-plan') {

@@ -1,3 +1,10 @@
+import {
+  computeLlmCostUsd,
+  estimateTokensFromText,
+  normalizeUsage
+} from '../billing/costRates.js';
+import { selectLlmProvider } from './providers/index.js';
+
 function normalizeBaseUrl(value) {
   return String(value || 'https://api.openai.com').replace(/\/+$/, '');
 }
@@ -10,6 +17,17 @@ function isDeepSeekRequest({ baseUrl, model }) {
   const url = normalizeBaseUrl(baseUrl).toLowerCase();
   const modelToken = normalizeModel(model);
   return url.includes('deepseek.com') || modelToken.startsWith('deepseek');
+}
+
+function providerName({ baseUrl, model }) {
+  if (isDeepSeekRequest({ baseUrl, model })) {
+    return 'deepseek';
+  }
+  const url = normalizeBaseUrl(baseUrl).toLowerCase();
+  if (url.includes('googleapis.com') || normalizeModel(model).includes('gemini')) {
+    return 'gemini';
+  }
+  return 'openai';
 }
 
 function shouldRetryWithoutJsonSchema(error) {
@@ -131,32 +149,18 @@ function parseJsonContent(content) {
 }
 
 async function requestChatCompletion({
-  endpoint,
+  providerClient,
+  baseUrl,
   apiKey,
   body,
   controller
 }) {
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify(body),
+  const parsedBody = await providerClient.request({
+    baseUrl,
+    apiKey,
+    body,
     signal: controller.signal
   });
-
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`OpenAI API error ${response.status}: ${text.slice(0, 1000)}`);
-  }
-
-  let parsedBody;
-  try {
-    parsedBody = JSON.parse(text);
-  } catch {
-    throw new Error('OpenAI API returned non-JSON payload');
-  }
 
   const message = parsedBody?.choices?.[0]?.message;
   const content = extractMessageContent(message);
@@ -166,7 +170,9 @@ async function requestChatCompletion({
 
   return {
     message,
-    content
+    content,
+    usage: parsedBody?.usage || {},
+    responseModel: parsedBody?.model || ''
   };
 }
 
@@ -181,16 +187,24 @@ export async function callOpenAI({
   jsonSchema,
   apiKey,
   baseUrl,
+  provider,
+  costRates,
+  usageContext = {},
+  onUsage,
   reasoningMode = false,
   reasoningBudget = 0,
   timeoutMs = 40_000,
   logger
 }) {
   if (!apiKey) {
-    throw new Error('OPENAI_API_KEY is not configured');
+    throw new Error('LLM_API_KEY is not configured');
   }
 
-  const endpoint = `${normalizeBaseUrl(baseUrl)}/v1/chat/completions`;
+  const baseUrlNormalized = normalizeBaseUrl(baseUrl);
+  const providerClient = selectLlmProvider(
+    provider || providerName({ baseUrl: baseUrlNormalized, model })
+  );
+  const providerLabel = providerClient.name;
   const deepSeekMode = isDeepSeekRequest({ baseUrl, model });
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -240,13 +254,50 @@ export async function callOpenAI({
     return parsed;
   };
 
+  const emitUsage = async ({ usage, content, responseModel, retryWithoutSchema = false }) => {
+    if (typeof onUsage !== 'function') {
+      return;
+    }
+
+    const fallbackUsage = {
+      promptTokens: estimateTokensFromText(`${effectiveSystem}\n${String(user || '')}`),
+      completionTokens: estimateTokensFromText(content),
+      cachedPromptTokens: 0,
+      estimated: !usage || Object.keys(usage || {}).length === 0
+    };
+    const normalizedUsage = normalizeUsage(usage, fallbackUsage);
+    const cost = computeLlmCostUsd({
+      usage: normalizedUsage,
+      rates: costRates || {}
+    });
+
+    await onUsage({
+      provider: providerLabel,
+      model: responseModel || model,
+      prompt_tokens: normalizedUsage.promptTokens,
+      completion_tokens: normalizedUsage.completionTokens,
+      cached_prompt_tokens: normalizedUsage.cachedPromptTokens,
+      total_tokens: normalizedUsage.totalTokens,
+      cost_usd: cost.costUsd,
+      estimated_usage: Boolean(normalizedUsage.estimated),
+      retry_without_schema: Boolean(retryWithoutSchema),
+      ...usageContext
+    });
+  };
+
   try {
     const useJsonSchema = Boolean(jsonSchema && !deepSeekMode);
     const first = await requestChatCompletion({
-      endpoint,
+      providerClient,
+      baseUrl: baseUrlNormalized,
       apiKey,
       body: buildBody({ useJsonSchema }),
       controller
+    });
+    await emitUsage({
+      usage: first.usage,
+      content: first.content,
+      responseModel: first.responseModel
     });
     return parseStructuredResult(first.content);
   } catch (firstError) {
@@ -261,10 +312,17 @@ export async function callOpenAI({
 
     try {
       const retry = await requestChatCompletion({
-        endpoint,
+        providerClient,
+        baseUrl: baseUrlNormalized,
         apiKey,
         body: buildBody({ useJsonSchema: false }),
         controller
+      });
+      await emitUsage({
+        usage: retry.usage,
+        content: retry.content,
+        responseModel: retry.responseModel,
+        retryWithoutSchema: true
       });
       return parseStructuredResult(retry.content);
     } catch (retryError) {
