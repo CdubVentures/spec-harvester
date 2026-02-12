@@ -1,0 +1,13 @@
+{
+  "created_at": "2026-02-12T05:55:36.253Z",
+  "files": {
+    "draft": true,
+    "field_rules_draft": true,
+    "field_rules_full": true,
+    "ui_field_catalog_draft": true,
+    "workbook_map": true
+  },
+  "note": "category-compile",
+  "version": 1,
+  "version_id": "20260212T055536Z"
+}

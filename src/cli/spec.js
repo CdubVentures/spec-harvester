@@ -25,6 +25,7 @@ import { buildBillingReport } from '../billing/costLedger.js';
 import { buildLearningReport } from '../learning/categoryBrain.js';
 import { syncJobsFromActiveFiltering } from '../helperFiles/index.js';
 import { runLlmHealthCheck } from '../llm/healthCheck.js';
+import { verifyGeneratedFieldRules } from '../ingest/fieldRulesVerify.js';
 
 function usage() {
   return [
@@ -37,6 +38,7 @@ function usage() {
     '  run-batch --category <category> [--brand <brand>] [--strategy <explore|exploit|mixed|bandit>] [--local] [--dry-run]',
     '  run-until-complete --s3key <key> [--max-rounds <n>] [--mode aggressive|balanced] [--local]',
     '  category-compile --category <category> [--workbook <path>] [--map <path>] [--local]',
+    '  field-rules-verify --category <category> [--fixture <path>] [--local]',
     '  discover --category <category> [--brand <brand>] [--local]',
     '  ingest-csv --category <category> --path <csv> [--imports-root <path>] [--local]',
     '  watch-imports [--imports-root <path>] [--category <category>|--all] [--once] [--local]',
@@ -466,6 +468,23 @@ async function commandCategoryCompile(config, _storage, args) {
   });
   return {
     command: 'category-compile',
+    ...result
+  };
+}
+
+async function commandFieldRulesVerify(config, _storage, args) {
+  const category = String(args.category || '').trim();
+  if (!category) {
+    throw new Error('field-rules-verify requires --category <category>');
+  }
+  const fixturePath = String(args.fixture || '').trim();
+  const result = await verifyGeneratedFieldRules({
+    category,
+    config,
+    fixturePath
+  });
+  return {
+    command: 'field-rules-verify',
     ...result
   };
 }
@@ -935,6 +954,8 @@ async function main() {
     output = await commandRunUntilComplete(config, storage, args);
   } else if (command === 'category-compile') {
     output = await commandCategoryCompile(config, storage, args);
+  } else if (command === 'field-rules-verify') {
+    output = await commandFieldRulesVerify(config, storage, args);
   } else if (command === 'run-batch') {
     output = await commandRunBatch(config, storage, args);
   } else if (command === 'discover') {

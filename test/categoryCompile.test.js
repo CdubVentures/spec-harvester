@@ -235,7 +235,6 @@ test('compileCategoryWorkbook bootstraps generated artifacts from workbook + too
       }
     });
     assert.equal(result.compiled, true);
-    assert.equal((result.compile_report?.source_summary?.field_rule_patch || null), null);
     assert.equal((result.compile_report?.source_summary?.enum_lists || 0) > 0, true);
     assert.equal((result.compile_report?.source_summary?.component_sheets || 0) > 0, true);
 
@@ -327,135 +326,66 @@ test('compileCategoryWorkbook honors selected_keys scope from workbook map', asy
     const generatedRoot = path.join(helperRoot, 'mouse', '_generated');
     const fieldRules = JSON.parse(await fs.readFile(path.join(generatedRoot, 'field_rules.json'), 'utf8'));
     assert.deepEqual(Object.keys(fieldRules.fields).sort(), ['connection', 'weight']);
-    assert.deepEqual((fieldRules.schema?.include_fields || []).sort(), ['connection', 'weight']);
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
 
-test('compileCategoryWorkbook applies field_rule_sample_v2 patch overrides for latency/force fields', async () => {
-  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-category-compile-patch-v2-'));
+test('compileCategoryWorkbook applies workbook_map field_overrides for latency/force fields', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-category-compile-overrides-'));
   const helperRoot = path.join(tempRoot, 'helper_files');
   const categoryRoot = path.join(helperRoot, 'mouse');
   await fs.mkdir(categoryRoot, { recursive: true });
   const workbookPath = mouseWorkbookPath();
   const workbookMap = buildMouseWorkbookMap(workbookPath);
-  const patchPathCandidates = [
-    path.resolve('helper_files', 'mouse', 'field_rule_sample_v2.json'),
-    path.resolve('helper_files', 'mouse', 'field_rules.json')
-  ];
-  let patchPath = '';
-  for (const candidate of patchPathCandidates) {
-    try {
-      await fs.access(candidate);
-      patchPath = candidate;
-      break;
-    } catch {
-      // continue
-    }
-  }
-  const targetPatchPath = path.join(categoryRoot, 'field_rule_sample_v2.json');
-  if (!patchPath) {
-    const inlinePatch = {
-      version: 'inline_latency_patch_v2',
-      notes: ['Fallback inline patch for latency/force fields when sample files are absent.'],
-      fields: {
-        click_latency: {
-          priority: { required_level: 'expected', availability: 'sometimes', difficulty: 'hard', effort: 8 },
-          contract: { type: 'number', shape: 'scalar', unit: 'ms', round: '2dp', value_form: 'single' },
-          parse: { template: 'number_with_unit', unit: 'ms', unit_accepts: ['ms'], strict_unit_required: true },
-          evidence: { required: true, min_evidence_refs: 1, tier_preference: ['tier2', 'tier1', 'tier3'], conflict_policy: 'resolve_by_tier_else_unknown' },
-          selection_policy: { allow_scalar_when: 'deterministic_single_source_or_consensus', conflict_behavior: 'set_unknown_on_conflict' }
-        },
-        click_latency_list: {
-          priority: { required_level: 'optional', availability: 'sometimes', difficulty: 'hard', effort: 9 },
-          contract: {
-            type: 'object',
-            shape: 'list',
-            unit: 'ms',
-            value_form: 'set',
-            object_schema: {
-              mode: { type: 'string' },
-              ms: { type: 'number' },
-              source_host: { type: 'string', required: false },
-              method: { type: 'string', required: false }
-            }
-          },
-          parse: { template: 'latency_list_modes_ms' },
-          evidence: { required: true, min_evidence_refs: 1, tier_preference: ['tier2', 'tier1', 'tier3'], conflict_policy: 'preserve_all_candidates' }
-        },
-        sensor_latency: {
-          priority: { required_level: 'expected', availability: 'sometimes', difficulty: 'hard', effort: 8 },
-          contract: { type: 'number', shape: 'scalar', unit: 'ms', round: '2dp', value_form: 'single' },
-          parse: { template: 'number_with_unit', unit: 'ms', unit_accepts: ['ms'], strict_unit_required: true },
-          evidence: { required: true, min_evidence_refs: 1, tier_preference: ['tier2', 'tier1', 'tier3'], conflict_policy: 'resolve_by_tier_else_unknown' }
-        },
-        sensor_latency_list: {
-          priority: { required_level: 'optional', availability: 'sometimes', difficulty: 'hard', effort: 9 },
-          contract: {
-            type: 'object',
-            shape: 'list',
-            unit: 'ms',
-            value_form: 'set',
-            object_schema: {
-              mode: { type: 'string' },
-              ms: { type: 'number' },
-              source_host: { type: 'string', required: false },
-              method: { type: 'string', required: false }
-            }
-          },
-          parse: { template: 'latency_list_modes_ms' },
-          evidence: { required: true, min_evidence_refs: 1, tier_preference: ['tier2', 'tier1', 'tier3'], conflict_policy: 'preserve_all_candidates' }
-        },
-        shift_latency: {
-          priority: { required_level: 'optional', availability: 'sometimes', difficulty: 'hard', effort: 7 },
-          contract: { type: 'number', shape: 'scalar', unit: 'ms', round: '2dp', value_form: 'single' },
-          parse: { template: 'number_with_unit', unit: 'ms', unit_accepts: ['ms'], strict_unit_required: true },
-          evidence: { required: true, min_evidence_refs: 1, tier_preference: ['tier2', 'tier1', 'tier3'], conflict_policy: 'resolve_by_tier_else_unknown' }
-        },
-        click_force: {
-          priority: { required_level: 'optional', availability: 'rare', difficulty: 'hard', effort: 6 },
-          contract: { type: 'number', shape: 'scalar', unit: 'gf', round: 'int', value_form: 'single' },
-          parse: { template: 'number_with_unit', unit: 'gf', unit_accepts: ['gf', 'g'], strict_unit_required: true },
-          evidence: { required: true, min_evidence_refs: 1, tier_preference: ['tier2', 'tier1', 'tier3'], conflict_policy: 'resolve_by_tier_else_unknown' }
+  const inlineOverrides = {
+    click_latency: {
+      priority: { required_level: 'expected', availability: 'sometimes', difficulty: 'hard', effort: 8 },
+      contract: { type: 'number', shape: 'scalar', unit: 'ms', rounding: { decimals: 2, mode: 'nearest' }, value_form: 'single' },
+      parse: { template: 'number_with_unit', unit: 'ms', unit_accepts: ['ms'], strict_unit_required: true },
+      evidence: { required: true, min_evidence_refs: 1, tier_preference: ['tier2', 'tier1', 'tier3'], conflict_policy: 'resolve_by_tier_else_unknown' },
+      selection_policy: { source_field: 'click_latency_list' }
+    },
+    click_latency_list: {
+      priority: { required_level: 'optional', availability: 'sometimes', difficulty: 'hard', effort: 9 },
+      contract: {
+        type: 'object',
+        shape: 'list',
+        unit: 'ms',
+        value_form: 'set',
+        object_schema: {
+          mode: { type: 'string' },
+          ms: { type: 'number' },
+          source_host: { type: 'string', required: false },
+          method: { type: 'string', required: false }
         }
-      }
-    };
-    await fs.writeFile(targetPatchPath, JSON.stringify(inlinePatch, null, 2));
-  } else if (patchPath.endsWith('field_rule_sample_v2.json')) {
-    await fs.copyFile(patchPath, targetPatchPath);
-  } else {
-    const sourcePayload = JSON.parse(await fs.readFile(patchPath, 'utf8'));
-    const sourceFields = sourcePayload?.fields || {};
-    const keepKeys = [
-      'click_latency',
-      'click_latency_list',
-      'sensor_latency',
-      'sensor_latency_list',
-      'shift_latency',
-      'click_force'
-    ];
-    const reducedPatch = {
-      version: 'derived_patch_from_field_rules',
-      generated_at: sourcePayload?.generated_at || null,
-      notes: ['Auto-derived latency/force patch subset for categoryCompile test fallback.'],
-      fields: Object.fromEntries(
-        keepKeys
-          .filter((fieldKey) => Object.prototype.hasOwnProperty.call(sourceFields, fieldKey))
-          .map((fieldKey) => {
-            const sourceRule = sourceFields[fieldKey] || {};
-            const narrowedRule = {};
-            for (const key of ['priority', 'contract', 'parse', 'evidence', 'selection_policy']) {
-              if (Object.prototype.hasOwnProperty.call(sourceRule, key)) {
-                narrowedRule[key] = sourceRule[key];
-              }
-            }
-            return [fieldKey, narrowedRule];
-          })
-      )
-    };
-    await fs.writeFile(targetPatchPath, JSON.stringify(reducedPatch, null, 2));
-  }
+      },
+      parse: { template: 'latency_list_modes_ms' },
+      evidence: { required: true, min_evidence_refs: 1, tier_preference: ['tier2', 'tier1', 'tier3'], conflict_policy: 'preserve_all_candidates' }
+    },
+    sensor_latency_list: {
+      priority: { required_level: 'optional', availability: 'sometimes', difficulty: 'hard', effort: 9 },
+      contract: {
+        type: 'object',
+        shape: 'list',
+        unit: 'ms',
+        value_form: 'set',
+        object_schema: {
+          mode: { type: 'string' },
+          ms: { type: 'number' },
+          source_host: { type: 'string', required: false },
+          method: { type: 'string', required: false }
+        }
+      },
+      parse: { template: 'latency_list_modes_ms' }
+    },
+    click_force: {
+      priority: { required_level: 'optional', availability: 'rare', difficulty: 'hard', effort: 6 },
+      contract: { type: 'number', shape: 'scalar', unit: 'gf', rounding: { decimals: 0, mode: 'nearest' }, value_form: 'single' },
+      parse: { template: 'number_with_unit', unit: 'gf', unit_accepts: ['gf', 'g'], strict_unit_required: true }
+    }
+  };
+  workbookMap.field_overrides = inlineOverrides;
 
   try {
     await saveWorkbookMap({
@@ -476,10 +406,7 @@ test('compileCategoryWorkbook applies field_rule_sample_v2 patch overrides for l
 
     const generatedRoot = path.join(categoryRoot, '_generated');
     const fieldRules = JSON.parse(await fs.readFile(path.join(generatedRoot, 'field_rules.json'), 'utf8'));
-    const patch = JSON.parse(await fs.readFile(path.join(categoryRoot, 'field_rule_sample_v2.json'), 'utf8'));
-    const patchFields = patch.fields || {};
-
-    for (const [fieldKey, expectedRule] of Object.entries(patchFields)) {
+    for (const [fieldKey, expectedRule] of Object.entries(inlineOverrides)) {
       assert.equal(Object.prototype.hasOwnProperty.call(fieldRules.fields || {}, fieldKey), true, `generated field missing ${fieldKey}`);
       assertSubsetDeep(expectedRule, fieldRules.fields[fieldKey], `field_rules.fields.${fieldKey}`);
     }

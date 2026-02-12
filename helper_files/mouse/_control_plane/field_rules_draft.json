@@ -30,8 +30,8 @@
       "component": null,
       "contract": {
         "range": {
-          "max": 100,
-          "min": 1
+          "min": 1.0,
+          "max": 100.0
         },
         "rounding": {
           "decimals": 0,
@@ -41,12 +41,20 @@
         "type": "integer",
         "unit": "g",
         "unknown_reason_required": true,
-        "unknown_token": "unk"
+        "unknown_token": "unk",
+        "list_rules": {
+          "dedupe": true,
+          "sort": "none",
+          "min_items": 0,
+          "max_items": 100
+        },
+        "object_schema": {},
+        "item_union": []
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
-          "strategy": "alias"
+          "strategy": "alias",
+          "fuzzy_threshold": 0.92
         },
         "new_value_policy": {
           "accept_if_evidence": true,
@@ -87,15 +95,24 @@
         "unit": "g",
         "unit_accepts": [
           "g"
-        ]
+        ],
+        "unit_conversions": {},
+        "delimiters": [],
+        "range_separators": [],
+        "token_map": {},
+        "accepted_formats": [],
+        "allow_unitless": true,
+        "allow_ranges": false,
+        "mode_aliases": {},
+        "accept_bare_numbers_as_mode": false
       },
       "priority": {
+        "required_level": "expected",
         "availability": "expected",
-        "block_publish_when_unk": false,
         "difficulty": "easy",
         "effort": 3,
         "publish_gate": false,
-        "required_level": "expected"
+        "block_publish_when_unk": false
       },
       "search_hints": {
         "domain_hints": [
@@ -134,7 +151,7 @@
         "display_mode": "all",
         "examples": [],
         "group": "Sensor & Performance",
-        "guidance_md": null,
+        "guidance_md": "",
         "input_control": "number",
         "label": "Max Acceleration",
         "order": 57,
@@ -144,9 +161,60 @@
         "suffix": "g",
         "tooltip_key": "acceleration",
         "tooltip_md": "Define 'Max Acceleration' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
-        "tooltip_source": "hbs_tooltipsMouse.js"
+        "tooltip_source": "hbs_tooltipsMouse.js",
+        "array_handling": "none"
       },
-      "value_form": "scalar"
+      "value_form": "single",
+      "deprecated_keys": [],
+      "required_level": "expected",
+      "availability": "expected",
+      "difficulty": "easy",
+      "effort": 3,
+      "type": "integer",
+      "shape": "scalar",
+      "unit": "g",
+      "parse_template": "number_with_unit",
+      "enum_policy": "open",
+      "enum_source": null,
+      "strict_unit_required": false,
+      "round": "int",
+      "array_handling": "none",
+      "min_evidence_refs": 1,
+      "evidence_required": true,
+      "publish_gate": false,
+      "block_publish_when_unk": false,
+      "selection_policy": null,
+      "_edited": true,
+      "new_value_policy": {
+        "accept_if_evidence": true,
+        "mark_needs_curation": true,
+        "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+      },
+      "enum_match_strategy": "alias",
+      "enum_fuzzy_threshold": 0.92,
+      "list_rules": {
+        "dedupe": true,
+        "sort": "none",
+        "min_items": 0,
+        "max_items": 100
+      },
+      "object_schema": {},
+      "item_union": [],
+      "parse_rules": {
+        "unit": "g",
+        "unit_accepts": [
+          "g"
+        ],
+        "unit_conversions": {},
+        "delimiters": [],
+        "separators": [],
+        "token_map": {},
+        "accepted_formats": [],
+        "allow_unitless": true,
+        "allow_ranges": false,
+        "mode_aliases": {},
+        "accept_bare_numbers_as_mode": false
+      }
     },
     "adjustable_scroll_wheel": {
       "aliases": [],
@@ -638,11 +706,26 @@
         "shape": "scalar",
         "type": "string",
         "unknown_reason_required": true,
-        "unknown_token": "unk"
+        "unknown_token": "unk",
+        "unit": "",
+        "rounding": {
+          "decimals": 0,
+          "mode": "nearest"
+        },
+        "range": {},
+        "list_rules": {
+          "dedupe": true,
+          "sort": "none",
+          "min_items": 0,
+          "max_items": 100
+        },
+        "object_schema": {},
+        "item_union": []
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "exact",
+          "fuzzy_threshold": 0.92
         },
         "new_value_policy": {
           "accept_if_evidence": true,
@@ -677,15 +760,27 @@
       },
       "key": "cable_type",
       "parse": {
-        "template": "text_field"
+        "template": "text_field",
+        "strict_unit_required": false,
+        "unit": "",
+        "unit_accepts": [],
+        "unit_conversions": {},
+        "delimiters": [],
+        "range_separators": [],
+        "token_map": {},
+        "accepted_formats": [],
+        "allow_unitless": true,
+        "allow_ranges": false,
+        "mode_aliases": {},
+        "accept_bare_numbers_as_mode": false
       },
       "priority": {
+        "required_level": "expected",
         "availability": "expected",
-        "block_publish_when_unk": false,
         "difficulty": "easy",
         "effort": 3,
         "publish_gate": false,
-        "required_level": "expected"
+        "block_publish_when_unk": false
       },
       "search_hints": {
         "domain_hints": [
@@ -720,7 +815,7 @@
         "display_mode": "all",
         "examples": [],
         "group": "Connectivity",
-        "guidance_md": null,
+        "guidance_md": "",
         "input_control": "text",
         "label": "Cable Type",
         "order": 22,
@@ -730,9 +825,59 @@
         "suffix": null,
         "tooltip_key": null,
         "tooltip_md": "Define 'Cable Type' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
-        "tooltip_source": null
+        "tooltip_source": null,
+        "display_decimals": 0,
+        "array_handling": "none"
       },
-      "value_form": "scalar"
+      "value_form": "single",
+      "deprecated_keys": [],
+      "required_level": "expected",
+      "availability": "expected",
+      "difficulty": "easy",
+      "effort": 3,
+      "type": "string",
+      "shape": "scalar",
+      "unit": "",
+      "parse_template": "text_field",
+      "enum_policy": "open",
+      "enum_source": null,
+      "strict_unit_required": false,
+      "round": "none",
+      "array_handling": "none",
+      "min_evidence_refs": 1,
+      "evidence_required": true,
+      "publish_gate": false,
+      "block_publish_when_unk": false,
+      "selection_policy": null,
+      "_edited": true,
+      "new_value_policy": {
+        "accept_if_evidence": true,
+        "mark_needs_curation": true,
+        "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+      },
+      "enum_match_strategy": "exact",
+      "enum_fuzzy_threshold": 0.92,
+      "list_rules": {
+        "dedupe": true,
+        "sort": "none",
+        "min_items": 0,
+        "max_items": 100
+      },
+      "object_schema": {},
+      "item_union": [],
+      "parse_rules": {
+        "unit": "",
+        "unit_accepts": [],
+        "unit_conversions": {},
+        "delimiters": [],
+        "separators": [],
+        "token_map": {},
+        "accepted_formats": [],
+        "allow_unitless": true,
+        "allow_ranges": false,
+        "mode_aliases": {},
+        "accept_bare_numbers_as_mode": false
+      }
     },
     "click_force": {
       "aliases": [],

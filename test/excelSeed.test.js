@@ -67,7 +67,7 @@ test('loadCategoryFieldRules loads generated field rules only', async () => {
   const generatedDir = path.join(helperCategoryDir, '_generated');
   await fs.mkdir(generatedDir, { recursive: true });
   await fs.writeFile(
-    path.join(generatedDir, 'field_rules.runtime.json'),
+    path.join(generatedDir, 'field_rules.json'),
     JSON.stringify({
       version: 1,
       schema: {
@@ -83,7 +83,7 @@ test('loadCategoryFieldRules loads generated field rules only', async () => {
     });
     assert.equal(Boolean(loaded), true);
     assert.equal(
-      String(loaded.file_path || '').replace(/\\/g, '/').endsWith(`/_generated/field_rules.runtime.json`),
+      String(loaded.file_path || '').replace(/\\/g, '/').endsWith(`/_generated/field_rules.json`),
       true
     );
     assert.deepEqual(loaded.value?.schema?.include_fields, ['edition']);
