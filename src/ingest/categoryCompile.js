@@ -970,9 +970,9 @@ export async function introspectWorkbook({
         header_row: 1,
         first_data_row: 2,
         canonical_name_column: 'A',
-        alias_columns: ['B'],
+        alias_columns: [],
         brand_column: '',
-        link_columns: ['C'],
+        link_columns: [],
         property_columns: [],
         stop_after_blank_names: 10,
         row_start: 2,
@@ -1966,9 +1966,37 @@ function isNumericIdValue(value = '') {
   return /^\d+$/.test(text);
 }
 
+function splitComponentTokens(value = '') {
+  const text = normalizeWhitespace(value);
+  if (!text) {
+    return [];
+  }
+  return text
+    .split(/[,\n;|/]+/)
+    .map((token) => normalizeWhitespace(token))
+    .filter(Boolean);
+}
+
+function extractHttpLinks(value = '') {
+  const text = String(value ?? '').trim();
+  if (!text) {
+    return [];
+  }
+  const matches = text.match(/https?:\/\/[^\s,;|]+/gi);
+  if (Array.isArray(matches) && matches.length > 0) {
+    return orderedUniqueStrings(matches.map((token) => normalizeWhitespace(token)));
+  }
+  const normalized = normalizeWhitespace(text);
+  if (/^https?:\/\//i.test(normalized)) {
+    return [normalized];
+  }
+  return [];
+}
+
 function pullComponentDbs(workbook, map) {
   const out = {};
   const sourceAssertions = [];
+  const sourceStats = {};
   for (const row of toArray(map.component_sheets)) {
     const sheet = sheetByName(workbook, row.sheet);
     if (!sheet) {
@@ -1990,11 +2018,13 @@ function pullComponentDbs(workbook, map) {
     }
 
     let blankStreak = 0;
+    let scannedRows = 0;
     let nonBlankNames = 0;
     let numericOnlyNames = 0;
     const firstTwentyNames = [];
 
     for (let idx = firstDataRow; idx <= rowEnd; idx += 1) {
+      scannedRows += 1;
       const rawName = getCell(sheet, nameColumn, idx);
       const name = normalizeWhitespace(rawName);
       if (!name) {
@@ -2013,13 +2043,19 @@ function pullComponentDbs(workbook, map) {
         firstTwentyNames.push(name);
       }
 
-      const aliases = stableSortStrings(
-        toArray(row.alias_columns).map((col) => normalizeWhitespace(getCell(sheet, col, idx)))
-      ).filter((alias) => alias.toLowerCase() !== name.toLowerCase());
+      const aliases = orderedUniqueStrings(
+        toArray(row.alias_columns)
+          .flatMap((col) => splitComponentTokens(getCell(sheet, col, idx)))
+          .map((alias) => normalizeWhitespace(alias))
+          .filter((alias) => alias && alias.toLowerCase() !== name.toLowerCase())
+      );
       const brand = row.brand_column ? normalizeWhitespace(getCell(sheet, row.brand_column, idx)) : '';
-      const links = stableSortStrings(
-        toArray(row.link_columns).map((col) => normalizeWhitespace(getCell(sheet, col, idx)))
-      ).filter((value) => /^https?:\/\//i.test(value));
+      const links = orderedUniqueStrings(
+        toArray(row.link_columns)
+          .flatMap((col) => extractHttpLinks(getCell(sheet, col, idx)))
+          .map((link) => normalizeWhitespace(link))
+          .filter((link) => /^https?:\/\//i.test(link))
+      );
       const properties = {};
       for (const col of toArray(row.property_columns)) {
         const headerToken = normalizeFieldKey(normalizeWhitespace(getCell(sheet, col, headerRow)) || col);
@@ -2037,17 +2073,28 @@ function pullComponentDbs(workbook, map) {
       });
     }
 
-    const firstTwentyAllNumeric = firstTwentyNames.length >= 20
+    const firstTwentyAllNumeric = firstTwentyNames.length > 0
       && firstTwentyNames.every((value) => isNumericIdValue(value));
     const numericRatio = nonBlankNames > 0 ? (numericOnlyNames / nonBlankNames) : 0;
     if (numericRatio > 0.10 || firstTwentyAllNumeric) {
       const errorText = `component_db_sources.${componentType} canonical_name_column is pointing to an ID column. Choose the name/model column.`;
       sourceAssertions.push(errorText);
     }
+    sourceStats[componentType] = {
+      scanned_rows: scannedRows,
+      entity_count: toArray(out[componentType]).length,
+      non_blank_names: nonBlankNames,
+      numeric_only_names: numericOnlyNames,
+      numeric_only_ratio: Number(numericRatio.toFixed(6)),
+      first_20_names: firstTwentyNames,
+      first_20_all_numeric: firstTwentyAllNumeric,
+      stop_after_blank_names: stopAfterBlankNames
+    };
   }
   return {
     componentDb: out,
-    sourceAssertions: stableSortStrings(sourceAssertions)
+    sourceAssertions: stableSortStrings(sourceAssertions),
+    sourceStats: sortDeep(sourceStats)
   };
 }
 
@@ -2527,7 +2574,8 @@ function buildEnumBucketSummary({
 
 function buildComponentSourceSummary({
   map,
-  componentDb
+  componentDb,
+  sourceStats
 } = {}) {
   const out = {};
   for (const row of toArray(map?.component_sheets)) {
@@ -2554,6 +2602,17 @@ function buildComponentSourceSummary({
       .map((rowValue) => normalizeText(rowValue?.name || rowValue?.canonical_name || ''))
       .filter(Boolean)
       .slice(0, 10);
+    const stats = isObject(sourceStats?.[componentType]) ? sourceStats[componentType] : {};
+    const previewStats = {
+      scanned_rows: asInt(stats.scanned_rows, 0),
+      entity_count: asInt(stats.entity_count, entries.length),
+      non_blank_names: asInt(stats.non_blank_names, entries.length),
+      numeric_only_names: asInt(stats.numeric_only_names, 0),
+      numeric_only_ratio: Number(stats.numeric_only_ratio ?? 0),
+      first_20_names: toArray(stats.first_20_names).slice(0, 20),
+      first_20_all_numeric: Boolean(stats.first_20_all_numeric),
+      stop_after_blank_names: Math.max(1, asInt(stats.stop_after_blank_names, excelBlock.stop_after_blank_names))
+    };
 
     out[componentType] = {
       type: componentType,
@@ -2561,7 +2620,8 @@ function buildComponentSourceSummary({
       name_column: excelBlock.canonical_name_column || null,
       excel: excelBlock,
       entity_count: entries.length,
-      sample_entities: sampleEntities
+      sample_entities: sampleEntities,
+      preview_stats: previewStats
     };
   }
   return out;
@@ -4108,6 +4168,7 @@ export async function compileCategoryWorkbook({
   const componentPull = pullComponentDbs(workbookForCompile, map);
   const componentDb = componentPull.componentDb || {};
   const componentSourceAssertions = toArray(componentPull.sourceAssertions);
+  const componentSourceStats = isObject(componentPull.sourceStats) ? componentPull.sourceStats : {};
   const tooltipLibrary = await loadTooltipLibrary({ categoryRoot, map });
   const tooltipEntries = isObject(tooltipLibrary?.entries) ? tooltipLibrary.entries : {};
   if (tooltipLibrary?.selectedMissing) {
@@ -4615,7 +4676,8 @@ export async function compileCategoryWorkbook({
   });
   const componentDbSources = buildComponentSourceSummary({
     map,
-    componentDb
+    componentDb,
+    sourceStats: componentSourceStats
   });
   const parseTemplates = isObject(baselineFieldRules?.parse_templates)
     ? baselineFieldRules.parse_templates
@@ -4635,9 +4697,7 @@ export async function compileCategoryWorkbook({
       ],
     workbook_tabs: isObject(baselineFieldRules?.workbook_tabs) ? baselineFieldRules.workbook_tabs : workbookTabs,
     enum_buckets: isObject(baselineFieldRules?.enum_buckets) ? baselineFieldRules.enum_buckets : enumBuckets,
-    component_db_sources: isObject(baselineFieldRules?.component_db_sources)
-      ? baselineFieldRules.component_db_sources
-      : componentDbSources,
+    component_db_sources: componentDbSources,
     parse_templates: parseTemplates,
     fields: canonicalFields
   };

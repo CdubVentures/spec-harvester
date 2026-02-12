@@ -476,6 +476,54 @@ def _resolve_workbook_path(value: str):
     return path
 
 
+def ordered_unique_text(values):
+    out = []
+    seen = set()
+    for raw in values or []:
+        text = norm(raw)
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(text)
+    return out
+
+
+def split_component_tokens(value):
+    text = norm(value)
+    if not text:
+        return []
+    parts = [norm(part) for part in re.split(r"[,\n;|/]+", text)]
+    return [part for part in parts if part]
+
+
+def extract_http_links(value):
+    text = str(value or "").strip()
+    if not text:
+        return []
+    matches = [norm(link) for link in re.findall(r"https?://[^\s,;|]+", text, flags=re.IGNORECASE)]
+    if matches:
+        return ordered_unique_text(matches)
+    normalized = norm(text)
+    if normalized.lower().startswith("http://") or normalized.lower().startswith("https://"):
+        return [normalized]
+    return []
+
+
+def _toggle_csv_column(raw_csv: str, col: str):
+    values = stable_sort_columns(csv_tokens(raw_csv))
+    target = normalize_col(col, "")
+    if not target:
+        return csv_join(values)
+    if target in values:
+        values = [value for value in values if value != target]
+    else:
+        values.append(target)
+    return csv_join(stable_sort_columns(values))
+
+
 @st.cache_data(ttl=20, show_spinner=False)
 def workbook_component_preview(workbook_path: str, sheet_name: str, header_row: int, first_data_row: int):
     if load_workbook is None:
@@ -517,6 +565,104 @@ def workbook_component_preview(workbook_path: str, sheet_name: str, header_row: 
             row[key] = col["values"][offset] if offset < len(col["values"]) else ""
         preview_rows.append(row)
     return {"columns": columns, "preview_rows": preview_rows}
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def workbook_component_entities_preview(
+    workbook_path: str,
+    sheet_name: str,
+    header_row: int,
+    first_data_row: int,
+    canonical_name_column: str,
+    brand_column: str = "",
+    alias_columns_csv: str = "",
+    link_columns_csv: str = "",
+    stop_after_blank_names: int = 10,
+):
+    if load_workbook is None:
+        return {"error": "openpyxl is not installed in this environment."}
+    path = _resolve_workbook_path(workbook_path)
+    if not path or not path.exists():
+        return {"error": f"Workbook not found: {workbook_path}"}
+    try:
+        wb = load_workbook(path, data_only=True, read_only=True)
+    except Exception as exc:
+        return {"error": f"Failed to read workbook: {exc}"}
+    if str(sheet_name or "").strip() not in wb.sheetnames:
+        return {"error": f"Sheet not found: {sheet_name}"}
+
+    ws = wb[str(sheet_name)]
+    name_col = normalize_col(canonical_name_column, "A")
+    brand_col = normalize_col(brand_column, "")
+    alias_cols = stable_sort_columns(csv_tokens(alias_columns_csv))
+    link_cols = stable_sort_columns(csv_tokens(link_columns_csv))
+    stop_limit = max(1, int(stop_after_blank_names or 10))
+    row_end = int(ws.max_row or max(2, int(first_data_row or 2)))
+
+    preview_rows = []
+    sample_names = []
+    sample_name_tokens = set()
+    first_20_names = []
+    blank_streak = 0
+    scanned_rows = 0
+    entity_count = 0
+    numeric_only_names = 0
+
+    for row_idx in range(max(1, int(first_data_row or 2)), row_end + 1):
+        scanned_rows += 1
+        name = norm(ws.cell(row=row_idx, column=col_to_index(name_col) or 1).value)
+        if not name:
+            blank_streak += 1
+            if blank_streak >= stop_limit:
+                break
+            continue
+        blank_streak = 0
+        entity_count += 1
+        if re.match(r"^\d+$", name):
+            numeric_only_names += 1
+        if len(first_20_names) < 20:
+            first_20_names.append(name)
+        name_token = token(name)
+        if len(sample_names) < 10 and name_token not in sample_name_tokens:
+            sample_name_tokens.add(name_token)
+            sample_names.append(name)
+
+        brand = ""
+        if brand_col:
+            brand = norm(ws.cell(row=row_idx, column=col_to_index(brand_col) or 1).value)
+
+        alias_values = []
+        for col in alias_cols:
+            alias_values.extend(split_component_tokens(ws.cell(row=row_idx, column=col_to_index(col) or 1).value))
+        aliases = [value for value in ordered_unique_text(alias_values) if token(value) != token(name)]
+
+        link_values = []
+        for col in link_cols:
+            link_values.extend(extract_http_links(ws.cell(row=row_idx, column=col_to_index(col) or 1).value))
+        links = ordered_unique_text(link_values)
+
+        if len(preview_rows) < 20:
+            preview_rows.append(
+                {
+                    "row": row_idx,
+                    "name": name,
+                    "brand": brand,
+                    "aliases": aliases,
+                    "links": links,
+                }
+            )
+
+    numeric_ratio = (numeric_only_names / entity_count) if entity_count > 0 else 0.0
+    return {
+        "preview_rows": preview_rows,
+        "entity_count": int(entity_count),
+        "sample_names": sample_names[:10],
+        "first_20_names": first_20_names,
+        "numeric_only_names": int(numeric_only_names),
+        "numeric_only_ratio": float(numeric_ratio),
+        "first_20_all_numeric": bool(first_20_names and all(re.match(r"^\d+$", value) for value in first_20_names)),
+        "scanned_rows": int(scanned_rows),
+    }
 
 
 @st.cache_data(ttl=20, show_spinner=False)
@@ -1454,36 +1600,32 @@ def render_field_rules_studio(category: str, local_mode: bool):
                 step=1,
                 key=f"studio_comp_stop_blank_{category}_{idx}",
             )
-            brand_column = m_d2.text_input(
-                "Brand Column (optional)",
-                value=str(row.get("brand_column", "") or ""),
-                key=f"studio_comp_brand_col_{category}_{idx}",
-                help="Optional column letter.",
-            )
-            alias_columns = m_d3.text_input(
-                "Alias Columns (optional csv)",
-                value=csv_join(row.get("alias_columns", [])),
-                key=f"studio_comp_alias_cols_{category}_{idx}",
-            )
-            link_columns = m_d4.text_input(
-                "Link Columns (optional csv)",
-                value=csv_join(row.get("link_columns", [])),
-                key=f"studio_comp_link_cols_{category}_{idx}",
-            )
-            property_columns = st.text_input(
-                "Property Columns (optional csv)",
-                value=csv_join(row.get("property_columns", [])),
-                key=f"studio_comp_prop_cols_{category}_{idx}",
-            )
-
-            preview = workbook_component_preview(workbook_path_value, comp_sheet, int(header_row), int(first_data_row))
             selected_name_col_key = f"studio_comp_name_col_{category}_{idx}"
+            name_input_key = f"studio_comp_name_col_input_{category}_{idx}"
+            brand_input_key = f"studio_comp_brand_col_{category}_{idx}"
+            alias_input_key = f"studio_comp_alias_cols_{category}_{idx}"
+            link_input_key = f"studio_comp_link_cols_{category}_{idx}"
+            property_input_key = f"studio_comp_prop_cols_{category}_{idx}"
+            picker_target_key = f"studio_comp_picker_target_{category}_{idx}"
+
             selected_name_col = normalize_col(
                 st.session_state.get(selected_name_col_key, row.get("canonical_name_column", "A")),
                 "A",
             )
             if selected_name_col_key not in st.session_state:
                 st.session_state[selected_name_col_key] = selected_name_col
+            if name_input_key not in st.session_state:
+                st.session_state[name_input_key] = selected_name_col
+            if brand_input_key not in st.session_state:
+                st.session_state[brand_input_key] = normalize_col(row.get("brand_column", ""), "")
+            if alias_input_key not in st.session_state:
+                st.session_state[alias_input_key] = csv_join(stable_sort_columns(row.get("alias_columns", [])))
+            if link_input_key not in st.session_state:
+                st.session_state[link_input_key] = csv_join(stable_sort_columns(row.get("link_columns", [])))
+            if property_input_key not in st.session_state:
+                st.session_state[property_input_key] = csv_join(stable_sort_columns(row.get("property_columns", [])))
+
+            preview = workbook_component_preview(workbook_path_value, comp_sheet, int(header_row), int(first_data_row))
 
             name_preview_values = []
             if "error" in preview:
@@ -1492,32 +1634,115 @@ def render_field_rules_studio(category: str, local_mode: bool):
             else:
                 preview_cols = preview.get("columns", []) if isinstance(preview.get("columns"), list) else []
                 if preview_cols:
-                    st.caption("Name/Model Column Picker (click header)")
+                    st.caption("Column Picker (click a header to map the selected role)")
+                    picker_target = st.selectbox(
+                        "Mapping Target",
+                        ["Name/Model", "Brand", "Aliases", "Links", "Properties"],
+                        key=picker_target_key,
+                        help="Use header clicks to map columns quickly; you can also type column letters below.",
+                    )
                     btn_cols = st.columns(5)
                     for col_idx, col_meta in enumerate(preview_cols):
                         col_label = str(col_meta.get("col", "") or "")
                         header_label = str(col_meta.get("header", "") or "")
                         text = f"{col_label}: {header_label or '(blank)'}"
                         if btn_cols[col_idx % 5].button(text, key=f"studio_comp_pick_name_col_{category}_{idx}_{col_label}", use_container_width=True):
-                            st.session_state[selected_name_col_key] = col_label
+                            if picker_target == "Name/Model":
+                                st.session_state[selected_name_col_key] = col_label
+                                st.session_state[name_input_key] = col_label
+                            elif picker_target == "Brand":
+                                current = normalize_col(st.session_state.get(brand_input_key, ""), "")
+                                st.session_state[brand_input_key] = "" if current == col_label else col_label
+                            elif picker_target == "Aliases":
+                                st.session_state[alias_input_key] = _toggle_csv_column(str(st.session_state.get(alias_input_key, "") or ""), col_label)
+                            elif picker_target == "Links":
+                                st.session_state[link_input_key] = _toggle_csv_column(str(st.session_state.get(link_input_key, "") or ""), col_label)
+                            else:
+                                st.session_state[property_input_key] = _toggle_csv_column(str(st.session_state.get(property_input_key, "") or ""), col_label)
                             st.rerun()
                     selected_name_col = normalize_col(st.session_state.get(selected_name_col_key, selected_name_col), selected_name_col)
-                st.caption(f"Selected Name/Model Column: `{selected_name_col or '?'}`")
+                selected_brand_col_hint = normalize_col(st.session_state.get(brand_input_key, ""), "")
+                selected_alias_cols_hint = stable_sort_columns(csv_tokens(str(st.session_state.get(alias_input_key, "") or "")))
+                selected_link_cols_hint = stable_sort_columns(csv_tokens(str(st.session_state.get(link_input_key, "") or "")))
+                selected_prop_cols_hint = stable_sort_columns(csv_tokens(str(st.session_state.get(property_input_key, "") or "")))
+                st.caption(
+                    "Selected mappings: "
+                    f"name `{selected_name_col or '?'}` | "
+                    f"brand `{selected_brand_col_hint or '-'}` | "
+                    f"aliases `{csv_join(selected_alias_cols_hint) or '-'}` | "
+                    f"links `{csv_join(selected_link_cols_hint) or '-'}` | "
+                    f"properties `{csv_join(selected_prop_cols_hint) or '-'}`"
+                )
                 st.dataframe(preview.get("preview_rows", []), hide_index=True, use_container_width=True, height=200)
-                selected_meta = next((col for col in preview_cols if str(col.get("col", "")).upper() == selected_name_col), None)
-                if isinstance(selected_meta, dict):
-                    raw_values = selected_meta.get("values", []) if isinstance(selected_meta.get("values"), list) else []
-                    name_preview_values = [str(value).strip() for value in raw_values if str(value).strip()][:20]
-                st.caption("First 20 names from selected column")
-                st.dataframe([{"name": value} for value in name_preview_values], hide_index=True, use_container_width=True, height=180)
+
+            manual_name_col = st.text_input(
+                "Name/Model Column (required)",
+                key=name_input_key,
+                help="Single column letter. You can type it directly or pick via header click.",
+            )
+            selected_name_col = normalize_col(manual_name_col, "A")
+            st.session_state[selected_name_col_key] = selected_name_col
+            brand_column = m_d2.text_input(
+                "Brand Column (optional)",
+                key=brand_input_key,
+                help="Optional column letter.",
+            )
+            alias_columns = m_d3.text_input(
+                "Alias Columns (optional csv)",
+                key=alias_input_key,
+            )
+            link_columns = m_d4.text_input(
+                "Link Columns (optional csv)",
+                key=link_input_key,
+            )
+            property_columns = st.text_input(
+                "Property Columns (optional csv)",
+                key=property_input_key,
+            )
+
+            selected_brand_col = normalize_col(brand_column, "")
+            selected_alias_cols = stable_sort_columns(csv_tokens(alias_columns))
+            selected_link_cols = stable_sort_columns(csv_tokens(link_columns))
+            selected_property_cols = stable_sort_columns(csv_tokens(property_columns))
+
+            entity_preview = workbook_component_entities_preview(
+                workbook_path=workbook_path_value,
+                sheet_name=comp_sheet,
+                header_row=int(header_row),
+                first_data_row=int(first_data_row),
+                canonical_name_column=selected_name_col,
+                brand_column=selected_brand_col,
+                alias_columns_csv=csv_join(selected_alias_cols),
+                link_columns_csv=csv_join(selected_link_cols),
+                stop_after_blank_names=int(stop_after_blank_names),
+            )
+            if "error" in entity_preview:
+                st.error(str(entity_preview.get("error")))
+                mapping_errors.append(f"{source_title}: {entity_preview.get('error')}")
+            else:
+                preview_rows = entity_preview.get("preview_rows", []) if isinstance(entity_preview.get("preview_rows"), list) else []
+                name_preview_values = entity_preview.get("first_20_names", []) if isinstance(entity_preview.get("first_20_names"), list) else []
+                st.caption("Live Preview (first 20 rows): {name, brand, aliases[], links[]}")
+                st.dataframe(preview_rows, hide_index=True, use_container_width=True, height=260)
+                sample_names = entity_preview.get("sample_names", []) if isinstance(entity_preview.get("sample_names"), list) else []
+                st.caption(
+                    f"Entity count: {int(entity_preview.get('entity_count', 0) or 0)} | "
+                    f"Samples: {', '.join(sample_names[:10]) or 'n/a'}"
+                )
                 preview_errors = component_preview_errors(name_preview_values)
-                if preview_errors:
-                    for err in preview_errors:
-                        st.error(err)
-                        mapping_errors.append(f"{source_title}: {err}")
-                else:
-                    ratio = numeric_only_ratio(name_preview_values)
-                    st.success(f"Preview looks valid ({len(name_preview_values)} names, numeric-only ratio {ratio:.0%}).")
+                if float(entity_preview.get("numeric_only_ratio", 0.0) or 0.0) > 0.10:
+                    preview_errors.append("More than 10% of component names are numeric-only. Choose the Name/Model column, not the ID column.")
+                if bool(entity_preview.get("first_20_all_numeric", False)):
+                    preview_errors.append("The first 20 component names are numeric-only. Choose the Name/Model column.")
+                for err in ordered_unique_text(preview_errors):
+                    st.error(err)
+                    mapping_errors.append(f"{source_title}: {err}")
+                if not preview_errors:
+                    ratio = float(entity_preview.get("numeric_only_ratio", 0.0) or 0.0)
+                    st.success(
+                        f"Preview looks valid ({int(entity_preview.get('entity_count', 0) or 0)} entities, "
+                        f"numeric-only ratio {ratio:.0%})."
+                    )
 
             component_rows_out.append(
                 {
@@ -1526,10 +1751,10 @@ def render_field_rules_studio(category: str, local_mode: bool):
                     "header_row": int(header_row),
                     "first_data_row": int(first_data_row),
                     "canonical_name_column": normalize_col(st.session_state.get(selected_name_col_key, selected_name_col), "A"),
-                    "brand_column": normalize_col(brand_column, ""),
-                    "alias_columns": stable_sort_columns(csv_tokens(alias_columns)),
-                    "link_columns": stable_sort_columns(csv_tokens(link_columns)),
-                    "property_columns": stable_sort_columns(csv_tokens(property_columns)),
+                    "brand_column": selected_brand_col,
+                    "alias_columns": selected_alias_cols,
+                    "link_columns": selected_link_cols,
+                    "property_columns": selected_property_cols,
                     "stop_after_blank_names": int(stop_after_blank_names),
                 }
             )
