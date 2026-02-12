@@ -1062,10 +1062,6 @@ export async function introspectWorkbook({
         }
       }
       let nameColumn = 'A';
-      let brandColumn = '';
-      const aliasColumns = [];
-      const linkColumns = [];
-      const propertyColumns = [];
       for (const colInfo of headerColumns) {
         const header = colInfo.header;
         if (!nameColumn || nameColumn === 'A') {
@@ -1074,21 +1070,6 @@ export async function introspectWorkbook({
             continue;
           }
         }
-        if (!brandColumn && (header.includes('brand') || header.includes('maker') || header.includes('manufacturer'))) {
-          brandColumn = colInfo.col;
-          continue;
-        }
-        if (header.includes('alias')) {
-          aliasColumns.push(colInfo.col);
-          continue;
-        }
-        if (header.includes('link') || header.includes('url')) {
-          linkColumns.push(colInfo.col);
-          continue;
-        }
-        if (!['id', 'sku'].includes(header)) {
-          propertyColumns.push(colInfo.col);
-        }
       }
       componentRows.push({
         sheet: componentSheet.name,
@@ -1096,10 +1077,10 @@ export async function introspectWorkbook({
         header_row: 1,
         first_data_row: 2,
         canonical_name_column: nameColumn || 'A',
-        alias_columns: stableSortStrings(aliasColumns),
-        brand_column: brandColumn,
-        link_columns: stableSortStrings(linkColumns),
-        property_columns: stableSortStrings(propertyColumns),
+        alias_columns: [],
+        brand_column: '',
+        link_columns: [],
+        property_columns: [],
         stop_after_blank_names: 10,
         row_start: 2,
         row_end: 0
@@ -2064,13 +2045,20 @@ function pullComponentDbs(workbook, map) {
           properties[headerToken] = value;
         }
       }
-      out[componentType].push({
-        name,
-        aliases,
-        brand,
-        links,
-        properties
-      });
+      const entity = { name };
+      if (row.brand_column && brand) {
+        entity.brand = brand;
+      }
+      if (toArray(row.alias_columns).length > 0 && aliases.length > 0) {
+        entity.aliases = aliases;
+      }
+      if (toArray(row.link_columns).length > 0 && links.length > 0) {
+        entity.links = links;
+      }
+      if (toArray(row.property_columns).length > 0 && Object.keys(properties).length > 0) {
+        entity.properties = properties;
+      }
+      out[componentType].push(entity);
     }
 
     const firstTwentyAllNumeric = firstTwentyNames.length > 0

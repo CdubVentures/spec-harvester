@@ -1607,6 +1607,11 @@ def render_field_rules_studio(category: str, local_mode: bool):
             link_input_key = f"studio_comp_link_cols_{category}_{idx}"
             property_input_key = f"studio_comp_prop_cols_{category}_{idx}"
             picker_target_key = f"studio_comp_picker_target_{category}_{idx}"
+            brand_enabled_key = f"studio_comp_brand_enabled_{category}_{idx}"
+            alias_enabled_key = f"studio_comp_alias_enabled_{category}_{idx}"
+            link_enabled_key = f"studio_comp_link_enabled_{category}_{idx}"
+            property_enabled_key = f"studio_comp_property_enabled_{category}_{idx}"
+            clear_optional_key = f"studio_comp_clear_optional_{category}_{idx}"
 
             selected_name_col = normalize_col(
                 st.session_state.get(selected_name_col_key, row.get("canonical_name_column", "A")),
@@ -1624,6 +1629,43 @@ def render_field_rules_studio(category: str, local_mode: bool):
                 st.session_state[link_input_key] = csv_join(stable_sort_columns(row.get("link_columns", [])))
             if property_input_key not in st.session_state:
                 st.session_state[property_input_key] = csv_join(stable_sort_columns(row.get("property_columns", [])))
+            if brand_enabled_key not in st.session_state:
+                st.session_state[brand_enabled_key] = bool(normalize_col(row.get("brand_column", ""), ""))
+            if alias_enabled_key not in st.session_state:
+                st.session_state[alias_enabled_key] = bool(stable_sort_columns(row.get("alias_columns", [])))
+            if link_enabled_key not in st.session_state:
+                st.session_state[link_enabled_key] = bool(stable_sort_columns(row.get("link_columns", [])))
+            if property_enabled_key not in st.session_state:
+                st.session_state[property_enabled_key] = bool(stable_sort_columns(row.get("property_columns", [])))
+
+            r1, r2, r3, r4, r5 = st.columns([1.1, 1.1, 1.1, 1.1, 1.6])
+            brand_enabled = r1.toggle("Use Brand", key=brand_enabled_key, help="Optional manufacturer/brand role.")
+            alias_enabled = r2.toggle("Use Aliases", key=alias_enabled_key, help="Optional synonym columns (CSV tokens supported).")
+            link_enabled = r3.toggle("Use Links", key=link_enabled_key, help="Optional URL/source columns.")
+            property_enabled = r4.toggle("Use Properties", key=property_enabled_key, help="Optional structured property columns.")
+            if r5.button("Clear Optional Roles", key=clear_optional_key, use_container_width=True):
+                st.session_state[brand_enabled_key] = False
+                st.session_state[alias_enabled_key] = False
+                st.session_state[link_enabled_key] = False
+                st.session_state[property_enabled_key] = False
+                st.session_state[brand_input_key] = ""
+                st.session_state[alias_input_key] = ""
+                st.session_state[link_input_key] = ""
+                st.session_state[property_input_key] = ""
+                st.rerun()
+            st.caption(
+                "Role-based mapping: `Name/Model` is required. Optional roles can stay off. "
+                "Example: material often uses only `Name/Model`, optionally `Aliases`."
+            )
+
+            if not brand_enabled:
+                st.session_state[brand_input_key] = ""
+            if not alias_enabled:
+                st.session_state[alias_input_key] = ""
+            if not link_enabled:
+                st.session_state[link_input_key] = ""
+            if not property_enabled:
+                st.session_state[property_input_key] = ""
 
             preview = workbook_component_preview(workbook_path_value, comp_sheet, int(header_row), int(first_data_row))
 
@@ -1635,11 +1677,22 @@ def render_field_rules_studio(category: str, local_mode: bool):
                 preview_cols = preview.get("columns", []) if isinstance(preview.get("columns"), list) else []
                 if preview_cols:
                     st.caption("Column Picker (click a header to map the selected role)")
+                    picker_targets = ["Name/Model"]
+                    if brand_enabled:
+                        picker_targets.append("Brand")
+                    if alias_enabled:
+                        picker_targets.append("Aliases")
+                    if link_enabled:
+                        picker_targets.append("Links")
+                    if property_enabled:
+                        picker_targets.append("Properties")
+                    if picker_target_key not in st.session_state or st.session_state.get(picker_target_key) not in picker_targets:
+                        st.session_state[picker_target_key] = picker_targets[0]
                     picker_target = st.selectbox(
                         "Mapping Target",
-                        ["Name/Model", "Brand", "Aliases", "Links", "Properties"],
+                        picker_targets,
                         key=picker_target_key,
-                        help="Use header clicks to map columns quickly; you can also type column letters below.",
+                        help="Step 1: choose target role. Step 2: click a column header to assign/toggle it.",
                     )
                     btn_cols = st.columns(5)
                     for col_idx, col_meta in enumerate(preview_cols):
@@ -1686,24 +1739,28 @@ def render_field_rules_studio(category: str, local_mode: bool):
                 "Brand Column (optional)",
                 key=brand_input_key,
                 help="Optional column letter.",
+                disabled=not brand_enabled,
             )
             alias_columns = m_d3.text_input(
                 "Alias Columns (optional csv)",
                 key=alias_input_key,
+                disabled=not alias_enabled,
             )
             link_columns = m_d4.text_input(
                 "Link Columns (optional csv)",
                 key=link_input_key,
+                disabled=not link_enabled,
             )
             property_columns = st.text_input(
                 "Property Columns (optional csv)",
                 key=property_input_key,
+                disabled=not property_enabled,
             )
 
-            selected_brand_col = normalize_col(brand_column, "")
-            selected_alias_cols = stable_sort_columns(csv_tokens(alias_columns))
-            selected_link_cols = stable_sort_columns(csv_tokens(link_columns))
-            selected_property_cols = stable_sort_columns(csv_tokens(property_columns))
+            selected_brand_col = normalize_col(brand_column if brand_enabled else "", "")
+            selected_alias_cols = stable_sort_columns(csv_tokens(alias_columns if alias_enabled else ""))
+            selected_link_cols = stable_sort_columns(csv_tokens(link_columns if link_enabled else ""))
+            selected_property_cols = stable_sort_columns(csv_tokens(property_columns if property_enabled else ""))
 
             entity_preview = workbook_component_entities_preview(
                 workbook_path=workbook_path_value,
