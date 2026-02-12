@@ -12278,6 +12278,10 @@
       "sheet": "EG_ID_QC"
     }
   ],
+  "tooltip_source": {
+    "format": "auto",
+    "path": ""
+  },
   "ui_defaults": {},
   "version": 1,
   "version_note": "",

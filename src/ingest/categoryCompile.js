@@ -639,54 +639,230 @@ function tooltipHtmlToMarkdown(rawHtml) {
     .join('\n');
 }
 
-async function loadTooltipLibrary({ categoryRoot }) {
+function parseTooltipJson(raw = '', sourceName = '') {
   const entries = {};
-  const files = [];
-  let dirEntries = [];
+  let payload = {};
   try {
-    dirEntries = await fs.readdir(categoryRoot, { withFileTypes: true });
+    payload = JSON.parse(raw);
   } catch {
-    return {
-      entries,
-      files
-    };
+    payload = {};
   }
-  const tooltipFiles = dirEntries
-    .filter((entry) => entry.isFile())
-    .map((entry) => entry.name)
-    .filter((name) => /^hbs_tooltips.*\.js$/i.test(name))
-    .sort((a, b) => a.localeCompare(b));
-  const entryPattern = /([A-Za-z0-9_]+)\s*:\s*`([\s\S]*?)`\s*(?:,|$)/g;
-  for (const fileName of tooltipFiles) {
-    const fullPath = path.join(categoryRoot, fileName);
-    let raw = '';
-    try {
-      raw = await fs.readFile(fullPath, 'utf8');
-    } catch {
+  const bucket = isObject(payload?.tooltips) ? payload.tooltips : payload;
+  if (!isObject(bucket)) {
+    return entries;
+  }
+  for (const [rawKey, value] of Object.entries(bucket)) {
+    const key = normalizeFieldKey(rawKey);
+    if (!key) {
       continue;
     }
-    files.push(fileName);
-    const bodyMatch = raw.match(/export\s+const\s+TOOLTIPS\s*=\s*{([\s\S]*?)}\s*;/i);
-    const body = bodyMatch ? bodyMatch[1] : raw;
-    entryPattern.lastIndex = 0;
-    let match = null;
-    while ((match = entryPattern.exec(body)) !== null) {
-      const key = normalizeFieldKey(match[1]);
-      const html = normalizeText(match[2]);
-      if (!key || !html) {
+    if (typeof value === 'string') {
+      const markdown = normalizeText(value);
+      if (!markdown) {
         continue;
       }
       entries[key] = {
         key,
-        source: fileName,
-        html,
-        markdown: tooltipHtmlToMarkdown(html)
+        source: sourceName,
+        html: '',
+        markdown
       };
+      continue;
+    }
+    if (!isObject(value)) {
+      continue;
+    }
+    const html = normalizeText(value.html || '');
+    const markdown = normalizeText(
+      value.markdown
+      || value.md
+      || value.tooltip_md
+      || value.text
+      || ''
+    ) || (html ? tooltipHtmlToMarkdown(html) : '');
+    if (!html && !markdown) {
+      continue;
+    }
+    entries[key] = {
+      key,
+      source: sourceName,
+      html,
+      markdown
+    };
+  }
+  return entries;
+}
+
+function parseTooltipMarkdown(raw = '', sourceName = '') {
+  const entries = {};
+  const lines = String(raw || '').split(/\r?\n/);
+  let currentKey = '';
+  let buffer = [];
+  const commit = () => {
+    if (!currentKey) {
+      return;
+    }
+    const markdown = buffer.map((line) => normalizeText(line)).filter(Boolean).join('\n');
+    if (!markdown) {
+      return;
+    }
+    entries[currentKey] = {
+      key: currentKey,
+      source: sourceName,
+      html: '',
+      markdown
+    };
+  };
+  for (const line of lines) {
+    const headingMatch = String(line || '').match(/^\s{0,3}#{1,6}\s+(.+?)\s*$/);
+    if (headingMatch) {
+      commit();
+      currentKey = normalizeFieldKey(String(headingMatch[1] || '').replace(/`/g, ''));
+      buffer = [];
+      continue;
+    }
+    if (currentKey) {
+      buffer.push(line);
+    }
+  }
+  commit();
+  return entries;
+}
+
+function parseTooltipJs(raw = '', sourceName = '') {
+  const entries = {};
+  const bodyMatch = String(raw || '').match(/export\s+const\s+TOOLTIPS\s*=\s*{([\s\S]*?)}\s*;/i);
+  const body = bodyMatch ? bodyMatch[1] : String(raw || '');
+  const templatePattern = /([A-Za-z0-9_]+)\s*:\s*`([\s\S]*?)`\s*(?:,|$)/g;
+  templatePattern.lastIndex = 0;
+  let match = null;
+  while ((match = templatePattern.exec(body)) !== null) {
+    const key = normalizeFieldKey(match[1]);
+    const html = normalizeText(match[2]);
+    if (!key || !html) {
+      continue;
+    }
+    entries[key] = {
+      key,
+      source: sourceName,
+      html,
+      markdown: tooltipHtmlToMarkdown(html)
+    };
+  }
+  if (Object.keys(entries).length > 0) {
+    return entries;
+  }
+  const stringPattern = /["']([A-Za-z0-9_\- ]+)["']\s*:\s*["']([^"']+)["']\s*(?:,|$)/g;
+  stringPattern.lastIndex = 0;
+  while ((match = stringPattern.exec(body)) !== null) {
+    const key = normalizeFieldKey(match[1]);
+    const markdown = normalizeText(match[2]);
+    if (!key || !markdown) {
+      continue;
+    }
+    entries[key] = {
+      key,
+      source: sourceName,
+      html: '',
+      markdown
+    };
+  }
+  return entries;
+}
+
+function resolveTooltipCandidatePaths({ categoryRoot, map }) {
+  const configuredPath = normalizeText(
+    map?.tooltip_source?.path
+    || map?.tooltip_bank_path
+    || map?.tooltip_file
+    || ''
+  );
+  const candidates = [];
+  if (configuredPath) {
+    const categoryRelative = path.isAbsolute(configuredPath)
+      ? path.resolve(configuredPath)
+      : path.resolve(categoryRoot, configuredPath);
+    candidates.push(categoryRelative);
+    if (!path.isAbsolute(configuredPath)) {
+      candidates.push(path.resolve(configuredPath));
     }
   }
   return {
+    configuredPath,
+    candidates: stableSortStrings(candidates)
+  };
+}
+
+async function loadTooltipLibrary({ categoryRoot, map = {} }) {
+  const entries = {};
+  const files = [];
+  const { configuredPath, candidates } = resolveTooltipCandidatePaths({ categoryRoot, map });
+  let selectedMissing = false;
+  let selectedConfigured = false;
+  const fileCandidates = [];
+
+  if (candidates.length > 0) {
+    selectedConfigured = true;
+    fileCandidates.push(...candidates);
+  } else {
+    let dirEntries = [];
+    try {
+      dirEntries = await fs.readdir(categoryRoot, { withFileTypes: true });
+    } catch {
+      return {
+        entries,
+        files,
+        selectedMissing,
+        selectedConfigured
+      };
+    }
+    const tooltipFiles = dirEntries
+      .filter((entry) => entry.isFile())
+      .map((entry) => entry.name)
+      .filter((name) => /^hbs_tooltips/i.test(name))
+      .sort((a, b) => a.localeCompare(b))
+      .map((fileName) => path.join(categoryRoot, fileName));
+    fileCandidates.push(...tooltipFiles);
+  }
+
+  let anyReadable = false;
+  const seenFiles = new Set();
+  for (const fullPath of fileCandidates) {
+    const resolved = path.resolve(fullPath);
+    if (seenFiles.has(resolved)) {
+      continue;
+    }
+    seenFiles.add(resolved);
+    let raw = '';
+    try {
+      raw = await fs.readFile(resolved, 'utf8');
+      anyReadable = true;
+    } catch {
+      continue;
+    }
+    const fileName = path.basename(resolved);
+    files.push(fileName);
+    const ext = path.extname(resolved).toLowerCase();
+    const parsed = ext === '.json'
+      ? parseTooltipJson(raw, fileName)
+      : (ext === '.md' || ext === '.markdown')
+        ? parseTooltipMarkdown(raw, fileName)
+        : parseTooltipJs(raw, fileName);
+    for (const [key, row] of Object.entries(parsed)) {
+      entries[key] = row;
+    }
+  }
+
+  if (selectedConfigured && !anyReadable && configuredPath) {
+    selectedMissing = true;
+  }
+
+  return {
     entries: sortDeep(entries),
-    files
+    files,
+    selectedMissing,
+    selectedConfigured,
+    configuredPath
   };
 }
 
@@ -1177,6 +1353,18 @@ function normalizeWorkbookMap(map = {}) {
       row_end: asInt(row.row_end || row.end_row, 0)
     };
   });
+  const tooltipSourceRaw = isObject(map.tooltip_source) ? map.tooltip_source : {};
+  const tooltipSourcePath = normalizeText(
+    tooltipSourceRaw.path
+    || map.tooltip_bank_path
+    || map.tooltip_file
+    || ''
+  );
+  const tooltipSourceFormat = normalizeToken(
+    tooltipSourceRaw.format
+    || (tooltipSourcePath ? path.extname(tooltipSourcePath).slice(1) : '')
+    || 'auto'
+  ) || 'auto';
 
   return {
     version: asInt(map.version, 1),
@@ -1261,6 +1449,10 @@ function normalizeWorkbookMap(map = {}) {
     version_note: normalizeText(map.version_note || ''),
     field_overrides: isObject(map.field_overrides) ? map.field_overrides : {},
     ui_defaults: isObject(map.ui_defaults) ? map.ui_defaults : {},
+    tooltip_source: {
+      path: tooltipSourcePath,
+      format: tooltipSourceFormat
+    },
     identity: isObject(map.identity) ? {
       min_identifiers: asInt(map.identity.min_identifiers, 2),
       anti_merge_rules: toArray(map.identity.anti_merge_rules)
@@ -1311,6 +1503,9 @@ function mergeWorkbookMapDefaults(baseMap = {}, suggestedMap = {}) {
   if (isEmptyArrayValue(merged.component_sheets) && !isEmptyArrayValue(suggested.component_sheets)) {
     merged.component_sheets = suggested.component_sheets;
     merged.component_sources = suggested.component_sources;
+  }
+  if (!normalizeText(merged?.tooltip_source?.path || '') && normalizeText(suggested?.tooltip_source?.path || '')) {
+    merged.tooltip_source = suggested.tooltip_source;
   }
   if (isEmptyArrayValue(merged.selected_keys) && !isEmptyArrayValue(suggested.selected_keys)) {
     merged.selected_keys = suggested.selected_keys;
@@ -3913,8 +4108,13 @@ export async function compileCategoryWorkbook({
   const componentPull = pullComponentDbs(workbookForCompile, map);
   const componentDb = componentPull.componentDb || {};
   const componentSourceAssertions = toArray(componentPull.sourceAssertions);
-  const tooltipLibrary = await loadTooltipLibrary({ categoryRoot });
+  const tooltipLibrary = await loadTooltipLibrary({ categoryRoot, map });
   const tooltipEntries = isObject(tooltipLibrary?.entries) ? tooltipLibrary.entries : {};
+  if (tooltipLibrary?.selectedMissing) {
+    mapWarnings.push(`tooltip_source: file not found '${normalizeText(tooltipLibrary.configuredPath || map?.tooltip_source?.path || '')}'`);
+  } else if (tooltipLibrary?.selectedConfigured && Object.keys(tooltipEntries).length === 0) {
+    mapWarnings.push(`tooltip_source: no tooltip entries parsed from '${normalizeText(tooltipLibrary.configuredPath || map?.tooltip_source?.path || '')}'`);
+  }
 
   const expectations = map.expectations || {
     required_fields: [],

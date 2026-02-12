@@ -388,7 +388,16 @@
       "canonical_key": "cable_type",
       "display_decimals": 0,
       "display_mode": "all",
-      "examples": [],
+      "examples": [
+        "braided",
+        "braided",
+        "braided",
+        "braided",
+        "braided",
+        "braided",
+        "braided",
+        "braided"
+      ],
       "group": "Connectivity",
       "guidance_md": null,
       "input_control": "text",
@@ -401,14 +410,7 @@
       "suffix": null,
       "tooltip_key": null,
       "tooltip_md": "Define 'Cable Type' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
-      "tooltip_source": null,
-      "required_level": "expected",
-      "availability": "expected",
-      "difficulty": "easy",
-      "effort": 3,
-      "type": "string",
-      "shape": "scalar",
-      "unit": ""
+      "tooltip_source": null
     },
     {
       "aliases": [],
@@ -1478,7 +1480,16 @@
       "canonical_key": "acceleration",
       "display_decimals": 0,
       "display_mode": "all",
-      "examples": [],
+      "examples": [
+        "40",
+        "50",
+        "50",
+        "50",
+        "50",
+        "10",
+        "40",
+        "50"
+      ],
       "group": "Sensor & Performance",
       "guidance_md": null,
       "input_control": "number",
@@ -1491,14 +1502,7 @@
       "suffix": "g",
       "tooltip_key": "acceleration",
       "tooltip_md": "Define 'Max Acceleration' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
-      "tooltip_source": "hbs_tooltipsMouse.js",
-      "required_level": "expected",
-      "availability": "expected",
-      "difficulty": "easy",
-      "effort": 3,
-      "type": "integer",
-      "shape": "scalar",
-      "unit": "g"
+      "tooltip_source": "hbs_tooltipsMouse.js"
     },
     {
       "aliases": [
@@ -2256,6 +2260,6 @@
       "tooltip_source": null
     }
   ],
-  "generated_at": "2026-02-12T07:30:40.098Z",
+  "generated_at": "2026-02-12T08:00:26.336Z",
   "version": 1
 }

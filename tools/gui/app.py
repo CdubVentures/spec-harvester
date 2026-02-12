@@ -83,6 +83,11 @@ def token(value) -> str:
     return norm(value).lower()
 
 
+def normalize_field_key(value) -> str:
+    text = re.sub(r"[^0-9a-zA-Z]+", "_", norm(value).lower()).strip("_")
+    return re.sub(r"_+", "_", text)
+
+
 def slug(value) -> str:
     return "".join(ch.lower() if ch.isalnum() else "-" for ch in str(value or "")).strip("-").replace("--", "-")
 
@@ -94,6 +99,10 @@ def clean_variant(value) -> str:
 
 def known(value) -> bool:
     return token(value) not in UNKNOWN
+
+
+def is_unknown_token(value) -> bool:
+    return token(value) in UNKNOWN
 
 
 def read_json(path: Path, default=None):
@@ -171,15 +180,37 @@ def studio_paths(category: str):
         "ui_field_catalog": generated / "ui_field_catalog.json",
         "known_values": generated / "known_values.json",
         "compile_report": generated / "_compile_report.json",
-        "tooltip_bank": root / "hbs_tooltipsMouse.js",
+        "tooltip_bank_default": root / "hbs_tooltips.js",
     }
+
+
+def resolve_local_path(value: str, base: Path | None = None):
+    text = str(value or "").strip()
+    if not text:
+        return None
+    candidate = Path(text)
+    if candidate.is_absolute():
+        return candidate.resolve()
+    start = base if base is not None else REPO_ROOT
+    return (start / candidate).resolve()
 
 
 def load_studio_payload(category: str):
     paths = studio_paths(category)
-    payload = {key: read_json(path, {}) for key, path in paths.items() if key not in {"root", "control_plane", "generated", "tooltip_bank"}}
+    workbook_map = read_json(paths["workbook_map"], {}) if paths["workbook_map"].exists() else {}
+    tooltip_source = workbook_map.get("tooltip_source", {}) if isinstance(workbook_map.get("tooltip_source"), dict) else {}
+    tooltip_path_raw = str(tooltip_source.get("path", "") or "").strip()
+    default_candidates = [
+        paths["root"] / "hbs_tooltips.js",
+        paths["root"] / "hbs_tooltipsMouse.js",
+    ]
+    default_tooltip_path = next((cand for cand in default_candidates if cand.exists()), paths["tooltip_bank_default"])
+    tooltip_resolved = resolve_local_path(tooltip_path_raw, paths["root"]) if tooltip_path_raw else default_tooltip_path
+    payload = {key: read_json(path, {}) for key, path in paths.items() if key not in {"root", "control_plane", "generated", "tooltip_bank_default", "workbook_map"}}
+    payload["workbook_map"] = workbook_map if isinstance(workbook_map, dict) else {}
     payload["paths"] = paths
-    payload["tooltip_exists"] = paths["tooltip_bank"].exists()
+    payload["tooltip_source_path"] = str(tooltip_resolved) if tooltip_resolved else ""
+    payload["tooltip_exists"] = bool(tooltip_resolved and tooltip_resolved.exists())
     return payload
 
 
@@ -419,10 +450,18 @@ def normalize_component_rows(workbook_map: dict):
         )
     if not rows:
         rows = [
-            {"sheet": "sensors", "component_type": "sensor", "header_row": 1, "first_data_row": 2, "canonical_name_column": "C", "brand_column": "B", "alias_columns": [], "link_columns": ["J"], "property_columns": [], "stop_after_blank_names": 10},
-            {"sheet": "switches", "component_type": "switch", "header_row": 1, "first_data_row": 2, "canonical_name_column": "C", "brand_column": "B", "alias_columns": [], "link_columns": ["H"], "property_columns": [], "stop_after_blank_names": 10},
-            {"sheet": "encoder", "component_type": "encoder", "header_row": 1, "first_data_row": 2, "canonical_name_column": "C", "brand_column": "B", "alias_columns": [], "link_columns": ["G"], "property_columns": [], "stop_after_blank_names": 10},
-            {"sheet": "material", "component_type": "material", "header_row": 1, "first_data_row": 2, "canonical_name_column": "B", "brand_column": "", "alias_columns": [], "link_columns": [], "property_columns": [], "stop_after_blank_names": 10},
+            {
+                "sheet": "",
+                "component_type": "",
+                "header_row": 1,
+                "first_data_row": 2,
+                "canonical_name_column": "A",
+                "brand_column": "",
+                "alias_columns": [],
+                "link_columns": [],
+                "property_columns": [],
+                "stop_after_blank_names": 10,
+            }
         ]
     return rows
 
@@ -480,6 +519,20 @@ def workbook_component_preview(workbook_path: str, sheet_name: str, header_row: 
     return {"columns": columns, "preview_rows": preview_rows}
 
 
+@st.cache_data(ttl=20, show_spinner=False)
+def workbook_sheet_names(workbook_path: str):
+    if load_workbook is None:
+        return []
+    path = _resolve_workbook_path(workbook_path)
+    if not path or not path.exists():
+        return []
+    try:
+        wb = load_workbook(path, data_only=True, read_only=True)
+    except Exception:
+        return []
+    return [str(name) for name in wb.sheetnames if str(name or "").strip()]
+
+
 def numeric_only_ratio(values):
     cleaned = [str(v or "").strip() for v in values or [] if str(v or "").strip()]
     if not cleaned:
@@ -498,6 +551,150 @@ def component_preview_errors(name_values):
     if cleaned and all(re.match(r"^\d+$", value) for value in cleaned[:20]):
         return ["The first 20 preview values are numeric-only. Choose the Name/Model column."]
     return []
+
+
+def collect_unique_samples(raw_values, include_unknown: bool = False, max_unique: int = 10, max_scan: int = 100, max_blank_streak: int = 20):
+    uniques = []
+    seen = set()
+    scanned = 0
+    blank_streak = 0
+    for raw in raw_values or []:
+        if scanned >= max(1, int(max_scan or 100)):
+            break
+        scanned += 1
+        text = norm(raw)
+        if not text or (is_unknown_token(text) and not include_unknown):
+            blank_streak += 1
+            if blank_streak >= max(1, int(max_blank_streak or 20)):
+                break
+            continue
+        blank_streak = 0
+        bucket = token(text)
+        if bucket in seen:
+            continue
+        seen.add(bucket)
+        uniques.append(text)
+        if len(uniques) >= max(1, int(max_unique or 10)):
+            break
+    return {
+        "samples": uniques,
+        "scanned": scanned,
+        "blank_streak": blank_streak,
+    }
+
+
+def find_key_row_hint(workbook_map: dict, selected_key: str, fallback_row: int = 0):
+    if int(fallback_row or 0) > 0:
+        return int(fallback_row)
+    key_map = workbook_map.get("key_list", {}) if isinstance(workbook_map.get("key_list"), dict) else {}
+    key_sheet = str(key_map.get("sheet", "") or "").strip()
+    key_column = normalize_col(key_map.get("column", "B"), "B")
+    row_start = int(key_map.get("row_start", 1) or 1)
+    row_end = int(key_map.get("row_end", 0) or 0)
+    workbook_path = str(workbook_map.get("workbook_path", "") or "").strip()
+    if load_workbook is None or not workbook_path or not key_sheet:
+        return 0
+    path = _resolve_workbook_path(workbook_path)
+    if not path or not path.exists():
+        return 0
+    try:
+        wb = load_workbook(path, data_only=True, read_only=True)
+    except Exception:
+        return 0
+    if key_sheet not in wb.sheetnames:
+        return 0
+    ws = wb[key_sheet]
+    end_row = row_end if row_end > 0 else int(ws.max_row or row_start)
+    target = normalize_field_key(selected_key)
+    col_idx = col_to_index(key_column) or 2
+    for row_idx in range(max(1, row_start), max(1, end_row) + 1):
+        candidate = normalize_field_key(ws.cell(row=row_idx, column=col_idx).value)
+        if candidate == target:
+            return row_idx
+    return 0
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def workbook_context_samples(
+    workbook_path: str,
+    workbook_map_json: str,
+    selected_key: str,
+    key_row_hint: int,
+    include_unknown: bool = False,
+    max_unique: int = 10,
+    max_scan: int = 100,
+    max_blank_streak: int = 20,
+):
+    if load_workbook is None:
+        return {"error": "openpyxl is not installed in this environment.", "samples": []}
+    path = _resolve_workbook_path(workbook_path)
+    if not path or not path.exists():
+        return {"error": f"Workbook not found: {workbook_path}", "samples": []}
+    try:
+        workbook_map = json.loads(str(workbook_map_json or "{}"))
+    except Exception:
+        workbook_map = {}
+    product_map = workbook_map.get("product_table", {}) if isinstance(workbook_map.get("product_table"), dict) else {}
+    layout = str(product_map.get("layout", "matrix") or "matrix").strip().lower()
+    sample_sheet_name = str(product_map.get("sheet", "") or "").strip()
+    if not sample_sheet_name:
+        return {"error": "Sampling sheet is not configured in workbook_map.product_table.sheet.", "samples": []}
+    try:
+        wb = load_workbook(path, data_only=True, read_only=True)
+    except Exception as exc:
+        return {"error": f"Failed to read workbook: {exc}", "samples": []}
+    if sample_sheet_name not in wb.sheetnames:
+        return {"error": f"Sampling sheet not found: {sample_sheet_name}", "samples": []}
+    ws = wb[sample_sheet_name]
+
+    selected_key_norm = normalize_field_key(selected_key)
+    raw_values = []
+
+    if layout in {"matrix", "column_range"}:
+        row_idx = int(key_row_hint or 0)
+        if row_idx <= 0:
+            return {"error": f"Unable to locate row for key `{selected_key_norm}`.", "samples": []}
+        start_col = col_to_index(product_map.get("value_col_start", "C")) or 3
+        end_col = col_to_index(product_map.get("value_col_end", "")) or int(ws.max_column or start_col)
+        end_col = max(start_col, end_col)
+        brand_row = int(product_map.get("brand_row", 3) or 3)
+        model_row = int(product_map.get("model_row", 4) or 4)
+        for col_idx in range(start_col, end_col + 1):
+            brand = norm(ws.cell(row=brand_row, column=col_idx).value)
+            model = norm(ws.cell(row=model_row, column=col_idx).value)
+            if not brand and not model:
+                continue
+            raw_values.append(ws.cell(row=row_idx, column=col_idx).value)
+    elif layout in {"row_table", "rows"}:
+        header_row = int(product_map.get("header_row", 1) or 1)
+        data_row_start = int(product_map.get("data_row_start", header_row + 1) or (header_row + 1))
+        col_idx = 0
+        for idx in range(1, int(ws.max_column or 1) + 1):
+            header_value = normalize_field_key(ws.cell(row=header_row, column=idx).value)
+            if header_value == selected_key_norm:
+                col_idx = idx
+                break
+        if col_idx <= 0:
+            return {"error": f"Key column not found for `{selected_key_norm}` in `{sample_sheet_name}` row {header_row}.", "samples": []}
+        for row_idx in range(data_row_start, int(ws.max_row or data_row_start) + 1):
+            raw_values.append(ws.cell(row=row_idx, column=col_idx).value)
+    else:
+        return {"error": f"Unsupported sampling layout `{layout}`.", "samples": []}
+
+    sampled = collect_unique_samples(
+        raw_values=raw_values,
+        include_unknown=bool(include_unknown),
+        max_unique=int(max_unique or 10),
+        max_scan=int(max_scan or 100),
+        max_blank_streak=int(max_blank_streak or 20),
+    )
+    return {
+        "samples": sampled.get("samples", []),
+        "scanned": int(sampled.get("scanned", 0) or 0),
+        "blank_streak": int(sampled.get("blank_streak", 0) or 0),
+        "layout": layout,
+        "sheet": sample_sheet_name,
+    }
 
 
 def _first_text(*values):
@@ -757,28 +954,89 @@ def enum_source_ref_to_string(enum_source: dict | None):
 
 @st.cache_data(ttl=30, show_spinner=False)
 def load_tooltip_bank_entries(tooltip_path: str):
-    path = Path(str(tooltip_path or "")).resolve()
-    if not path.exists():
+    path = resolve_local_path(str(tooltip_path or ""))
+    if not path or not path.exists():
         return {}
     try:
         text = path.read_text(encoding="utf-8", errors="ignore")
     except Exception:
         return {}
+
+    suffix = path.suffix.lower().strip()
     out = {}
-    pattern = re.compile(r"([A-Za-z0-9_]+)\s*:\s*`([\s\S]*?)`\s*,", re.MULTILINE)
-    for match in pattern.finditer(text):
-        key = str(match.group(1) or "").strip()
-        html = str(match.group(2) or "").strip()
+
+    def push_entry(raw_key: str, html: str = "", markdown: str = ""):
+        key = normalize_field_key(raw_key)
         if not key:
-            continue
-        plain = re.sub(r"<[^>]+>", " ", html)
+            return
+        html_text = str(html or "").strip()
+        markdown_text = str(markdown or "").strip()
+        if not markdown_text and html_text:
+            markdown_text = re.sub(r"<[^>]+>", " ", html_text)
+            markdown_text = re.sub(r"\s+", " ", markdown_text).strip()
+        plain = re.sub(r"<[^>]+>", " ", markdown_text or html_text)
         plain = re.sub(r"\s+", " ", plain).strip()
+        if not (html_text or markdown_text or plain):
+            return
         out[key] = {
             "key": key,
-            "html": html,
+            "html": html_text,
+            "markdown": markdown_text or plain,
             "plain": plain,
             "source": path.name,
         }
+
+    if suffix == ".json":
+        try:
+            payload = json.loads(text)
+        except Exception:
+            payload = {}
+        bucket = payload.get("tooltips") if isinstance(payload, dict) and isinstance(payload.get("tooltips"), dict) else payload
+        if isinstance(bucket, dict):
+            for raw_key, value in bucket.items():
+                if isinstance(value, str):
+                    push_entry(str(raw_key), markdown=value)
+                elif isinstance(value, dict):
+                    push_entry(
+                        str(raw_key),
+                        html=str(value.get("html", "") or ""),
+                        markdown=str(
+                            value.get("markdown", "")
+                            or value.get("md", "")
+                            or value.get("tooltip_md", "")
+                            or value.get("text", "")
+                            or ""
+                        ),
+                    )
+        return out
+
+    if suffix in {".md", ".markdown"}:
+        current_key = ""
+        buffer = []
+        for line in text.splitlines():
+            heading = re.match(r"^\s{0,3}#{1,6}\s+(.+?)\s*$", line or "")
+            if heading:
+                if current_key and buffer:
+                    push_entry(current_key, markdown="\n".join(buffer).strip())
+                current_key = normalize_field_key(re.sub(r"`", "", str(heading.group(1) or "").strip()))
+                buffer = []
+                continue
+            if current_key:
+                buffer.append(line)
+        if current_key and buffer:
+            push_entry(current_key, markdown="\n".join(buffer).strip())
+        return out
+
+    # Default parser for JS/TS and loose text tooltip banks.
+    js_template_pattern = re.compile(r'([A-Za-z0-9_]+)\s*:\s*`([\s\S]*?)`\s*(?:,|$)', re.MULTILINE)
+    for match in js_template_pattern.finditer(text):
+        push_entry(str(match.group(1) or ""), html=str(match.group(2) or ""))
+    if out:
+        return out
+
+    js_string_pattern = re.compile(r'["\']([A-Za-z0-9_\- ]+)["\']\s*:\s*["\']([^"\']+)["\']\s*(?:,|$)', re.MULTILINE)
+    for match in js_string_pattern.finditer(text):
+        push_entry(str(match.group(1) or ""), markdown=str(match.group(2) or ""))
     return out
 
 
@@ -973,7 +1231,8 @@ def render_field_rules_studio(category: str, local_mode: bool):
     field_rows = field_rules_draft.get("fields", {}) if isinstance(field_rules_draft.get("fields"), dict) else {}
     generated_rules = payload.get("field_rules", {}) if isinstance(payload.get("field_rules"), dict) else {}
     known_values_payload = payload.get("known_values", {}) if isinstance(payload.get("known_values"), dict) else {}
-    tooltip_entries = load_tooltip_bank_entries(str(paths["tooltip_bank"]))
+    tooltip_source_path = str(payload.get("tooltip_source_path", "") or "")
+    tooltip_entries = load_tooltip_bank_entries(tooltip_source_path)
     component_db_cache = {}
 
     def component_db_fallback(ctype: str):
@@ -981,6 +1240,47 @@ def render_field_rules_studio(category: str, local_mode: bool):
         if ckey not in component_db_cache:
             component_db_cache[ckey] = component_db_snapshot(category, ctype)
         return component_db_cache.get(ckey, {"entity_count": 0, "sample_entities": []})
+
+    def apply_tooltip_mapping(entries: dict):
+        changed = False
+        for key in list(field_rows.keys()):
+            rule = field_rows.get(key, {})
+            if not isinstance(rule, dict):
+                continue
+            ui = rule.get("ui", {}) if isinstance(rule.get("ui"), dict) else {}
+            normalized_key = normalize_field_key(key)
+            match = entries.get(normalized_key, {}) if isinstance(entries, dict) else {}
+            if isinstance(match, dict) and match:
+                tooltip_key = normalized_key
+                tooltip_source = str(match.get("source", "") or "") or None
+                if ui.get("tooltip_key") != tooltip_key:
+                    ui["tooltip_key"] = tooltip_key
+                    changed = True
+                if ui.get("tooltip_source") != tooltip_source:
+                    ui["tooltip_source"] = tooltip_source
+                    changed = True
+                if "tooltip_md" not in ui:
+                    ui["tooltip_md"] = ""
+                    changed = True
+            else:
+                if ui.get("tooltip_key"):
+                    ui["tooltip_key"] = None
+                    changed = True
+                if ui.get("tooltip_source"):
+                    ui["tooltip_source"] = None
+                    changed = True
+                if ui.get("tooltip_md", "") != "":
+                    ui["tooltip_md"] = ""
+                    changed = True
+                if "tooltip_md" not in ui:
+                    ui["tooltip_md"] = ""
+                    changed = True
+            rule["ui"] = ui
+            field_rows[key] = rule
+            upsert_ui_catalog_row(ui_field_catalog_draft, key, ui, rule)
+        if changed:
+            field_rules_draft["fields"] = field_rows
+        return changed
 
     if not field_rows and isinstance(generated_rules.get("fields"), dict):
         field_rows = deepcopy(generated_rules.get("fields", {}))
@@ -1028,10 +1328,13 @@ def render_field_rules_studio(category: str, local_mode: bool):
 
     with tab_map:
         st.caption("Set workbook key source and sampling in plain-language controls.")
-        sheet_names = collect_sheet_names(workbook_map) or ["dataEntry", "data_lists", "sensors", "switches", "encoder", "material"]
+        mapped_sheet_names = collect_sheet_names(workbook_map)
         key_map = workbook_map.get("key_list", {}) if isinstance(workbook_map.get("key_list"), dict) else {}
         product_map = workbook_map.get("product_table", {}) if isinstance(workbook_map.get("product_table"), dict) else {}
         st.text_input("Workbook File", value=str(workbook_map.get("workbook_path", "") or ""), key=f"studio_workbook_path_{category}", help="Workbook path used by compile.")
+        workbook_path_for_map = str(st.session_state.get(f"studio_workbook_path_{category}", workbook_map.get("workbook_path", "") or "")).strip()
+        discovered_sheet_names = workbook_sheet_names(workbook_path_for_map)
+        sheet_names = sorted(set(mapped_sheet_names + discovered_sheet_names)) or ["Sheet1"]
         k1, k2, k3, k4 = st.columns(4)
         k1.selectbox("Key Sheet", sheet_names, index=sheet_names.index(str(key_map.get("sheet", "") or sheet_names[0])) if str(key_map.get("sheet", "") or "") in sheet_names else 0, key=f"studio_key_sheet_{category}", help="Sheet containing source key list.")
         k2.text_input("Key Column", value=str(key_map.get("column", "B") or "B"), key=f"studio_key_col_{category}", help="Column containing key names.")
@@ -1043,10 +1346,66 @@ def render_field_rules_studio(category: str, local_mode: bool):
         p3.text_input("Value Start Column", value=str(product_map.get("value_col_start", "C") or "C"), key=f"studio_value_col_start_{category}", help="First product/value column.")
         p4.caption("Sampling mode: **All columns** from Value Start Column to last populated product column.")
 
+        st.markdown("#### Tooltip Source")
+        tooltip_cfg = workbook_map.get("tooltip_source", {}) if isinstance(workbook_map.get("tooltip_source"), dict) else {}
+        default_tooltip_path = str(st.session_state.get(f"studio_tooltip_source_path_{category}", tooltip_cfg.get("path", tooltip_source_path) or tooltip_source_path or "")).strip()
+        t1, t2, t3, t4 = st.columns([2.4, 1, 1, 1.2])
+        tooltip_path_value = t1.text_input(
+            "Tooltip Bank File (JS/JSON/MD)",
+            value=default_tooltip_path,
+            key=f"studio_tooltip_source_path_{category}",
+            help="Path to tooltip bank file. Relative paths resolve from repo root.",
+        )
+        tooltip_entries_live = load_tooltip_bank_entries(tooltip_path_value)
+        coverage_keys = [key for key in keys if normalize_field_key(key) in tooltip_entries_live]
+        coverage_pct = (len(coverage_keys) / max(1, len(keys))) * 100.0
+        t2.metric("Bank Keys", len(tooltip_entries_live))
+        t3.metric("Coverage", f"{coverage_pct:.0f}%")
+        if t4.button("Apply Tooltip Mapping", use_container_width=True, help="Bind tooltip_key for matched fields; set empty tooltip_md for missing keys."):
+            changed = apply_tooltip_mapping(tooltip_entries_live)
+            if changed:
+                save_studio_drafts(category, field_rules_draft, ui_field_catalog_draft)
+                st.success("Tooltip mapping applied to draft fields.")
+                st.rerun()
+            st.info("Tooltip mapping already up to date.")
+        if tooltip_path_value and not tooltip_entries_live:
+            st.warning("No tooltip entries parsed from the selected file.")
+        elif tooltip_entries_live:
+            st.caption("Parsed tooltip keys preview: " + ", ".join(sorted(list(tooltip_entries_live.keys()))[:12]))
+
         st.markdown("#### Component Source Mapping")
-        st.caption("Pick the Name/Model column from each component sheet. Save is disabled when the preview looks like IDs.")
+        st.caption("Universal component source mapping: required name/model column + row settings, optional role columns.")
         workbook_path_value = str(st.session_state.get(f"studio_workbook_path_{category}", workbook_map.get("workbook_path", "") or "")).strip()
         component_rows = normalize_component_rows(workbook_map)
+        source_count_key = f"studio_component_source_count_{category}"
+        if source_count_key not in st.session_state:
+            st.session_state[source_count_key] = len(component_rows)
+        s_c1, s_c2, s_c3 = st.columns([1, 1, 2.4])
+        if s_c1.button("Add Source", use_container_width=True):
+            st.session_state[source_count_key] = int(st.session_state.get(source_count_key, len(component_rows)) or len(component_rows)) + 1
+            st.rerun()
+        if s_c2.button("Remove Last", use_container_width=True, disabled=int(st.session_state.get(source_count_key, len(component_rows)) or len(component_rows)) <= 1):
+            st.session_state[source_count_key] = max(1, int(st.session_state.get(source_count_key, len(component_rows)) or len(component_rows)) - 1)
+            st.rerun()
+        s_c3.caption("Add/remove component sources to map any category-specific component sheets.")
+        target_count = max(1, int(st.session_state.get(source_count_key, len(component_rows)) or len(component_rows)))
+        if len(component_rows) < target_count:
+            for _ in range(target_count - len(component_rows)):
+                component_rows.append(
+                    {
+                        "sheet": sheet_names[0] if sheet_names else "",
+                        "component_type": "",
+                        "header_row": 1,
+                        "first_data_row": 2,
+                        "canonical_name_column": "A",
+                        "brand_column": "",
+                        "alias_columns": [],
+                        "link_columns": [],
+                        "property_columns": [],
+                        "stop_after_blank_names": 10,
+                    }
+                )
+        component_rows = component_rows[:target_count]
         component_rows_out = []
         mapping_errors = []
 
@@ -1096,23 +1455,23 @@ def render_field_rules_studio(category: str, local_mode: bool):
                 key=f"studio_comp_stop_blank_{category}_{idx}",
             )
             brand_column = m_d2.text_input(
-                "Brand Column",
+                "Brand Column (optional)",
                 value=str(row.get("brand_column", "") or ""),
                 key=f"studio_comp_brand_col_{category}_{idx}",
                 help="Optional column letter.",
             )
             alias_columns = m_d3.text_input(
-                "Alias Columns (csv)",
+                "Alias Columns (optional csv)",
                 value=csv_join(row.get("alias_columns", [])),
                 key=f"studio_comp_alias_cols_{category}_{idx}",
             )
             link_columns = m_d4.text_input(
-                "Link Columns (csv)",
+                "Link Columns (optional csv)",
                 value=csv_join(row.get("link_columns", [])),
                 key=f"studio_comp_link_cols_{category}_{idx}",
             )
             property_columns = st.text_input(
-                "Property Columns (csv)",
+                "Property Columns (optional csv)",
                 value=csv_join(row.get("property_columns", [])),
                 key=f"studio_comp_prop_cols_{category}_{idx}",
             )
@@ -1186,9 +1545,15 @@ def render_field_rules_studio(category: str, local_mode: bool):
             disabled=not mapping_can_save,
             help="Save workbook key/product mapping and component source mapping to `_control_plane/workbook_map.json`.",
         ):
+            tooltip_path_to_store = str(st.session_state.get(f"studio_tooltip_source_path_{category}", tooltip_path_value or "") or "").strip()
+            tooltip_format = Path(tooltip_path_to_store).suffix.lower().lstrip(".") if tooltip_path_to_store else "auto"
             workbook_map = {
                 **workbook_map,
                 "workbook_path": workbook_path_value,
+                "tooltip_source": {
+                    "path": tooltip_path_to_store,
+                    "format": tooltip_format or "auto",
+                },
                 "key_list": {
                     **key_map,
                     "sheet": str(st.session_state.get(f"studio_key_sheet_{category}", key_map.get("sheet", "dataEntry"))),
@@ -1224,6 +1589,8 @@ def render_field_rules_studio(category: str, local_mode: bool):
                 ],
             }
             write_json(paths["workbook_map"], workbook_map)
+            if tooltip_path_to_store and apply_tooltip_mapping(tooltip_entries_live):
+                save_studio_drafts(category, field_rules_draft, ui_field_catalog_draft)
             st.success("Mapping saved.")
 
         st.markdown("#### Globals / Sources")
@@ -1990,16 +2357,56 @@ def render_field_rules_studio(category: str, local_mode: bool):
         for hint_block in hints.values():
             if isinstance(hint_block, dict) and isinstance(hint_block.get("sample_values"), list):
                 samples_raw.extend(hint_block.get("sample_values", []))
-        seen_samples = set()
-        samples = []
-        for raw in samples_raw:
-            text = str(raw or "").strip()
-            lower = text.lower()
-            if not text or lower in seen_samples:
-                continue
-            seen_samples.add(lower)
-            samples.append(text)
-        samples = samples[:10]
+        include_unknown_key = f"studio_context_include_unknown_{category}_{selected_key}"
+        sample_limit_key = f"studio_context_sample_limit_{category}_{selected_key}"
+        s1, s2, s3 = st.columns([1.2, 1.2, 2.6])
+        include_unknown = s1.toggle("Include unknown tokens", value=bool(st.session_state.get(include_unknown_key, False)), key=include_unknown_key)
+        sample_limit = int(
+            s2.number_input(
+                "Unique sample cap",
+                min_value=1,
+                max_value=50,
+                value=int(st.session_state.get(sample_limit_key, 10) or 10),
+                step=1,
+                key=sample_limit_key,
+                help="Default is first 10 unique values.",
+            )
+        )
+        workbook_path_for_context = str(st.session_state.get(f"studio_workbook_path_{category}", workbook_map.get("workbook_path", "") or "")).strip()
+        data_entry_hints = hints.get("dataEntry", {}) if isinstance(hints.get("dataEntry"), dict) else {}
+        key_row_hint = int(data_entry_hints.get("row", 0) or 0)
+        if key_row_hint <= 0:
+            key_row_hint = find_key_row_hint(workbook_map, selected_key, fallback_row=0)
+        workbook_context = workbook_context_samples(
+            workbook_path=workbook_path_for_context,
+            workbook_map_json=json.dumps(workbook_map or {}, ensure_ascii=False, sort_keys=True),
+            selected_key=selected_key,
+            key_row_hint=int(key_row_hint or 0),
+            include_unknown=bool(include_unknown),
+            max_unique=int(sample_limit),
+            max_scan=100,
+            max_blank_streak=20,
+        )
+        if isinstance(workbook_context, dict) and isinstance(workbook_context.get("samples"), list) and workbook_context.get("samples"):
+            samples = [str(value or "").strip() for value in workbook_context.get("samples", []) if str(value or "").strip()]
+            s3.caption(
+                f"Source: workbook `{workbook_context.get('sheet', '?')}` "
+                f"(layout `{workbook_context.get('layout', 'matrix')}`, scanned {int(workbook_context.get('scanned', 0) or 0)} columns/rows)."
+            )
+        else:
+            fallback_samples = collect_unique_samples(
+                raw_values=samples_raw,
+                include_unknown=bool(include_unknown),
+                max_unique=int(sample_limit),
+                max_scan=100,
+                max_blank_streak=20,
+            )
+            samples = fallback_samples.get("samples", [])
+            fallback_error = str(workbook_context.get("error", "") or "")
+            if fallback_error:
+                s3.caption(f"Source fallback: existing hints ({fallback_error})")
+            else:
+                s3.caption("Source fallback: existing hint samples")
         hint_summary = infer_key_hints(selected_key, samples)
 
         st.markdown("#### A) Sample Values")
