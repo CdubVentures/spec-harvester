@@ -7,3 +7,13 @@ npm-debug.log*
 .env
 .env.*
 !.env.example
+# Generated control plane versions
+helper_files/**/_control_plane/_versions/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Excel temp/lock files
+~$*.xls*
+**/~$*.xls*
