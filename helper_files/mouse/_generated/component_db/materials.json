@@ -1,28 +1,19 @@
 {
   "category": "mouse",
   "component_type": "material",
-  "generated_at": "2026-02-12T08:00:26.336Z",
+  "generated_at": "2026-02-12T09:37:15.231Z",
   "items": [
     {
-      "aliases": [],
-      "brand": "",
-      "links": [],
-      "name": "metal",
-      "properties": {}
+      "name": "metal"
     },
     {
-      "aliases": [],
-      "brand": "",
-      "links": [],
-      "name": "plastic",
-      "properties": {}
+      "name": "plastic"
     },
     {
-      "aliases": [],
-      "brand": "",
-      "links": [],
-      "name": "carbon fiber",
-      "properties": {}
+      "aliases": [
+        "carbonfiber"
+      ],
+      "name": "carbon fiber"
     }
   ],
   "version": 1

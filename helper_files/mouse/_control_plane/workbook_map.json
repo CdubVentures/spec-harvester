@@ -1,133 +1,74 @@
 {
-  "component_sheets": [
-    {
-      "alias_columns": [],
-      "brand_column": "B",
-      "canonical_name_column": "C",
-      "component_type": "sensor",
-      "first_data_row": 2,
-      "header_row": 1,
-      "link_columns": [
-        "J"
-      ],
-      "name_column": "C",
-      "property_columns": [],
-      "row_end": 0,
-      "row_start": 2,
-      "sheet": "sensors",
-      "stop_after_blank_names": 10
-    },
-    {
-      "alias_columns": [],
-      "brand_column": "B",
-      "canonical_name_column": "C",
-      "component_type": "switch",
-      "first_data_row": 2,
-      "header_row": 1,
-      "link_columns": [
-        "H"
-      ],
-      "name_column": "C",
-      "property_columns": [],
-      "row_end": 0,
-      "row_start": 2,
-      "sheet": "switches",
-      "stop_after_blank_names": 10
-    },
-    {
-      "alias_columns": [],
-      "brand_column": "B",
-      "canonical_name_column": "C",
-      "component_type": "encoder",
-      "first_data_row": 2,
-      "header_row": 1,
-      "link_columns": [
-        "G"
-      ],
-      "name_column": "C",
-      "property_columns": [],
-      "row_end": 0,
-      "row_start": 2,
-      "sheet": "encoder",
-      "stop_after_blank_names": 10
-    },
-    {
-      "alias_columns": [],
-      "brand_column": "",
-      "canonical_name_column": "B",
-      "component_type": "material",
-      "first_data_row": 2,
-      "header_row": 1,
-      "link_columns": [],
-      "name_column": "B",
-      "property_columns": [],
-      "row_end": 0,
-      "row_start": 2,
-      "sheet": "material",
-      "stop_after_blank_names": 10
-    }
-  ],
+  "component_sheets": [],
   "component_sources": [
     {
-      "alias_columns": [],
-      "brand_column": "B",
-      "canonical_name_column": "C",
-      "end_row": null,
+      "auto_derive_aliases": true,
       "first_data_row": 2,
       "header_row": 1,
-      "link_columns": [
-        "J"
-      ],
-      "property_columns": [],
+      "roles": {
+        "aliases": [],
+        "links": [
+          "J"
+        ],
+        "maker": "B",
+        "primary_identifier": "C",
+        "properties": []
+      },
       "sheet": "sensors",
       "start_row": 2,
-      "stop_after_blank_names": 10,
+      "stop_after_blank_primary": 10,
       "type": "sensor"
     },
     {
-      "alias_columns": [],
-      "brand_column": "B",
-      "canonical_name_column": "C",
-      "end_row": null,
+      "auto_derive_aliases": true,
       "first_data_row": 2,
       "header_row": 1,
-      "link_columns": [
-        "H"
-      ],
-      "property_columns": [],
+      "roles": {
+        "aliases": [],
+        "links": [
+          "H"
+        ],
+        "maker": "B",
+        "primary_identifier": "C",
+        "properties": []
+      },
       "sheet": "switches",
       "start_row": 2,
-      "stop_after_blank_names": 10,
+      "stop_after_blank_primary": 10,
       "type": "switch"
     },
     {
-      "alias_columns": [],
-      "brand_column": "B",
-      "canonical_name_column": "C",
-      "end_row": null,
+      "auto_derive_aliases": true,
       "first_data_row": 2,
       "header_row": 1,
-      "link_columns": [
-        "G"
-      ],
-      "property_columns": [],
+      "roles": {
+        "aliases": [],
+        "links": [
+          "G"
+        ],
+        "maker": "B",
+        "primary_identifier": "C",
+        "properties": []
+      },
       "sheet": "encoder",
       "start_row": 2,
-      "stop_after_blank_names": 10,
+      "stop_after_blank_primary": 10,
       "type": "encoder"
     },
     {
-      "alias_columns": [],
-      "brand_column": null,
-      "canonical_name_column": "B",
-      "end_row": null,
+      "auto_derive_aliases": true,
       "first_data_row": 2,
       "header_row": 1,
-      "link_columns": [],
-      "property_columns": [],
+      "roles": {
+        "aliases": [],
+        "links": [],
+        "maker": "",
+        "primary_identifier": "B",
+        "properties": []
+      },
       "sheet": "material",
       "start_row": 2,
-      "stop_after_blank_names": 10,
+      "stop_after_blank_primary": 10,
       "type": "material"
     }
   ],

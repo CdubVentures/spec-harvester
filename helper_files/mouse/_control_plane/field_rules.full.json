@@ -5,18 +5,62 @@
       "entity_count": 40,
       "excel": {
         "alias_columns": [],
-        "brand_column": "B",
-        "canonical_name_column": "C",
+        "auto_derive_aliases": true,
         "first_data_row": 2,
         "header_row": 1,
         "link_columns": [
           "G"
         ],
+        "maker_column": "B",
+        "primary_identifier_column": "C",
         "property_columns": [],
+        "property_mappings": [],
         "sheet": "encoder",
-        "stop_after_blank_names": 10
+        "stop_after_blank_names": 10,
+        "stop_after_blank_primary": 10
       },
       "name_column": "C",
+      "preview_stats": {
+        "entity_count": 40,
+        "first_20_all_numeric": false,
+        "first_20_names": [
+          "Encoder",
+          "Encoder",
+          "Black",
+          "Brown",
+          "E10A2",
+          "Encoder",
+          "Green",
+          "Pink",
+          "Teal",
+          "Encoder",
+          "Red",
+          "Unspecified",
+          "Black",
+          "GE 2.0",
+          "GE 5.0",
+          "Gray",
+          "Green",
+          "Red",
+          "Encoder",
+          "E11"
+        ],
+        "non_blank_names": 40,
+        "numeric_only_names": 0,
+        "numeric_only_ratio": 0,
+        "scanned_rows": 46,
+        "stop_after_blank_names": 10,
+        "stop_after_blank_primary": 10
+      },
+      "roles": {
+        "aliases": [],
+        "links": [
+          "G"
+        ],
+        "maker": "B",
+        "primary_identifier": "C",
+        "properties": []
+      },
       "sample_entities": [
         "Encoder",
         "Encoder",
@@ -36,16 +80,41 @@
       "entity_count": 3,
       "excel": {
         "alias_columns": [],
-        "brand_column": null,
-        "canonical_name_column": "B",
+        "auto_derive_aliases": true,
         "first_data_row": 2,
         "header_row": 1,
         "link_columns": [],
+        "maker_column": null,
+        "primary_identifier_column": "B",
         "property_columns": [],
+        "property_mappings": [],
         "sheet": "material",
-        "stop_after_blank_names": 10
+        "stop_after_blank_names": 10,
+        "stop_after_blank_primary": 10
       },
       "name_column": "B",
+      "preview_stats": {
+        "entity_count": 3,
+        "first_20_all_numeric": false,
+        "first_20_names": [
+          "metal",
+          "plastic",
+          "carbon fiber"
+        ],
+        "non_blank_names": 3,
+        "numeric_only_names": 0,
+        "numeric_only_ratio": 0,
+        "scanned_rows": 13,
+        "stop_after_blank_names": 10,
+        "stop_after_blank_primary": 10
+      },
+      "roles": {
+        "aliases": [],
+        "links": [],
+        "maker": null,
+        "primary_identifier": "B",
+        "properties": []
+      },
       "sample_entities": [
         "metal",
         "plastic",
@@ -58,18 +127,62 @@
       "entity_count": 116,
       "excel": {
         "alias_columns": [],
-        "brand_column": "B",
-        "canonical_name_column": "C",
+        "auto_derive_aliases": true,
         "first_data_row": 2,
         "header_row": 1,
         "link_columns": [
           "J"
         ],
+        "maker_column": "B",
+        "primary_identifier_column": "C",
         "property_columns": [],
+        "property_mappings": [],
         "sheet": "sensors",
-        "stop_after_blank_names": 10
+        "stop_after_blank_names": 10,
+        "stop_after_blank_primary": 10
       },
       "name_column": "C",
+      "preview_stats": {
+        "entity_count": 116,
+        "first_20_all_numeric": false,
+        "first_20_names": [
+          "Focus Pro 45K",
+          "HERO 2",
+          "PAW3950 Ti",
+          "PAW3950 Max",
+          "AimPoint Pro (PixArt PAW3950)",
+          "XERO",
+          "Focus Pro Gen-2",
+          "MARKSMAN S",
+          "XS-1",
+          "BAMF 3.0",
+          "Owl-Eye 30K",
+          "3950IZ",
+          "AimNinja",
+          "G3950",
+          "Focus Pro 30K",
+          "PAW3950 HS",
+          "PAW3950 Pro",
+          "PAW3950 Ultra",
+          "PAW3950",
+          "PAW3950 APEX"
+        ],
+        "non_blank_names": 116,
+        "numeric_only_names": 3,
+        "numeric_only_ratio": 0.025862,
+        "scanned_rows": 124,
+        "stop_after_blank_names": 10,
+        "stop_after_blank_primary": 10
+      },
+      "roles": {
+        "aliases": [],
+        "links": [
+          "J"
+        ],
+        "maker": "B",
+        "primary_identifier": "C",
+        "properties": []
+      },
       "sample_entities": [
         "Focus Pro 45K",
         "HERO 2",
@@ -89,18 +202,62 @@
       "entity_count": 106,
       "excel": {
         "alias_columns": [],
-        "brand_column": "B",
-        "canonical_name_column": "C",
+        "auto_derive_aliases": true,
         "first_data_row": 2,
         "header_row": 1,
         "link_columns": [
           "H"
         ],
+        "maker_column": "B",
+        "primary_identifier_column": "C",
         "property_columns": [],
+        "property_mappings": [],
         "sheet": "switches",
-        "stop_after_blank_names": 10
+        "stop_after_blank_names": 10,
+        "stop_after_blank_primary": 10
       },
       "name_column": "C",
+      "preview_stats": {
+        "entity_count": 106,
+        "first_20_all_numeric": false,
+        "first_20_names": [
+          "ROG Micro Switch",
+          "ROG Micro Switch II",
+          "Light Blade",
+          "Optical Switches",
+          "SwiftLight",
+          "Blue Ghost Optical",
+          "Fog Blue Optical",
+          "Advanced Optical Switch",
+          "Black Shell White Dot",
+          "Mouse Switches",
+          "Optical",
+          "Black Shell Pink Dot",
+          "Black Shell White Dot",
+          "Blue Shell Blue Dot",
+          "Blue Shell Pink Dot",
+          "Blue Shell White Dot",
+          "Crispy Pink",
+          "Dragon Claw",
+          "Orange SPDT",
+          "Silent Brown Shell White Dot"
+        ],
+        "non_blank_names": 106,
+        "numeric_only_names": 0,
+        "numeric_only_ratio": 0,
+        "scanned_rows": 114,
+        "stop_after_blank_names": 10,
+        "stop_after_blank_primary": 10
+      },
+      "roles": {
+        "aliases": [],
+        "links": [
+          "H"
+        ],
+        "maker": "B",
+        "primary_identifier": "C",
+        "properties": []
+      },
       "sample_entities": [
         "ROG Micro Switch",
         "ROG Micro Switch II",
@@ -766,8 +923,8 @@
     "acceleration": {
       "aliases": [
         "acceleration",
-        "max acceleration",
-        "g"
+        "g",
+        "max acceleration"
       ],
       "canonical_key": null,
       "component": null,
@@ -825,6 +982,9 @@
       },
       "key": "acceleration",
       "parse": {
+        "accept_bare_numbers_as_mode": false,
+        "allow_ranges": false,
+        "allow_unitless": true,
         "strict_unit_required": false,
         "template": "number_with_unit",
         "unit": "g",
@@ -9573,7 +9733,7 @@
       "value_form": "scalar"
     }
   },
-  "generated_at": "2026-02-12T08:00:26.336Z",
+  "generated_at": "2026-02-12T09:37:15.231Z",
   "global": {
     "availability_levels": [
       "expected",
@@ -10082,7 +10242,7 @@
     "hash": "1038c577075766a29b20229ef8d9631bb4c6283ddc46e85a2ce4cecce703a727",
     "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2 - Copy (3)\\helper_files\\mouse\\mouseData.xlsm"
   },
-  "workbook_map_hash": "000b8352a084e006b395e8da04f238ba930125ddec45b6a8f9edb9c63ccd07d8",
+  "workbook_map_hash": "1e285f6d3228c36aee387a0a911e9a858e5d435ef0a8ed879ab78d6855052b32",
   "workbook_tabs": {
     "data_lists": {
       "notes": "Columns contain canonical lists for form_factor/shape/hump/front_flare/etc.",
@@ -10097,19 +10257,19 @@
       "role": "field_keys + optional product-table sampling"
     },
     "encoder": {
-      "notes": "Encoder entities and properties (brand/model/type/steps/life/link).",
+      "notes": "Entity source sheet mapped by column roles (primary identifier, maker, aliases, links, properties).",
       "role": "component_db:encoder"
     },
     "material": {
-      "notes": "Body material tokens (plastic/metal/etc.).",
+      "notes": "Entity source sheet mapped by column roles (primary identifier, maker, aliases, links, properties).",
       "role": "component_db:material"
     },
     "sensors": {
-      "notes": "Sensor entities and properties (brand/type/dpi/ips/acc/year/link).",
+      "notes": "Entity source sheet mapped by column roles (primary identifier, maker, aliases, links, properties).",
       "role": "component_db:sensor"
     },
     "switches": {
-      "notes": "Switch entities and properties (brand/type/forces/link).",
+      "notes": "Entity source sheet mapped by column roles (primary identifier, maker, aliases, links, properties).",
       "role": "component_db:switch"
     }
   }

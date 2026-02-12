@@ -4,8 +4,8 @@
     "acceleration": {
       "aliases": [
         "acceleration",
-        "max acceleration",
-        "g"
+        "g",
+        "max acceleration"
       ],
       "canonical_key": null,
       "component": null,
@@ -63,6 +63,9 @@
       },
       "key": "acceleration",
       "parse": {
+        "accept_bare_numbers_as_mode": false,
+        "allow_ranges": false,
+        "allow_unitless": true,
         "strict_unit_required": false,
         "template": "number_with_unit",
         "unit": "g",
@@ -8811,7 +8814,7 @@
       "value_form": "scalar"
     }
   },
-  "generated_at": "2026-02-12T08:00:26.336Z",
+  "generated_at": "2026-02-12T09:37:15.231Z",
   "selected_keys": [
     "acceleration",
     "adjustable_scroll_wheel",
@@ -10362,8 +10365,8 @@
     {
       "aliases": [
         "acceleration",
-        "max acceleration",
-        "g"
+        "g",
+        "max acceleration"
       ],
       "array_handling": "none",
       "canonical_key": "acceleration",
@@ -11150,5 +11153,5 @@
     }
   ],
   "version": 1,
-  "workbook_map_hash": "000b8352a084e006b395e8da04f238ba930125ddec45b6a8f9edb9c63ccd07d8"
+  "workbook_map_hash": "1e285f6d3228c36aee387a0a911e9a858e5d435ef0a8ed879ab78d6855052b32"
 }

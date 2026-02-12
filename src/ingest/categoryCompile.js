@@ -969,12 +969,20 @@ export async function introspectWorkbook({
         component_type: guessComponentType(sheet.name),
         header_row: 1,
         first_data_row: 2,
+        roles: {
+          primary_identifier: 'A',
+          maker: '',
+          aliases: [],
+          links: [],
+          properties: []
+        },
         canonical_name_column: 'A',
         alias_columns: [],
         brand_column: '',
         link_columns: [],
         property_columns: [],
         auto_derive_aliases: true,
+        stop_after_blank_primary: 10,
         stop_after_blank_names: 10,
         row_start: 2,
         row_end: ''
@@ -1077,12 +1085,20 @@ export async function introspectWorkbook({
         component_type: guessComponentType(componentSheet.name),
         header_row: 1,
         first_data_row: 2,
+        roles: {
+          primary_identifier: nameColumn || 'A',
+          maker: '',
+          aliases: [],
+          links: [],
+          properties: []
+        },
         canonical_name_column: nameColumn || 'A',
         alias_columns: [],
         brand_column: '',
         link_columns: [],
         property_columns: [],
         auto_derive_aliases: true,
+        stop_after_blank_primary: 10,
         stop_after_blank_names: 10,
         row_start: 2,
         row_end: 0
@@ -1114,6 +1130,21 @@ export async function introspectWorkbook({
     };
     suggestedMap.enum_lists = enumRows;
     suggestedMap.component_sheets = componentRows;
+    suggestedMap.component_sources = componentRows.map((row) => ({
+      type: row.component_type,
+      sheet: row.sheet,
+      header_row: row.header_row,
+      first_data_row: row.first_data_row,
+      roles: {
+        primary_identifier: row.roles?.primary_identifier || row.canonical_name_column || 'A',
+        maker: row.roles?.maker || '',
+        aliases: toArray(row.roles?.aliases),
+        links: toArray(row.roles?.links),
+        properties: toArray(row.roles?.properties)
+      },
+      auto_derive_aliases: row.auto_derive_aliases !== false,
+      stop_after_blank_primary: row.stop_after_blank_primary || row.stop_after_blank_names || 10
+    }));
     suggestedMap.selected_keys = selectedKeys;
     suggestedMap.expectations = {
       required_fields: stableSortStrings([
@@ -1313,27 +1344,83 @@ function normalizeWorkbookMap(map = {}) {
     pushEnumRow(row.field || row.bucket, row.value_column || row.column || 'A');
   }
 
-  const componentRowsRaw = toArray(map.component_sheets).length > 0 ? toArray(map.component_sheets) : toArray(map.component_sources);
+  const componentRowsRaw = toArray(map.component_sources).length > 0 ? toArray(map.component_sources) : toArray(map.component_sheets);
   const componentSheets = componentRowsRaw.map((row) => {
+    const rolesRaw = isObject(row.roles) ? row.roles : {};
     const headerRow = Math.max(1, asInt(row.header_row, 1));
     const firstDataRow = Math.max(1, asInt(
       row.first_data_row || row.row_start || row.start_row,
       Math.max(2, headerRow + 1)
     ));
+    const propertyMappingsRaw = Array.isArray(rolesRaw.properties)
+      ? rolesRaw.properties
+      : toArray(row.property_mappings);
+    const propertyMappings = propertyMappingsRaw
+      .filter((entry) => isObject(entry))
+      .map((entry) => ({
+        key: normalizeFieldKey(entry.key || entry.property_key || ''),
+        column: normalizeText(entry.column || entry.col || '').toUpperCase(),
+        type: ['number', 'string'].includes(normalizeToken(entry.type)) ? normalizeToken(entry.type) : 'string',
+        unit: normalizeText(entry.unit || '')
+      }))
+      .filter((entry) => entry.column);
+    if (propertyMappings.length === 0) {
+      for (const col of stableSortStrings(toArray(row.property_columns || row.props_columns).map((entry) => normalizeText(entry).toUpperCase()))) {
+        if (!col) continue;
+        propertyMappings.push({
+          key: normalizeFieldKey(col),
+          column: col,
+          type: 'string',
+          unit: ''
+        });
+      }
+    }
+    const propertyColumns = stableSortStrings(propertyMappings.map((entry) => entry.column));
+    const primaryIdentifierColumn = normalizeText(
+      rolesRaw.primary_identifier
+      || row.primary_identifier_column
+      || row.canonical_name_column
+      || row.name_column
+      || row.canonical_column
+      || 'A'
+    ).toUpperCase();
+    const makerColumn = normalizeText(
+      rolesRaw.maker
+      || row.maker_column
+      || row.brand_column
+      || ''
+    ).toUpperCase();
+    const aliasColumns = stableSortStrings(
+      toArray(rolesRaw.aliases || row.alias_columns || row.alias_cols).map((entry) => normalizeText(entry).toUpperCase())
+    );
+    const linkColumns = stableSortStrings(
+      toArray(rolesRaw.links || row.link_columns || row.links_columns).map((entry) => normalizeText(entry).toUpperCase())
+    );
+    const stopAfterBlankPrimary = Math.max(1, asInt(row.stop_after_blank_primary || row.stop_after_blank_names, 10));
     return {
       sheet: normalizeText(row.sheet),
       component_type: normalizeToken(row.component_type || row.type || guessComponentType(row.sheet)),
-      canonical_name_column: normalizeText(
-        row.canonical_name_column || row.name_column || row.canonical_column || 'A'
-      ).toUpperCase(),
-      alias_columns: stableSortStrings(toArray(row.alias_columns || row.alias_cols).map((entry) => normalizeText(entry).toUpperCase())),
-      brand_column: normalizeText(row.brand_column || '').toUpperCase(),
-      link_columns: stableSortStrings(toArray(row.link_columns || row.links_columns).map((entry) => normalizeText(entry).toUpperCase())),
-      property_columns: stableSortStrings(toArray(row.property_columns || row.props_columns).map((entry) => normalizeText(entry).toUpperCase())),
+      primary_identifier_column: primaryIdentifierColumn,
+      maker_column: makerColumn,
+      canonical_name_column: primaryIdentifierColumn,
+      name_column: primaryIdentifierColumn,
+      brand_column: makerColumn,
+      alias_columns: aliasColumns,
+      link_columns: linkColumns,
+      property_mappings: propertyMappings,
+      property_columns: propertyColumns,
+      roles: {
+        primary_identifier: primaryIdentifierColumn,
+        maker: makerColumn,
+        aliases: aliasColumns,
+        links: linkColumns,
+        properties: propertyMappings
+      },
       auto_derive_aliases: row.auto_derive_aliases !== false,
       header_row: headerRow,
       first_data_row: firstDataRow,
-      stop_after_blank_names: Math.max(1, asInt(row.stop_after_blank_names, 10)),
+      stop_after_blank_primary: stopAfterBlankPrimary,
+      stop_after_blank_names: stopAfterBlankPrimary,
       row_end: asInt(row.row_end || row.end_row, 0)
     };
   });
@@ -1393,13 +1480,7 @@ function normalizeWorkbookMap(map = {}) {
         delimiter: row.delimiter || '',
         normalize: row.normalize
       })),
-    component_sheets: componentSheets
-      .filter((row) => row.sheet)
-      .map((row) => ({
-        ...row,
-        name_column: row.canonical_name_column,
-        row_start: row.first_data_row
-      })),
+    component_sheets: [],
     component_sources: componentSheets
       .filter((row) => row.sheet)
       .map((row) => ({
@@ -1407,15 +1488,16 @@ function normalizeWorkbookMap(map = {}) {
         type: row.component_type,
         header_row: row.header_row,
         first_data_row: row.first_data_row,
-        canonical_name_column: row.canonical_name_column,
-        brand_column: row.brand_column || null,
-        alias_columns: row.alias_columns,
-        link_columns: row.link_columns,
-        property_columns: row.property_columns,
+        roles: {
+          primary_identifier: row.primary_identifier_column,
+          maker: row.maker_column || '',
+          aliases: row.alias_columns,
+          links: row.link_columns,
+          properties: row.property_mappings
+        },
         auto_derive_aliases: row.auto_derive_aliases,
-        stop_after_blank_names: row.stop_after_blank_names,
-        start_row: row.first_data_row,
-        end_row: row.row_end > 0 ? row.row_end : null
+        stop_after_blank_primary: row.stop_after_blank_primary,
+        start_row: row.first_data_row
       })),
     expectations: isObject(map.expectations) ? {
       required_fields: stableSortStrings(toArray(map.expectations.required_fields).map((field) => normalizeFieldKey(field))),
@@ -1485,7 +1567,7 @@ function mergeWorkbookMapDefaults(baseMap = {}, suggestedMap = {}) {
     merged.enum_lists = suggested.enum_lists;
     merged.enum_sources = suggested.enum_sources;
   }
-  if (isEmptyArrayValue(merged.component_sheets) && !isEmptyArrayValue(suggested.component_sheets)) {
+  if (isEmptyArrayValue(merged.component_sources) && !isEmptyArrayValue(suggested.component_sources)) {
     merged.component_sheets = suggested.component_sheets;
     merged.component_sources = suggested.component_sources;
   }
@@ -1579,42 +1661,73 @@ export function validateWorkbookMap(map = {}, options = {}) {
     }
   }
 
-  for (const row of normalized.component_sheets) {
-    checkSheet(row.sheet, 'component_sheets');
-    if (!row.component_type) {
-      errors.push(`component_sheets: component_type is required for sheet '${row.sheet}'`);
+  const normalizedComponentRows = toArray(normalized.component_sources).length > 0
+    ? toArray(normalized.component_sources)
+    : toArray(normalized.component_sheets);
+  for (const row of normalizedComponentRows) {
+    const roles = isObject(row.roles) ? row.roles : {};
+    const componentType = normalizeFieldKey(row.component_type || row.type || '');
+    const primaryIdentifierColumn = normalizeText(
+      roles.primary_identifier
+      || ''
+    ).toUpperCase();
+    const makerColumn = normalizeText(roles.maker || '').toUpperCase();
+    const aliasColumns = stableSortStrings(toArray(roles.aliases).map((entry) => normalizeText(entry).toUpperCase()));
+    const linkColumns = stableSortStrings(toArray(roles.links).map((entry) => normalizeText(entry).toUpperCase()));
+    const propertyMappings = toArray(roles.properties).filter((entry) => isObject(entry));
+    const propertyColumns = stableSortStrings(propertyMappings.map((entry) => normalizeText(entry.column || '').toUpperCase()));
+    const stopAfterBlankPrimary = Math.max(1, asInt(row.stop_after_blank_primary || row.stop_after_blank_names, 10));
+
+    checkSheet(row.sheet, 'component_sources');
+    if (!componentType) {
+      errors.push(`component_sources: type is required for sheet '${row.sheet}'`);
     }
-    if (!colToIndex(row.canonical_name_column)) {
-      errors.push(`component_sheets: invalid canonical_name_column '${row.canonical_name_column}' for sheet '${row.sheet}'`);
+    if (!colToIndex(primaryIdentifierColumn)) {
+      errors.push(`component_sources: invalid primary_identifier column '${primaryIdentifierColumn}' for sheet '${row.sheet}'`);
     }
     if (row.header_row <= 0) {
-      errors.push(`component_sheets: header_row must be > 0 for sheet '${row.sheet}'`);
+      errors.push(`component_sources: header_row must be > 0 for sheet '${row.sheet}'`);
     }
     if (row.first_data_row <= 0) {
-      errors.push(`component_sheets: first_data_row must be > 0 for sheet '${row.sheet}'`);
+      errors.push(`component_sources: first_data_row must be > 0 for sheet '${row.sheet}'`);
     }
     if (row.first_data_row <= row.header_row) {
-      errors.push(`component_sheets: first_data_row must be > header_row for sheet '${row.sheet}'`);
+      errors.push(`component_sources: first_data_row must be > header_row for sheet '${row.sheet}'`);
     }
-    if (row.stop_after_blank_names <= 0) {
-      errors.push(`component_sheets: stop_after_blank_names must be > 0 for sheet '${row.sheet}'`);
+    if (stopAfterBlankPrimary <= 0) {
+      errors.push(`component_sources: stop_after_blank_primary must be > 0 for sheet '${row.sheet}'`);
     }
-    if (row.brand_column && !colToIndex(row.brand_column)) {
-      errors.push(`component_sheets: invalid brand_column '${row.brand_column}' for sheet '${row.sheet}'`);
+    if (makerColumn && !colToIndex(makerColumn)) {
+      errors.push(`component_sources: invalid maker column '${makerColumn}' for sheet '${row.sheet}'`);
     }
-    for (const aliasCol of toArray(row.alias_columns)) {
+    for (const aliasCol of aliasColumns) {
       if (!colToIndex(aliasCol)) {
-        errors.push(`component_sheets: invalid alias_columns entry '${aliasCol}' for sheet '${row.sheet}'`);
+        errors.push(`component_sources: invalid aliases entry '${aliasCol}' for sheet '${row.sheet}'`);
       }
     }
-    for (const linkCol of toArray(row.link_columns)) {
+    for (const linkCol of linkColumns) {
       if (!colToIndex(linkCol)) {
-        errors.push(`component_sheets: invalid link_columns entry '${linkCol}' for sheet '${row.sheet}'`);
+        errors.push(`component_sources: invalid links entry '${linkCol}' for sheet '${row.sheet}'`);
       }
     }
-    for (const propCol of toArray(row.property_columns)) {
+    for (const propCol of propertyColumns) {
       if (!colToIndex(propCol)) {
-        errors.push(`component_sheets: invalid property_columns entry '${propCol}' for sheet '${row.sheet}'`);
+        errors.push(`component_sources: invalid property column '${propCol}' for sheet '${row.sheet}'`);
+      }
+    }
+    for (const prop of propertyMappings) {
+      if (!isObject(prop)) {
+        errors.push(`component_sources: invalid property mapping in sheet '${row.sheet}'`);
+        continue;
+      }
+      if (!normalizeFieldKey(prop.key || '')) {
+        errors.push(`component_sources: property mapping missing key for sheet '${row.sheet}'`);
+      }
+      if (!colToIndex(prop.column || '')) {
+        errors.push(`component_sources: invalid property mapping column '${prop.column}' for sheet '${row.sheet}'`);
+      }
+      if (prop.type && !['string', 'number'].includes(normalizeToken(prop.type))) {
+        errors.push(`component_sources: invalid property mapping type '${prop.type}' for sheet '${row.sheet}'`);
       }
     }
   }
@@ -2004,20 +2117,36 @@ function pullComponentDbs(workbook, map) {
   const out = {};
   const sourceAssertions = [];
   const sourceStats = {};
-  for (const row of toArray(map.component_sheets)) {
+  const sourceRows = toArray(map.component_sources).length > 0 ? toArray(map.component_sources) : toArray(map.component_sheets);
+  for (const row of sourceRows) {
     const sheet = sheetByName(workbook, row.sheet);
     if (!sheet) {
       continue;
     }
+    const rolesRaw = isObject(row.roles) ? row.roles : {};
 
     const componentType = normalizeFieldKey(row.component_type || row.type || 'component') || 'component';
     const headerRow = Math.max(1, asInt(row.header_row, 1));
-    const nameColumn = normalizeText(row.canonical_name_column || row.name_column || 'A').toUpperCase() || 'A';
+    const nameColumn = normalizeText(
+      rolesRaw.primary_identifier
+      || 'A'
+    ).toUpperCase() || 'A';
+    const makerColumn = normalizeText(rolesRaw.maker || '').toUpperCase();
+    const aliasColumns = stableSortStrings(toArray(rolesRaw.aliases).map((value) => normalizeText(value).toUpperCase()));
+    const linkColumns = stableSortStrings(toArray(rolesRaw.links).map((value) => normalizeText(value).toUpperCase()));
+    const rolePropertyMappings = toArray(rolesRaw.properties)
+      .filter((entry) => isObject(entry))
+      .map((entry) => ({
+        key: normalizeFieldKey(entry.key || entry.property_key || ''),
+        column: normalizeText(entry.column || entry.col || '').toUpperCase(),
+        type: ['number', 'string'].includes(normalizeToken(entry.type)) ? normalizeToken(entry.type) : 'string'
+      }))
+      .filter((entry) => entry.column);
     const firstDataRow = Math.max(1, asInt(
       row.first_data_row || row.row_start,
       Math.max(2, headerRow + 1)
     ));
-    const stopAfterBlankNames = Math.max(1, asInt(row.stop_after_blank_names, 10));
+    const stopAfterBlankNames = Math.max(1, asInt(row.stop_after_blank_primary || row.stop_after_blank_names, 10));
     const rowEnd = row.row_end > 0 ? Math.min(asInt(row.row_end, sheet.maxRow), sheet.maxRow) : sheet.maxRow;
 
     if (!out[componentType]) {
@@ -2050,10 +2179,9 @@ function pullComponentDbs(workbook, map) {
         firstTwentyNames.push(name);
       }
 
-      const aliasColumns = toArray(row.alias_columns);
       const shouldAutoDeriveAliases = row.auto_derive_aliases !== false;
       let aliases = orderedUniqueStrings(
-        toArray(row.alias_columns)
+        aliasColumns
           .flatMap((col) => splitComponentTokens(getCell(sheet, col, idx)))
           .map((alias) => normalizeWhitespace(alias))
           .filter((alias) => alias && alias.toLowerCase() !== name.toLowerCase())
@@ -2061,32 +2189,40 @@ function pullComponentDbs(workbook, map) {
       if (aliases.length === 0 && shouldAutoDeriveAliases) {
         aliases = deriveSafeAliases(name);
       }
-      const brand = row.brand_column ? normalizeWhitespace(getCell(sheet, row.brand_column, idx)) : '';
+      const maker = makerColumn ? normalizeWhitespace(getCell(sheet, makerColumn, idx)) : '';
       const links = orderedUniqueStrings(
-        toArray(row.link_columns)
+        linkColumns
           .flatMap((col) => extractHttpLinks(getCell(sheet, col, idx)))
           .map((link) => normalizeWhitespace(link))
           .filter((link) => /^https?:\/\//i.test(link))
       );
+      const propertyMappings = rolePropertyMappings;
       const properties = {};
-      for (const col of toArray(row.property_columns)) {
-        const headerToken = normalizeFieldKey(normalizeWhitespace(getCell(sheet, col, headerRow)) || col);
-        const value = normalizeWhitespace(getCell(sheet, col, idx));
-        if (headerToken && value) {
-          properties[headerToken] = value;
+      if (propertyMappings.length > 0) {
+        for (const mapping of propertyMappings) {
+          const value = normalizeWhitespace(getCell(sheet, mapping.column, idx));
+          if (!value) {
+            continue;
+          }
+          if (mapping.type === 'number') {
+            const numericValue = asNumber(value);
+            properties[mapping.key] = numericValue === null ? value : numericValue;
+          } else {
+            properties[mapping.key] = value;
+          }
         }
       }
       const entity = { name };
-      if (row.brand_column && brand) {
-        entity.brand = brand;
+      if (makerColumn && maker) {
+        entity.maker = maker;
       }
       if ((aliasColumns.length > 0 || shouldAutoDeriveAliases) && aliases.length > 0) {
         entity.aliases = aliases;
       }
-      if (toArray(row.link_columns).length > 0 && links.length > 0) {
+      if (linkColumns.length > 0 && links.length > 0) {
         entity.links = links;
       }
-      if (toArray(row.property_columns).length > 0 && Object.keys(properties).length > 0) {
+      if (rolePropertyMappings.length > 0 && Object.keys(properties).length > 0) {
         entity.properties = properties;
       }
       out[componentType].push(entity);
@@ -2096,7 +2232,7 @@ function pullComponentDbs(workbook, map) {
       && firstTwentyNames.every((value) => isNumericIdValue(value));
     const numericRatio = nonBlankNames > 0 ? (numericOnlyNames / nonBlankNames) : 0;
     if (numericRatio > 0.10 || firstTwentyAllNumeric) {
-      const errorText = `component_db_sources.${componentType} canonical_name_column is pointing to an ID column. Choose the name/model column.`;
+      const errorText = `component_db_sources.${componentType} primary_identifier is pointing to an ID column. Choose the name/model column.`;
       sourceAssertions.push(errorText);
     }
     sourceStats[componentType] = {
@@ -2107,6 +2243,7 @@ function pullComponentDbs(workbook, map) {
       numeric_only_ratio: Number(numericRatio.toFixed(6)),
       first_20_names: firstTwentyNames,
       first_20_all_numeric: firstTwentyAllNumeric,
+      stop_after_blank_primary: stopAfterBlankNames,
       stop_after_blank_names: stopAfterBlankNames
     };
   }
@@ -2470,7 +2607,11 @@ function buildWorkbookTabsSummary({
   const summary = {};
   const keySheet = normalizeText(map?.key_list?.sheet || '');
   const enumSheets = stableSortStrings(toArray(map?.enum_lists).map((row) => normalizeText(row?.sheet || '')).filter(Boolean));
-  const componentRows = toArray(map?.component_sheets).filter((row) => isObject(row));
+  const componentRows = (
+    toArray(map?.component_sources).length > 0
+      ? toArray(map?.component_sources)
+      : toArray(map?.component_sheets)
+  ).filter((row) => isObject(row));
   const componentSheets = stableSortStrings(componentRows.map((row) => normalizeText(row.sheet || '')).filter(Boolean));
   const knownSheetSet = new Set([
     keySheet,
@@ -2505,15 +2646,7 @@ function buildWorkbookTabsSummary({
     const componentType = normalizeFieldKey(componentRow?.component_type || componentRow?.type || '');
     summary[sheetName] = {
       role: componentType ? `component_db:${componentType}` : 'component_db',
-      notes: componentType === 'sensor'
-        ? 'Sensor entities and properties (brand/type/dpi/ips/acc/year/link).'
-        : componentType === 'switch'
-          ? 'Switch entities and properties (brand/type/forces/link).'
-          : componentType === 'encoder'
-            ? 'Encoder entities and properties (brand/model/type/steps/life/link).'
-            : componentType === 'material'
-              ? 'Body material tokens (plastic/metal/etc.).'
-              : 'Component entity source.'
+      notes: 'Entity source sheet mapped by column roles (primary identifier, maker, aliases, links, properties).'
     };
   }
 
@@ -2597,7 +2730,8 @@ function buildComponentSourceSummary({
   sourceStats
 } = {}) {
   const out = {};
-  for (const row of toArray(map?.component_sheets)) {
+  const sourceRows = toArray(map?.component_sources).length > 0 ? toArray(map.component_sources) : toArray(map?.component_sheets);
+  for (const row of sourceRows) {
     if (!isObject(row)) {
       continue;
     }
@@ -2605,17 +2739,36 @@ function buildComponentSourceSummary({
     if (!componentType) {
       continue;
     }
+    const rolesBlock = isObject(row.roles) ? row.roles : {};
+    const propertyMappings = toArray(rolesBlock.properties)
+      .filter((entry) => isObject(entry))
+      .map((entry) => ({
+        key: normalizeFieldKey(entry.key || entry.property_key || ''),
+        column: normalizeText(entry.column || entry.col || '').toUpperCase(),
+        type: ['number', 'string'].includes(normalizeToken(entry.type)) ? normalizeToken(entry.type) : 'string',
+        unit: normalizeText(entry.unit || '')
+      }))
+      .filter((entry) => entry.column);
+    const primaryIdentifier = normalizeText(
+      rolesBlock.primary_identifier
+      || ''
+    );
+    const makerColumn = normalizeText(
+      rolesBlock.maker || ''
+    ) || null;
     const excelBlock = {
       sheet: normalizeText(row.sheet),
       header_row: asInt(row.header_row, 1),
       first_data_row: asInt(row.first_data_row || row.row_start, 2),
-      canonical_name_column: normalizeText(row.canonical_name_column || row.name_column || ''),
-      alias_columns: stableSortStrings(toArray(row.alias_columns || [])),
+      primary_identifier_column: primaryIdentifier,
+      alias_columns: stableSortStrings(toArray(rolesBlock.aliases)),
       auto_derive_aliases: row.auto_derive_aliases !== false,
-      brand_column: normalizeText(row.brand_column || '') || null,
-      link_columns: stableSortStrings(toArray(row.link_columns || [])),
-      property_columns: stableSortStrings(toArray(row.property_columns || [])),
-      stop_after_blank_names: Math.max(1, asInt(row.stop_after_blank_names, 10))
+      maker_column: makerColumn,
+      link_columns: stableSortStrings(toArray(rolesBlock.links)),
+      property_columns: stableSortStrings(propertyMappings.map((entry) => entry.column)),
+      property_mappings: propertyMappings,
+      stop_after_blank_primary: Math.max(1, asInt(row.stop_after_blank_primary || row.stop_after_blank_names, 10)),
+      stop_after_blank_names: Math.max(1, asInt(row.stop_after_blank_primary || row.stop_after_blank_names, 10))
     };
     const entries = toArray(componentDb?.[componentType]);
     const sampleEntities = entries
@@ -2631,13 +2784,21 @@ function buildComponentSourceSummary({
       numeric_only_ratio: Number(stats.numeric_only_ratio ?? 0),
       first_20_names: toArray(stats.first_20_names).slice(0, 20),
       first_20_all_numeric: Boolean(stats.first_20_all_numeric),
+      stop_after_blank_primary: Math.max(1, asInt(stats.stop_after_blank_primary, excelBlock.stop_after_blank_primary)),
       stop_after_blank_names: Math.max(1, asInt(stats.stop_after_blank_names, excelBlock.stop_after_blank_names))
     };
 
     out[componentType] = {
       type: componentType,
       sheet: excelBlock.sheet,
-      name_column: excelBlock.canonical_name_column || null,
+      roles: {
+        primary_identifier: excelBlock.primary_identifier_column || null,
+        maker: excelBlock.maker_column,
+        aliases: excelBlock.alias_columns,
+        links: excelBlock.link_columns,
+        properties: excelBlock.property_mappings
+      },
+      name_column: excelBlock.primary_identifier_column || null,
       excel: excelBlock,
       entity_count: entries.length,
       sample_entities: sampleEntities,
@@ -3396,7 +3557,8 @@ function buildStudioFieldRule({
     }
   }
   if (source?.type === 'component_db') {
-    const componentRow = toArray(map?.component_sheets).find((entry) => normalizeFieldKey(entry?.component_type || entry?.type || '') === normalizeFieldKey(source.ref || ''));
+    const componentRows = toArray(map?.component_sources).length > 0 ? toArray(map.component_sources) : toArray(map?.component_sheets);
+    const componentRow = componentRows.find((entry) => normalizeFieldKey(entry?.component_type || entry?.type || '') === normalizeFieldKey(source.ref || ''));
     if (componentRow && !normalizeText(excelHints.component_sheet || '')) {
       excelHints.component_sheet = normalizeText(componentRow.sheet || '') || null;
     }
@@ -4821,7 +4983,7 @@ export async function compileCategoryWorkbook({
       sampled_product_columns: toArray(samples.columns).length,
       sampled_values: Object.values(samples.byField || {}).reduce((sum, list) => sum + toArray(list).length, 0),
       enum_lists: toArray(map.enum_lists).length,
-      component_sheets: toArray(map.component_sheets).length
+      component_sources: toArray(map.component_sources).length > 0 ? toArray(map.component_sources).length : toArray(map.component_sheets).length
     },
     diff: {
       changed,

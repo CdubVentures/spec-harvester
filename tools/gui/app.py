@@ -425,28 +425,65 @@ def stable_sort_columns(values):
 
 def normalize_component_rows(workbook_map: dict):
     rows = []
-    rows_raw = workbook_map.get("component_sheets", []) if isinstance(workbook_map.get("component_sheets"), list) else []
+    rows_raw = workbook_map.get("component_sources", []) if isinstance(workbook_map.get("component_sources"), list) else []
     if not rows_raw:
-        rows_raw = workbook_map.get("component_sources", []) if isinstance(workbook_map.get("component_sources"), list) else []
+        rows_raw = workbook_map.get("component_sheets", []) if isinstance(workbook_map.get("component_sheets"), list) else []
     for row in rows_raw:
         if not isinstance(row, dict):
             continue
+        roles = row.get("roles", {}) if isinstance(row.get("roles"), dict) else {}
+        properties_raw = roles.get("properties", []) if isinstance(roles.get("properties"), list) else row.get("property_mappings", [])
+        property_mappings = []
+        for prop in properties_raw or []:
+            if not isinstance(prop, dict):
+                continue
+            prop_key = normalize_field_key(prop.get("key", ""))
+            prop_col = normalize_col(prop.get("column", ""), "")
+            prop_type = str(prop.get("type", "string") or "string").strip().lower()
+            if prop_type not in {"string", "number"}:
+                prop_type = "string"
+            if not prop_col:
+                continue
+            property_mappings.append(
+                {
+                    "key": prop_key,
+                    "column": prop_col,
+                    "type": prop_type,
+                    "unit": str(prop.get("unit", "") or "").strip(),
+                }
+            )
+        if not property_mappings:
+            legacy_cols = stable_sort_columns(row.get("property_columns", []))
+            for col in legacy_cols:
+                property_mappings.append({"key": normalize_field_key(col), "column": col, "type": "string", "unit": ""})
+
         header_row = int(row.get("header_row", 1) or 1)
         first_data_row = int(row.get("first_data_row", row.get("row_start", row.get("start_row", header_row + 1)) or (header_row + 1)) or (header_row + 1))
-        stop_after_blank_names = int(row.get("stop_after_blank_names", 10) or 10)
+        stop_after_blank_primary = int(row.get("stop_after_blank_primary", row.get("stop_after_blank_names", 10)) or 10)
+        primary_identifier_col = normalize_col(
+            roles.get("primary_identifier", row.get("canonical_name_column", row.get("name_column", "A"))),
+            "A",
+        )
+        maker_col = normalize_col(roles.get("maker", row.get("brand_column", "")), "")
+        alias_cols = stable_sort_columns(roles.get("aliases", row.get("alias_columns", [])))
+        link_cols = stable_sort_columns(roles.get("links", row.get("link_columns", [])))
         rows.append(
             {
                 "sheet": str(row.get("sheet", "") or "").strip(),
                 "component_type": str(row.get("component_type", row.get("type", "")) or "").strip(),
                 "header_row": max(1, header_row),
                 "first_data_row": max(1, first_data_row),
-                "canonical_name_column": normalize_col(row.get("canonical_name_column", row.get("name_column", "A")), "A"),
-                "brand_column": normalize_col(row.get("brand_column", ""), ""),
-                "alias_columns": stable_sort_columns(row.get("alias_columns", [])),
-                "link_columns": stable_sort_columns(row.get("link_columns", [])),
-                "property_columns": stable_sort_columns(row.get("property_columns", [])),
+                "property_columns": stable_sort_columns([prop.get("column", "") for prop in property_mappings]),
+                "property_mappings": property_mappings,
+                "roles": {
+                    "primary_identifier": primary_identifier_col,
+                    "maker": maker_col,
+                    "aliases": alias_cols,
+                    "links": link_cols,
+                    "properties": property_mappings,
+                },
                 "auto_derive_aliases": bool(row.get("auto_derive_aliases", True)),
-                "stop_after_blank_names": max(1, stop_after_blank_names),
+                "stop_after_blank_primary": max(1, stop_after_blank_primary),
             }
         )
     if not rows:
@@ -456,13 +493,17 @@ def normalize_component_rows(workbook_map: dict):
                 "component_type": "",
                 "header_row": 1,
                 "first_data_row": 2,
-                "canonical_name_column": "A",
-                "brand_column": "",
-                "alias_columns": [],
-                "link_columns": [],
                 "property_columns": [],
+                "property_mappings": [],
+                "roles": {
+                    "primary_identifier": "A",
+                    "maker": "",
+                    "aliases": [],
+                    "links": [],
+                    "properties": [],
+                },
                 "auto_derive_aliases": True,
-                "stop_after_blank_names": 10,
+                "stop_after_blank_primary": 10,
             }
         ]
     return rows
@@ -589,12 +630,13 @@ def workbook_component_entities_preview(
     sheet_name: str,
     header_row: int,
     first_data_row: int,
-    canonical_name_column: str,
-    brand_column: str = "",
-    alias_columns_csv: str = "",
-    link_columns_csv: str = "",
+    primary_identifier_column: str,
+    maker_column: str = "",
+    aliases_columns_csv: str = "",
+    links_columns_csv: str = "",
+    property_mappings_json: str = "[]",
     auto_derive_aliases: bool = True,
-    stop_after_blank_names: int = 10,
+    stop_after_blank_primary: int = 10,
 ):
     if load_workbook is None:
         return {"error": "openpyxl is not installed in this environment."}
@@ -609,11 +651,37 @@ def workbook_component_entities_preview(
         return {"error": f"Sheet not found: {sheet_name}"}
 
     ws = wb[str(sheet_name)]
-    name_col = normalize_col(canonical_name_column, "A")
-    brand_col = normalize_col(brand_column, "")
-    alias_cols = stable_sort_columns(csv_tokens(alias_columns_csv))
-    link_cols = stable_sort_columns(csv_tokens(link_columns_csv))
-    stop_limit = max(1, int(stop_after_blank_names or 10))
+    name_col = normalize_col(primary_identifier_column, "A")
+    maker_col = normalize_col(maker_column, "")
+    alias_cols = stable_sort_columns(csv_tokens(aliases_columns_csv))
+    link_cols = stable_sort_columns(csv_tokens(links_columns_csv))
+    try:
+        property_mappings = json.loads(str(property_mappings_json or "[]"))
+    except Exception:
+        property_mappings = []
+    if not isinstance(property_mappings, list):
+        property_mappings = []
+    normalized_property_mappings = []
+    for prop in property_mappings:
+        if not isinstance(prop, dict):
+            continue
+        prop_key = normalize_field_key(prop.get("key", ""))
+        prop_col = normalize_col(prop.get("column", ""), "")
+        prop_type = str(prop.get("type", "string") or "string").strip().lower()
+        if prop_type not in {"string", "number"}:
+            prop_type = "string"
+        prop_unit = str(prop.get("unit", "") or "").strip()
+        if not prop_key or not prop_col:
+            continue
+        normalized_property_mappings.append(
+            {
+                "key": prop_key,
+                "column": prop_col,
+                "type": prop_type,
+                "unit": prop_unit,
+            }
+        )
+    stop_limit = max(1, int(stop_after_blank_primary or 10))
     row_end = int(ws.max_row or max(2, int(first_data_row or 2)))
 
     preview_rows = []
@@ -644,9 +712,9 @@ def workbook_component_entities_preview(
             sample_name_tokens.add(name_token)
             sample_names.append(name)
 
-        brand = ""
-        if brand_col:
-            brand = norm(ws.cell(row=row_idx, column=col_to_index(brand_col) or 1).value)
+        maker = ""
+        if maker_col:
+            maker = norm(ws.cell(row=row_idx, column=col_to_index(maker_col) or 1).value)
 
         alias_values = []
         for col in alias_cols:
@@ -660,14 +728,36 @@ def workbook_component_entities_preview(
             link_values.extend(extract_http_links(ws.cell(row=row_idx, column=col_to_index(col) or 1).value))
         links = ordered_unique_text(link_values)
 
+        properties = {}
+        for prop in normalized_property_mappings:
+            raw_value = ws.cell(row=row_idx, column=col_to_index(prop.get("column", "")) or 1).value
+            value = norm(raw_value)
+            if not value:
+                continue
+            if prop.get("type") == "number":
+                numeric_value = None
+                try:
+                    numeric_value = float(value)
+                    if numeric_value.is_integer():
+                        numeric_value = int(numeric_value)
+                except Exception:
+                    numeric_value = None
+                if numeric_value is not None:
+                    properties[prop.get("key")] = numeric_value
+                else:
+                    properties[prop.get("key")] = value
+            else:
+                properties[prop.get("key")] = value
+
         if len(preview_rows) < 20:
             preview_rows.append(
                 {
                     "row": row_idx,
                     "name": name,
-                    "brand": brand,
+                    "maker": maker,
                     "aliases": aliases,
                     "links": links,
+                    "properties": properties,
                 }
             )
 
@@ -709,12 +799,12 @@ def numeric_only_ratio(values):
 def component_preview_errors(name_values):
     cleaned = [str(v or "").strip() for v in (name_values or []) if str(v or "").strip()]
     if not cleaned:
-        return ["No non-empty values found in selected Name/Model column preview."]
+        return ["No non-empty values found in selected Primary Identifier column preview."]
     ratio = numeric_only_ratio(cleaned)
     if ratio > 0.10:
-        return ["More than 10% of preview values are numeric-only. Choose the Name/Model column, not the ID column."]
+        return ["More than 10% of preview values are numeric-only. Choose the Primary Identifier column, not the ID column."]
     if cleaned and all(re.match(r"^\d+$", value) for value in cleaned[:20]):
-        return ["The first 20 preview values are numeric-only. Choose the Name/Model column."]
+        return ["The first 20 preview values are numeric-only. Choose the Primary Identifier column."]
     return []
 
 
@@ -1539,7 +1629,7 @@ def render_field_rules_studio(category: str, local_mode: bool):
             st.caption("Parsed tooltip keys preview: " + ", ".join(sorted(list(tooltip_entries_live.keys()))[:12]))
 
         st.markdown("#### Component Source Mapping")
-        st.caption("Universal component source mapping: required name/model column + row settings, optional role columns.")
+        st.caption("Universal source-sheet mapping: required Primary Identifier role + optional fixed roles (Maker, Name Variants, Reference URLs, Attributes).")
         workbook_path_value = str(st.session_state.get(f"studio_workbook_path_{category}", workbook_map.get("workbook_path", "") or "")).strip()
         component_rows = normalize_component_rows(workbook_map)
         source_count_key = f"studio_component_source_count_{category}"
@@ -1562,13 +1652,17 @@ def render_field_rules_studio(category: str, local_mode: bool):
                         "component_type": "",
                         "header_row": 1,
                         "first_data_row": 2,
-                        "canonical_name_column": "A",
-                        "brand_column": "",
-                        "alias_columns": [],
-                        "link_columns": [],
                         "property_columns": [],
+                        "property_mappings": [],
+                        "roles": {
+                            "primary_identifier": "A",
+                            "maker": "",
+                            "aliases": [],
+                            "links": [],
+                            "properties": [],
+                        },
                         "auto_derive_aliases": True,
-                        "stop_after_blank_names": 10,
+                        "stop_after_blank_primary": 10,
                     }
                 )
         component_rows = component_rows[:target_count]
@@ -1613,19 +1707,19 @@ def render_field_rules_studio(category: str, local_mode: bool):
             )
             m_d1, m_d2, m_d3, m_d4 = st.columns(4)
             stop_after_blank_names = m_d1.number_input(
-                "Stop After Blank Names",
+                "Stop After Blank Primary",
                 min_value=1,
                 max_value=200,
-                value=int(row.get("stop_after_blank_names", 10) or 10),
+                value=int(row.get("stop_after_blank_primary", row.get("stop_after_blank_names", 10)) or 10),
                 step=1,
                 key=f"studio_comp_stop_blank_{category}_{idx}",
             )
             selected_name_col_key = f"studio_comp_name_col_{category}_{idx}"
             name_input_key = f"studio_comp_name_col_input_{category}_{idx}"
-            brand_input_key = f"studio_comp_brand_col_{category}_{idx}"
+            maker_input_key = f"studio_comp_maker_col_{category}_{idx}"
             alias_input_key = f"studio_comp_alias_cols_{category}_{idx}"
             link_input_key = f"studio_comp_link_cols_{category}_{idx}"
-            property_input_key = f"studio_comp_prop_cols_{category}_{idx}"
+            property_rows_key = f"studio_comp_property_rows_{category}_{idx}"
             picker_target_key = f"studio_comp_picker_target_{category}_{idx}"
             active_roles_key = f"studio_comp_active_roles_{category}_{idx}"
             role_picker_key = f"studio_comp_role_picker_{category}_{idx}"
@@ -1634,36 +1728,60 @@ def render_field_rules_studio(category: str, local_mode: bool):
             clear_optional_key = f"studio_comp_clear_optional_{category}_{idx}"
 
             selected_name_col = normalize_col(
-                st.session_state.get(selected_name_col_key, row.get("canonical_name_column", "A")),
+                st.session_state.get(
+                    selected_name_col_key,
+                    row.get("roles", {}).get("primary_identifier", row.get("canonical_name_column", "A")) if isinstance(row.get("roles", {}), dict) else row.get("canonical_name_column", "A"),
+                ),
                 "A",
             )
             if selected_name_col_key not in st.session_state:
                 st.session_state[selected_name_col_key] = selected_name_col
             if name_input_key not in st.session_state:
                 st.session_state[name_input_key] = selected_name_col
-            if brand_input_key not in st.session_state:
-                st.session_state[brand_input_key] = normalize_col(row.get("brand_column", ""), "")
+            if maker_input_key not in st.session_state:
+                st.session_state[maker_input_key] = normalize_col(row.get("roles", {}).get("maker", row.get("brand_column", "")) if isinstance(row.get("roles", {}), dict) else row.get("brand_column", ""), "")
             if alias_input_key not in st.session_state:
-                st.session_state[alias_input_key] = csv_join(stable_sort_columns(row.get("alias_columns", [])))
+                alias_seed = row.get("roles", {}).get("aliases", row.get("alias_columns", [])) if isinstance(row.get("roles", {}), dict) else row.get("alias_columns", [])
+                st.session_state[alias_input_key] = csv_join(stable_sort_columns(alias_seed))
             if link_input_key not in st.session_state:
-                st.session_state[link_input_key] = csv_join(stable_sort_columns(row.get("link_columns", [])))
-            if property_input_key not in st.session_state:
-                st.session_state[property_input_key] = csv_join(stable_sort_columns(row.get("property_columns", [])))
+                link_seed = row.get("roles", {}).get("links", row.get("link_columns", [])) if isinstance(row.get("roles", {}), dict) else row.get("link_columns", [])
+                st.session_state[link_input_key] = csv_join(stable_sort_columns(link_seed))
+            if property_rows_key not in st.session_state:
+                seed_rows = row.get("roles", {}).get("properties", row.get("property_mappings", [])) if isinstance(row.get("roles", {}), dict) else row.get("property_mappings", [])
+                normalized_props = []
+                for prop in seed_rows or []:
+                    if not isinstance(prop, dict):
+                        continue
+                    p_key = normalize_field_key(prop.get("key", ""))
+                    p_col = normalize_col(prop.get("column", ""), "")
+                    p_type = str(prop.get("type", "string") or "string").strip().lower()
+                    if p_type not in {"string", "number"}:
+                        p_type = "string"
+                    p_unit = str(prop.get("unit", "") or "").strip()
+                    if p_key or p_col:
+                        normalized_props.append({"key": p_key, "column": p_col, "type": p_type, "unit": p_unit})
+                st.session_state[property_rows_key] = normalized_props
             if active_roles_key not in st.session_state:
                 role_tokens = []
-                if normalize_col(row.get("brand_column", ""), ""):
-                    role_tokens.append("brand")
-                if stable_sort_columns(row.get("link_columns", [])):
+                roles_seed = row.get("roles", {}) if isinstance(row.get("roles", {}), dict) else {}
+                if stable_sort_columns(roles_seed.get("aliases", row.get("alias_columns", []))) or bool(row.get("auto_derive_aliases", True)):
+                    role_tokens.append("aliases")
+                if normalize_col(roles_seed.get("maker", row.get("brand_column", "")), ""):
+                    role_tokens.append("maker")
+                if stable_sort_columns(roles_seed.get("links", row.get("link_columns", []))):
                     role_tokens.append("links")
-                if stable_sort_columns(row.get("property_columns", [])):
+                if isinstance(roles_seed.get("properties"), list) and roles_seed.get("properties"):
+                    role_tokens.append("properties")
+                elif row.get("property_mappings"):
                     role_tokens.append("properties")
                 st.session_state[active_roles_key] = role_tokens
             if auto_alias_key not in st.session_state:
                 st.session_state[auto_alias_key] = bool(row.get("auto_derive_aliases", True))
             role_defs = [
-                {"id": "brand", "label": "Brand", "input_key": brand_input_key},
-                {"id": "links", "label": "Links", "input_key": link_input_key},
-                {"id": "properties", "label": "Properties", "input_key": property_input_key},
+                {"id": "aliases", "label": "Name Variants (Aliases)", "input_key": alias_input_key},
+                {"id": "maker", "label": "Maker (Brand/Manufacturer)", "input_key": maker_input_key},
+                {"id": "links", "label": "Reference URLs (Links)", "input_key": link_input_key},
+                {"id": "properties", "label": "Attributes (Properties)", "input_key": property_rows_key},
             ]
             role_def_by_id = {row["id"]: row for row in role_defs}
             known_role_ids = [row["id"] for row in role_defs]
@@ -1673,7 +1791,7 @@ def render_field_rules_studio(category: str, local_mode: bool):
 
             addable_roles = [role for role in role_defs if role["id"] not in active_role_set]
             role_mgr_a, role_mgr_b, role_mgr_c = st.columns([1.4, 1.3, 1.3])
-            role_mgr_a.caption("Aliases role is always available.")
+            role_mgr_a.caption("Optional roles are per-source and can be added/removed.")
             if addable_roles:
                 add_labels = [role["label"] for role in addable_roles]
                 if role_picker_key not in st.session_state or st.session_state.get(role_picker_key) not in add_labels:
@@ -1704,38 +1822,53 @@ def render_field_rules_studio(category: str, local_mode: bool):
                     if remove_cols[ridx % len(remove_cols)].button(f"Remove {label}", key=remove_key, use_container_width=True):
                         active_role_set.discard(role_id)
                         st.session_state[active_roles_key] = sorted(active_role_set)
-                        input_key = str(role_def.get("input_key", "") or "")
-                        if input_key:
-                            st.session_state[input_key] = ""
+                        if role_id == "aliases":
+                            st.session_state[alias_input_key] = ""
+                            st.session_state[auto_alias_key] = False
+                        elif role_id == "maker":
+                            st.session_state[maker_input_key] = ""
+                        elif role_id == "links":
+                            st.session_state[link_input_key] = ""
+                        elif role_id == "properties":
+                            st.session_state[property_rows_key] = []
                         st.rerun()
 
             if st.button("Clear Optional Roles", key=clear_optional_key, use_container_width=True):
                 st.session_state[active_roles_key] = []
-                st.session_state[brand_input_key] = ""
+                st.session_state[maker_input_key] = ""
+                st.session_state[alias_input_key] = ""
                 st.session_state[link_input_key] = ""
-                st.session_state[property_input_key] = ""
+                st.session_state[property_rows_key] = []
+                st.session_state[auto_alias_key] = False
                 st.rerun()
 
-            brand_enabled = "brand" in active_role_set
+            aliases_enabled = "aliases" in active_role_set
+            maker_enabled = "maker" in active_role_set
             link_enabled = "links" in active_role_set
             property_enabled = "properties" in active_role_set
 
-            auto_derive_aliases = st.toggle(
-                "Auto-Derive Aliases",
-                key=auto_alias_key,
-                help="If alias columns are empty, generate safe aliases from punctuation/spacing variants of Name/Model.",
-            )
+            if aliases_enabled:
+                auto_derive_aliases = st.toggle(
+                    "Auto-Derive Aliases",
+                    key=auto_alias_key,
+                    help="If alias columns are empty, generate safe aliases from punctuation/spacing variants of Name/Model.",
+                )
+            else:
+                st.session_state[auto_alias_key] = False
+                auto_derive_aliases = False
             st.caption(
-                "Role-based mapping: `Name/Model` is required. Optional roles can stay off. "
-                "Example: material often uses only `Name/Model`, optionally `Aliases`."
+                "Role-based mapping: `Primary Identifier (Name/Model)` is required. Optional roles can stay off. "
+                "Example: material often uses only Primary Identifier, optionally Name Variants."
             )
 
-            if not brand_enabled:
-                st.session_state[brand_input_key] = ""
+            if not aliases_enabled:
+                st.session_state[alias_input_key] = ""
+            if not maker_enabled:
+                st.session_state[maker_input_key] = ""
             if not link_enabled:
                 st.session_state[link_input_key] = ""
             if not property_enabled:
-                st.session_state[property_input_key] = ""
+                st.session_state[property_rows_key] = []
 
             preview = workbook_component_preview(workbook_path_value, comp_sheet, int(header_row), int(first_data_row))
 
@@ -1747,13 +1880,33 @@ def render_field_rules_studio(category: str, local_mode: bool):
                 preview_cols = preview.get("columns", []) if isinstance(preview.get("columns"), list) else []
                 if preview_cols:
                     st.caption("Column Picker (click a header to map the selected role)")
-                    picker_targets = ["Name/Model", "Aliases"]
-                    if brand_enabled:
-                        picker_targets.append("Brand")
+                    picker_targets = ["Primary Identifier (Name/Model)"]
+                    if aliases_enabled:
+                        picker_targets.append("Name Variants (Aliases)")
+                    if maker_enabled:
+                        picker_targets.append("Maker (Brand/Manufacturer)")
                     if link_enabled:
-                        picker_targets.append("Links")
+                        picker_targets.append("Reference URLs (Links)")
                     if property_enabled:
-                        picker_targets.append("Properties")
+                        picker_targets.append("Attributes (Properties)")
+                        property_rows = st.session_state.get(property_rows_key, []) if isinstance(st.session_state.get(property_rows_key, []), list) else []
+                        prop_labels = []
+                        for pidx, prop in enumerate(property_rows):
+                            label = str(prop.get("key", "") or f"property_{pidx + 1}")
+                            col = normalize_col(prop.get("column", ""), "")
+                            prop_labels.append(f"{pidx}:{label}:{col or '?'}")
+                        prop_target_key = f"studio_comp_property_target_{category}_{idx}"
+                        if prop_labels:
+                            if prop_target_key not in st.session_state or st.session_state.get(prop_target_key) not in prop_labels:
+                                st.session_state[prop_target_key] = prop_labels[0]
+                            st.selectbox(
+                                "Property Target Row",
+                                prop_labels,
+                                key=prop_target_key,
+                                help="When mapping target is Attributes, header clicks set this property row's column.",
+                            )
+                        else:
+                            st.info("Add at least one property row to map Attributes.")
                     if picker_target_key not in st.session_state or st.session_state.get(picker_target_key) not in picker_targets:
                         st.session_state[picker_target_key] = picker_targets[0]
                     picker_target = st.selectbox(
@@ -1768,85 +1921,200 @@ def render_field_rules_studio(category: str, local_mode: bool):
                         header_label = str(col_meta.get("header", "") or "")
                         text = f"{col_label}: {header_label or '(blank)'}"
                         if btn_cols[col_idx % 5].button(text, key=f"studio_comp_pick_name_col_{category}_{idx}_{col_label}", use_container_width=True):
-                            if picker_target == "Name/Model":
+                            if picker_target == "Primary Identifier (Name/Model)":
                                 st.session_state[selected_name_col_key] = col_label
                                 st.session_state[name_input_key] = col_label
-                            elif picker_target == "Brand":
-                                current = normalize_col(st.session_state.get(brand_input_key, ""), "")
-                                st.session_state[brand_input_key] = "" if current == col_label else col_label
-                            elif picker_target == "Aliases":
+                            elif picker_target == "Name Variants (Aliases)":
                                 st.session_state[alias_input_key] = _toggle_csv_column(str(st.session_state.get(alias_input_key, "") or ""), col_label)
-                            elif picker_target == "Links":
+                            elif picker_target == "Maker (Brand/Manufacturer)":
+                                current = normalize_col(st.session_state.get(maker_input_key, ""), "")
+                                st.session_state[maker_input_key] = "" if current == col_label else col_label
+                            elif picker_target == "Reference URLs (Links)":
                                 st.session_state[link_input_key] = _toggle_csv_column(str(st.session_state.get(link_input_key, "") or ""), col_label)
                             else:
-                                st.session_state[property_input_key] = _toggle_csv_column(str(st.session_state.get(property_input_key, "") or ""), col_label)
+                                prop_target_key = f"studio_comp_property_target_{category}_{idx}"
+                                prop_selected = str(st.session_state.get(prop_target_key, "") or "")
+                                prop_rows = st.session_state.get(property_rows_key, []) if isinstance(st.session_state.get(property_rows_key, []), list) else []
+                                try:
+                                    prop_idx = int(prop_selected.split(":", 1)[0]) if ":" in prop_selected else 0
+                                except Exception:
+                                    prop_idx = 0
+                                if 0 <= prop_idx < len(prop_rows):
+                                    prop_rows[prop_idx]["column"] = col_label
+                                    st.session_state[property_rows_key] = prop_rows
                             st.rerun()
                     selected_name_col = normalize_col(st.session_state.get(selected_name_col_key, selected_name_col), selected_name_col)
-                selected_brand_col_hint = normalize_col(st.session_state.get(brand_input_key, ""), "")
-                selected_alias_cols_hint = stable_sort_columns(csv_tokens(str(st.session_state.get(alias_input_key, "") or "")))
+                selected_brand_col_hint = normalize_col(st.session_state.get(maker_input_key, ""), "")
+                selected_alias_cols_hint = stable_sort_columns(csv_tokens(str(st.session_state.get(alias_input_key, "") or ""))) if aliases_enabled else []
                 selected_link_cols_hint = stable_sort_columns(csv_tokens(str(st.session_state.get(link_input_key, "") or "")))
-                selected_prop_cols_hint = stable_sort_columns(csv_tokens(str(st.session_state.get(property_input_key, "") or "")))
-                st.caption(
-                    "Selected mappings: "
-                    f"name `{selected_name_col or '?'}` | "
-                    f"brand `{selected_brand_col_hint or '-'}` | "
-                    f"aliases `{csv_join(selected_alias_cols_hint) or '-'}` | "
-                    f"links `{csv_join(selected_link_cols_hint) or '-'}` | "
-                    f"properties `{csv_join(selected_prop_cols_hint) or '-'}`"
-                )
+                selected_prop_cols_hint = stable_sort_columns([
+                    normalize_col(prop.get("column", ""), "")
+                    for prop in (st.session_state.get(property_rows_key, []) if isinstance(st.session_state.get(property_rows_key, []), list) else [])
+                ])
+                selected_map_parts = [f"Primary Identifier `{selected_name_col or '?'}`"]
+                if aliases_enabled:
+                    selected_map_parts.append(f"Aliases `{csv_join(selected_alias_cols_hint) or '-'}`{' + auto-derive' if bool(auto_derive_aliases) else ''}")
+                if maker_enabled:
+                    selected_map_parts.append(f"Maker `{selected_brand_col_hint or '-'}`")
+                if link_enabled:
+                    selected_map_parts.append(f"Links `{csv_join(selected_link_cols_hint) or '-'}`")
+                if property_enabled:
+                    selected_map_parts.append(f"Properties `{csv_join(selected_prop_cols_hint) or '-'}`")
+                st.caption("Selected mappings: " + " | ".join(selected_map_parts))
                 st.dataframe(preview.get("preview_rows", []), hide_index=True, use_container_width=True, height=200)
 
-            manual_name_col = st.text_input(
-                "Name/Model Column (required)",
-                key=name_input_key,
-                help="Single column letter. You can type it directly or pick via header click.",
-            )
-            selected_name_col = normalize_col(manual_name_col, "A")
+            selected_name_col = normalize_col(st.session_state.get(name_input_key, selected_name_col), "A")
             st.session_state[selected_name_col_key] = selected_name_col
-            brand_column = m_d2.text_input(
-                "Brand Column (optional)",
-                key=brand_input_key,
-                help="Optional column letter.",
-                disabled=not brand_enabled,
-            )
-            alias_columns = m_d3.text_input(
-                "Alias Columns (csv)",
-                key=alias_input_key,
-                help="Alias role is always available; leave blank if not needed.",
-            )
+            selected_maker_col = normalize_col(st.session_state.get(maker_input_key, "") if maker_enabled else "", "")
+            selected_alias_cols = stable_sort_columns(csv_tokens(str(st.session_state.get(alias_input_key, "") or ""))) if aliases_enabled else []
+            selected_link_cols = stable_sort_columns(csv_tokens(str(st.session_state.get(link_input_key, "") or ""))) if link_enabled else []
+            property_rows_state = st.session_state.get(property_rows_key, []) if isinstance(st.session_state.get(property_rows_key, []), list) else []
+            active_role_labels = []
+            if aliases_enabled:
+                active_role_labels.append("aliases")
+            if maker_enabled:
+                active_role_labels.append("maker")
             if link_enabled:
-                link_columns = m_d4.text_input(
-                    "Link Columns (optional csv)",
-                    key=link_input_key,
-                )
-            else:
-                m_d4.caption("Links role not added.")
-                link_columns = ""
+                active_role_labels.append("links")
             if property_enabled:
-                property_columns = st.text_input(
-                    "Property Columns (optional csv)",
-                    key=property_input_key,
+                active_role_labels.append("properties")
+            m_d2.caption(f"Active Optional Roles: `{csv_join(active_role_labels) or '-'}`")
+            m_d3.caption(f"Maker/Links: maker `{selected_maker_col or '-'}` | links `{csv_join(selected_link_cols) or '-'}`")
+            m_d4.caption(f"Aliases/Props: aliases `{csv_join(selected_alias_cols) or '-'}` | props `{len(property_rows_state) if property_enabled else 0}`")
+
+            st.markdown("###### Role Column Assignments")
+            role_col_a, role_col_b = st.columns(2)
+            role_col_a.text_input(
+                "Primary Identifier Column",
+                key=name_input_key,
+                help="Required single column for entity name/model.",
+            )
+            if maker_enabled:
+                role_col_a.text_input(
+                    "Maker Column",
+                    key=maker_input_key,
+                    help="Optional single column for maker/brand/manufacturer.",
                 )
             else:
-                st.caption("Properties role not added.")
-                property_columns = ""
+                role_col_a.caption("Maker role not added.")
+            if aliases_enabled:
+                role_col_b.text_input(
+                    "Aliases Columns (csv)",
+                    key=alias_input_key,
+                    help="Optional multi-column list (e.g. D,E,F).",
+                )
+            else:
+                role_col_b.caption("Aliases role not added.")
+            if link_enabled:
+                role_col_b.text_input(
+                    "Reference URL Columns (csv)",
+                    key=link_input_key,
+                    help="Optional multi-column list for URL sources.",
+                )
+            else:
+                role_col_b.caption("Reference URLs role not added.")
+            st.caption("Choose Mapping Target, then click headers to assign/toggle columns for that role.")
 
-            selected_brand_col = normalize_col(brand_column if brand_enabled else "", "")
-            selected_alias_cols = stable_sort_columns(csv_tokens(alias_columns))
-            selected_link_cols = stable_sort_columns(csv_tokens(link_columns if link_enabled else ""))
-            selected_property_cols = stable_sort_columns(csv_tokens(property_columns if property_enabled else ""))
+            if property_enabled:
+                st.caption("Attributes (Properties) mappings")
+                prop_rows_out = []
+                for pidx, prop in enumerate(property_rows_state):
+                    p_c1, p_c2, p_c3, p_c4, p_c5 = st.columns([1.4, 1.1, 1.0, 1.0, 0.9])
+                    p_key = p_c1.text_input(
+                        f"Property Key {pidx + 1}",
+                        value=str(prop.get("key", "") or ""),
+                        key=f"studio_comp_prop_key_{category}_{idx}_{pidx}",
+                        help="Canonical property key (e.g. dpi, ips, acceleration).",
+                    )
+                    p_type = p_c2.selectbox(
+                        f"Type {pidx + 1}",
+                        ["string", "number"],
+                        index=0 if str(prop.get("type", "string") or "string").lower() == "string" else 1,
+                        key=f"studio_comp_prop_type_{category}_{idx}_{pidx}",
+                    )
+                    p_unit = p_c3.text_input(
+                        f"Unit {pidx + 1}",
+                        value=str(prop.get("unit", "") or ""),
+                        key=f"studio_comp_prop_unit_{category}_{idx}_{pidx}",
+                    )
+                    p_col = normalize_col(prop.get("column", ""), "")
+                    p_c4.caption(f"Column: `{p_col or '?'}`")
+                    if p_c5.button("Remove", key=f"studio_comp_prop_remove_{category}_{idx}_{pidx}", use_container_width=True):
+                        continue
+                    prop_rows_out.append(
+                        {
+                            "key": normalize_field_key(p_key),
+                            "column": p_col,
+                            "type": "number" if p_type == "number" else "string",
+                            "unit": str(p_unit or "").strip(),
+                        }
+                    )
+                a1, a2 = st.columns([1.2, 3.0])
+                if a1.button("Add Property Row", key=f"studio_comp_prop_add_{category}_{idx}", use_container_width=True):
+                    prop_rows_out.append({"key": "", "column": "", "type": "string", "unit": ""})
+                st.session_state[property_rows_key] = prop_rows_out
+                a2.caption("Use Mapping Target = Attributes and click column headers to assign a property column.")
+            else:
+                st.session_state[property_rows_key] = []
+                st.caption("Attributes role not added.")
+
+            with st.expander("Advanced Property Column Entry", expanded=False):
+                st.caption("Type property column letters directly only when needed; header-click mapping is preferred.")
+                if property_enabled:
+                    for pidx, prop in enumerate(st.session_state.get(property_rows_key, [])):
+                        col_key = f"studio_comp_prop_adv_col_{category}_{idx}_{pidx}"
+                        if col_key not in st.session_state:
+                            st.session_state[col_key] = str(prop.get("column", "") or "")
+                        st.text_input(f"Property {pidx + 1} Column", key=col_key)
+                    adv_rows = []
+                    for pidx, prop in enumerate(st.session_state.get(property_rows_key, [])):
+                        col_key = f"studio_comp_prop_adv_col_{category}_{idx}_{pidx}"
+                        adv_rows.append(
+                            {
+                                **prop,
+                                "column": normalize_col(st.session_state.get(col_key, prop.get("column", "")), ""),
+                            }
+                        )
+                    st.session_state[property_rows_key] = adv_rows
+                else:
+                    st.caption("Add the Attributes role to edit property columns.")
+
+            selected_name_col = normalize_col(st.session_state.get(name_input_key, selected_name_col), "A")
+            st.session_state[selected_name_col_key] = selected_name_col
+            selected_maker_col = normalize_col(st.session_state.get(maker_input_key, "") if maker_enabled else "", "")
+            selected_alias_cols = stable_sort_columns(csv_tokens(str(st.session_state.get(alias_input_key, "") or ""))) if aliases_enabled else []
+            selected_link_cols = stable_sort_columns(csv_tokens(str(st.session_state.get(link_input_key, "") or ""))) if link_enabled else []
+            selected_property_mappings = []
+            for prop in st.session_state.get(property_rows_key, []):
+                if not isinstance(prop, dict):
+                    continue
+                selected_property_mappings.append(
+                    {
+                        "key": normalize_field_key(prop.get("key", "")),
+                        "column": normalize_col(prop.get("column", ""), ""),
+                        "type": "number" if str(prop.get("type", "string")).lower() == "number" else "string",
+                        "unit": str(prop.get("unit", "") or "").strip(),
+                    }
+                )
+            if property_enabled:
+                for pidx, prop in enumerate(selected_property_mappings):
+                    if not str(prop.get("key", "") or "").strip():
+                        mapping_errors.append(f"{source_title}: property row {pidx + 1} is missing property_key.")
+                    if not normalize_col(prop.get("column", ""), ""):
+                        mapping_errors.append(f"{source_title}: property row {pidx + 1} is missing property column.")
 
             entity_preview = workbook_component_entities_preview(
                 workbook_path=workbook_path_value,
                 sheet_name=comp_sheet,
                 header_row=int(header_row),
                 first_data_row=int(first_data_row),
-                canonical_name_column=selected_name_col,
-                brand_column=selected_brand_col,
-                alias_columns_csv=csv_join(selected_alias_cols),
-                link_columns_csv=csv_join(selected_link_cols),
-                auto_derive_aliases=bool(auto_derive_aliases),
-                stop_after_blank_names=int(stop_after_blank_names),
+                primary_identifier_column=selected_name_col,
+                maker_column=selected_maker_col,
+                aliases_columns_csv=csv_join(selected_alias_cols),
+                links_columns_csv=csv_join(selected_link_cols),
+                property_mappings_json=json.dumps(selected_property_mappings, ensure_ascii=False, sort_keys=True),
+                auto_derive_aliases=bool(aliases_enabled and auto_derive_aliases),
+                stop_after_blank_primary=int(stop_after_blank_names),
             )
             if "error" in entity_preview:
                 st.error(str(entity_preview.get("error")))
@@ -1854,7 +2122,7 @@ def render_field_rules_studio(category: str, local_mode: bool):
             else:
                 preview_rows = entity_preview.get("preview_rows", []) if isinstance(entity_preview.get("preview_rows"), list) else []
                 name_preview_values = entity_preview.get("first_20_names", []) if isinstance(entity_preview.get("first_20_names"), list) else []
-                st.caption("Live Preview (first 20 rows): {name, brand, aliases[], links[]}")
+                st.caption("Live Preview (first 20 rows): {name, maker, aliases[], links[], properties{}}")
                 st.dataframe(preview_rows, hide_index=True, use_container_width=True, height=260)
                 sample_names = entity_preview.get("sample_names", []) if isinstance(entity_preview.get("sample_names"), list) else []
                 st.caption(
@@ -1863,9 +2131,9 @@ def render_field_rules_studio(category: str, local_mode: bool):
                 )
                 preview_errors = component_preview_errors(name_preview_values)
                 if float(entity_preview.get("numeric_only_ratio", 0.0) or 0.0) > 0.10:
-                    preview_errors.append("More than 10% of component names are numeric-only. Choose the Name/Model column, not the ID column.")
+                    preview_errors.append("More than 10% of Primary Identifier values are numeric-only. Choose the Name/Model column, not the ID column.")
                 if bool(entity_preview.get("first_20_all_numeric", False)):
-                    preview_errors.append("The first 20 component names are numeric-only. Choose the Name/Model column.")
+                    preview_errors.append("The first 20 Primary Identifier values are numeric-only. Choose the Name/Model column.")
                 for err in ordered_unique_text(preview_errors):
                     st.error(err)
                     mapping_errors.append(f"{source_title}: {err}")
@@ -1882,13 +2150,15 @@ def render_field_rules_studio(category: str, local_mode: bool):
                     "component_type": str(comp_type or "").strip(),
                     "header_row": int(header_row),
                     "first_data_row": int(first_data_row),
-                    "canonical_name_column": normalize_col(st.session_state.get(selected_name_col_key, selected_name_col), "A"),
-                    "brand_column": selected_brand_col,
-                    "alias_columns": selected_alias_cols,
-                    "link_columns": selected_link_cols,
-                    "property_columns": selected_property_cols,
-                    "auto_derive_aliases": bool(auto_derive_aliases),
-                    "stop_after_blank_names": int(stop_after_blank_names),
+                    "roles": {
+                        "primary_identifier": normalize_col(st.session_state.get(selected_name_col_key, selected_name_col), "A"),
+                        "maker": selected_maker_col,
+                        "aliases": selected_alias_cols,
+                        "links": selected_link_cols,
+                        "properties": selected_property_mappings,
+                    },
+                    "auto_derive_aliases": bool(aliases_enabled and auto_derive_aliases),
+                    "stop_after_blank_primary": int(stop_after_blank_names),
                 }
             )
 
@@ -1928,20 +2198,22 @@ def render_field_rules_studio(category: str, local_mode: bool):
                     "value_col_start": str(st.session_state.get(f"studio_value_col_start_{category}", product_map.get("value_col_start", "C") or "C")),
                     "sample_columns": 0,
                 },
-                "component_sheets": component_rows_out,
+                "component_sheets": [],
                 "component_sources": [
                     {
-                        "sheet": row.get("sheet"),
                         "type": row.get("component_type"),
+                        "sheet": row.get("sheet"),
                         "header_row": row.get("header_row"),
                         "first_data_row": row.get("first_data_row"),
-                        "canonical_name_column": row.get("canonical_name_column"),
-                        "brand_column": row.get("brand_column") or None,
-                        "alias_columns": row.get("alias_columns", []),
-                        "link_columns": row.get("link_columns", []),
-                        "property_columns": row.get("property_columns", []),
+                        "roles": {
+                            "primary_identifier": row.get("roles", {}).get("primary_identifier", "A"),
+                            "maker": row.get("roles", {}).get("maker", "") or "",
+                            "aliases": row.get("roles", {}).get("aliases", []),
+                            "links": row.get("roles", {}).get("links", []),
+                            "properties": row.get("roles", {}).get("properties", []),
+                        },
                         "auto_derive_aliases": bool(row.get("auto_derive_aliases", True)),
-                        "stop_after_blank_names": row.get("stop_after_blank_names", 10),
+                        "stop_after_blank_primary": row.get("stop_after_blank_primary", 10),
                     }
                     for row in component_rows_out
                     if str(row.get("sheet", "")).strip()
@@ -2000,12 +2272,21 @@ def render_field_rules_studio(category: str, local_mode: bool):
                 for ctype, meta in component_sources.items():
                     meta = meta if isinstance(meta, dict) else {}
                     excel_meta = meta.get("excel", {}) if isinstance(meta.get("excel"), dict) else {}
+                    roles_meta = meta.get("roles", {}) if isinstance(meta.get("roles"), dict) else {}
                     if not excel_meta:
                         excel_meta = {
                             "sheet": meta.get("sheet", ""),
-                            "canonical_name_column": meta.get("canonical_name_column", meta.get("name_column", "")),
+                            "primary_identifier_column": meta.get("primary_identifier_column", meta.get("canonical_name_column", meta.get("name_column", ""))),
                             "name_column": meta.get("name_column", ""),
                             "alias_columns": meta.get("alias_columns", []),
+                        }
+                    if not roles_meta:
+                        roles_meta = {
+                            "primary_identifier": excel_meta.get("primary_identifier_column", excel_meta.get("canonical_name_column", excel_meta.get("name_column", ""))),
+                            "maker": excel_meta.get("maker_column", excel_meta.get("brand_column", "")),
+                            "aliases": excel_meta.get("alias_columns", []),
+                            "links": excel_meta.get("link_columns", []),
+                            "properties": excel_meta.get("property_mappings", []),
                         }
                     sample_entities = meta.get("sample_entities", []) if isinstance(meta.get("sample_entities"), list) else []
                     entity_count = int(meta.get("entity_count", 0) or 0)
@@ -2020,8 +2301,11 @@ def render_field_rules_studio(category: str, local_mode: bool):
                         {
                             "type": ctype,
                             "sheet": str(excel_meta.get("sheet", "")),
-                            "name_col": str(excel_meta.get("canonical_name_column", "") or excel_meta.get("name_column", "")),
-                            "aliases": ", ".join(excel_meta.get("alias_columns", []) if isinstance(excel_meta.get("alias_columns"), list) else []),
+                            "primary_id_col": str(roles_meta.get("primary_identifier", "") or excel_meta.get("primary_identifier_column", "") or excel_meta.get("canonical_name_column", "") or excel_meta.get("name_column", "")),
+                            "maker_col": str(roles_meta.get("maker", "")),
+                            "aliases": ", ".join(roles_meta.get("aliases", []) if isinstance(roles_meta.get("aliases"), list) else []),
+                            "links": ", ".join(roles_meta.get("links", []) if isinstance(roles_meta.get("links"), list) else []),
+                            "properties": len(roles_meta.get("properties", []) if isinstance(roles_meta.get("properties"), list) else []),
                             "entity_count": entity_count,
                         }
                     )
@@ -2057,9 +2341,14 @@ def render_field_rules_studio(category: str, local_mode: bool):
     component_source_meta = generated_rules.get("component_db_sources", {}) if isinstance(generated_rules.get("component_db_sources"), dict) else {}
     component_types = sorted([str(k) for k in component_source_meta.keys() if str(k).strip()])
     if not component_types:
-        for row in workbook_map.get("component_sheets", []) if isinstance(workbook_map.get("component_sheets"), list) else []:
+        fallback_rows = workbook_map.get("component_sources", []) if isinstance(workbook_map.get("component_sources"), list) else []
+        if not fallback_rows:
+            fallback_rows = workbook_map.get("component_sheets", []) if isinstance(workbook_map.get("component_sheets"), list) else []
+        for row in fallback_rows:
             if isinstance(row, dict) and str(row.get("component_type", "")).strip():
                 component_types.append(str(row.get("component_type")).strip())
+            elif isinstance(row, dict) and str(row.get("type", "")).strip():
+                component_types.append(str(row.get("type")).strip())
         component_types = sorted(set(component_types))
 
     with tab_nav:
@@ -2220,7 +2509,7 @@ def render_field_rules_studio(category: str, local_mode: bool):
             if not excel_meta:
                 excel_meta = {
                     "sheet": meta.get("sheet", ""),
-                    "canonical_name_column": meta.get("canonical_name_column", meta.get("name_column", "")),
+                    "primary_identifier_column": meta.get("primary_identifier_column", meta.get("canonical_name_column", meta.get("name_column", ""))),
                 }
             sheet = str(excel_meta.get("sheet", "") or "")
             count = int(meta.get("entity_count", 0) or 0)
@@ -2858,16 +3147,16 @@ def render_field_rules_studio(category: str, local_mode: bool):
                 if not excel_meta:
                     excel_meta = {
                         "sheet": meta.get("sheet", ""),
-                        "canonical_name_column": meta.get("canonical_name_column", meta.get("name_column", "")),
+                        "primary_identifier_column": meta.get("primary_identifier_column", meta.get("canonical_name_column", meta.get("name_column", ""))),
                     }
                 if not excel_meta and ctype in component_rows_lookup:
                     fallback = component_rows_lookup.get(ctype, {})
                     excel_meta = {
                         "sheet": fallback.get("sheet", ""),
-                        "canonical_name_column": fallback.get("canonical_name_column", ""),
+                        "primary_identifier_column": fallback.get("roles", {}).get("primary_identifier", fallback.get("canonical_name_column", "")) if isinstance(fallback.get("roles", {}), dict) else fallback.get("canonical_name_column", ""),
                     }
                 source_sheet = str(excel_meta.get("sheet", "") or "")
-                name_col = str(excel_meta.get("canonical_name_column", "") or excel_meta.get("name_column", "") or "")
+                name_col = str(excel_meta.get("primary_identifier_column", "") or excel_meta.get("canonical_name_column", "") or excel_meta.get("name_column", "") or "")
                 sample_entities = meta.get("sample_entities", []) if isinstance(meta.get("sample_entities"), list) else []
                 entity_count = int(meta.get("entity_count", 0) or 0)
                 fallback = component_db_fallback(ctype)

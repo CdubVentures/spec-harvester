@@ -1,751 +1,717 @@
 {
   "category": "mouse",
   "component_type": "switch",
-  "generated_at": "2026-02-12T08:00:26.336Z",
+  "generated_at": "2026-02-12T09:37:15.231Z",
   "items": [
     {
-      "aliases": [],
-      "brand": "asus",
-      "links": [],
-      "name": "ROG Micro Switch",
-      "properties": {}
+      "aliases": [
+        "ROGMicroSwitch"
+      ],
+      "maker": "asus",
+      "name": "ROG Micro Switch"
     },
     {
-      "aliases": [],
-      "brand": "asus",
-      "links": [],
-      "name": "ROG Micro Switch II",
-      "properties": {}
+      "aliases": [
+        "ROGMicroSwitchII"
+      ],
+      "maker": "asus",
+      "name": "ROG Micro Switch II"
     },
     {
-      "aliases": [],
-      "brand": "atk",
-      "links": [],
-      "name": "Light Blade",
-      "properties": {}
+      "aliases": [
+        "LightBlade"
+      ],
+      "maker": "atk",
+      "name": "Light Blade"
     },
     {
-      "aliases": [],
-      "brand": "atk",
-      "links": [],
-      "name": "Optical Switches",
-      "properties": {}
+      "aliases": [
+        "OpticalSwitches"
+      ],
+      "maker": "atk",
+      "name": "Optical Switches"
     },
     {
-      "aliases": [],
-      "brand": "atk",
-      "links": [],
-      "name": "SwiftLight",
-      "properties": {}
+      "maker": "atk",
+      "name": "SwiftLight"
     },
     {
-      "aliases": [],
-      "brand": "chilkey",
-      "links": [],
-      "name": "Blue Ghost Optical",
-      "properties": {}
+      "aliases": [
+        "BlueGhostOptical"
+      ],
+      "maker": "chilkey",
+      "name": "Blue Ghost Optical"
     },
     {
-      "aliases": [],
-      "brand": "chilkey",
-      "links": [],
-      "name": "Fog Blue Optical",
-      "properties": {}
+      "aliases": [
+        "FogBlueOptical"
+      ],
+      "maker": "chilkey",
+      "name": "Fog Blue Optical"
     },
     {
-      "aliases": [],
-      "brand": "fe",
-      "links": [],
-      "name": "Advanced Optical Switch",
-      "properties": {}
+      "aliases": [
+        "AdvancedOpticalSwitch"
+      ],
+      "maker": "fe",
+      "name": "Advanced Optical Switch"
     },
     {
-      "aliases": [],
-      "brand": "fraly",
-      "links": [],
-      "name": "Black Shell White Dot",
-      "properties": {}
+      "aliases": [
+        "BlackShellWhiteDot"
+      ],
+      "maker": "fraly",
+      "name": "Black Shell White Dot"
     },
     {
-      "aliases": [],
-      "brand": "glorious",
-      "links": [],
-      "name": "Mouse Switches",
-      "properties": {}
+      "aliases": [
+        "MouseSwitches"
+      ],
+      "maker": "glorious",
+      "name": "Mouse Switches"
     },
     {
-      "aliases": [],
-      "brand": "hator",
-      "links": [],
-      "name": "Optical",
-      "properties": {}
+      "maker": "hator",
+      "name": "Optical"
     },
     {
-      "aliases": [],
-      "brand": "huano",
-      "links": [],
-      "name": "Black Shell Pink Dot",
-      "properties": {}
+      "aliases": [
+        "BlackShellPinkDot"
+      ],
+      "maker": "huano",
+      "name": "Black Shell Pink Dot"
     },
     {
-      "aliases": [],
-      "brand": "huano",
-      "links": [],
-      "name": "Black Shell White Dot",
-      "properties": {}
+      "aliases": [
+        "BlackShellWhiteDot"
+      ],
+      "maker": "huano",
+      "name": "Black Shell White Dot"
     },
     {
-      "aliases": [],
-      "brand": "huano",
-      "links": [],
-      "name": "Blue Shell Blue Dot",
-      "properties": {}
+      "aliases": [
+        "BlueShellBlueDot"
+      ],
+      "maker": "huano",
+      "name": "Blue Shell Blue Dot"
     },
     {
-      "aliases": [],
-      "brand": "huano",
-      "links": [],
-      "name": "Blue Shell Pink Dot",
-      "properties": {}
+      "aliases": [
+        "BlueShellPinkDot"
+      ],
+      "maker": "huano",
+      "name": "Blue Shell Pink Dot"
     },
     {
-      "aliases": [],
-      "brand": "huano",
-      "links": [],
-      "name": "Blue Shell White Dot",
-      "properties": {}
+      "aliases": [
+        "BlueShellWhiteDot"
+      ],
+      "maker": "huano",
+      "name": "Blue Shell White Dot"
     },
     {
-      "aliases": [],
-      "brand": "huano",
-      "links": [],
-      "name": "Crispy Pink",
-      "properties": {}
+      "aliases": [
+        "CrispyPink"
+      ],
+      "maker": "huano",
+      "name": "Crispy Pink"
     },
     {
-      "aliases": [],
-      "brand": "huano",
-      "links": [],
-      "name": "Dragon Claw",
-      "properties": {}
+      "aliases": [
+        "DragonClaw"
+      ],
+      "maker": "huano",
+      "name": "Dragon Claw"
     },
     {
-      "aliases": [],
-      "brand": "huano",
-      "links": [],
-      "name": "Orange SPDT",
-      "properties": {}
+      "aliases": [
+        "OrangeSPDT"
+      ],
+      "maker": "huano",
+      "name": "Orange SPDT"
     },
     {
-      "aliases": [],
-      "brand": "huano",
-      "links": [],
-      "name": "Silent Brown Shell White Dot",
-      "properties": {}
+      "aliases": [
+        "SilentBrownShellWhiteDot"
+      ],
+      "maker": "huano",
+      "name": "Silent Brown Shell White Dot"
     },
     {
-      "aliases": [],
-      "brand": "huano",
-      "links": [],
-      "name": "Silent Brown Shell Yellow Dot",
-      "properties": {}
+      "aliases": [
+        "SilentBrownShellYellowDot"
+      ],
+      "maker": "huano",
+      "name": "Silent Brown Shell Yellow Dot"
     },
     {
-      "aliases": [],
-      "brand": "huano",
-      "links": [],
-      "name": "Transparent Blue Shell Blue Dot",
-      "properties": {}
+      "aliases": [
+        "TransparentBlueShellBlueDot"
+      ],
+      "maker": "huano",
+      "name": "Transparent Blue Shell Blue Dot"
     },
     {
-      "aliases": [],
-      "brand": "huano",
-      "links": [],
-      "name": "Transparent Blue Shell Pink Dot",
-      "properties": {}
+      "aliases": [
+        "TransparentBlueShellPinkDot"
+      ],
+      "maker": "huano",
+      "name": "Transparent Blue Shell Pink Dot"
     },
     {
-      "aliases": [],
-      "brand": "huano",
-      "links": [],
-      "name": "Transparent Blue Shell Red Dot",
-      "properties": {}
+      "aliases": [
+        "TransparentBlueShellRedDot"
+      ],
+      "maker": "huano",
+      "name": "Transparent Blue Shell Red Dot"
     },
     {
-      "aliases": [],
-      "brand": "huano",
-      "links": [],
-      "name": "Transparent Blue Shell Yellow Dot",
-      "properties": {}
+      "aliases": [
+        "TransparentBlueShellYellowDot"
+      ],
+      "maker": "huano",
+      "name": "Transparent Blue Shell Yellow Dot"
     },
     {
-      "aliases": [],
-      "brand": "huano",
-      "links": [],
-      "name": "Transparent Green Shell White Dot",
-      "properties": {}
+      "aliases": [
+        "TransparentGreenShellWhiteDot"
+      ],
+      "maker": "huano",
+      "name": "Transparent Green Shell White Dot"
     },
     {
-      "aliases": [],
-      "brand": "huano",
-      "links": [],
-      "name": "Transparent Pink Shell Pink Dot",
-      "properties": {}
+      "aliases": [
+        "TransparentPinkShellPinkDot"
+      ],
+      "maker": "huano",
+      "name": "Transparent Pink Shell Pink Dot"
     },
     {
-      "aliases": [],
-      "brand": "huano",
-      "links": [],
-      "name": "Transparent Purple Shell White Dot",
-      "properties": {}
+      "aliases": [
+        "TransparentPurpleShellWhiteDot"
+      ],
+      "maker": "huano",
+      "name": "Transparent Purple Shell White Dot"
     },
     {
-      "aliases": [],
-      "brand": "huano",
-      "links": [],
-      "name": "Transparent Yellow Shell White Dot",
-      "properties": {}
+      "aliases": [
+        "TransparentYellowShellWhiteDot"
+      ],
+      "maker": "huano",
+      "name": "Transparent Yellow Shell White Dot"
     },
     {
-      "aliases": [],
-      "brand": "hyperx",
-      "links": [],
-      "name": "Optical Switches",
-      "properties": {}
+      "aliases": [
+        "OpticalSwitches"
+      ],
+      "maker": "hyperx",
+      "name": "Optical Switches"
     },
     {
-      "aliases": [],
-      "brand": "hyperx",
-      "links": [],
-      "name": "Switches",
-      "properties": {}
+      "maker": "hyperx",
+      "name": "Switches"
     },
     {
-      "aliases": [],
-      "brand": "incott",
-      "links": [],
-      "name": "Purple",
-      "properties": {}
+      "maker": "incott",
+      "name": "Purple"
     },
     {
-      "aliases": [],
-      "brand": "kailh",
-      "links": [],
-      "name": "Black Shell Blue Dot",
-      "properties": {}
+      "aliases": [
+        "BlackShellBlueDot"
+      ],
+      "maker": "kailh",
+      "name": "Black Shell Blue Dot"
     },
     {
-      "aliases": [],
-      "brand": "kailh",
-      "links": [],
-      "name": "Black Shell Red Dot",
-      "properties": {}
+      "aliases": [
+        "BlackShellRedDot"
+      ],
+      "maker": "kailh",
+      "name": "Black Shell Red Dot"
     },
     {
-      "aliases": [],
-      "brand": "kailh",
-      "links": [],
-      "name": "GM 8.0",
-      "properties": {}
+      "aliases": [
+        "GM 8 0",
+        "GM80"
+      ],
+      "maker": "kailh",
+      "name": "GM 8.0"
     },
     {
-      "aliases": [],
-      "brand": "kailh",
-      "links": [],
-      "name": "GM 8.0 Blue",
-      "properties": {}
+      "aliases": [
+        "GM 8 0 Blue",
+        "GM80Blue"
+      ],
+      "maker": "kailh",
+      "name": "GM 8.0 Blue"
     },
     {
-      "aliases": [],
-      "brand": "kailh",
-      "links": [],
-      "name": "GO",
-      "properties": {}
+      "maker": "kailh",
+      "name": "GO"
     },
     {
-      "aliases": [],
-      "brand": "kailh",
-      "links": [],
-      "name": "GX",
-      "properties": {}
+      "maker": "kailh",
+      "name": "GX"
     },
     {
-      "aliases": [],
-      "brand": "kailh",
-      "links": [],
-      "name": "Optical",
-      "properties": {}
+      "maker": "kailh",
+      "name": "Optical"
     },
     {
-      "aliases": [],
-      "brand": "kailh",
-      "links": [],
-      "name": "Optical V2",
-      "properties": {}
+      "aliases": [
+        "OpticalV2"
+      ],
+      "maker": "kailh",
+      "name": "Optical V2"
     },
     {
-      "aliases": [],
-      "brand": "kailh",
-      "links": [],
-      "name": "Sword GM X",
-      "properties": {}
+      "aliases": [
+        "SwordGMX"
+      ],
+      "maker": "kailh",
+      "name": "Sword GM X"
     },
     {
-      "aliases": [],
-      "brand": "logitech",
-      "links": [],
-      "name": "SUPERSTRIKE",
-      "properties": {}
+      "maker": "logitech",
+      "name": "SUPERSTRIKE"
     },
     {
-      "aliases": [],
-      "brand": "ninjutso",
-      "links": [],
-      "name": "HyperSwitch",
-      "properties": {}
+      "maker": "ninjutso",
+      "name": "HyperSwitch"
     },
     {
-      "aliases": [],
-      "brand": "omron",
-      "links": [],
-      "name": "D2F -01F",
-      "properties": {}
+      "aliases": [
+        "D2F 01F",
+        "D2F01F"
+      ],
+      "maker": "omron",
+      "name": "D2F -01F"
     },
     {
-      "aliases": [],
-      "brand": "omron",
-      "links": [],
-      "name": "D2F -F",
-      "properties": {}
+      "aliases": [
+        "D2F F",
+        "D2FF"
+      ],
+      "maker": "omron",
+      "name": "D2F -F"
     },
     {
-      "aliases": [],
-      "brand": "omron",
-      "links": [],
-      "name": "D2FC -F-7N(100M)",
-      "properties": {}
+      "aliases": [
+        "D2FC F 7N 100M",
+        "D2FCF7N100M"
+      ],
+      "maker": "omron",
+      "name": "D2FC -F-7N(100M)"
     },
     {
-      "aliases": [],
-      "brand": "omron",
-      "links": [],
-      "name": "D2FC -F-7N(10M)",
-      "properties": {}
+      "aliases": [
+        "D2FC F 7N 10M",
+        "D2FCF7N10M"
+      ],
+      "maker": "omron",
+      "name": "D2FC -F-7N(10M)"
     },
     {
-      "aliases": [],
-      "brand": "omron",
+      "aliases": [
+        "D2FC F 7N 20M",
+        "D2FCF7N20M"
+      ],
       "links": [
         "https://www.mouser.com/ProductDetail/Omron-Electronics/D2FC-F-7N20M?qs=17ckDYBRdek0%2FvhX1fLcuQ%3D%3D"
       ],
-      "name": "D2FC -F-7N(20M)",
-      "properties": {}
+      "maker": "omron",
+      "name": "D2FC -F-7N(20M)"
     },
     {
-      "aliases": [],
-      "brand": "omron",
-      "links": [],
-      "name": "D2FC -F-7N(G)",
-      "properties": {}
+      "aliases": [
+        "D2FC F 7N G",
+        "D2FCF7NG"
+      ],
+      "maker": "omron",
+      "name": "D2FC -F-7N(G)"
     },
     {
-      "aliases": [],
-      "brand": "omron",
-      "links": [],
-      "name": "D2FC -F-7N(G1)",
-      "properties": {}
+      "aliases": [
+        "D2FC F 7N G1",
+        "D2FCF7NG1"
+      ],
+      "maker": "omron",
+      "name": "D2FC -F-7N(G1)"
     },
     {
-      "aliases": [],
-      "brand": "omron",
-      "links": [],
-      "name": "D2LS-21 (20M)",
-      "properties": {}
+      "aliases": [
+        "D2LS 21 20M",
+        "D2LS2120M"
+      ],
+      "maker": "omron",
+      "name": "D2LS-21 (20M)"
     },
     {
-      "aliases": [],
-      "brand": "omron",
-      "links": [],
-      "name": "Optical",
-      "properties": {}
+      "maker": "omron",
+      "name": "Optical"
     },
     {
-      "aliases": [],
-      "brand": "pulsar",
-      "links": [],
-      "name": "Optical Switch",
-      "properties": {}
+      "aliases": [
+        "OpticalSwitch"
+      ],
+      "maker": "pulsar",
+      "name": "Optical Switch"
     },
     {
-      "aliases": [],
-      "brand": "raesha",
-      "links": [],
-      "name": "Optical",
-      "properties": {}
+      "maker": "raesha",
+      "name": "Optical"
     },
     {
-      "aliases": [],
-      "brand": "raesha",
-      "links": [],
-      "name": "Optical",
-      "properties": {}
+      "maker": "raesha",
+      "name": "Optical"
     },
     {
-      "aliases": [],
-      "brand": "rapoo",
-      "links": [],
-      "name": "Optical",
-      "properties": {}
+      "maker": "rapoo",
+      "name": "Optical"
     },
     {
-      "aliases": [],
-      "brand": "razer",
-      "links": [],
-      "name": "Mechanical Mouse Switches",
-      "properties": {}
+      "aliases": [
+        "MechanicalMouseSwitches"
+      ],
+      "maker": "razer",
+      "name": "Mechanical Mouse Switches"
     },
     {
-      "aliases": [],
-      "brand": "razer",
-      "links": [],
-      "name": "Mechanical Mouse Switches Gen-2",
-      "properties": {}
+      "aliases": [
+        "Mechanical Mouse Switches Gen 2",
+        "MechanicalMouseSwitchesGen2"
+      ],
+      "maker": "razer",
+      "name": "Mechanical Mouse Switches Gen-2"
     },
     {
-      "aliases": [],
-      "brand": "razer",
-      "links": [],
-      "name": "Optical Mouse Switches",
-      "properties": {}
+      "aliases": [
+        "OpticalMouseSwitches"
+      ],
+      "maker": "razer",
+      "name": "Optical Mouse Switches"
     },
     {
-      "aliases": [],
-      "brand": "razer",
-      "links": [],
-      "name": "Optical Mouse Switches Gen-2",
-      "properties": {}
+      "aliases": [
+        "Optical Mouse Switches Gen 2",
+        "OpticalMouseSwitchesGen2"
+      ],
+      "maker": "razer",
+      "name": "Optical Mouse Switches Gen-2"
     },
     {
-      "aliases": [],
-      "brand": "razer",
-      "links": [],
-      "name": "Optical Mouse Switches Gen-3",
-      "properties": {}
+      "aliases": [
+        "Optical Mouse Switches Gen 3",
+        "OpticalMouseSwitchesGen3"
+      ],
+      "maker": "razer",
+      "name": "Optical Mouse Switches Gen-3"
     },
     {
-      "aliases": [],
-      "brand": "razer",
-      "links": [],
-      "name": "Optical Mouse Switches Gen-4",
-      "properties": {}
+      "aliases": [
+        "Optical Mouse Switches Gen 4",
+        "OpticalMouseSwitchesGen4"
+      ],
+      "maker": "razer",
+      "name": "Optical Mouse Switches Gen-4"
     },
     {
-      "aliases": [],
-      "brand": "roccat",
-      "links": [],
-      "name": "TITAN Optical Switch",
-      "properties": {}
+      "aliases": [
+        "TITANOpticalSwitch"
+      ],
+      "maker": "roccat",
+      "name": "TITAN Optical Switch"
     },
     {
-      "aliases": [],
-      "brand": "steelseries",
-      "links": [],
-      "name": "Black Shell Orange Dot 10M",
-      "properties": {}
+      "aliases": [
+        "BlackShellOrangeDot10M"
+      ],
+      "maker": "steelseries",
+      "name": "Black Shell Orange Dot 10M"
     },
     {
-      "aliases": [],
-      "brand": "steelseries",
-      "links": [],
-      "name": "Black Shell Orange Dot 30M",
-      "properties": {}
+      "aliases": [
+        "BlackShellOrangeDot30M"
+      ],
+      "maker": "steelseries",
+      "name": "Black Shell Orange Dot 30M"
     },
     {
-      "aliases": [],
-      "brand": "steelseries",
-      "links": [],
-      "name": "Prestige OM",
-      "properties": {}
+      "aliases": [
+        "PrestigeOM"
+      ],
+      "maker": "steelseries",
+      "name": "Prestige OM"
     },
     {
-      "aliases": [],
-      "brand": "ttc",
-      "links": [],
-      "name": "Azure Dragon",
-      "properties": {}
+      "aliases": [
+        "AzureDragon"
+      ],
+      "maker": "ttc",
+      "name": "Azure Dragon"
     },
     {
-      "aliases": [],
-      "brand": "ttc",
-      "links": [],
-      "name": "Black Shell White Dot",
-      "properties": {}
+      "aliases": [
+        "BlackShellWhiteDot"
+      ],
+      "maker": "ttc",
+      "name": "Black Shell White Dot"
     },
     {
-      "aliases": [],
-      "brand": "ttc",
-      "links": [],
-      "name": "Dustproof Gold 100M",
-      "properties": {}
+      "aliases": [
+        "DustproofGold100M"
+      ],
+      "maker": "ttc",
+      "name": "Dustproof Gold 100M"
     },
     {
-      "aliases": [],
-      "brand": "ttc",
-      "links": [],
-      "name": "Dustproof Gold 20M",
-      "properties": {}
+      "aliases": [
+        "DustproofGold20M"
+      ],
+      "maker": "ttc",
+      "name": "Dustproof Gold 20M"
     },
     {
-      "aliases": [],
-      "brand": "ttc",
-      "links": [],
-      "name": "Dustproof Gold 60M",
-      "properties": {}
+      "aliases": [
+        "DustproofGold60M"
+      ],
+      "maker": "ttc",
+      "name": "Dustproof Gold 60M"
     },
     {
-      "aliases": [],
-      "brand": "ttc",
-      "links": [],
-      "name": "Dustproof Gold 80M",
-      "properties": {}
+      "aliases": [
+        "DustproofGold80M"
+      ],
+      "maker": "ttc",
+      "name": "Dustproof Gold 80M"
     },
     {
-      "aliases": [],
-      "brand": "ttc",
-      "links": [],
-      "name": "Falcon Transparent Blue Shell White Dot",
-      "properties": {}
+      "aliases": [
+        "FalconTransparentBlueShellWhiteDot"
+      ],
+      "maker": "ttc",
+      "name": "Falcon Transparent Blue Shell White Dot"
     },
     {
-      "aliases": [],
-      "brand": "ttc",
-      "links": [],
-      "name": "Nihil Transparent Black Dot",
-      "properties": {}
+      "aliases": [
+        "NihilTransparentBlackDot"
+      ],
+      "maker": "ttc",
+      "name": "Nihil Transparent Black Dot"
     },
     {
-      "aliases": [],
-      "brand": "ttc",
-      "links": [],
-      "name": "Optical V2",
-      "properties": {}
+      "aliases": [
+        "OpticalV2"
+      ],
+      "maker": "ttc",
+      "name": "Optical V2"
     },
     {
-      "aliases": [],
-      "brand": "ttc",
-      "links": [],
-      "name": "Orange Dot Optical V2",
-      "properties": {}
+      "aliases": [
+        "OrangeDotOpticalV2"
+      ],
+      "maker": "ttc",
+      "name": "Orange Dot Optical V2"
     },
     {
-      "aliases": [],
-      "brand": "ttc",
-      "links": [],
-      "name": "Silver",
-      "properties": {}
+      "maker": "ttc",
+      "name": "Silver"
     },
     {
-      "aliases": [],
-      "brand": "turtle-beach",
-      "links": [],
-      "name": "TITAN Optical Switch",
-      "properties": {}
+      "aliases": [
+        "TITANOpticalSwitch"
+      ],
+      "maker": "turtle-beach",
+      "name": "TITAN Optical Switch"
     },
     {
-      "aliases": [],
-      "brand": "unk",
-      "links": [],
-      "name": "Mechanical Switches",
-      "properties": {}
+      "aliases": [
+        "MechanicalSwitches"
+      ],
+      "maker": "unk",
+      "name": "Mechanical Switches"
     },
     {
-      "aliases": [],
-      "brand": "unk",
-      "links": [],
-      "name": "Mechanical Switches",
-      "properties": {}
+      "aliases": [
+        "MechanicalSwitches"
+      ],
+      "maker": "unk",
+      "name": "Mechanical Switches"
     },
     {
-      "aliases": [],
-      "brand": "unk",
-      "links": [],
-      "name": "Mechanical Switches",
-      "properties": {}
+      "aliases": [
+        "MechanicalSwitches"
+      ],
+      "maker": "unk",
+      "name": "Mechanical Switches"
     },
     {
-      "aliases": [],
-      "brand": "unk",
-      "links": [],
-      "name": "Mechanical Switches",
-      "properties": {}
+      "aliases": [
+        "MechanicalSwitches"
+      ],
+      "maker": "unk",
+      "name": "Mechanical Switches"
     },
     {
-      "aliases": [],
-      "brand": "unk",
-      "links": [],
-      "name": "Mechanical Switches",
-      "properties": {}
+      "aliases": [
+        "MechanicalSwitches"
+      ],
+      "maker": "unk",
+      "name": "Mechanical Switches"
     },
     {
-      "aliases": [],
-      "brand": "unk",
-      "links": [],
-      "name": "Mechanical Switches",
-      "properties": {}
+      "aliases": [
+        "MechanicalSwitches"
+      ],
+      "maker": "unk",
+      "name": "Mechanical Switches"
     },
     {
-      "aliases": [],
-      "brand": "unk",
-      "links": [],
-      "name": "Mechanical Switches",
-      "properties": {}
+      "aliases": [
+        "MechanicalSwitches"
+      ],
+      "maker": "unk",
+      "name": "Mechanical Switches"
     },
     {
-      "aliases": [],
-      "brand": "unk",
-      "links": [],
-      "name": "Optical Switches",
-      "properties": {}
+      "aliases": [
+        "OpticalSwitches"
+      ],
+      "maker": "unk",
+      "name": "Optical Switches"
     },
     {
-      "aliases": [],
-      "brand": "unk",
-      "links": [],
-      "name": "Optical Switches",
-      "properties": {}
+      "aliases": [
+        "OpticalSwitches"
+      ],
+      "maker": "unk",
+      "name": "Optical Switches"
     },
     {
-      "aliases": [],
-      "brand": "unk",
-      "links": [],
-      "name": "Optical Switches",
-      "properties": {}
+      "aliases": [
+        "OpticalSwitches"
+      ],
+      "maker": "unk",
+      "name": "Optical Switches"
     },
     {
-      "aliases": [],
-      "brand": "unk",
-      "links": [],
-      "name": "Silent",
-      "properties": {}
+      "maker": "unk",
+      "name": "Silent"
     },
     {
-      "aliases": [],
-      "brand": "vgn",
-      "links": [],
-      "name": "Optical",
-      "properties": {}
+      "maker": "vgn",
+      "name": "Optical"
     },
     {
-      "aliases": [],
-      "brand": "zippy",
-      "links": [],
-      "name": "DF3-P1L1",
-      "properties": {}
+      "aliases": [
+        "DF3 P1L1",
+        "DF3P1L1"
+      ],
+      "maker": "zippy",
+      "name": "DF3-P1L1"
     },
     {
-      "aliases": [],
-      "brand": "omron",
-      "links": [],
-      "name": "D2FC -F-K(60M)",
-      "properties": {}
+      "aliases": [
+        "D2FC F K 60M",
+        "D2FCFK60M"
+      ],
+      "maker": "omron",
+      "name": "D2FC -F-K(60M)"
     },
     {
-      "aliases": [],
-      "brand": "kailh",
-      "links": [],
-      "name": "GM 4.0",
-      "properties": {}
+      "aliases": [
+        "GM 4 0",
+        "GM40"
+      ],
+      "maker": "kailh",
+      "name": "GM 4.0"
     },
     {
-      "aliases": [],
-      "brand": "omron",
-      "links": [],
-      "name": "D2FC -F-7N",
-      "properties": {}
+      "aliases": [
+        "D2FC F 7N",
+        "D2FCF7N"
+      ],
+      "maker": "omron",
+      "name": "D2FC -F-7N"
     },
     {
-      "aliases": [],
-      "brand": "lk",
-      "links": [],
-      "name": "Optical",
-      "properties": {}
+      "maker": "lk",
+      "name": "Optical"
     },
     {
-      "aliases": [],
-      "brand": "ttc",
-      "links": [],
-      "name": "Optical",
-      "properties": {}
+      "maker": "ttc",
+      "name": "Optical"
     },
     {
-      "aliases": [],
-      "brand": "omron",
-      "links": [],
-      "name": "D2FC -F-7N",
-      "properties": {}
+      "aliases": [
+        "D2FC F 7N",
+        "D2FCF7N"
+      ],
+      "maker": "omron",
+      "name": "D2FC -F-7N"
     },
     {
-      "aliases": [],
-      "brand": "omron",
-      "links": [],
-      "name": "D2FC -F-K(50M)",
-      "properties": {}
+      "aliases": [
+        "D2FC F K 50M",
+        "D2FCFK50M"
+      ],
+      "maker": "omron",
+      "name": "D2FC -F-K(50M)"
     },
     {
-      "aliases": [],
-      "brand": "omron",
-      "links": [],
-      "name": "D2FC -F-7N(60M)",
-      "properties": {}
+      "aliases": [
+        "D2FC F 7N 60M",
+        "D2FCF7N60M"
+      ],
+      "maker": "omron",
+      "name": "D2FC -F-7N(60M)"
     },
     {
-      "aliases": [],
-      "brand": "huano",
-      "links": [],
-      "name": "Black Shell Blue Dot",
-      "properties": {}
+      "aliases": [
+        "BlackShellBlueDot"
+      ],
+      "maker": "huano",
+      "name": "Black Shell Blue Dot"
     },
     {
-      "aliases": [],
-      "brand": "huano",
-      "links": [],
-      "name": "Transparent Crystal Shell White Dot",
-      "properties": {}
+      "aliases": [
+        "TransparentCrystalShellWhiteDot"
+      ],
+      "maker": "huano",
+      "name": "Transparent Crystal Shell White Dot"
     },
     {
-      "aliases": [],
-      "brand": "asus",
-      "links": [],
-      "name": "ROG Optical Micro Switches",
-      "properties": {}
+      "aliases": [
+        "ROGOpticalMicroSwitches"
+      ],
+      "maker": "asus",
+      "name": "ROG Optical Micro Switches"
     },
     {
-      "aliases": [],
-      "brand": "logitech",
-      "links": [],
-      "name": "LIGHTFORCE",
-      "properties": {}
+      "maker": "logitech",
+      "name": "LIGHTFORCE"
     },
     {
-      "aliases": [],
-      "brand": "omron",
-      "links": [],
-      "name": "D2FC-F-K",
-      "properties": {}
+      "aliases": [
+        "D2FC F K",
+        "D2FCFK"
+      ],
+      "maker": "omron",
+      "name": "D2FC-F-K"
     },
     {
-      "aliases": [],
-      "brand": "lk",
-      "links": [],
-      "name": "Optical v2",
-      "properties": {}
+      "aliases": [
+        "Opticalv2"
+      ],
+      "maker": "lk",
+      "name": "Optical v2"
     },
     {
-      "aliases": [],
-      "brand": "ttc",
-      "links": [],
-      "name": "Optical Microswitch",
-      "properties": {}
+      "aliases": [
+        "OpticalMicroswitch"
+      ],
+      "maker": "ttc",
+      "name": "Optical Microswitch"
     }
   ],
   "version": 1

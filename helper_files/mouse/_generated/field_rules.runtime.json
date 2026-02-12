@@ -1,6 +1,6 @@
 {
   "version": "field_rules_mouse_B9_B83_v2_FULL",
-  "generated_at": "2026-02-12T08:00:26.336Z",
+  "generated_at": "2026-02-12T09:37:15.231Z",
   "category": "mouse",
   "source_workbook": "mouseData.xlsm",
   "key_range": "dataEntry!B9:B83",
@@ -666,24 +666,35 @@
   },
   "component_db_sources": {
     "sensor": {
+      "type": "sensor",
+      "sheet": "sensors",
+      "roles": {
+        "primary_identifier": "C",
+        "maker": "B",
+        "aliases": [],
+        "links": [
+          "J"
+        ],
+        "properties": []
+      },
+      "name_column": "C",
       "excel": {
         "sheet": "sensors",
         "header_row": 1,
-        "canonical_name_column": "C",
-        "brand_column": "B",
+        "first_data_row": 2,
+        "primary_identifier_column": "C",
+        "alias_columns": [],
+        "auto_derive_aliases": true,
+        "maker_column": "B",
         "link_columns": [
           "J"
         ],
-        "alias_columns": [],
-        "property_columns": [
-          "D",
-          "E",
-          "F",
-          "G",
-          "H",
-          "I"
-        ]
+        "property_columns": [],
+        "property_mappings": [],
+        "stop_after_blank_primary": 10,
+        "stop_after_blank_names": 10
       },
+      "entity_count": 116,
       "sample_entities": [
         "Focus Pro 45K",
         "HERO 2",
@@ -695,25 +706,70 @@
         "MARKSMAN S",
         "XS-1",
         "BAMF 3.0"
-      ]
+      ],
+      "preview_stats": {
+        "scanned_rows": 124,
+        "entity_count": 116,
+        "non_blank_names": 116,
+        "numeric_only_names": 3,
+        "numeric_only_ratio": 0.025862,
+        "first_20_names": [
+          "Focus Pro 45K",
+          "HERO 2",
+          "PAW3950 Ti",
+          "PAW3950 Max",
+          "AimPoint Pro (PixArt PAW3950)",
+          "XERO",
+          "Focus Pro Gen-2",
+          "MARKSMAN S",
+          "XS-1",
+          "BAMF 3.0",
+          "Owl-Eye 30K",
+          "3950IZ",
+          "AimNinja",
+          "G3950",
+          "Focus Pro 30K",
+          "PAW3950 HS",
+          "PAW3950 Pro",
+          "PAW3950 Ultra",
+          "PAW3950",
+          "PAW3950 APEX"
+        ],
+        "first_20_all_numeric": false,
+        "stop_after_blank_primary": 10,
+        "stop_after_blank_names": 10
+      }
     },
     "switch": {
+      "type": "switch",
+      "sheet": "switches",
+      "roles": {
+        "primary_identifier": "C",
+        "maker": "B",
+        "aliases": [],
+        "links": [
+          "H"
+        ],
+        "properties": []
+      },
+      "name_column": "C",
       "excel": {
         "sheet": "switches",
         "header_row": 1,
-        "canonical_name_column": "C",
-        "brand_column": "B",
+        "first_data_row": 2,
+        "primary_identifier_column": "C",
+        "alias_columns": [],
+        "auto_derive_aliases": true,
+        "maker_column": "B",
         "link_columns": [
           "H"
         ],
-        "alias_columns": [],
-        "property_columns": [
-          "D",
-          "E",
-          "F",
-          "G"
-        ]
+        "property_columns": [],
+        "property_mappings": [],
+        "stop_after_blank_primary": 10,
+        "stop_after_blank_names": 10
       },
+      "entity_count": 106,
       "sample_entities": [
         "ROG Micro Switch",
         "ROG Micro Switch II",
@@ -725,37 +781,161 @@
         "Advanced Optical Switch",
         "Black Shell White Dot",
         "Mouse Switches"
-      ]
+      ],
+      "preview_stats": {
+        "scanned_rows": 114,
+        "entity_count": 106,
+        "non_blank_names": 106,
+        "numeric_only_names": 0,
+        "numeric_only_ratio": 0,
+        "first_20_names": [
+          "ROG Micro Switch",
+          "ROG Micro Switch II",
+          "Light Blade",
+          "Optical Switches",
+          "SwiftLight",
+          "Blue Ghost Optical",
+          "Fog Blue Optical",
+          "Advanced Optical Switch",
+          "Black Shell White Dot",
+          "Mouse Switches",
+          "Optical",
+          "Black Shell Pink Dot",
+          "Black Shell White Dot",
+          "Blue Shell Blue Dot",
+          "Blue Shell Pink Dot",
+          "Blue Shell White Dot",
+          "Crispy Pink",
+          "Dragon Claw",
+          "Orange SPDT",
+          "Silent Brown Shell White Dot"
+        ],
+        "first_20_all_numeric": false,
+        "stop_after_blank_primary": 10,
+        "stop_after_blank_names": 10
+      }
     },
     "encoder": {
-      "sheet": "encoder",
       "type": "encoder",
-      "header_row": 1,
-      "name_column": "A",
-      "brand_column": "B",
-      "link_columns": [
-        "C"
+      "sheet": "encoder",
+      "roles": {
+        "primary_identifier": "C",
+        "maker": "B",
+        "aliases": [],
+        "links": [
+          "G"
+        ],
+        "properties": []
+      },
+      "name_column": "C",
+      "excel": {
+        "sheet": "encoder",
+        "header_row": 1,
+        "first_data_row": 2,
+        "primary_identifier_column": "C",
+        "alias_columns": [],
+        "auto_derive_aliases": true,
+        "maker_column": "B",
+        "link_columns": [
+          "G"
+        ],
+        "property_columns": [],
+        "property_mappings": [],
+        "stop_after_blank_primary": 10,
+        "stop_after_blank_names": 10
+      },
+      "entity_count": 40,
+      "sample_entities": [
+        "Encoder",
+        "Encoder",
+        "Black",
+        "Brown",
+        "E10A2",
+        "Encoder",
+        "Green",
+        "Pink",
+        "Teal",
+        "Encoder"
       ],
-      "alias_columns": [
-        "D"
-      ],
-      "property_columns": []
+      "preview_stats": {
+        "scanned_rows": 46,
+        "entity_count": 40,
+        "non_blank_names": 40,
+        "numeric_only_names": 0,
+        "numeric_only_ratio": 0,
+        "first_20_names": [
+          "Encoder",
+          "Encoder",
+          "Black",
+          "Brown",
+          "E10A2",
+          "Encoder",
+          "Green",
+          "Pink",
+          "Teal",
+          "Encoder",
+          "Red",
+          "Unspecified",
+          "Black",
+          "GE 2.0",
+          "GE 5.0",
+          "Gray",
+          "Green",
+          "Red",
+          "Encoder",
+          "E11"
+        ],
+        "first_20_all_numeric": false,
+        "stop_after_blank_primary": 10,
+        "stop_after_blank_names": 10
+      }
     },
     "material": {
+      "type": "material",
+      "sheet": "material",
+      "roles": {
+        "primary_identifier": "B",
+        "maker": null,
+        "aliases": [],
+        "links": [],
+        "properties": []
+      },
+      "name_column": "B",
       "excel": {
         "sheet": "material",
         "header_row": 1,
-        "canonical_name_column": "B",
-        "brand_column": null,
-        "link_columns": [],
+        "first_data_row": 2,
+        "primary_identifier_column": "B",
         "alias_columns": [],
-        "property_columns": []
+        "auto_derive_aliases": true,
+        "maker_column": null,
+        "link_columns": [],
+        "property_columns": [],
+        "property_mappings": [],
+        "stop_after_blank_primary": 10,
+        "stop_after_blank_names": 10
       },
+      "entity_count": 3,
       "sample_entities": [
         "metal",
         "plastic",
         "carbon fiber"
-      ]
+      ],
+      "preview_stats": {
+        "scanned_rows": 13,
+        "entity_count": 3,
+        "non_blank_names": 3,
+        "numeric_only_names": 0,
+        "numeric_only_ratio": 0,
+        "first_20_names": [
+          "metal",
+          "plastic",
+          "carbon fiber"
+        ],
+        "first_20_all_numeric": false,
+        "stop_after_blank_primary": 10,
+        "stop_after_blank_names": 10
+      }
     }
   },
   "parse_templates": {
@@ -6615,8 +6795,8 @@
       "canonical_key": null,
       "aliases": [
         "acceleration",
-        "max acceleration",
-        "g"
+        "g",
+        "max acceleration"
       ],
       "ui": {
         "label": "Max Acceleration",
@@ -6654,8 +6834,8 @@
           "mode": "nearest"
         },
         "range": {
-          "min": 1,
-          "max": 100
+          "max": 100,
+          "min": 1
         }
       },
       "parse": {
@@ -6664,7 +6844,10 @@
         "unit_accepts": [
           "g"
         ],
-        "strict_unit_required": false
+        "strict_unit_required": false,
+        "allow_ranges": false,
+        "allow_unitless": true,
+        "accept_bare_numbers_as_mode": false
       },
       "enum": {
         "policy": "open",
@@ -6681,14 +6864,14 @@
       },
       "component": null,
       "evidence": {
-        "required": true,
+        "conflict_policy": "resolve_by_tier_else_unknown",
         "min_evidence_refs": 1,
+        "required": true,
         "tier_preference": [
           "tier1",
           "tier2",
           "tier3"
-        ],
-        "conflict_policy": "resolve_by_tier_else_unknown"
+        ]
       },
       "excel_hints": {
         "dataEntry": {
@@ -6706,10 +6889,11 @@
       },
       "value_form": "scalar",
       "search_hints": {
-        "preferred_tiers": [
-          "tier1",
-          "tier2",
-          "tier3"
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
         ],
         "preferred_content_types": [
           "support",
@@ -6718,11 +6902,10 @@
           "pdf",
           "product_page"
         ],
-        "query_terms": [
-          "Max Acceleration",
-          "acceleration",
-          "g",
-          "max acceleration"
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
         ],
         "query_templates": [
           "{brand} {model} {field}",
@@ -6730,11 +6913,11 @@
           "{brand} {model} manual pdf {field}",
           "{brand} {model} datasheet {field}"
         ],
-        "domain_hints": [
-          "manufacturer",
-          "support",
-          "manual",
-          "pdf"
+        "query_terms": [
+          "Max Acceleration",
+          "acceleration",
+          "g",
+          "max acceleration"
         ]
       }
     },
