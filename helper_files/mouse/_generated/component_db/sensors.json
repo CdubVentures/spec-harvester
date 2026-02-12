@@ -1,818 +1,846 @@
 {
   "category": "mouse",
   "component_type": "sensor",
-  "generated_at": "1970-01-01T00:00:00.000Z",
+  "generated_at": "2026-02-12T07:30:40.098Z",
   "items": [
     {
       "aliases": [],
-      "brand": "",
+      "brand": "razer",
       "links": [],
-      "name": "1",
+      "name": "Focus Pro 45K",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
-      "links": [],
-      "name": "10",
+      "brand": "logitech",
+      "links": [
+        "https://www.logitechg.com/en-us/software/guides/hero-2-sensor"
+      ],
+      "name": "HERO 2",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "100",
+      "name": "PAW3950 Ti",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "101",
+      "name": "PAW3950 Max",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "asus",
       "links": [],
-      "name": "102",
+      "name": "AimPoint Pro (PixArt PAW3950)",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "pwnage",
       "links": [],
-      "name": "103",
+      "name": "XERO",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "razer",
       "links": [],
-      "name": "104",
+      "name": "Focus Pro Gen-2",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
-      "links": [],
-      "name": "105",
+      "brand": "corsair",
+      "links": [
+        "https://www.corsair.com/us/en/explorer/gamer/mice/get-to-know-the-corsair-marksman-s-33k-dpi-sensor/"
+      ],
+      "name": "MARKSMAN S",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "pulsar",
       "links": [],
-      "name": "106",
+      "name": "XS-1",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "glorious",
       "links": [],
-      "name": "107",
+      "name": "BAMF 3.0",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "turtle-beach",
       "links": [],
-      "name": "108",
+      "name": "Owl-Eye 30K",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "inzone",
       "links": [],
-      "name": "109",
+      "name": "3950IZ",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "ninjutso",
       "links": [],
-      "name": "11",
+      "name": "AimNinja",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "110",
+      "name": "G3950",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "razer",
       "links": [],
-      "name": "111",
+      "name": "Focus Pro 30K",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "112",
+      "name": "PAW3950 HS",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "113",
+      "name": "PAW3950 Pro",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "114",
+      "name": "PAW3950 Ultra",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "115",
+      "name": "PAW3950",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "116",
+      "name": "PAW3950 APEX",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "12",
+      "name": "PAW3950ES-KING",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "13",
+      "name": "PAW3395 Pro",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
-      "links": [],
-      "name": "14",
+      "brand": "PixArt",
+      "links": [
+        "https://www.pixart.com/products-detail/129/PAW3395DM-T6QU"
+      ],
+      "name": "AimPoint (PixArt PAW3395)",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "15",
+      "name": "PAW3395 Ultra",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "16",
+      "name": "PAW3998",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "razer",
       "links": [],
-      "name": "17",
+      "name": "Focus+",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "roccat",
       "links": [],
-      "name": "18",
+      "name": "Owl-Eye",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "glorious",
       "links": [],
-      "name": "19",
+      "name": "BAMF 2.0",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "glorious",
       "links": [],
-      "name": "2",
+      "name": "BAMF 2.0 26K",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "hyperx",
       "links": [],
-      "name": "20",
+      "name": "26K",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "corsair",
       "links": [],
-      "name": "21",
+      "name": "MARKSMAN 26K",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "22",
+      "name": "PAW3395ES-KING",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "23",
+      "name": "PAW3398",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
-      "links": [],
-      "name": "24",
+      "brand": "PixArt",
+      "links": [
+        "https://www.pixart.com/products-detail/129/PAW3395DM-T6QU"
+      ],
+      "name": "PAW3395",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "roccat",
       "links": [],
-      "name": "25",
+      "name": "Owl-Eye 26K",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "pixart",
       "links": [],
-      "name": "26",
+      "name": "PAW3399",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "razer",
       "links": [],
-      "name": "27",
+      "name": "Focus X 26K",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "steelseries",
       "links": [],
-      "name": "28",
+      "name": "TrueMove Pro+",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "razer",
       "links": [],
-      "name": "29",
+      "name": "5G",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "steelseries",
       "links": [],
-      "name": "3",
+      "name": "TrueMove Pro",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "logitech",
       "links": [],
-      "name": "30",
+      "name": "HERO 25K",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "pixart",
       "links": [],
-      "name": "31",
+      "name": "PAW3371",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "roccat",
       "links": [],
-      "name": "32",
+      "name": "Owl-Eye 19K",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "glorious",
       "links": [],
-      "name": "33",
+      "name": "BAMF",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
-      "links": [],
-      "name": "34",
+      "brand": "PixArt",
+      "links": [
+        "https://www.pixart.com/products-detail/4/PAW3370DM-T4QU"
+      ],
+      "name": "PAW3370",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "35",
+      "name": "PMW3391",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "36",
+      "name": "PAW3392",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "37",
+      "name": "PAW3395 SE",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "steelseries",
       "links": [],
-      "name": "38",
+      "name": "TrueMove Air",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "39",
+      "name": "PAW3338",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "4",
+      "name": "PMW3381",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
-      "links": [],
-      "name": "40",
+      "brand": "PixArt",
+      "links": [
+        "https://www.pixart.com/products-detail/4/PMW3389DM-T3QU"
+      ],
+      "name": "PMW3389",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "logitech",
       "links": [],
-      "name": "41",
+      "name": "HERO 12K",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "42",
+      "name": "PMW3366",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "razer",
       "links": [],
-      "name": "43",
+      "name": "Focus X 18K",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "steelseries",
       "links": [],
-      "name": "44",
+      "name": "TrueMove 3",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "sg",
       "links": [],
-      "name": "45",
+      "name": "8960",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "46",
+      "name": "PAW3333",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "dareu",
       "links": [],
-      "name": "47",
+      "name": "AIM-WL",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
-      "links": [],
-      "name": "48",
+      "brand": "pixart",
+      "links": [
+        "https://www.pixart.com/products-detail/131/PAW3311DB-T2MU"
+      ],
+      "name": "PAW3311",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "hyperx",
       "links": [],
-      "name": "49",
+      "name": "Core",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "steelseries",
       "links": [],
-      "name": "5",
+      "name": "TrueMove Core",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "50",
+      "name": "PAW3349",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "51",
+      "name": "PMW3331",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "52",
+      "name": "PMW3359",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "53",
+      "name": "PMW3367",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "54",
+      "name": "PMW3360",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "steelseries",
       "links": [],
-      "name": "55",
+      "name": "TrueMove 1",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "56",
+      "name": "PAW3328",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
-      "links": [],
-      "name": "57",
+      "brand": "PixArt",
+      "links": [
+        "https://www.pixart.com/products-detail/12/PAW3327DB-TWQU"
+      ],
+      "name": "PAW3327",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "avago",
       "links": [],
-      "name": "58",
+      "name": "ADNS-3310",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "59",
+      "name": "PAW3318",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "razer",
       "links": [],
-      "name": "6",
+      "name": "4G",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
-      "links": [],
-      "name": "60",
+      "brand": "avago",
+      "links": [
+        "https://datasheet.octopart.com/ADNS-9800-Avago-datasheet-10666463.pdf"
+      ],
+      "name": "ADNS-A9800",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "61",
+      "name": "PMW3330",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "62",
+      "name": "PMW3310",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "instant",
       "links": [],
-      "name": "63",
+      "name": "S205",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "avago",
       "links": [],
-      "name": "64",
+      "name": "AM010",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "microsoft",
       "links": [],
-      "name": "65",
+      "name": "BlueTrack",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "66",
+      "name": "ADNS-3888",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "razer",
       "links": [],
-      "name": "67",
+      "name": "3G",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "68",
+      "name": "PMW3325",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "razer",
       "links": [],
-      "name": "69",
+      "name": "3G Laser",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
-      "links": [],
-      "name": "7",
+      "brand": "pixart",
+      "links": [
+        "https://www.epsglobal.com/Media-Library/EPSGlobal/Products/files/pixart/PMW3320DB-TYDU.pdf?ext=.pdf"
+      ],
+      "name": "PMW3320",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "avago",
       "links": [],
-      "name": "70",
+      "name": "Delta Zero",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "71",
+      "name": "PAW3305DK",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "avago",
       "links": [],
-      "name": "72",
+      "name": "S6006",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "avago",
       "links": [],
-      "name": "73",
+      "name": "A3325",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "avago",
       "links": [],
-      "name": "74",
+      "name": "ADNS-3095",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "avago",
       "links": [],
-      "name": "75",
+      "name": "ADNS-3090",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "avago",
       "links": [],
-      "name": "76",
+      "name": "A3050",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "pixart",
       "links": [],
-      "name": "77",
+      "name": "PAW3104",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "razer",
       "links": [],
-      "name": "78",
+      "name": "Laser Engine",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "79",
+      "name": "PAW3805",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "avago",
       "links": [],
-      "name": "8",
+      "name": "ADNS-3080",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "soc",
       "links": [],
-      "name": "80",
+      "name": "3212",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "avago",
       "links": [],
-      "name": "81",
+      "name": "SDNS3988",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "avago",
       "links": [],
-      "name": "82",
+      "name": "S9808",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "83",
+      "name": "1855",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "logitech",
       "links": [],
-      "name": "84",
+      "name": "Advanced Optical Tracking",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "avago",
       "links": [],
-      "name": "85",
+      "name": "A3305",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "avago",
       "links": [],
-      "name": "86",
+      "name": "A3055",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "logitech",
       "links": [],
-      "name": "87",
+      "name": "Darkfield",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "logitech",
       "links": [],
-      "name": "88",
+      "name": "VB010411",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "89",
+      "name": "PAW3808(EK)",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
-      "links": [],
-      "name": "9",
+      "brand": "PixArt",
+      "links": [
+        "https://www.pixart.com/products-detail/22/PAW3519DL-TKST"
+      ],
+      "name": "PAW3519",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "90",
+      "name": "PMW3335",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "91",
+      "name": "PMW3370",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "92",
+      "name": "PMW3327",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "93",
+      "name": "SDNS3988",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "94",
+      "name": "PAW3392",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "95",
+      "name": "PMW3367",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "PixArt",
       "links": [],
-      "name": "96",
+      "name": "PAW3393",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
-      "links": [],
-      "name": "97",
+      "brand": "PixArt",
+      "links": [
+        "https://edit.wpgdadawant.com/uploads/news_file/blog/2021/3481/tech_files/sv-1619399703.pdf"
+      ],
+      "name": "PAW3335",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
-      "links": [],
-      "name": "98",
+      "brand": "PixArt",
+      "links": [
+        "https://www.pixart.com/products-detail/22/PAW3519DL-TKST"
+      ],
+      "name": "PAW3519",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
-      "links": [],
-      "name": "99",
+      "brand": "PixArt",
+      "links": [
+        "https://www.pixart.com/products-detail/4/PAW3395DM-T6QU"
+      ],
+      "name": "PMW3395",
       "properties": {}
     }
   ],

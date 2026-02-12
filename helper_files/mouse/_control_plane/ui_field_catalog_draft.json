@@ -474,10 +474,10 @@
     },
     {
       "aliases": [
+        "battery_hours",
         "battery life",
         "battery life (hours)",
-        "battery runtime",
-        "battery_hours"
+        "battery runtime"
       ],
       "array_handling": "none",
       "canonical_key": "battery_hours",
@@ -659,10 +659,10 @@
     },
     {
       "aliases": [
-        "grams",
-        "mass",
         "weight",
-        "weight_g"
+        "weight_g",
+        "mass",
+        "grams"
       ],
       "array_handling": "none",
       "canonical_key": "weight",
@@ -759,9 +759,9 @@
     },
     {
       "aliases": [
-        "overall width",
         "width",
-        "width_mm"
+        "width_mm",
+        "overall width"
       ],
       "array_handling": "none",
       "canonical_key": "width",
@@ -1073,7 +1073,13 @@
       "display_mode": "all",
       "examples": [
         "https://www.nordicsemi.com/Products/nRF52832",
-        "https://www.holtek.com/page/vg/HT32F52352"
+        "https://www.holtek.com/page/vg/HT32F52352",
+        "https://www.nordicsemi.com/Products/nRF52833",
+        "https://www.nordicsemi.com/Products/nRF52833",
+        "https://www.nordicsemi.com/Products/nRF52840",
+        "https://www.nxp.com/docs/en/data-sheet/LPC11U6X.pdf?utm_source=chatgpt.com",
+        "https://www.nxp.com/products/LPC546XX",
+        "https://www.nxp.com/docs/en/data-sheet/LPC11U6X.pdf?utm_source=chatgpt.com"
       ],
       "group": "Electronics",
       "guidance_md": null,
@@ -1361,10 +1367,10 @@
     },
     {
       "aliases": [
-        "hz",
+        "polling_rate",
         "polling",
         "polling rate",
-        "polling_rate",
+        "hz",
         "report rate"
       ],
       "array_handling": "none",
@@ -1397,10 +1403,10 @@
     },
     {
       "aliases": [
-        "cpi",
         "dpi",
         "max dpi",
-        "maximum dpi"
+        "maximum dpi",
+        "cpi"
       ],
       "array_handling": "none",
       "canonical_key": "dpi",
@@ -1432,9 +1438,9 @@
     },
     {
       "aliases": [
-        "inches per second",
         "ips",
-        "max ips"
+        "max ips",
+        "inches per second"
       ],
       "array_handling": "none",
       "canonical_key": "ips",
@@ -1467,8 +1473,8 @@
     {
       "aliases": [
         "acceleration",
-        "g",
-        "max acceleration"
+        "max acceleration",
+        "g"
       ],
       "array_handling": "none",
       "canonical_key": "acceleration",
@@ -1501,9 +1507,9 @@
     {
       "aliases": [
         "lift",
+        "lod",
         "lift off distance",
-        "lift-off distance",
-        "lod"
+        "lift-off distance"
       ],
       "array_handling": "none",
       "canonical_key": "lift",
@@ -1562,32 +1568,6 @@
       "tooltip_key": "lift_settings",
       "tooltip_md": "Define 'Lift Settings' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
       "tooltip_source": "hbs_tooltipsMouse.js"
-    },
-    {
-      "aliases": [
-        "Switch Link",
-        "switch_link"
-      ],
-      "array_handling": "none",
-      "canonical_key": "switch_link",
-      "display_decimals": 0,
-      "display_mode": "all",
-      "examples": [
-        "https://www.mouser.com/ProductDetail/Omron-Electronics/D2FC-F-7N20M?qs=17ckDYBRdek0%2FvhX1fLcuQ%3D%3D"
-      ],
-      "group": "controls",
-      "guidance_md": null,
-      "input_control": "text",
-      "key": "switch_link",
-      "label": "switch_link",
-      "order": 59,
-      "placeholder": "unk",
-      "prefix": null,
-      "short_label": null,
-      "suffix": null,
-      "tooltip_key": null,
-      "tooltip_md": "",
-      "tooltip_source": null
     },
     {
       "aliases": [],
@@ -1955,7 +1935,10 @@
       "canonical_key": "encoder",
       "display_decimals": 0,
       "display_mode": "all",
-      "examples": [],
+      "examples": [
+        "Black",
+        "Black"
+      ],
       "group": "Encoder",
       "guidance_md": null,
       "input_control": "component_picker",
@@ -1976,7 +1959,10 @@
       "canonical_key": "encoder_brand",
       "display_decimals": 0,
       "display_mode": "all",
-      "examples": [],
+      "examples": [
+        "kailh",
+        "kailh"
+      ],
       "group": "Encoder",
       "guidance_md": null,
       "input_control": "text",
@@ -2251,8 +2237,29 @@
       "tooltip_key": "profile_switching",
       "tooltip_md": "Define 'Profile Switching' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
       "tooltip_source": "hbs_tooltipsMouse.js"
+    },
+    {
+      "aliases": [],
+      "array_handling": "none",
+      "canonical_key": "switches_link",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [],
+      "group": "Unsorted",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "switches_link",
+      "label": "switches_link",
+      "order": 999,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": null,
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
     }
   ],
-  "generated_at": "1970-01-01T00:00:00.000Z",
+  "generated_at": "2026-02-12T07:30:40.098Z",
   "version": 1
 }

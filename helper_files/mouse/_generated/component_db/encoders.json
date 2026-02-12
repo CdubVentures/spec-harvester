@@ -1,300 +1,286 @@
 {
   "category": "mouse",
   "component_type": "encoder",
-  "generated_at": "1970-01-01T00:00:00.000Z",
+  "generated_at": "2026-02-12T07:30:40.098Z",
   "items": [
     {
       "aliases": [],
-      "brand": "",
+      "brand": "alps",
       "links": [],
-      "name": "1",
+      "name": "Encoder",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "changfeng",
       "links": [],
-      "name": "10",
+      "name": "Encoder",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "f-switch",
       "links": [],
-      "name": "11",
+      "name": "Black",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "f-switch",
       "links": [],
-      "name": "12",
+      "name": "Brown",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "f-switch",
       "links": [],
-      "name": "13",
+      "name": "E10A2",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "f-switch",
       "links": [],
-      "name": "14",
+      "name": "Encoder",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "f-switch",
       "links": [],
-      "name": "15",
+      "name": "Green",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "f-switch",
       "links": [],
-      "name": "16",
+      "name": "Pink",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "f-switch",
       "links": [],
-      "name": "17",
+      "name": "Teal",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "fswq",
       "links": [],
-      "name": "18",
+      "name": "Encoder",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "huano",
       "links": [],
-      "name": "19",
+      "name": "Red",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "huano",
       "links": [],
-      "name": "2",
+      "name": "Unspecified",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "kailh",
       "links": [],
-      "name": "20",
+      "name": "Black",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "kailh",
       "links": [],
-      "name": "21",
+      "name": "GE 2.0",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "kailh",
       "links": [],
-      "name": "22",
+      "name": "GE 5.0",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "kailh",
       "links": [],
-      "name": "23",
+      "name": "Gray",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "kailh",
       "links": [],
-      "name": "24",
+      "name": "Green",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "kailh",
       "links": [],
-      "name": "25",
+      "name": "Red",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "lamzu",
       "links": [],
-      "name": "26",
+      "name": "Encoder",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "lk",
       "links": [],
-      "name": "27",
+      "name": "E11",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "ninjutso",
       "links": [],
-      "name": "28",
+      "name": "HyperScroll",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "pulsar",
       "links": [],
-      "name": "29",
+      "name": "Blue Encoder",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "raesha",
       "links": [],
-      "name": "3",
+      "name": "Optical Encoder",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "raesha",
       "links": [],
-      "name": "30",
+      "name": "Silver",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "raesha",
       "links": [],
-      "name": "31",
+      "name": "Yellow",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "razer",
       "links": [],
-      "name": "32",
+      "name": "Optical Scroll Wheel",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "ttc",
       "links": [],
-      "name": "33",
+      "name": "Black",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "ttc",
       "links": [],
-      "name": "34",
+      "name": "Blue",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "ttc",
       "links": [],
-      "name": "35",
+      "name": "Gold",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "ttc",
       "links": [],
-      "name": "36",
+      "name": "Green",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "ttc",
       "links": [],
-      "name": "37",
+      "name": "Red",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "ttc",
       "links": [],
-      "name": "38",
+      "name": "Silver",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "ttc",
       "links": [],
-      "name": "39",
+      "name": "Teal",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "ttc",
       "links": [],
-      "name": "4",
+      "name": "Unspecified",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "unspecified",
       "links": [],
-      "name": "40",
+      "name": "Magnetic Encoder",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "unspecified",
       "links": [],
-      "name": "41",
+      "name": "Mechanical Encoder",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "unspecified",
       "links": [],
-      "name": "42",
+      "name": "Optical Encoder",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "unspecified",
       "links": [],
-      "name": "5",
+      "name": "Optical Encoder",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "zowie",
       "links": [],
-      "name": "6",
+      "name": "Optical (16 steps)",
       "properties": {}
     },
     {
       "aliases": [],
-      "brand": "",
+      "brand": "zowie",
       "links": [],
-      "name": "7",
-      "properties": {}
-    },
-    {
-      "aliases": [],
-      "brand": "",
-      "links": [],
-      "name": "8",
-      "properties": {}
-    },
-    {
-      "aliases": [],
-      "brand": "",
-      "links": [],
-      "name": "9",
+      "name": "Optical (24 steps)",
       "properties": {}
     }
   ],

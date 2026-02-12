@@ -4,8 +4,7 @@ import { createHash } from 'node:crypto';
 import zlib from 'node:zlib';
 import { XMLParser } from 'fast-xml-parser';
 import { nowIso } from '../utils/common.js';
-
-const DETERMINISTIC_TIMESTAMP = '1970-01-01T00:00:00.000Z';
+import { toRawFieldKey } from '../utils/fieldKeys.js';
 const DEFAULT_REQUIRED_FIELDS = new Set([
   'weight',
   'lngth',
@@ -51,6 +50,10 @@ function asNumber(value) {
 
 function normalizeText(value) {
   return String(value ?? '').trim();
+}
+
+function normalizeWhitespace(value) {
+  return normalizeText(value).replace(/\s+/g, ' ');
 }
 
 function normalizeToken(value) {
@@ -788,11 +791,14 @@ export async function introspectWorkbook({
       .map((sheet) => ({
         sheet: sheet.name,
         component_type: guessComponentType(sheet.name),
-        name_column: 'A',
+        header_row: 1,
+        first_data_row: 2,
+        canonical_name_column: 'A',
         alias_columns: ['B'],
         brand_column: '',
         link_columns: ['C'],
         property_columns: [],
+        stop_after_blank_names: 10,
         row_start: 2,
         row_end: ''
       })),
@@ -834,13 +840,22 @@ export async function introspectWorkbook({
     ];
     const enumRows = [];
     if (dataListsSheet) {
+      const seenEnumBuckets = new Set();
       for (let col = 1; col <= Math.max(1, asInt(dataListsSheet.max_col, 0)); col += 1) {
         const colLabel = indexToCol(col);
         const header = normalizeText(getCell(dataListsSheet, colLabel, 1));
-        const bucket = normalizeFieldKey(header);
+        const bucket = shouldKeepEnumBucket({
+          requestedBucket: normalizeFieldKey(header),
+          headerBucket: normalizeFieldKey(header),
+          row: {}
+        });
         if (!bucket) {
           continue;
         }
+        if (seenEnumBuckets.has(bucket)) {
+          continue;
+        }
+        seenEnumBuckets.add(bucket);
         enumRows.push({
           sheet: dataListsSheet.name,
           field: bucket,
@@ -902,11 +917,14 @@ export async function introspectWorkbook({
       componentRows.push({
         sheet: componentSheet.name,
         component_type: guessComponentType(componentSheet.name),
-        name_column: nameColumn || 'A',
+        header_row: 1,
+        first_data_row: 2,
+        canonical_name_column: nameColumn || 'A',
         alias_columns: stableSortStrings(aliasColumns),
         brand_column: brandColumn,
         link_columns: stableSortStrings(linkColumns),
         property_columns: stableSortStrings(propertyColumns),
+        stop_after_blank_names: 10,
         row_start: 2,
         row_end: 0
       });
@@ -933,7 +951,7 @@ export async function introspectWorkbook({
       variant_row: 5,
       value_col_start: 'C',
       value_col_end: '',
-      sample_columns: 24
+      sample_columns: 0
     };
     suggestedMap.enum_lists = enumRows;
     suggestedMap.component_sheets = componentRows;
@@ -1076,7 +1094,7 @@ function normalizeWorkbookMap(map = {}) {
       variant_row: asInt(productRaw.variant_row || samplingRaw.variant_row, 5),
       value_col_start: normalizeText(productRaw.value_col_start || samplingRaw.value_col_start || samplingRaw.value_start_column || 'C').toUpperCase(),
       value_col_end: normalizeText(productRaw.value_col_end || samplingRaw.value_col_end || '').toUpperCase(),
-      sample_columns: asInt(productRaw.sample_columns || samplingRaw.sample_columns || samplingRaw.sample_count, 24)
+      sample_columns: asInt(productRaw.sample_columns || samplingRaw.sample_columns || samplingRaw.sample_count, 0)
     }
     : null;
 
@@ -1093,7 +1111,11 @@ function normalizeWorkbookMap(map = {}) {
     const delimiter = normalizeText(row.delimiter || '');
     const rowHeader = asInt(row.header_row, 0);
     const pushEnumRow = (bucket, columnRef) => {
-      const field = normalizeFieldKey(bucket);
+      const field = shouldKeepEnumBucket({
+        requestedBucket: bucket,
+        headerBucket: bucket,
+        row
+      });
       const valueColumn = normalizeText(columnRef).toUpperCase();
       if (!rowSheet || !field || !valueColumn) {
         return;
@@ -1133,17 +1155,28 @@ function normalizeWorkbookMap(map = {}) {
   }
 
   const componentRowsRaw = toArray(map.component_sheets).length > 0 ? toArray(map.component_sheets) : toArray(map.component_sources);
-  const componentSheets = componentRowsRaw.map((row) => ({
-    sheet: normalizeText(row.sheet),
-    component_type: normalizeToken(row.component_type || row.type || guessComponentType(row.sheet)),
-    name_column: normalizeText(row.name_column || row.canonical_name_column || row.canonical_column || 'A').toUpperCase(),
-    alias_columns: stableSortStrings(toArray(row.alias_columns || row.alias_cols).map((entry) => normalizeText(entry).toUpperCase())),
-    brand_column: normalizeText(row.brand_column || '').toUpperCase(),
-    link_columns: stableSortStrings(toArray(row.link_columns || row.links_columns).map((entry) => normalizeText(entry).toUpperCase())),
-    property_columns: stableSortStrings(toArray(row.property_columns || row.props_columns).map((entry) => normalizeText(entry).toUpperCase())),
-    row_start: asInt(row.row_start || row.start_row, 2),
-    row_end: asInt(row.row_end || row.end_row, 0)
-  }));
+  const componentSheets = componentRowsRaw.map((row) => {
+    const headerRow = Math.max(1, asInt(row.header_row, 1));
+    const firstDataRow = Math.max(1, asInt(
+      row.first_data_row || row.row_start || row.start_row,
+      Math.max(2, headerRow + 1)
+    ));
+    return {
+      sheet: normalizeText(row.sheet),
+      component_type: normalizeToken(row.component_type || row.type || guessComponentType(row.sheet)),
+      canonical_name_column: normalizeText(
+        row.canonical_name_column || row.name_column || row.canonical_column || 'A'
+      ).toUpperCase(),
+      alias_columns: stableSortStrings(toArray(row.alias_columns || row.alias_cols).map((entry) => normalizeText(entry).toUpperCase())),
+      brand_column: normalizeText(row.brand_column || '').toUpperCase(),
+      link_columns: stableSortStrings(toArray(row.link_columns || row.links_columns).map((entry) => normalizeText(entry).toUpperCase())),
+      property_columns: stableSortStrings(toArray(row.property_columns || row.props_columns).map((entry) => normalizeText(entry).toUpperCase())),
+      header_row: headerRow,
+      first_data_row: firstDataRow,
+      stop_after_blank_names: Math.max(1, asInt(row.stop_after_blank_names, 10)),
+      row_end: asInt(row.row_end || row.end_row, 0)
+    };
+  });
 
   return {
     version: asInt(map.version, 1),
@@ -1188,18 +1221,27 @@ function normalizeWorkbookMap(map = {}) {
         delimiter: row.delimiter || '',
         normalize: row.normalize
       })),
-    component_sheets: componentSheets.filter((row) => row.sheet),
+    component_sheets: componentSheets
+      .filter((row) => row.sheet)
+      .map((row) => ({
+        ...row,
+        name_column: row.canonical_name_column,
+        row_start: row.first_data_row
+      })),
     component_sources: componentSheets
       .filter((row) => row.sheet)
       .map((row) => ({
         sheet: row.sheet,
         type: row.component_type,
-        canonical_name_column: row.name_column,
+        header_row: row.header_row,
+        first_data_row: row.first_data_row,
+        canonical_name_column: row.canonical_name_column,
         brand_column: row.brand_column || null,
         alias_columns: row.alias_columns,
         link_columns: row.link_columns,
         property_columns: row.property_columns,
-        start_row: row.row_start,
+        stop_after_blank_names: row.stop_after_blank_names,
+        start_row: row.first_data_row,
         end_row: row.row_end > 0 ? row.row_end : null
       })),
     expectations: isObject(map.expectations) ? {
@@ -1362,11 +1404,38 @@ export function validateWorkbookMap(map = {}, options = {}) {
     if (!row.component_type) {
       errors.push(`component_sheets: component_type is required for sheet '${row.sheet}'`);
     }
-    if (!colToIndex(row.name_column)) {
-      errors.push(`component_sheets: invalid name_column '${row.name_column}' for sheet '${row.sheet}'`);
+    if (!colToIndex(row.canonical_name_column)) {
+      errors.push(`component_sheets: invalid canonical_name_column '${row.canonical_name_column}' for sheet '${row.sheet}'`);
     }
-    if (row.row_start <= 0) {
-      errors.push(`component_sheets: row_start must be > 0 for sheet '${row.sheet}'`);
+    if (row.header_row <= 0) {
+      errors.push(`component_sheets: header_row must be > 0 for sheet '${row.sheet}'`);
+    }
+    if (row.first_data_row <= 0) {
+      errors.push(`component_sheets: first_data_row must be > 0 for sheet '${row.sheet}'`);
+    }
+    if (row.first_data_row <= row.header_row) {
+      errors.push(`component_sheets: first_data_row must be > header_row for sheet '${row.sheet}'`);
+    }
+    if (row.stop_after_blank_names <= 0) {
+      errors.push(`component_sheets: stop_after_blank_names must be > 0 for sheet '${row.sheet}'`);
+    }
+    if (row.brand_column && !colToIndex(row.brand_column)) {
+      errors.push(`component_sheets: invalid brand_column '${row.brand_column}' for sheet '${row.sheet}'`);
+    }
+    for (const aliasCol of toArray(row.alias_columns)) {
+      if (!colToIndex(aliasCol)) {
+        errors.push(`component_sheets: invalid alias_columns entry '${aliasCol}' for sheet '${row.sheet}'`);
+      }
+    }
+    for (const linkCol of toArray(row.link_columns)) {
+      if (!colToIndex(linkCol)) {
+        errors.push(`component_sheets: invalid link_columns entry '${linkCol}' for sheet '${row.sheet}'`);
+      }
+    }
+    for (const propCol of toArray(row.property_columns)) {
+      if (!colToIndex(propCol)) {
+        errors.push(`component_sheets: invalid property_columns entry '${propCol}' for sheet '${row.sheet}'`);
+      }
     }
   }
 
@@ -1486,8 +1555,8 @@ function pullMatrixSamples(workbook, map, keyRows) {
   }
   const startCol = colToIndex(productTable.value_col_start || 'C') || 3;
   const endColRaw = colToIndex(productTable.value_col_end || '') || sheet.maxCol;
-  const sampleColumns = Math.max(1, asInt(productTable.sample_columns, 24));
-  const endCol = Math.min(Math.max(startCol, endColRaw), startCol + sampleColumns - 1);
+  const maxColFromRange = Math.max(startCol, endColRaw);
+  const endCol = maxColFromRange;
 
   const byField = {};
   const productColumns = [];
@@ -1575,10 +1644,77 @@ function normalizeEnumValue(value, mode = 'lower_trim') {
   if (!text) {
     return '';
   }
-  if (mode === 'raw') {
+  const normalizedMode = normalizeToken(mode || 'lower_trim');
+  if (normalizedMode === 'raw') {
     return text;
   }
-  return text.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (normalizedMode === 'lower' || normalizedMode === 'lowercase') {
+    return text.toLowerCase().replace(/\s+/g, ' ').trim();
+  }
+  if (normalizedMode === 'trim' || normalizedMode === 'lower_trim') {
+    return text.replace(/\s+/g, ' ').trim();
+  }
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+const REAL_ENUM_BUCKET_ALLOWLIST = new Set([
+  'yes_no',
+  'connection',
+  'connectivity',
+  'form_factor',
+  'shape',
+  'hump',
+  'front_flare',
+  'sensor_type',
+  'mcu',
+  'switch_type',
+  'lighting',
+  'feet_material',
+  'lift_notes',
+  'coating',
+  'polling'
+]);
+
+const ENUM_BUCKET_ALIASES = {
+  yesno: 'yes_no',
+  yes_no: 'yes_no',
+  switches: 'switch_type',
+  switches_type: 'switch_type',
+  polling_rate: 'polling'
+};
+
+function normalizeEnumBucketName(value) {
+  const token = normalizeFieldKey(value);
+  if (!token) {
+    return '';
+  }
+  return ENUM_BUCKET_ALIASES[token] || token;
+}
+
+function enumBucketExplicitlyAllowed(row = {}) {
+  return row?.allow === true
+    || row?.include === true
+    || row?.explicit_allow === true
+    || row?.whitelisted === true;
+}
+
+function isAllowedEnumBucket(bucket = '') {
+  return REAL_ENUM_BUCKET_ALLOWLIST.has(normalizeEnumBucketName(bucket));
+}
+
+function shouldKeepEnumBucket({ requestedBucket = '', headerBucket = '', row = {} } = {}) {
+  const requested = normalizeEnumBucketName(requestedBucket);
+  const header = normalizeEnumBucketName(headerBucket);
+  if (enumBucketExplicitlyAllowed(row)) {
+    return requested || header;
+  }
+  if (header && isAllowedEnumBucket(header)) {
+    return header;
+  }
+  if (requested && isAllowedEnumBucket(requested)) {
+    return requested;
+  }
+  return '';
 }
 
 function pullEnumLists(workbook, map) {
@@ -1586,6 +1722,18 @@ function pullEnumLists(workbook, map) {
   for (const row of toArray(map.enum_lists)) {
     const sheet = sheetByName(workbook, row.sheet);
     if (!sheet || !row.field) {
+      continue;
+    }
+    const headerRow = asInt(row.header_row, 0);
+    const headerToken = headerRow > 0
+      ? normalizeFieldKey(getCell(sheet, row.value_column || 'A', headerRow))
+      : '';
+    const acceptedBucket = shouldKeepEnumBucket({
+      requestedBucket: row.field,
+      headerBucket: headerToken,
+      row
+    });
+    if (!acceptedBucket) {
       continue;
     }
     const valueSet = new Set();
@@ -1605,42 +1753,84 @@ function pullEnumLists(workbook, map) {
         }
       }
     }
-    out[row.field] = stableSortStrings([...valueSet]);
+    const existing = toArray(out[acceptedBucket]);
+    out[acceptedBucket] = orderedUniqueStrings([
+      ...existing,
+      ...[...valueSet]
+    ]);
+  }
+  if (!toArray(out.yes_no).length) {
+    out.yes_no = ['yes', 'no'];
   }
   return out;
 }
 
+function isNumericIdValue(value = '') {
+  const text = normalizeWhitespace(value);
+  if (!text) return false;
+  return /^\d+$/.test(text);
+}
+
 function pullComponentDbs(workbook, map) {
   const out = {};
+  const sourceAssertions = [];
   for (const row of toArray(map.component_sheets)) {
     const sheet = sheetByName(workbook, row.sheet);
     if (!sheet) {
       continue;
     }
-    const componentType = row.component_type || 'component';
+
+    const componentType = normalizeFieldKey(row.component_type || row.type || 'component') || 'component';
+    const headerRow = Math.max(1, asInt(row.header_row, 1));
+    const nameColumn = normalizeText(row.canonical_name_column || row.name_column || 'A').toUpperCase() || 'A';
+    const firstDataRow = Math.max(1, asInt(
+      row.first_data_row || row.row_start,
+      Math.max(2, headerRow + 1)
+    ));
+    const stopAfterBlankNames = Math.max(1, asInt(row.stop_after_blank_names, 10));
+    const rowEnd = row.row_end > 0 ? Math.min(asInt(row.row_end, sheet.maxRow), sheet.maxRow) : sheet.maxRow;
+
     if (!out[componentType]) {
       out[componentType] = [];
     }
-    const rowStart = row.row_start || 2;
-    const rowEnd = row.row_end > 0 ? row.row_end : sheet.maxRow;
-    for (let idx = rowStart; idx <= rowEnd; idx += 1) {
-      const name = normalizeText(getCell(sheet, row.name_column || 'A', idx));
+
+    let blankStreak = 0;
+    let nonBlankNames = 0;
+    let numericOnlyNames = 0;
+    const firstTwentyNames = [];
+
+    for (let idx = firstDataRow; idx <= rowEnd; idx += 1) {
+      const rawName = getCell(sheet, nameColumn, idx);
+      const name = normalizeWhitespace(rawName);
       if (!name) {
+        blankStreak += 1;
+        if (blankStreak >= stopAfterBlankNames) {
+          break;
+        }
         continue;
       }
+      blankStreak = 0;
+      nonBlankNames += 1;
+      if (isNumericIdValue(name)) {
+        numericOnlyNames += 1;
+      }
+      if (firstTwentyNames.length < 20) {
+        firstTwentyNames.push(name);
+      }
+
       const aliases = stableSortStrings(
-        toArray(row.alias_columns).map((col) => getCell(sheet, col, idx))
+        toArray(row.alias_columns).map((col) => normalizeWhitespace(getCell(sheet, col, idx)))
       ).filter((alias) => alias.toLowerCase() !== name.toLowerCase());
-      const brand = row.brand_column ? normalizeText(getCell(sheet, row.brand_column, idx)) : '';
+      const brand = row.brand_column ? normalizeWhitespace(getCell(sheet, row.brand_column, idx)) : '';
       const links = stableSortStrings(
-        toArray(row.link_columns).map((col) => normalizeText(getCell(sheet, col, idx)))
+        toArray(row.link_columns).map((col) => normalizeWhitespace(getCell(sheet, col, idx)))
       ).filter((value) => /^https?:\/\//i.test(value));
       const properties = {};
       for (const col of toArray(row.property_columns)) {
-        const key = normalizeFieldKey(col);
-        const value = normalizeText(getCell(sheet, col, idx));
-        if (key && value) {
-          properties[key] = value;
+        const headerToken = normalizeFieldKey(normalizeWhitespace(getCell(sheet, col, headerRow)) || col);
+        const value = normalizeWhitespace(getCell(sheet, col, idx));
+        if (headerToken && value) {
+          properties[headerToken] = value;
         }
       }
       out[componentType].push({
@@ -1651,10 +1841,19 @@ function pullComponentDbs(workbook, map) {
         properties
       });
     }
-    out[componentType] = out[componentType]
-      .sort((a, b) => a.name.localeCompare(b.name));
+
+    const firstTwentyAllNumeric = firstTwentyNames.length >= 20
+      && firstTwentyNames.every((value) => isNumericIdValue(value));
+    const numericRatio = nonBlankNames > 0 ? (numericOnlyNames / nonBlankNames) : 0;
+    if (numericRatio > 0.10 || firstTwentyAllNumeric) {
+      const errorText = `component_db_sources.${componentType} canonical_name_column is pointing to an ID column. Choose the name/model column.`;
+      sourceAssertions.push(errorText);
+    }
   }
-  return out;
+  return {
+    componentDb: out,
+    sourceAssertions: stableSortStrings(sourceAssertions)
+  };
 }
 
 function inferUnitByField(key) {
@@ -1664,7 +1863,7 @@ function inferUnitByField(key) {
   if (token.includes('polling') || token === 'hz' || token.endsWith('_hz')) return 'hz';
   if (token === 'lngth' || token === 'length' || token === 'width' || token === 'height' || token.endsWith('_length') || token.endsWith('_width') || token.endsWith('_height')) return 'mm';
   if (token.includes('price')) return 'usd';
-  if (token.includes('battery') && token.includes('hour')) return 'hours';
+  if (token.includes('battery') && token.includes('hour')) return 'h';
   return '';
 }
 
@@ -1674,7 +1873,7 @@ function inferParseTemplate({ key, type, shape, enumValues = [], componentType =
     return 'component_reference';
   }
   if (type === 'boolean') {
-    return 'boolean_yes_no_unknown';
+    return 'boolean_yes_no_unk';
   }
   if (shape === 'range') {
     return 'range_number';
@@ -1695,7 +1894,15 @@ function inferParseTemplate({ key, type, shape, enumValues = [], componentType =
     }
     return 'integer_with_unit';
   }
-  return 'list_of_tokens_delimited';
+  return 'text_field';
+}
+
+function canonicalParseTemplate(template = '') {
+  const token = normalizeToken(template);
+  if (token === 'boolean_yes_no_unknown') {
+    return 'boolean_yes_no_unk';
+  }
+  return token;
 }
 
 function inferFromSamples(key, samples = []) {
@@ -1816,27 +2023,37 @@ function normalizeValueForm(value, shape = 'scalar') {
   const token = normalizeToken(value);
   const normalizedShape = normalizeToken(shape || 'scalar');
   if (token === 'single' || token === 'scalar') {
-    return normalizedShape === 'list' ? 'set' : 'single';
+    return normalizedShape === 'list' ? 'list' : 'scalar';
   }
   if (token === 'set' || token === 'list') {
-    return normalizedShape === 'scalar' ? 'single' : 'set';
+    return normalizedShape === 'scalar' ? 'scalar' : 'list';
   }
   if (token === 'range') {
-    return (normalizedShape === 'list') ? 'mixed' : 'range';
+    return (normalizedShape === 'list') ? 'mixed_values_and_ranges' : 'range';
   }
   if (token === 'mixed' || token === 'mixed_values_and_ranges' || token === 'list_ranges') {
-    return normalizedShape === 'scalar' ? 'single' : 'mixed';
+    return normalizedShape === 'scalar' ? 'scalar' : 'mixed_values_and_ranges';
   }
-  if (normalizedShape === 'list') return 'set';
+  if (token === 'list_of_objects') {
+    return 'list_of_objects';
+  }
+  if (normalizedShape === 'list') return 'list';
   if (normalizedShape === 'range' || normalizedShape === 'object') return 'range';
-  return 'single';
+  return 'scalar';
 }
 
 function parseEnumSource(sourceRaw, fallbackField = '') {
   if (isObject(sourceRaw)) {
-    const sourceType = normalizeToken(sourceRaw.type);
+    const sourceTypeRaw = normalizeToken(sourceRaw.type);
+    const sourceType = sourceTypeRaw === 'component_db_sources' ? 'component_db' : sourceTypeRaw;
     const sourceRef = normalizeText(sourceRaw.ref || fallbackField);
     if (sourceType && sourceRef) {
+      if (sourceType === 'enum_buckets' || sourceType === 'known_values' || sourceType === 'datalists' || sourceType === 'data_lists') {
+        return {
+          type: 'known_values',
+          ref: sourceRef
+        };
+      }
       return {
         type: sourceType,
         ref: sourceRef
@@ -1848,14 +2065,50 @@ function parseEnumSource(sourceRaw, fallbackField = '') {
   if (!sourceText) {
     return null;
   }
+  const colonIndex = sourceText.indexOf(':');
+  if (colonIndex > 0) {
+    const sourceTypeRaw = normalizeToken(sourceText.slice(0, colonIndex));
+    const sourceType = sourceTypeRaw === 'component_db_sources' ? 'component_db' : sourceTypeRaw;
+    const sourceRef = normalizeText(sourceText.slice(colonIndex + 1));
+    if (sourceRef) {
+      if (sourceType === 'enum_buckets' || sourceType === 'known_values' || sourceType === 'datalists') {
+        return {
+          type: 'known_values',
+          ref: sourceRef
+        };
+      }
+      if (sourceType === 'component_db') {
+        return {
+          type: 'component_db',
+          ref: sourceRef
+        };
+      }
+    }
+  }
   const dotIndex = sourceText.indexOf('.');
   if (dotIndex > 0) {
-    const sourceType = normalizeToken(sourceText.slice(0, dotIndex));
+    const sourceTypeRaw = normalizeToken(sourceText.slice(0, dotIndex));
+    const sourceType = sourceTypeRaw === 'component_db_sources' ? 'component_db' : sourceTypeRaw;
     const sourceRef = normalizeText(sourceText.slice(dotIndex + 1));
     if (sourceType && sourceRef) {
+      if (sourceType === 'data_lists' || sourceType === 'datalists' || sourceType === 'known_values') {
+        return {
+          type: 'known_values',
+          ref: sourceRef
+        };
+      }
       return {
         type: sourceType,
         ref: sourceRef
+      };
+    }
+  }
+  const standalone = normalizeFieldKey(sourceText);
+  if (standalone) {
+    if (standalone === 'yes_no' || isAllowedEnumBucket(standalone)) {
+      return {
+        type: 'known_values',
+        ref: standalone
       };
     }
   }
@@ -1870,6 +2123,12 @@ function sourceRefToString(source = null) {
   const sourceRef = normalizeText(source.ref);
   if (!sourceType || !sourceRef) {
     return null;
+  }
+  if (sourceType === 'known_values') {
+    if (sourceRef === 'yes_no') {
+      return 'yes_no';
+    }
+    return `data_lists.${sourceRef}`;
   }
   return `${sourceType}.${sourceRef}`;
 }
@@ -1899,9 +2158,10 @@ function roundTokenToContract(roundToken = '') {
 
 function sampleValueFormFromInternal(valueForm = '', shape = 'scalar') {
   const token = normalizeValueForm(valueForm, shape);
-  if (token === 'single') return 'scalar';
-  if (token === 'set') return 'list';
+  if (token === 'scalar') return 'scalar';
+  if (token === 'list') return 'list';
   if (token === 'range') return 'range';
+  if (token === 'list_of_objects') return 'list_of_objects';
   return 'mixed_values_and_ranges';
 }
 
@@ -1913,30 +2173,33 @@ function buildSearchHints({
   parseTemplate = '',
   enumSource = null
 } = {}) {
+  const fieldLabel = titleFromKey(key);
+  const templates = [
+    '{brand} {model} {field}',
+    '{brand} {model} specifications {field}',
+    '{brand} {model} manual pdf {field}',
+    '{brand} {model} datasheet {field}'
+  ];
   const hints = {
-    priority_weight: requiredLevel === 'identity'
-      ? 1
-      : (requiredLevel === 'required' ? 0.95 : (requiredLevel === 'critical' ? 0.9 : 0.75)),
-    availability_bias: availability,
-    difficulty_bias: difficulty
+    preferred_tiers: ['tier1', 'tier2', 'tier3'],
+    preferred_content_types: ['support', 'manual', 'spec', 'pdf', 'product_page'],
+    query_terms: [fieldLabel],
+    query_templates: templates,
+    domain_hints: ['manufacturer', 'support', 'manual', 'pdf']
   };
-  if (normalizeText(parseTemplate)) {
-    hints.parse_template = normalizeToken(parseTemplate);
+  if (requiredLevel === 'identity' || requiredLevel === 'required' || requiredLevel === 'critical') {
+    hints.preferred_content_types = ['support', 'spec', 'manual', 'pdf', 'product_page'];
   }
-  if (isObject(enumSource) && normalizeText(enumSource.type) && normalizeText(enumSource.ref)) {
-    hints.enum_source = {
-      type: normalizeToken(enumSource.type),
-      ref: normalizeText(enumSource.ref)
-    };
+  if (difficulty === 'hard' || availability === 'rare') {
+    hints.preferred_content_types = ['spec', 'manual', 'pdf', 'support', 'product_page'];
   }
-  if (key.includes('link') || key.endsWith('_url')) {
-    hints.query_bias = ['manual', 'datasheet', 'spec'];
-  } else if (key.includes('sensor') || key.includes('switch') || key.includes('encoder')) {
-    hints.query_bias = ['component', 'spec', 'pdf'];
-  } else {
-    hints.query_bias = ['spec', 'manual'];
+  if (isObject(enumSource) && normalizeText(enumSource.type) === 'component_db') {
+    hints.preferred_content_types = ['support', 'spec', 'manual', 'pdf', 'lab'];
   }
-  return hints;
+  if (canonicalParseTemplate(parseTemplate) === 'component_reference') {
+    hints.query_terms = [fieldLabel, 'component'];
+  }
+  return sortDeep(hints);
 }
 
 function buildWorkbookTabsSummary({
@@ -1944,81 +2207,127 @@ function buildWorkbookTabsSummary({
   map
 } = {}) {
   const summary = {};
-  const rolesBySheet = new Map();
-  for (const row of toArray(map?.sheet_roles)) {
-    if (!isObject(row)) {
+  const keySheet = normalizeText(map?.key_list?.sheet || '');
+  const enumSheets = stableSortStrings(toArray(map?.enum_lists).map((row) => normalizeText(row?.sheet || '')).filter(Boolean));
+  const componentRows = toArray(map?.component_sheets).filter((row) => isObject(row));
+  const componentSheets = stableSortStrings(componentRows.map((row) => normalizeText(row.sheet || '')).filter(Boolean));
+  const knownSheetSet = new Set([
+    keySheet,
+    ...enumSheets,
+    ...componentSheets,
+    'data_values'
+  ].filter(Boolean));
+
+  for (const sheetName of knownSheetSet) {
+    if (sheetName === keySheet) {
+      summary[sheetName] = {
+        role: 'field_keys + optional product-table sampling',
+        notes: 'Column B holds field keys; columns C+ hold product values.'
+      };
       continue;
     }
-    const sheetName = normalizeText(row.sheet);
-    const role = normalizeToken(row.role || 'ignore');
-    if (!sheetName) {
+    if (enumSheets.includes(sheetName)) {
+      summary[sheetName] = {
+        role: 'enum buckets (canonical values)',
+        notes: 'Columns contain canonical lists for form_factor/shape/hump/front_flare/etc.'
+      };
       continue;
     }
-    rolesBySheet.set(sheetName, role || 'ignore');
-  }
-  for (const sheet of toArray(workbook?.sheets)) {
-    const sheetName = normalizeText(sheet?.name);
-    if (!sheetName) {
+    if (sheetName === 'data_values') {
+      summary[sheetName] = {
+        role: 'observed value samples (optional)',
+        notes: 'Observed values across products; can be used for suggestion/inference but not strict enums.'
+      };
       continue;
     }
-    const role = rolesBySheet.get(sheetName) || 'ignore';
+    const componentRow = componentRows.find((row) => normalizeText(row.sheet || '') === sheetName);
+    const componentType = normalizeFieldKey(componentRow?.component_type || componentRow?.type || '');
     summary[sheetName] = {
-      role,
-      notes: role === 'field_key_list'
-        ? 'Primary key list source for field contract generation.'
-        : role === 'product_table'
-          ? 'Product sampling source used for parse/template inference.'
-          : role === 'enum_list'
-            ? 'Known values source used for enum buckets.'
-            : role === 'component_db'
-              ? 'Component entity source used for component bindings.'
-              : role === 'notes'
-                ? 'Optional guidance/docs source.'
-                : 'Not currently used by compile mapping.'
+      role: componentType ? `component_db:${componentType}` : 'component_db',
+      notes: componentType === 'sensor'
+        ? 'Sensor entities and properties (brand/type/dpi/ips/acc/year/link).'
+        : componentType === 'switch'
+          ? 'Switch entities and properties (brand/type/forces/link).'
+          : componentType === 'encoder'
+            ? 'Encoder entities and properties (brand/model/type/steps/life/link).'
+            : componentType === 'material'
+              ? 'Body material tokens (plastic/metal/etc.).'
+              : 'Component entity source.'
     };
   }
-  return sortDeep(summary);
+
+  return summary;
 }
 
 function buildEnumBucketSummary({
   map,
-  enumLists
+  enumLists,
+  workbook
 } = {}) {
   const out = {};
-  for (const row of toArray(map?.enum_lists)) {
-    if (!isObject(row)) {
+  const enumRows = toArray(map?.enum_lists).filter((row) => isObject(row));
+
+  for (const row of enumRows) {
+    const requestedBucket = normalizeEnumBucketName(row.field || row.bucket || '');
+    if (!requestedBucket || requestedBucket === 'yes_no') {
       continue;
     }
-    const bucket = normalizeFieldKey(row.field || row.bucket || '');
-    if (!bucket) {
+    const values = orderedUniqueStrings(toArray(enumLists?.[requestedBucket]));
+    if (!values.length) {
       continue;
     }
-    out[bucket] = {
+    out[requestedBucket] = {
       excel: {
-        sheet: normalizeText(row.sheet),
+        sheet: normalizeText(row.sheet || ''),
         column: normalizeText(row.value_column || row.column || ''),
-        header_row: asInt(row.header_row, null),
-        start_row: asInt(row.row_start, null)
+        header_row: asInt(row.header_row, 1),
+        start_row: asInt(row.row_start, 2)
       },
-      values: stableSortStrings(toArray(enumLists?.[bucket]))
+      values
     };
   }
-  for (const [bucket, values] of Object.entries(enumLists || {})) {
-    const normalizedBucket = normalizeFieldKey(bucket);
-    if (!normalizedBucket || out[normalizedBucket]) {
+
+  const enumSheets = stableSortStrings(enumRows.map((row) => normalizeText(row.sheet || '')).filter(Boolean));
+  for (const sheetName of enumSheets) {
+    const sheet = sheetByName(workbook, sheetName);
+    if (!sheet) {
       continue;
     }
-    out[normalizedBucket] = {
-      excel: {
-        sheet: '',
-        column: '',
-        header_row: null,
-        start_row: null
-      },
-      values: stableSortStrings(toArray(values))
-    };
+    const mappedColIndexes = enumRows
+      .filter((row) => normalizeText(row.sheet || '') === sheetName)
+      .map((row) => colToIndex(normalizeText(row.value_column || row.column || '')))
+      .filter((value) => Number.isFinite(value) && value > 0);
+    const maxMappedCol = mappedColIndexes.length ? Math.max(...mappedColIndexes) : 27;
+    const maxScanCol = Math.max(maxMappedCol, 27);
+    const headerRow = 1;
+    const startRow = 2;
+    for (let col = 1; col <= Math.min(Math.max(1, sheet.maxCol), maxScanCol); col += 1) {
+      const column = indexToCol(col);
+      const header = normalizeText(getCell(sheet, column, headerRow));
+      if (!header) {
+        continue;
+      }
+      const key = `${sheetName}.${header}`;
+      if (Object.prototype.hasOwnProperty.call(out, key)) {
+        continue;
+      }
+      out[key] = {
+        source_type: 'sheet_column',
+        sheet: sheetName,
+        header,
+        column_index: col,
+        start_row: startRow,
+        normalization: {
+          trim: true,
+          lowercase: true,
+          collapse_whitespace: true
+        },
+        delimiters: [',', '/', '|', ';', '+']
+      };
+    }
   }
-  return sortDeep(out);
+
+  return out;
 }
 
 function buildComponentSourceSummary({
@@ -2034,20 +2343,33 @@ function buildComponentSourceSummary({
     if (!componentType) {
       continue;
     }
+    const excelBlock = {
+      sheet: normalizeText(row.sheet),
+      header_row: asInt(row.header_row, 1),
+      first_data_row: asInt(row.first_data_row || row.row_start, 2),
+      canonical_name_column: normalizeText(row.canonical_name_column || row.name_column || ''),
+      alias_columns: stableSortStrings(toArray(row.alias_columns || [])),
+      brand_column: normalizeText(row.brand_column || '') || null,
+      link_columns: stableSortStrings(toArray(row.link_columns || [])),
+      property_columns: stableSortStrings(toArray(row.property_columns || [])),
+      stop_after_blank_names: Math.max(1, asInt(row.stop_after_blank_names, 10))
+    };
+    const entries = toArray(componentDb?.[componentType]);
+    const sampleEntities = entries
+      .map((rowValue) => normalizeText(rowValue?.name || rowValue?.canonical_name || ''))
+      .filter(Boolean)
+      .slice(0, 10);
+
     out[componentType] = {
-      excel: {
-        sheet: normalizeText(row.sheet),
-        name_column: normalizeText(row.name_column || ''),
-        alias_columns: stableSortStrings(toArray(row.alias_columns || [])),
-        brand_column: normalizeText(row.brand_column || ''),
-        link_columns: stableSortStrings(toArray(row.link_columns || [])),
-        property_columns: stableSortStrings(toArray(row.property_columns || [])),
-        start_row: asInt(row.row_start, null)
-      },
-      entity_count: toArray(componentDb?.[componentType]).length
+      type: componentType,
+      sheet: excelBlock.sheet,
+      name_column: excelBlock.canonical_name_column || null,
+      excel: excelBlock,
+      entity_count: entries.length,
+      sample_entities: sampleEntities
     };
   }
-  return sortDeep(out);
+  return out;
 }
 
 function buildGlobalContractMetadata() {
@@ -2073,78 +2395,64 @@ function buildGlobalContractMetadata() {
 function buildParseTemplateCatalog() {
   return {
     boolean_yes_no_unk: {
-      description: 'Parse yes/no/true/false variants into boolean, else unk.',
+      description: "Parse yes/no/true/false/1/0 tokens. Output boolean or 'unk'.",
       tests: [
         { raw: 'Yes', expected: true },
-        { raw: 'No', expected: false },
+        { raw: 'no', expected: false },
         { raw: 'unk', expected: 'unk' }
       ]
     },
     number_with_unit: {
-      description: 'Parse scalar numeric value with unit normalization.',
+      description: 'Parse a single number with optional unit. Convert to target unit when allowed.',
       tests: [
-        { raw: '80 g', expected: 80 },
-        { raw: '4.5 in', expected: 114.3 }
-      ]
-    },
-    integer_with_unit: {
-      description: 'Parse integer numeric value with unit normalization.',
-      tests: [
-        { raw: '1000 hz', expected: 1000 }
+        { raw: '120 mm', expected_mm: 120 },
+        { raw: '12 cm', expected_mm: 120 },
+        { raw: '4.5 in', expected_mm: 114.3 }
       ]
     },
     list_of_tokens_delimited: {
-      description: 'Parse token list separated by known delimiters.',
+      description: 'Parse delimited tokens into list<string> with optional token_map normalization.',
       tests: [
-        { raw: 'wired, wireless', expected: ['wired', 'wireless'] }
+        { raw: 'white, black', expected: ['white', 'black'] },
+        { raw: 'gray+black', expected: ['gray', 'black'] },
+        { raw: '  Red / Blue  ', expected: ['red', 'blue'] }
       ]
     },
     list_numbers_or_ranges_with_unit: {
-      description: 'Parse mixed numeric sets and ranges with optional unit conversion.',
+      description: "Parse mixed lists containing numbers and ranges (e.g. '1-3, 4'). Canonical output is list of intervals {min,max}.",
       tests: [
+        { raw: '4', expected: [{ min: 4, max: 4 }] },
+        { raw: '1-3', expected: [{ min: 1, max: 3 }] },
         { raw: '1-3, 4', expected: [{ min: 1, max: 3 }, { min: 4, max: 4 }] }
       ]
     },
-    latency_list_modes_ms: {
-      description: 'Parse mixed latency measurements into structured list entries {mode, ms}.',
-      tests: [
-        { raw: '14 wireless, 16 wired', expected: [{ mode: 'wireless', ms: 14 }, { mode: 'wired', ms: 16 }] }
-      ]
-    },
     list_of_numbers_with_unit: {
-      description: 'Parse list of numeric values sharing one unit.',
+      description: 'Parse list of numbers with optional unit into list<number> (or list<int>) in target unit.',
       tests: [
-        { raw: '8000, 4000, 1000 hz', expected: [8000, 4000, 1000] }
-      ]
-    },
-    mode_tagged_values: {
-      description: 'Parse enumerated mode/value combinations.',
-      tests: [
-        { raw: 'wired/wireless', expected: ['wired', 'wireless'] }
-      ]
-    },
-    mode_tagged_list: {
-      description: 'Parse enumerated mode/value combinations.',
-      tests: [
-        { raw: 'wired/wireless', expected: ['wired', 'wireless'] }
+        { raw: '125, 500, 1000 Hz', expected: [125, 500, 1000] },
+        { raw: '1000', expected: [1000] },
+        { raw: '1k, 2k', expected: [1000, 2000] }
       ]
     },
     url_field: {
-      description: 'Parse and validate URL-like values.',
+      description: 'Parse and validate URL. Normalize by trimming and ensuring scheme.',
       tests: [
-        { raw: 'https://example.com/spec.pdf', expected: 'https://example.com/spec.pdf' }
+        { raw: 'https://example.com/spec', expected: 'https://example.com/spec' },
+        { raw: 'example.com/spec', expected: 'https://example.com/spec' }
       ]
     },
     date_field: {
-      description: 'Parse date strings into normalized precision-aware format.',
+      description: 'Parse date strings to ISO-8601 (YYYY-MM-DD) when possible.',
       tests: [
-        { raw: '2024-06', expected: '2024-06' }
+        { raw: '2024-10-01', expected: '2024-10-01' },
+        { raw: 'Oct 2024', expected: '2024-10-01' }
       ]
     },
     component_reference: {
-      description: 'Resolve component names against component DB aliases/canonical names.',
+      description: 'Match a component entity name/alias against a component_db type; output canonical component name.',
       tests: [
-        { raw: 'PAW3395', expected: 'PAW3395' }
+        { raw: 'PAW 3395', expected: 'PAW3395' },
+        { raw: 'Kailh GM 8.0', expected: 'Kailh GM 8.0' }
       ]
     }
   };
@@ -2355,7 +2663,13 @@ function mergeFieldOverride(baseRule, overrideRaw = {}) {
 }
 
 function parseRulesForTemplate(template, { unit = '', enumValues = [], componentType = '' } = {}) {
-  if (template === 'boolean_yes_no_unknown') {
+  if (template === 'text_field' || template === 'string') {
+    return {
+      trim: true,
+      collapse_whitespace: true
+    };
+  }
+  if (template === 'boolean_yes_no_unknown' || template === 'boolean_yes_no_unk') {
     return {
       truthy: ['yes', 'true', '1'],
       falsy: ['no', 'false', '0'],
@@ -2558,6 +2872,7 @@ function fieldTypeForContract(rule = {}) {
 }
 
 function buildStudioFieldRule({
+  category = '',
   key,
   rule = {},
   row = {},
@@ -2566,10 +2881,28 @@ function buildStudioFieldRule({
   enumLists = {},
   componentDb = {}
 } = {}) {
-  const source = parseEnumSource(rule.enum_source, key);
+  const priorityBlock = isObject(rule.priority) ? rule.priority : {};
+  const requiredLevel = normalizeToken(rule.required_level || priorityBlock.required_level || 'optional');
+  const availability = normalizeToken(rule.availability || priorityBlock.availability || 'sometimes');
+  const difficulty = normalizeToken(rule.difficulty || priorityBlock.difficulty || 'medium');
+  const effort = asInt(
+    rule.effort,
+    asInt(priorityBlock.effort, 5)
+  );
+  const publishGate = (
+    rule.publish_gate === true
+    || (rule.publish_gate === undefined && priorityBlock.publish_gate === true)
+  );
+  const blockPublishWhenUnk = (
+    rule.block_publish_when_unk === true
+    || (rule.block_publish_when_unk === undefined && priorityBlock.block_publish_when_unk === true)
+  );
+
+  const enumBlock = isObject(rule.enum) ? rule.enum : {};
+  const source = parseEnumSource(rule.enum_source || enumBlock.source, key);
   const sourceRef = sourceRefToString(source);
-  const policy = normalizeToken(rule.enum_policy || 'open_prefer_known');
-  const parseTemplate = normalizeToken(rule.parse_template || '');
+  const policy = normalizeToken(rule.enum_policy || enumBlock.policy || 'open_prefer_known');
+  const parseTemplate = canonicalParseTemplate(rule.parse_template || ((isObject(rule.parse) ? rule.parse.template : '') || ''));
   const contractType = normalizeToken(rule.type || 'string');
   const contractShape = normalizeToken(rule.shape || 'scalar');
   const valueForm = sampleValueFormFromInternal(rule.value_form, contractShape);
@@ -2616,6 +2949,14 @@ function buildStudioFieldRule({
       max_items: asInt(rule.list_rules.max_items, 100)
     };
   }
+  if (nestedContract.shape === 'list' && !isObject(nestedContract.list_rules)) {
+    nestedContract.list_rules = {
+      dedupe: true,
+      sort: 'none',
+      min_items: 0,
+      max_items: 100
+    };
+  }
   if (nestedContract.shape === 'object' && !isObject(nestedContract.object_schema) && isObject(rule.object_schema)) {
     nestedContract.object_schema = sortDeep(rule.object_schema);
   }
@@ -2637,7 +2978,7 @@ function buildStudioFieldRule({
   }
 
   const nestedParse = isObject(rule.parse) ? { ...rule.parse } : {};
-  nestedParse.template = normalizeToken(nestedParse.template || parseTemplate || '') || '';
+  nestedParse.template = canonicalParseTemplate(nestedParse.template || parseTemplate || '') || '';
   if (!Object.prototype.hasOwnProperty.call(nestedParse, 'unit')) {
     const candidateUnit = normalizeText(parseRules.unit || rule.unit || '');
     if (candidateUnit) {
@@ -2667,35 +3008,45 @@ function buildStudioFieldRule({
       nestedParse[parseRuleKey] = parseRuleValue;
     }
   }
-  if (parseTemplate === 'date_field' && !Array.isArray(nestedParse.accepted_formats)) {
+  if (nestedParse.template === 'date_field' && !Array.isArray(nestedParse.accepted_formats)) {
     nestedParse.accepted_formats = ['YYYY-MM-DD', 'YYYY-MM', 'YYYY'];
   }
 
+  const enumMatch = isObject(enumBlock.match) ? enumBlock.match : {};
   const nestedEnum = {
     policy: policy || 'open_prefer_known',
     source: sourceRef,
     match: {
-      strategy: normalizeToken(rule.enum_match_strategy || 'alias') || 'alias'
-    },
-    new_value_policy: isObject(rule.new_value_policy)
-      ? sortDeep(rule.new_value_policy)
-      : {
-        accept_if_evidence: true,
-        mark_needs_curation: true,
-        suggestion_target: '_suggestions/enums.json'
-      }
+      strategy: normalizeToken(rule.enum_match_strategy || enumMatch.strategy || 'exact') || 'exact'
+    }
   };
-  const fuzzy = asNumber(rule.enum_fuzzy_threshold);
+  const fuzzy = asNumber(rule.enum_fuzzy_threshold ?? enumMatch.fuzzy_threshold);
   if (fuzzy !== null) {
     nestedEnum.match.fuzzy_threshold = fuzzy;
   }
+  if (nestedEnum.policy === 'open' || nestedEnum.policy === 'open_prefer_known') {
+    nestedEnum.new_value_policy = isObject(rule.new_value_policy)
+      ? sortDeep(rule.new_value_policy)
+      : (isObject(enumBlock.new_value_policy)
+        ? sortDeep(enumBlock.new_value_policy)
+        : {
+          accept_if_evidence: true,
+          mark_needs_curation: true,
+          suggestion_target: `helper_files/${normalizeFieldKey(category || map?.category || 'category')}/_suggestions/enums.json`
+        });
+  }
 
-  const nestedComponent = source?.type === 'component_db'
+  const componentBlock = isObject(rule.component) ? rule.component : {};
+  const componentSource = parseEnumSource(componentBlock.source || (componentBlock.type ? `component_db.${componentBlock.type}` : ''), key);
+  const effectiveComponentSource = source?.type === 'component_db' ? source : componentSource;
+  const nestedComponent = effectiveComponentSource?.type === 'component_db'
     ? {
-      type: normalizeText(source.ref),
-      source: sourceRef,
-      require_identity_evidence: rule.require_component_identity_evidence !== false,
-      allow_new_components: rule.allow_new_components !== false
+      type: normalizeText(componentBlock.type || effectiveComponentSource.ref),
+      source: sourceRefToString(effectiveComponentSource),
+      require_identity_evidence: componentBlock.require_identity_evidence !== false
+        && rule.require_component_identity_evidence !== false,
+      allow_new_components: componentBlock.allow_new_components !== false
+        && rule.allow_new_components !== false
     }
     : {};
 
@@ -2727,59 +3078,201 @@ function buildStudioFieldRule({
     guidance_md: normalizeText(ui.guidance_md || '') || null,
     tooltip_key: normalizeText(ui.tooltip_key || '') || null,
     tooltip_source: normalizeText(ui.tooltip_source || '') || null,
-    display_mode: normalizeToken(ui.display_mode || 'all') || 'all',
-    display_decimals: asInt(ui.display_decimals, 0),
-    array_handling: normalizeToken(rule.array_handling || ui.array_handling || 'none') || 'none'
+    display_mode: normalizeToken(ui.display_mode || 'all') || 'all'
   };
+  if (ui.display_decimals !== undefined || nestedContract.type === 'number' || nestedContract.type === 'integer') {
+    uiOut.display_decimals = asInt(ui.display_decimals, 0);
+  }
 
+  const keySheet = normalizeText(map?.key_list?.sheet || '');
+  const keyColumn = normalizeText(map?.key_list?.column || '').toUpperCase();
+  const keyRow = asInt(row.row, 0);
+  const dataEntrySamples = toArray(samples)
+    .map((value) => normalizeText(value))
+    .filter(Boolean);
+  const defaultExcelHints = {
+    dataEntry: {
+      sheet: keySheet || null,
+      key_cell: keySheet && keyColumn && keyRow > 0 ? `${keyColumn}${keyRow}` : null,
+      row: keyRow || null,
+      sample_values: dataEntrySamples
+    }
+  };
+  const existingExcelHints = isObject(rule.excel_hints) ? rule.excel_hints : {};
+  const existingDataEntryHints = isObject(existingExcelHints.dataEntry) ? existingExcelHints.dataEntry : {};
   const excelHints = {
-    key_sheet: normalizeText(map?.key_list?.sheet || ''),
-    key_column: normalizeText(map?.key_list?.column || ''),
-    key_row: asInt(row.row, 0),
-    sample_values: toArray(samples).map((value) => normalizeText(value)).filter(Boolean).slice(0, 10)
+    ...defaultExcelHints,
+    ...existingExcelHints,
+    dataEntry: {
+      ...defaultExcelHints.dataEntry,
+      ...existingDataEntryHints,
+      sample_values: toArray(existingDataEntryHints.sample_values).length
+        ? toArray(existingDataEntryHints.sample_values).map((value) => normalizeText(value)).filter(Boolean)
+        : dataEntrySamples
+    }
   };
+  if (source?.type === 'known_values') {
+    const enumRow = toArray(map?.enum_lists).find((entry) => normalizeFieldKey(entry?.field || entry?.bucket || '') === normalizeFieldKey(source.ref || key));
+    if (enumRow && !isObject(excelHints.enum_column)) {
+      excelHints.enum_column = {
+        sheet: normalizeText(enumRow.sheet || ''),
+        header: normalizeFieldKey(enumRow.field || enumRow.bucket || '')
+      };
+    }
+  }
+  if (source?.type === 'component_db') {
+    const componentRow = toArray(map?.component_sheets).find((entry) => normalizeFieldKey(entry?.component_type || entry?.type || '') === normalizeFieldKey(source.ref || ''));
+    if (componentRow && !normalizeText(excelHints.component_sheet || '')) {
+      excelHints.component_sheet = normalizeText(componentRow.sheet || '') || null;
+    }
+  }
 
-  const searchHints = buildSearchHints({
+  const defaultSearchHints = buildSearchHints({
     key,
-    requiredLevel: normalizeToken(rule.required_level || 'optional'),
-    availability: normalizeToken(rule.availability || 'sometimes'),
-    difficulty: normalizeToken(rule.difficulty || 'medium'),
-    parseTemplate,
+    requiredLevel,
+    availability,
+    difficulty,
+    parseTemplate: nestedParse.template,
     enumSource: source
   });
+  const existingSearchHints = isObject(rule.search_hints) ? rule.search_hints : {};
+  const searchHints = {
+    ...defaultSearchHints,
+    ...existingSearchHints
+  };
+  if (!toArray(existingSearchHints.query_terms).length) {
+    searchHints.query_terms = toArray(defaultSearchHints.query_terms);
+  }
 
-  return sortDeep({
-    ...rule,
+  const canonicalValueForm = (
+    nestedContract.shape === 'list' && nestedContract.type === 'object'
+      ? 'list_of_objects'
+      : valueForm
+  );
+
+  const out = {
     key,
-    canonical_key: normalizeFieldKey(rule.canonical_key || key) || key,
-    aliases: stableSortStrings(toArray(rule.aliases || [key])),
+    canonical_key: (() => {
+      const candidate = normalizeFieldKey(rule.canonical_key || '');
+      return candidate && candidate !== key ? candidate : null;
+    })(),
+    aliases: orderedUniqueStrings(toArray(rule.aliases || [])),
     ui: uiOut,
     priority: {
-      required_level: normalizeToken(rule.required_level || 'optional'),
-      availability: normalizeToken(rule.availability || 'sometimes'),
-      difficulty: normalizeToken(rule.difficulty || 'medium'),
-      effort: asInt(rule.effort, 5),
-      publish_gate: rule.publish_gate === true,
-      block_publish_when_unk: rule.block_publish_when_unk === true
+      required_level: requiredLevel,
+      availability,
+      difficulty,
+      effort,
+      publish_gate: publishGate,
+      block_publish_when_unk: blockPublishWhenUnk
     },
-    contract: nestedContract,
-    parse: nestedParse,
+    contract: (() => {
+      const outContract = {
+        unknown_token: nestedContract.unknown_token,
+        unknown_reason_required: nestedContract.unknown_reason_required !== false,
+        type: nestedContract.type,
+        shape: nestedContract.shape
+      };
+      if (normalizeText(nestedContract.unit)) {
+        outContract.unit = normalizeText(nestedContract.unit);
+      }
+      if (normalizeText(nestedContract.value_form)) {
+        outContract.value_form = normalizeText(nestedContract.value_form);
+      }
+      if (isObject(nestedContract.rounding) && Object.keys(nestedContract.rounding).length > 0) {
+        outContract.rounding = sortDeep(nestedContract.rounding);
+      }
+      if (isObject(nestedContract.range) && Object.keys(nestedContract.range).length > 0) {
+        outContract.range = sortDeep(nestedContract.range);
+      }
+      if (nestedContract.shape === 'list') {
+        outContract.list_rules = sortDeep(
+          isObject(nestedContract.list_rules) && Object.keys(nestedContract.list_rules).length > 0
+            ? nestedContract.list_rules
+            : { dedupe: true, sort: 'none', min_items: 0, max_items: 100 }
+        );
+      }
+      if ((nestedContract.shape === 'object' || nestedContract.type === 'object') && isObject(nestedContract.object_schema) && Object.keys(nestedContract.object_schema).length > 0) {
+        outContract.object_schema = sortDeep(nestedContract.object_schema);
+      }
+      if (Array.isArray(nestedContract.item_union) && nestedContract.item_union.length > 0) {
+        outContract.item_union = sortDeep(nestedContract.item_union);
+      }
+      return outContract;
+    })(),
+    parse: (() => {
+      const outParse = {
+        template: canonicalParseTemplate(nestedParse.template || parseTemplate || '')
+      };
+      const maybeCopy = (parseKey) => {
+        const parseValue = nestedParse[parseKey];
+        if (Array.isArray(parseValue) && parseValue.length > 0) {
+          outParse[parseKey] = sortDeep(parseValue);
+          return;
+        }
+        if (isObject(parseValue) && Object.keys(parseValue).length > 0) {
+          outParse[parseKey] = sortDeep(parseValue);
+          return;
+        }
+        if (typeof parseValue === 'boolean') {
+          outParse[parseKey] = parseValue;
+          return;
+        }
+        if (typeof parseValue === 'string' && parseValue.trim()) {
+          outParse[parseKey] = parseValue;
+        }
+      };
+      const parseTemplateToken = outParse.template;
+      if (['number_with_unit', 'integer_with_unit', 'list_of_numbers_with_unit', 'list_numbers_or_ranges_with_unit', 'range_number', 'latency_list_modes_ms'].includes(parseTemplateToken)) {
+        maybeCopy('unit');
+        maybeCopy('unit_accepts');
+        maybeCopy('unit_conversions');
+        maybeCopy('strict_unit_required');
+      }
+      if (['list_of_tokens_delimited', 'list_of_numbers_with_unit', 'list_numbers_or_ranges_with_unit', 'latency_list_modes_ms'].includes(parseTemplateToken)) {
+        maybeCopy('delimiters');
+      }
+      if (parseTemplateToken === 'list_numbers_or_ranges_with_unit') {
+        maybeCopy('range_separators');
+      }
+      if (parseTemplateToken === 'component_reference') {
+        maybeCopy('component_type');
+      }
+      maybeCopy('token_map');
+      maybeCopy('allow_ranges');
+      maybeCopy('allow_unitless');
+      maybeCopy('accepted_formats');
+      maybeCopy('mode_aliases');
+      maybeCopy('accept_bare_numbers_as_mode');
+      return outParse;
+    })(),
     enum: nestedEnum,
-    component: nestedComponent,
+    component: Object.keys(nestedComponent).length ? nestedComponent : null,
     evidence: nestedEvidence,
     excel_hints: excelHints,
-    value_form: valueForm,
+    value_form: canonicalValueForm,
     search_hints: searchHints
-  });
+  };
+  if (isObject(rule.selection_policy) && Object.keys(rule.selection_policy).length > 0) {
+    out.selection_policy = sortDeep(rule.selection_policy);
+  }
+  return out;
 }
 
-function buildCompileValidation({ fields, knownValues, componentDb }) {
+function buildCompileValidation({ fields, knownValues, enumLists, componentDb }) {
   const errors = [];
   const warnings = [];
   const seenKeys = new Set();
-  const knownValueFields = new Set(Object.keys(knownValues || {}));
+  const knownValueFields = new Set([
+    ...Object.keys(knownValues || {}),
+    ...Object.keys(enumLists || {})
+  ]);
   const componentTypes = new Set(Object.keys(componentDb || {}));
   const validParseTemplates = new Set([
+    'text_field',
+    'string',
+    'enum_string',
+    'boolean_yes_no_unk',
     'boolean_yes_no_unknown',
     'number_with_unit',
     'integer_with_unit',
@@ -2792,10 +3285,76 @@ function buildCompileValidation({ fields, knownValues, componentDb }) {
     'range_number',
     'url_field',
     'date_field',
-    'component_reference'
+    'component_reference',
+    'price_range_string',
+    'year_field',
+    'integer_field'
   ]);
 
   for (const [fieldKey, rule] of Object.entries(fields || {})) {
+    const priority = isObject(rule.priority) ? rule.priority : {};
+    const contract = isObject(rule.contract) ? rule.contract : {};
+    const parse = isObject(rule.parse) ? rule.parse : {};
+    const enumObj = isObject(rule.enum) ? rule.enum : {};
+    const evidence = isObject(rule.evidence) ? rule.evidence : {};
+    const parseRules = isObject(rule.parse_rules) ? rule.parse_rules : {};
+
+    const resolvedType = normalizeToken(rule.type || contract.type || '');
+    const resolvedShape = normalizeToken(rule.shape || contract.shape || '');
+    const resolvedValueForm = normalizeValueForm(rule.value_form, resolvedShape || 'scalar');
+    const resolvedRequiredLevel = normalizeToken(rule.required_level || priority.required_level || '');
+    const resolvedAvailability = normalizeToken(rule.availability || priority.availability || '');
+    const resolvedDifficulty = normalizeToken(rule.difficulty || priority.difficulty || '');
+    const resolvedEffort = asInt(rule.effort, asInt(priority.effort, 0));
+    const resolvedEnumPolicy = normalizeToken(rule.enum_policy || enumObj.policy || 'open_prefer_known');
+    const resolvedParseTemplate = canonicalParseTemplate(rule.parse_template || parse.template);
+    const resolvedUnit = normalizeText(rule.unit || contract.unit || parse.unit || '');
+    const resolvedRound = normalizeToken(
+      rule.round
+      || (() => {
+        const decimals = asInt(contract?.rounding?.decimals, null);
+        if (decimals === 0) return 'int';
+        if (decimals === 1) return '1dp';
+        if (decimals === 2) return '2dp';
+        return '';
+      })()
+    );
+    const resolvedStrictUnitRequired = (
+      typeof rule.strict_unit_required === 'boolean'
+        ? rule.strict_unit_required
+        : (typeof parse.strict_unit_required === 'boolean' ? parse.strict_unit_required : undefined)
+    );
+    const resolvedListRules = isObject(rule.list_rules)
+      ? rule.list_rules
+      : (isObject(contract.list_rules) ? contract.list_rules : null);
+    const resolvedObjectSchema = isObject(rule.object_schema)
+      ? rule.object_schema
+      : (isObject(contract.object_schema) ? contract.object_schema : null);
+    const resolvedEnumSource = parseEnumSource(rule.enum_source || enumObj.source, fieldKey);
+    const resolvedNewValuePolicy = isObject(rule.new_value_policy)
+      ? rule.new_value_policy
+      : (isObject(enumObj.new_value_policy) ? enumObj.new_value_policy : null);
+    const resolvedPublishGate = (
+      typeof rule.publish_gate === 'boolean'
+        ? rule.publish_gate
+        : (typeof priority.publish_gate === 'boolean' ? priority.publish_gate : false)
+    );
+    const resolvedBlockPublishWhenUnk = (
+      typeof rule.block_publish_when_unk === 'boolean'
+        ? rule.block_publish_when_unk
+        : (typeof priority.block_publish_when_unk === 'boolean' ? priority.block_publish_when_unk : undefined)
+    );
+    const resolvedEvidenceRequired = (
+      rule.evidence_required !== undefined
+        ? rule.evidence_required !== false
+        : (evidence.required !== false)
+    );
+    const resolvedMinEvidenceRefs = (
+      rule.min_evidence_refs !== undefined
+        ? asInt(rule.min_evidence_refs, 0)
+        : asInt(evidence.min_evidence_refs, 1)
+    );
+
     if (seenKeys.has(fieldKey)) {
       errors.push(`duplicate field key: ${fieldKey}`);
     }
@@ -2803,42 +3362,45 @@ function buildCompileValidation({ fields, knownValues, componentDb }) {
     if (!rule.key || normalizeFieldKey(rule.key) !== fieldKey) {
       errors.push(`field ${fieldKey}: missing/invalid key`);
     }
-    if (!['number', 'integer', 'string', 'boolean', 'date', 'url', 'object'].includes(rule.type)) {
-      errors.push(`field ${fieldKey}: invalid type '${rule.type}'`);
+    if (!['number', 'integer', 'string', 'boolean', 'date', 'url', 'object'].includes(resolvedType)) {
+      errors.push(`field ${fieldKey}: invalid type '${resolvedType || rule.type}'`);
     }
-    if (!['scalar', 'list', 'range', 'object'].includes(rule.shape)) {
-      errors.push(`field ${fieldKey}: invalid shape '${rule.shape}'`);
+    if (!['scalar', 'list', 'range', 'object'].includes(resolvedShape)) {
+      errors.push(`field ${fieldKey}: invalid shape '${resolvedShape || rule.shape}'`);
     }
-    const valueForm = normalizeValueForm(rule.value_form, normalizeToken(rule.shape || 'scalar'));
-    if (!['single', 'set', 'range', 'mixed'].includes(valueForm)) {
+    const valueForm = resolvedValueForm;
+    if (!['scalar', 'list', 'range', 'mixed_values_and_ranges', 'list_of_objects'].includes(valueForm)) {
       errors.push(`field ${fieldKey}: invalid value_form '${rule.value_form}'`);
     }
-    if (valueForm === 'single' && rule.shape !== 'scalar') {
-      errors.push(`field ${fieldKey}: value_form=single requires shape=scalar`);
+    if (valueForm === 'scalar' && resolvedShape !== 'scalar') {
+      errors.push(`field ${fieldKey}: value_form=scalar requires shape=scalar`);
     }
-    if (valueForm === 'set' && rule.shape !== 'list') {
-      errors.push(`field ${fieldKey}: value_form=set requires shape=list`);
+    if (valueForm === 'list' && resolvedShape !== 'list') {
+      errors.push(`field ${fieldKey}: value_form=list requires shape=list`);
     }
-    if (valueForm === 'range' && !['range', 'object'].includes(rule.shape)) {
+    if (valueForm === 'range' && !['range', 'object'].includes(resolvedShape)) {
       errors.push(`field ${fieldKey}: value_form=range requires shape=range|object`);
     }
-    if (valueForm === 'mixed' && rule.shape !== 'list') {
-      errors.push(`field ${fieldKey}: value_form=mixed requires shape=list`);
+    if (valueForm === 'mixed_values_and_ranges' && resolvedShape !== 'list') {
+      errors.push(`field ${fieldKey}: value_form=mixed_values_and_ranges requires shape=list`);
     }
-    if (!['identity', 'required', 'critical', 'expected', 'optional', 'rare'].includes(rule.required_level)) {
-      errors.push(`field ${fieldKey}: invalid required_level '${rule.required_level}'`);
+    if (valueForm === 'list_of_objects' && resolvedShape !== 'list') {
+      errors.push(`field ${fieldKey}: value_form=list_of_objects requires shape=list`);
     }
-    if (!['expected', 'sometimes', 'rare'].includes(rule.availability)) {
-      errors.push(`field ${fieldKey}: invalid availability '${rule.availability}'`);
+    if (!['identity', 'required', 'critical', 'expected', 'optional', 'rare'].includes(resolvedRequiredLevel)) {
+      errors.push(`field ${fieldKey}: invalid required_level '${resolvedRequiredLevel || rule.required_level}'`);
     }
-    if (!['easy', 'medium', 'hard'].includes(rule.difficulty)) {
-      errors.push(`field ${fieldKey}: invalid difficulty '${rule.difficulty}'`);
+    if (!['expected', 'sometimes', 'rare'].includes(resolvedAvailability)) {
+      errors.push(`field ${fieldKey}: invalid availability '${resolvedAvailability || rule.availability}'`);
     }
-    const effort = asInt(rule.effort, 0);
+    if (!['easy', 'medium', 'hard'].includes(resolvedDifficulty)) {
+      errors.push(`field ${fieldKey}: invalid difficulty '${resolvedDifficulty || rule.difficulty}'`);
+    }
+    const effort = resolvedEffort;
     if (effort < 1 || effort > 10) {
       errors.push(`field ${fieldKey}: effort must be 1..10`);
     }
-    if (!['open', 'open_prefer_known', 'closed', 'closed_with_curation'].includes(rule.enum_policy)) {
+    if (!['open', 'open_prefer_known', 'closed', 'closed_with_curation'].includes(resolvedEnumPolicy)) {
       errors.push(`field ${fieldKey}: enum_policy must be open|open_prefer_known|closed|closed_with_curation`);
     }
     if (!isObject(rule.ui)) {
@@ -2859,52 +3421,82 @@ function buildCompileValidation({ fields, knownValues, componentDb }) {
         errors.push(`field ${fieldKey}: ui.tooltip_md key or ui.tooltip_key is required`);
       }
     }
-    const parseTemplate = normalizeText(rule.parse_template);
+    const parseTemplate = resolvedParseTemplate;
     if (!parseTemplate) {
       errors.push(`field ${fieldKey}: parse_template is required`);
     } else if (!validParseTemplates.has(parseTemplate)) {
       errors.push(`field ${fieldKey}: unsupported parse_template '${parseTemplate}'`);
     }
+    if (normalizeToken(resolvedShape) === 'list') {
+      if (!isObject(resolvedListRules) || Object.keys(resolvedListRules).length === 0) {
+        errors.push(`field ${fieldKey}: list shape requires list_rules`);
+      }
+    }
+    if (normalizeToken(resolvedShape) === 'object') {
+      if (!isObject(resolvedObjectSchema) || Object.keys(resolvedObjectSchema).length === 0) {
+        errors.push(`field ${fieldKey}: object shape requires object_schema`);
+      }
+    }
     if (parseTemplate === 'number_with_unit' || parseTemplate === 'integer_with_unit' || parseTemplate === 'list_of_numbers_with_unit' || parseTemplate === 'range_number' || parseTemplate === 'list_numbers_or_ranges_with_unit') {
-      if (!normalizeText(rule.unit)) {
+      if (!normalizeText(resolvedUnit)) {
         errors.push(`field ${fieldKey}: unit required for ${parseTemplate}`);
       }
-      if (!['none', 'int', '1dp', '2dp'].includes(normalizeToken(rule.round || ''))) {
-        errors.push(`field ${fieldKey}: numeric parsing requires round value (none|int|1dp|2dp)`);
-      }
-      if (typeof rule.strict_unit_required !== 'boolean') {
-        errors.push(`field ${fieldKey}: strict_unit_required boolean is required for unit-based parsing`);
-      }
     } else if (parseTemplate === 'latency_list_modes_ms') {
-      if (normalizeToken(rule.shape) !== 'list') {
+      if (normalizeToken(resolvedShape) !== 'list') {
         errors.push(`field ${fieldKey}: latency_list_modes_ms requires shape=list`);
       }
-      if (normalizeToken(rule.type) !== 'object') {
+      if (normalizeToken(resolvedType) !== 'object') {
         errors.push(`field ${fieldKey}: latency_list_modes_ms requires type=object`);
       }
-      if (!normalizeText(rule.unit)) {
+      if (!normalizeText(resolvedUnit)) {
         errors.push(`field ${fieldKey}: latency_list_modes_ms requires unit (ms)`);
       }
-      const objectSchema = isObject(rule.object_schema)
-        ? rule.object_schema
-        : (isObject(rule.contract?.object_schema) ? rule.contract.object_schema : {});
+      const objectSchema = isObject(resolvedObjectSchema) ? resolvedObjectSchema : {};
       if (!isObject(objectSchema) || Object.keys(objectSchema).length === 0) {
         errors.push(`field ${fieldKey}: latency_list_modes_ms requires object_schema`);
       }
-    } else if ((rule.type === 'number' || rule.type === 'integer') && !normalizeText(rule.unit)) {
+    } else if (
+      (resolvedType === 'number' || resolvedType === 'integer')
+      && !normalizeText(resolvedUnit)
+      && !['integer_field', 'price_range_string', 'year_field'].includes(parseTemplate)
+    ) {
       errors.push(`field ${fieldKey}: numeric fields must declare unit`);
     }
-    const enumSource = isObject(rule.enum_source) ? rule.enum_source : null;
+    const listTemplates = new Set([
+      'list_of_tokens_delimited',
+      'list_of_numbers_with_unit',
+      'mode_tagged_list',
+      'mode_tagged_values',
+      'latency_list_modes_ms',
+      'list_numbers_or_ranges_with_unit'
+    ]);
+    if (listTemplates.has(parseTemplate) && normalizeToken(resolvedShape) !== 'list') {
+      errors.push(`field ${fieldKey}: parse_template '${parseTemplate}' requires shape=list`);
+    }
+    if (parseTemplate === 'component_reference') {
+      const parsedEnumSourceForComponent = resolvedEnumSource;
+      const hasComponentSource = normalizeToken(parsedEnumSourceForComponent?.type || '') === 'component_db'
+        || (isObject(rule.component) && normalizeToken(parseEnumSource(rule.component.source || `component_db.${rule.component.type || ''}`)?.type || '') === 'component_db');
+      if (!hasComponentSource) {
+        errors.push(`field ${fieldKey}: component_reference requires component_db source`);
+      }
+    }
+    if ((resolvedType === 'number' || resolvedType === 'integer') && ['text_field', 'string', 'enum_string'].includes(parseTemplate)) {
+      errors.push(`field ${fieldKey}: numeric field parse_template '${parseTemplate}' is incompatible`);
+    }
+    const enumSource = resolvedEnumSource;
     const hasInlineKnownValues = toArray(rule.vocab?.known_values).length > 0;
-    if ((rule.enum_policy === 'closed' || rule.enum_policy === 'closed_with_curation') && !enumSource && !hasInlineKnownValues) {
-      errors.push(`field ${fieldKey}: enum_source is required for ${rule.enum_policy}`);
+    if ((resolvedEnumPolicy === 'closed' || resolvedEnumPolicy === 'closed_with_curation') && !enumSource && !hasInlineKnownValues) {
+      errors.push(`field ${fieldKey}: enum_source is required for ${resolvedEnumPolicy}`);
     }
     if (enumSource) {
       const sourceType = normalizeToken(enumSource.type);
       const sourceRef = normalizeText(enumSource.ref);
       if (sourceType === 'known_values') {
-        if (!knownValueFields.has(sourceRef || fieldKey) && !hasInlineKnownValues) {
-          errors.push(`field ${fieldKey}: enum_source known_values ref '${sourceRef || fieldKey}' not found`);
+        if ((resolvedEnumPolicy === 'closed' || resolvedEnumPolicy === 'closed_with_curation')
+          && !knownValueFields.has(sourceRef || fieldKey)
+          && !hasInlineKnownValues) {
+          warnings.push(`field ${fieldKey}: enum_source known_values ref '${sourceRef || fieldKey}' not found`);
         }
       } else if (sourceType === 'component_db') {
         if (!componentTypes.has(sourceRef)) {
@@ -2914,37 +3506,28 @@ function buildCompileValidation({ fields, knownValues, componentDb }) {
         errors.push(`field ${fieldKey}: invalid enum_source type '${sourceType}'`);
       }
     }
-    if (rule.enum_policy === 'open' || rule.enum_policy === 'open_prefer_known') {
-      if (!isObject(rule.new_value_policy)) {
-        errors.push(`field ${fieldKey}: new_value_policy is required for ${rule.enum_policy}`);
+    if (resolvedEnumPolicy === 'open') {
+      if (!isObject(resolvedNewValuePolicy)) {
+        errors.push(`field ${fieldKey}: new_value_policy is required for ${resolvedEnumPolicy}`);
       } else {
-        if (typeof rule.new_value_policy.accept_if_evidence !== 'boolean') {
+        if (typeof resolvedNewValuePolicy.accept_if_evidence !== 'boolean') {
           errors.push(`field ${fieldKey}: new_value_policy.accept_if_evidence boolean required`);
         }
-        if (typeof rule.new_value_policy.mark_needs_curation !== 'boolean') {
+        if (typeof resolvedNewValuePolicy.mark_needs_curation !== 'boolean') {
           errors.push(`field ${fieldKey}: new_value_policy.mark_needs_curation boolean required`);
         }
-        if (!normalizeText(rule.new_value_policy.suggestion_target)) {
+        if (!normalizeText(resolvedNewValuePolicy.suggestion_target)) {
           errors.push(`field ${fieldKey}: new_value_policy.suggestion_target required`);
         }
       }
     }
-    if (rule.publish_gate && !normalizeText(rule.publish_gate_reason)) {
-      errors.push(`field ${fieldKey}: publish_gate_reason required when publish_gate=true`);
-    }
-    if (rule.publish_gate && typeof rule.block_publish_when_unk !== 'boolean') {
+    if (resolvedPublishGate && typeof resolvedBlockPublishWhenUnk !== 'boolean') {
       errors.push(`field ${fieldKey}: block_publish_when_unk boolean required when publish_gate=true`);
     }
-    const evidenceRequired = (rule.evidence_required !== undefined)
-      ? rule.evidence_required !== false
-      : (isObject(rule.evidence) ? rule.evidence.required !== false : true);
-    const minEvidenceRefs = (rule.min_evidence_refs !== undefined)
-      ? asInt(rule.min_evidence_refs, 0)
-      : asInt(isObject(rule.evidence) ? rule.evidence.min_evidence_refs : 1, 1);
-    if (evidenceRequired && minEvidenceRefs <= 0) {
+    if (resolvedEvidenceRequired && resolvedMinEvidenceRefs <= 0) {
       errors.push(`field ${fieldKey}: min_evidence_refs must be >= 1 when evidence is required`);
     }
-    if (isObject(rule.selection_policy)) {
+    if (isObject(rule.selection_policy) && Object.keys(rule.selection_policy).length > 0) {
       const sourceField = normalizeFieldKey(rule.selection_policy.source_field || '');
       if (!sourceField) {
         errors.push(`field ${fieldKey}: selection_policy.source_field is required when selection_policy is set`);
@@ -2959,11 +3542,11 @@ function buildCompileValidation({ fields, knownValues, componentDb }) {
         errors.push(`field ${fieldKey}: selection_policy.mode_preference must be an array when provided`);
       }
     }
-    if ((rule.shape === 'list') && parseTemplate !== 'list_of_tokens_delimited' && parseTemplate !== 'list_of_numbers_with_unit' && parseTemplate !== 'mode_tagged_list' && parseTemplate !== 'mode_tagged_values' && parseTemplate !== 'latency_list_modes_ms' && parseTemplate !== 'list_numbers_or_ranges_with_unit') {
+    if ((resolvedShape === 'list') && parseTemplate !== 'list_of_tokens_delimited' && parseTemplate !== 'list_of_numbers_with_unit' && parseTemplate !== 'mode_tagged_list' && parseTemplate !== 'mode_tagged_values' && parseTemplate !== 'latency_list_modes_ms' && parseTemplate !== 'list_numbers_or_ranges_with_unit') {
       warnings.push(`field ${fieldKey}: list shape with parse template '${parseTemplate}' may be inconsistent`);
     }
-    if (rule.shape === 'list' && ['list_of_tokens_delimited', 'list_of_numbers_with_unit', 'mode_tagged_list', 'mode_tagged_values', 'latency_list_modes_ms', 'list_numbers_or_ranges_with_unit'].includes(parseTemplate)) {
-      const delimiters = toArray(rule.parse_rules?.delimiters);
+    if (resolvedShape === 'list' && ['list_of_tokens_delimited', 'list_of_numbers_with_unit', 'mode_tagged_list', 'mode_tagged_values', 'latency_list_modes_ms', 'list_numbers_or_ranges_with_unit'].includes(parseTemplate)) {
+      const delimiters = toArray(parseRules?.delimiters || parse?.delimiters);
       if (delimiters.length === 0 && parseTemplate !== 'mode_tagged_list' && parseTemplate !== 'mode_tagged_values') {
         errors.push(`field ${fieldKey}: list parse template requires parse_rules.delimiters`);
       }
@@ -2974,7 +3557,7 @@ function buildCompileValidation({ fields, knownValues, componentDb }) {
         warnings.push(`field ${fieldKey}: surfaces enabled but ui.label missing`);
       }
     }
-    if (rule.enum_policy === 'open' && (!isObject(rule.parse_rules) || Object.keys(rule.parse_rules).length === 0)) {
+    if (resolvedEnumPolicy === 'open' && (!isObject(parseRules) || Object.keys(parseRules).length === 0) && (!isObject(parse) || Object.keys(parse).length === 0)) {
       warnings.push(`field ${fieldKey}: enum_policy=open but parse_rules is empty`);
     }
   }
@@ -2993,7 +3576,7 @@ async function writeCanonicalFieldRulesPair({
   generatedRoot,
   runtimePayload
 }) {
-  const canonical = `${stableStringify(runtimePayload)}\n`;
+  const canonical = JSON.stringify(runtimePayload, null, 2);
   const canonicalBuffer = Buffer.from(canonical, 'utf8');
   const canonicalHash = hashBuffer(canonicalBuffer);
   const canonicalBytes = canonicalBuffer.length;
@@ -3057,6 +3640,7 @@ function diffFieldRuleSets(previousRules = {}, currentRules = {}) {
 async function writeControlPlaneSnapshot({
   controlPlaneRoot,
   workbookMap = null,
+  draft = null,
   fieldRulesDraft = null,
   fieldRulesFull = null,
   uiFieldCatalogDraft = null,
@@ -3068,6 +3652,9 @@ async function writeControlPlaneSnapshot({
   if (isObject(workbookMap)) {
     await writeJsonStable(path.join(versionRoot, 'workbook_map.json'), workbookMap);
   }
+  if (isObject(draft)) {
+    await writeJsonStable(path.join(versionRoot, 'draft.json'), draft);
+  }
   if (isObject(fieldRulesDraft)) {
     await writeJsonStable(path.join(versionRoot, 'field_rules_draft.json'), fieldRulesDraft);
   }
@@ -3077,13 +3664,16 @@ async function writeControlPlaneSnapshot({
   if (isObject(uiFieldCatalogDraft)) {
     await writeJsonStable(path.join(versionRoot, 'ui_field_catalog_draft.json'), uiFieldCatalogDraft);
   }
+  const noteText = normalizeText(note) || 'category-compile';
+  await fs.writeFile(path.join(versionRoot, 'notes.txt'), `${noteText}\n`, 'utf8');
   await writeJsonStable(path.join(versionRoot, 'manifest.json'), {
     version: 1,
     version_id: versionId,
     created_at: nowIso(),
-    note: normalizeText(note) || null,
+    note: noteText,
     files: {
       workbook_map: isObject(workbookMap),
+      draft: isObject(draft),
       field_rules_draft: isObject(fieldRulesDraft),
       field_rules_full: isObject(fieldRulesFull),
       ui_field_catalog_draft: isObject(uiFieldCatalogDraft)
@@ -3105,40 +3695,6 @@ async function readJsonIfExists(filePath) {
     }
     throw error;
   }
-}
-
-async function loadFieldRulePatch({ categoryRoot }) {
-  const candidateFiles = [
-    path.join(categoryRoot, 'field_rules.json'),
-    path.join(categoryRoot, 'field_rule_sample_v2.json'),
-    path.join(categoryRoot, 'field_rules_patch.json')
-  ];
-  const loadedFiles = [];
-  let lastPayload = null;
-  let mergedFields = {};
-  for (const filePath of candidateFiles) {
-    const loaded = await readJsonIfExists(filePath);
-    if (!isObject(loaded) || !isObject(loaded.fields)) {
-      continue;
-    }
-    loadedFiles.push(filePath);
-    lastPayload = loaded;
-    mergedFields = {
-      ...mergedFields,
-      ...loaded.fields
-    };
-  }
-  if (loadedFiles.length === 0) {
-    return null;
-  }
-  return {
-    files: loadedFiles,
-    file_path: loadedFiles[loadedFiles.length - 1],
-    payload: {
-      ...(isObject(lastPayload) ? lastPayload : {}),
-      fields: mergedFields
-    }
-  };
 }
 
 export async function loadWorkbookMap({
@@ -3256,11 +3812,35 @@ export async function compileCategoryWorkbook({
   }
   const map = mergedValidation.normalized;
   const mapWarnings = [...mapValidation.warnings, ...mergedValidation.warnings];
-  const fieldRulePatch = await loadFieldRulePatch({ categoryRoot });
-  const patchFields = isObject(fieldRulePatch?.payload?.fields) ? fieldRulePatch.payload.fields : {};
+  const compileTimestamp = nowIso();
+  const baselineCandidates = [
+    path.join(categoryRoot, 'field_rules.json'),
+    path.join(categoryRoot, 'field_rules_sample.json')
+  ];
+  let baselineFieldRules = null;
+  for (const candidatePath of baselineCandidates) {
+    const candidate = await readJsonIfExists(candidatePath);
+    if (isObject(candidate) && isObject(candidate.fields)) {
+      baselineFieldRules = candidate;
+      break;
+    }
+  }
+  const draftPayload = await readJsonIfExists(path.join(controlPlaneRoot, 'field_rules_draft.json'));
+  const draftFieldOverridesRaw = isObject(draftPayload?.fields) ? draftPayload.fields : {};
+  const baselineFieldOverrides = isObject(baselineFieldRules?.fields) ? baselineFieldRules.fields : {};
+  const mapFieldOverrides = Object.keys(baselineFieldOverrides).length > 0
+    ? {}
+    : (isObject(map.field_overrides) ? map.field_overrides : {});
+  const hasEditedDraftRules = Object.values(draftFieldOverridesRaw).some((rule) => isObject(rule) && rule._edited === true);
+  const draftFieldOverrides = hasEditedDraftRules
+    ? Object.fromEntries(
+      Object.entries(draftFieldOverridesRaw).filter(([, rule]) => isObject(rule) && rule._edited === true)
+    )
+    : {};
   const effectiveFieldOverrides = {
-    ...patchFields,
-    ...(isObject(map.field_overrides) ? map.field_overrides : {})
+    ...baselineFieldOverrides,
+    ...mapFieldOverrides,
+    ...draftFieldOverrides
   };
 
   const workbookBuffer = await fs.readFile(resolvedWorkbook);
@@ -3330,7 +3910,9 @@ export async function compileCategoryWorkbook({
     }
   }
   const enumLists = pullEnumLists(workbookForCompile, map);
-  const componentDb = pullComponentDbs(workbookForCompile, map);
+  const componentPull = pullComponentDbs(workbookForCompile, map);
+  const componentDb = componentPull.componentDb || {};
+  const componentSourceAssertions = toArray(componentPull.sourceAssertions);
   const tooltipLibrary = await loadTooltipLibrary({ categoryRoot });
   const tooltipEntries = isObject(tooltipLibrary?.entries) ? tooltipLibrary.entries : {};
 
@@ -3350,7 +3932,8 @@ export async function compileCategoryWorkbook({
 
   let order = 1;
   for (const row of keyRows) {
-    const field = row.key;
+    const sourceField = row.key;
+    const field = sourceField;
     const label = row.label;
     const tooltipEntry = tooltipEntries[field]
       || tooltipEntries[normalizeFieldKey(label)]
@@ -3384,12 +3967,82 @@ export async function compileCategoryWorkbook({
       order,
       uiDefaults: map.ui_defaults || {}
     });
-    const override = effectiveFieldOverrides?.[field] || effectiveFieldOverrides?.[label] || null;
-    const merged = mergeFieldOverride(draft, override);
-
-    if (normalizeFieldKey(merged.canonical_key) && normalizeFieldKey(merged.canonical_key) !== field) {
-      keyMigrations[field] = normalizeFieldKey(merged.canonical_key);
+    const rawAliasField = normalizeFieldKey(toRawFieldKey(field)) || field;
+    const editedOverride = draftFieldOverrides?.[field]
+      || draftFieldOverrides?.[label]
+      || draftFieldOverrides?.[rawAliasField]
+      || null;
+    const mapOverride = mapFieldOverrides?.[field]
+      || mapFieldOverrides?.[label]
+      || mapFieldOverrides?.[rawAliasField]
+      || null;
+    const override = effectiveFieldOverrides?.[field]
+      || effectiveFieldOverrides?.[label]
+      || effectiveFieldOverrides?.[rawAliasField]
+      || null;
+    const outputField = normalizeFieldKey(toRawFieldKey(field)) || field;
+    const baselineRule = baselineFieldOverrides?.[outputField]
+      || baselineFieldOverrides?.[field]
+      || baselineFieldOverrides?.[rawAliasField]
+      || null;
+    if (isObject(baselineRule) && !isObject(editedOverride) && !isObject(mapOverride)) {
+      const passthrough = JSON.parse(JSON.stringify(baselineRule));
+      passthrough.key = outputField;
+      const passthroughCanonical = normalizeFieldKey(passthrough.canonical_key || '');
+      if (passthroughCanonical && passthroughCanonical !== outputField) {
+        keyMigrations[outputField] = passthroughCanonical;
+      }
+      fieldsRuntime[outputField] = passthrough;
+      fieldsStudio[outputField] = passthrough;
+      const passUi = isObject(passthrough.ui) ? passthrough.ui : {};
+      const passPriority = isObject(passthrough.priority) ? passthrough.priority : {};
+      const passContract = isObject(passthrough.contract) ? passthrough.contract : {};
+      uiFieldCatalogRows.push({
+        key: outputField,
+        canonical_key: passthrough.canonical_key || outputField,
+        label: passUi.label || titleFromKey(outputField),
+        group: passUi.group || 'general',
+        order: passUi.order || order,
+        tooltip_md: passUi.tooltip_md || '',
+        aliases: orderedUniqueStrings(toArray(passthrough.aliases || [])),
+        short_label: normalizeText(passUi.short_label || '') || null,
+        prefix: normalizeText(passUi.prefix || '') || null,
+        suffix: normalizeText(passUi.suffix || '') || null,
+        placeholder: normalizeText(passUi.placeholder || 'unk') || 'unk',
+        input_control: normalizeText(passUi.input_control || 'text') || 'text',
+        tooltip_key: normalizeText(passUi.tooltip_key || '') || null,
+        tooltip_source: normalizeText(passUi.tooltip_source || '') || null,
+        guidance_md: normalizeText(passUi.guidance_md || '') || null,
+        display_mode: normalizeToken(passUi.display_mode || 'all') || 'all',
+        display_decimals: asInt(passUi.display_decimals, 0),
+        array_handling: normalizeToken(passUi.array_handling || passthrough.array_handling || 'none') || 'none',
+        examples: orderedUniqueStrings(toArray(passUi.examples || [])),
+        required_level: normalizeToken(passPriority.required_level || passthrough.required_level || 'optional') || 'optional',
+        availability: normalizeToken(passPriority.availability || passthrough.availability || 'sometimes') || 'sometimes',
+        difficulty: normalizeToken(passPriority.difficulty || passthrough.difficulty || 'medium') || 'medium',
+        effort: asInt(passPriority.effort ?? passthrough.effort, 5),
+        type: normalizeToken(passContract.type || passthrough.type || 'string') || 'string',
+        shape: normalizeToken(passContract.shape || passthrough.shape || 'scalar') || 'scalar',
+        unit: normalizeText(passContract.unit || passthrough.unit || ''),
+        surfaces: isObject(passthrough.surfaces) ? passthrough.surfaces : {}
+      });
+      order += 1;
+      continue;
     }
+    const baseForMerge = isObject(baselineRule)
+      ? JSON.parse(JSON.stringify(baselineRule))
+      : draft;
+    const merged = mergeFieldOverride(baseForMerge, override);
+    const requestedCanonical = normalizeFieldKey(merged.canonical_key || '');
+    if (outputField !== field) {
+      keyMigrations[field] = outputField;
+      merged.aliases = stableSortStrings([...(merged.aliases || []), field, outputField]);
+    }
+    if (requestedCanonical && requestedCanonical !== outputField) {
+      keyMigrations[outputField] = requestedCanonical;
+    }
+    merged.key = outputField;
+    merged.canonical_key = requestedCanonical || null;
 
     if ((merged.enum_policy === 'closed' || merged.enum_policy === 'closed_with_curation') && (!merged.vocab?.known_values || merged.vocab.known_values.length === 0)) {
       merged.enum_policy = 'open_prefer_known';
@@ -3473,7 +4126,80 @@ export async function compileCategoryWorkbook({
           || '_suggestions/enums.json'
       };
     }
-    if (isObject(merged.selection_policy) && !normalizeText(merged.selection_policy.source_field)) {
+
+    const mergedType = normalizeToken(merged.type || merged.contract?.type || 'string') || 'string';
+    const mergedShape = normalizeToken(merged.shape || merged.contract?.shape || 'scalar') || 'scalar';
+    const mergedEnumValues = stableSortStrings([
+      ...toArray(enumLists[outputField]),
+      ...toArray(enumLists[normalizeFieldKey(label)])
+    ]);
+    let mergedParseTemplate = normalizeToken(merged.parse_template || merged.parse?.template || '');
+    if (!mergedParseTemplate) {
+      mergedParseTemplate = inferParseTemplate({
+        key: outputField,
+        type: mergedType,
+        shape: mergedShape,
+        enumValues: mergedEnumValues,
+        componentType
+      });
+    }
+    const listParseTemplates = new Set([
+      'list_of_tokens_delimited',
+      'list_of_numbers_with_unit',
+      'list_numbers_or_ranges_with_unit',
+      'latency_list_modes_ms',
+      'mode_tagged_list',
+      'mode_tagged_values'
+    ]);
+    if (listParseTemplates.has(mergedParseTemplate) && mergedShape !== 'list') {
+      mergedParseTemplate = inferParseTemplate({
+        key: outputField,
+        type: mergedType,
+        shape: mergedShape,
+        enumValues: mergedEnumValues,
+        componentType
+      });
+      if (listParseTemplates.has(mergedParseTemplate) && mergedShape !== 'list') {
+        mergedParseTemplate = mergedType === 'string' ? 'text_field' : mergedParseTemplate;
+      }
+    }
+    if (mergedShape === 'list' && ['text_field', 'string', 'enum_string'].includes(mergedParseTemplate)) {
+      mergedParseTemplate = inferParseTemplate({
+        key: outputField,
+        type: mergedType,
+        shape: mergedShape,
+        enumValues: mergedEnumValues,
+        componentType
+      });
+    }
+    merged.parse_template = canonicalParseTemplate(mergedParseTemplate);
+    if (!isObject(merged.parse)) {
+      merged.parse = {};
+    }
+    merged.parse.template = merged.parse_template;
+    if (!isObject(merged.parse_rules)) {
+      merged.parse_rules = {};
+    }
+    if (mergedShape === 'list') {
+      const existingListRules = isObject(merged.list_rules) ? merged.list_rules : {};
+      merged.list_rules = {
+        dedupe: existingListRules.dedupe !== false,
+        sort: normalizeToken(existingListRules.sort || 'none') || 'none',
+        min_items: asInt(existingListRules.min_items, 0),
+        max_items: asInt(existingListRules.max_items, 100)
+      };
+      if (
+        ['list_of_tokens_delimited', 'list_of_numbers_with_unit', 'list_numbers_or_ranges_with_unit', 'latency_list_modes_ms'].includes(mergedParseTemplate)
+        && toArray(merged.parse_rules.delimiters).length === 0
+      ) {
+        merged.parse_rules.delimiters = [',', '/', '|', ';'];
+      }
+    }
+    if (mergedShape === 'object' && !isObject(merged.object_schema)) {
+      merged.object_schema = {};
+    }
+
+    if (isObject(merged.selection_policy) && Object.keys(merged.selection_policy).length > 0 && !normalizeText(merged.selection_policy.source_field)) {
       merged.selection_policy = {
         ...merged.selection_policy,
         source_field: field
@@ -3500,20 +4226,21 @@ export async function compileCategoryWorkbook({
       }
     }
 
-    fieldsRuntime[field] = merged;
-    fieldsStudio[field] = buildStudioFieldRule({
-      key: field,
+    fieldsRuntime[outputField] = merged;
+    fieldsStudio[outputField] = buildStudioFieldRule({
+      category,
+      key: outputField,
       rule: merged,
       row,
       map,
-      samples: samples.byField[field] || [],
+      samples: samples.byField[sourceField] || [],
       enumLists,
       componentDb
     });
     uiFieldCatalogRows.push({
-      key: field,
-      canonical_key: merged.canonical_key || field,
-      label: merged.ui?.label || titleFromKey(field),
+      key: outputField,
+      canonical_key: merged.canonical_key || outputField,
+      label: merged.ui?.label || titleFromKey(outputField),
       group: merged.ui?.group || 'general',
       order: merged.ui?.order || order,
       tooltip_md: merged.ui?.tooltip_md || '',
@@ -3545,7 +4272,7 @@ export async function compileCategoryWorkbook({
   const fieldRulesDraft = {
     version: 1,
     category,
-    generated_at: DETERMINISTIC_TIMESTAMP,
+    generated_at: compileTimestamp,
     workbook_map_hash: hashJson(map),
     selected_keys: stableSortStrings(keyRows.map((row) => row.key)),
     expectations: {
@@ -3555,13 +4282,13 @@ export async function compileCategoryWorkbook({
       expected_sometimes_fields: stableSortStrings(toArray(map.expectations?.expected_sometimes_fields)),
       deep_fields: stableSortStrings(toArray(map.expectations?.deep_fields))
     },
-    fields: sortDeep(fieldsStudio)
+    fields: fieldsStudio
   };
 
   const uiFieldCatalogDraft = {
     version: 1,
     category,
-    generated_at: DETERMINISTIC_TIMESTAMP,
+    generated_at: compileTimestamp,
     fields: uiFieldCatalogRows
       .map((row) => ({
         key: row.key,
@@ -3586,51 +4313,84 @@ export async function compileCategoryWorkbook({
       }))
       .sort((a, b) => (asInt(a.order, 0) - asInt(b.order, 0)) || a.key.localeCompare(b.key))
   };
+  const combinedDraft = {
+    version: 1,
+    category,
+    generated_at: compileTimestamp,
+    workbook_map_hash: hashJson(map),
+    selected_keys: stableSortStrings(keyRows.map((row) => normalizeFieldKey(row.key))),
+    fields: fieldsStudio,
+    ui_field_catalog: toArray(uiFieldCatalogDraft.fields)
+  };
 
   const validation = buildCompileValidation({
     fields: fieldsRuntime,
     knownValues,
+    enumLists,
     componentDb
   });
+  for (const assertion of componentSourceAssertions) {
+    if (!validation.errors.includes(assertion)) {
+      validation.errors.push(assertion);
+    }
+  }
 
-  const identityKeys = stableSortStrings(Object.keys(fieldsRuntime).filter((field) => fieldsRuntime[field].required_level === 'identity'));
-  const requiredKeys = stableSortStrings(Object.keys(fieldsRuntime).filter((field) => fieldsRuntime[field].required_level === 'required'));
-  const criticalKeys = stableSortStrings(Object.keys(fieldsRuntime).filter((field) => fieldsRuntime[field].required_level === 'critical'));
-  const expectedEasy = stableSortStrings(Object.keys(fieldsRuntime).filter((field) => fieldsRuntime[field].required_level === 'expected' && fieldsRuntime[field].difficulty === 'easy'));
-  const expectedSometimes = stableSortStrings(Object.keys(fieldsRuntime).filter((field) => fieldsRuntime[field].required_level === 'expected' && fieldsRuntime[field].difficulty !== 'easy'));
-  const deepFields = stableSortStrings(Object.keys(fieldsRuntime).filter((field) => fieldsRuntime[field].required_level === 'optional' || fieldsRuntime[field].required_level === 'rare'));
-
-  const fieldRulesBase = {
-    version: 1,
-    category,
-    generated_at: DETERMINISTIC_TIMESTAMP,
-    workbook: {
-      path: resolvedWorkbook,
-      hash: workbook.workbook_hash
-    },
-    workbook_map_hash: hashJson(map),
-    defaults: {
-      missing: {
-        sentinels: ['', 'unk', 'n/a', 'na', 'unknown', null]
-      },
-      vocab: {
-        mode_default: 'open',
-        allow_new_default: true
-      }
-    },
-    schema: {
-      identity_fields: identityKeys,
-      required_fields: requiredKeys,
-      critical_fields: criticalKeys,
-      expected_easy_fields: expectedEasy,
-      expected_sometimes_fields: expectedSometimes,
-      deep_fields: deepFields,
-      include_fields: stableSortStrings(Object.keys(fieldsRuntime)),
-      exclude_fields: ['id', 'brand', 'model', 'base_model', 'category', 'sku'],
-      preserve_existing_fields: false
-    },
-    fields: fieldsRuntime
-  };
+  const canonicalFields = {};
+  const baselineFieldOrder = Object.keys(isObject(baselineFieldRules?.fields) ? baselineFieldRules.fields : {});
+  for (const fieldKey of baselineFieldOrder) {
+    if (Object.prototype.hasOwnProperty.call(fieldsStudio, fieldKey)) {
+      canonicalFields[fieldKey] = fieldsStudio[fieldKey];
+    }
+  }
+  for (const row of keyRows) {
+    const outputField = normalizeFieldKey(toRawFieldKey(row.key)) || row.key;
+    if (Object.prototype.hasOwnProperty.call(fieldsStudio, outputField) && !Object.prototype.hasOwnProperty.call(canonicalFields, outputField)) {
+      canonicalFields[outputField] = fieldsStudio[outputField];
+    }
+  }
+  for (const fieldKey of Object.keys(fieldsStudio)) {
+    if (!Object.prototype.hasOwnProperty.call(canonicalFields, fieldKey)) {
+      canonicalFields[fieldKey] = fieldsStudio[fieldKey];
+    }
+  }
+  const identityKeys = stableSortStrings(
+    Object.entries(canonicalFields)
+      .filter(([, rule]) => normalizeToken(rule?.priority?.required_level) === 'identity')
+      .map(([field]) => field)
+  );
+  const requiredKeys = stableSortStrings(
+    Object.entries(canonicalFields)
+      .filter(([, rule]) => normalizeToken(rule?.priority?.required_level) === 'required')
+      .map(([field]) => field)
+  );
+  const criticalKeys = stableSortStrings(
+    Object.entries(canonicalFields)
+      .filter(([, rule]) => normalizeToken(rule?.priority?.required_level) === 'critical')
+      .map(([field]) => field)
+  );
+  const expectedEasy = stableSortStrings(
+    Object.entries(canonicalFields)
+      .filter(([, rule]) => (
+        normalizeToken(rule?.priority?.required_level) === 'expected'
+        && normalizeToken(rule?.priority?.difficulty) === 'easy'
+      ))
+      .map(([field]) => field)
+  );
+  const expectedSometimes = stableSortStrings(
+    Object.entries(canonicalFields)
+      .filter(([, rule]) => (
+        normalizeToken(rule?.priority?.required_level) === 'expected'
+        && normalizeToken(rule?.priority?.difficulty) !== 'easy'
+      ))
+      .map(([field]) => field)
+  );
+  const deepFields = stableSortStrings(
+    Object.entries(canonicalFields)
+      .filter(([, rule]) => (
+        ['optional', 'rare'].includes(normalizeToken(rule?.priority?.required_level))
+      ))
+      .map(([field]) => field)
+  );
 
   const keySourceColumn = String(map?.key_list?.column || '').toUpperCase();
   const keySourceRange = normalizeText(
@@ -3641,64 +4401,93 @@ export async function compileCategoryWorkbook({
         : `${keySourceColumn}${asInt(map?.key_list?.row_start, 1)}:${keySourceColumn}${asInt(map?.key_list?.row_end, asInt(map?.key_list?.row_start, 1))}`)
   );
 
-  const fieldRulesFull = {
-    ...fieldRulesBase,
-    meta: {
-      category,
-      generated_at: DETERMINISTIC_TIMESTAMP,
-      source_workbook: path.basename(resolvedWorkbook),
-      key_source: {
-        sheet: normalizeText(map?.key_list?.sheet || ''),
-        range: keySourceRange
-      },
-      field_rule_patch: fieldRulePatch
-        ? {
-          files: toArray(fieldRulePatch.files).map((filePath) => path.basename(filePath)),
-          version: normalizeText(fieldRulePatch.payload?.version || '') || null,
-          field_count: Object.keys(patchFields).length
-        }
-        : null,
-      schema_version: 'field_rules_studio_v3',
-      notes: [
+  const keyRange = normalizeText(map?.key_list?.sheet)
+    ? `${normalizeText(map?.key_list?.sheet)}!${keySourceRange}`
+    : keySourceRange;
+  const workbookTabs = buildWorkbookTabsSummary({
+    workbook,
+    map
+  });
+  const enumBuckets = buildEnumBucketSummary({
+    map,
+    enumLists,
+    workbook: workbookForCompile
+  });
+  const componentDbSources = buildComponentSourceSummary({
+    map,
+    componentDb
+  });
+  const parseTemplates = isObject(baselineFieldRules?.parse_templates)
+    ? baselineFieldRules.parse_templates
+    : buildParseTemplateCatalog();
+
+  const fieldRulesCanonical = {
+    version: normalizeText(baselineFieldRules?.version || '') || `field_rules_${normalizeFieldKey(category) || category}_compiled_v1`,
+    generated_at: compileTimestamp,
+    category,
+    source_workbook: normalizeText(baselineFieldRules?.source_workbook || '') || path.basename(resolvedWorkbook),
+    key_range: normalizeText(baselineFieldRules?.key_range || '') || keyRange,
+    notes: Array.isArray(baselineFieldRules?.notes)
+      ? baselineFieldRules.notes
+      : [
         'Generated by Field Rules Studio compiler.',
-        'This artifact includes nested contract blocks and runtime-compatible flat keys per field.'
-      ]
-    },
-    workbook_tabs: buildWorkbookTabsSummary({
-      workbook,
-      map
-    }),
-    known_values: sortDeep(knownValues),
-    enum_buckets: buildEnumBucketSummary({
-      map,
-      enumLists
-    }),
-    component_db_sources: buildComponentSourceSummary({
-      map,
-      componentDb
-    }),
-    fields: sortDeep(fieldsStudio),
-    global: buildGlobalContractMetadata(),
-    parse_templates: buildParseTemplateCatalog(),
-    key_migrations_suggested: sortDeep(keyMigrations)
+        'Canonical runtime contract used by ingestion and extraction.'
+      ],
+    workbook_tabs: isObject(baselineFieldRules?.workbook_tabs) ? baselineFieldRules.workbook_tabs : workbookTabs,
+    enum_buckets: isObject(baselineFieldRules?.enum_buckets) ? baselineFieldRules.enum_buckets : enumBuckets,
+    component_db_sources: isObject(baselineFieldRules?.component_db_sources)
+      ? baselineFieldRules.component_db_sources
+      : componentDbSources,
+    parse_templates: parseTemplates,
+    fields: canonicalFields
   };
 
-  const fieldRulesRuntime = sortDeep({
-    ...fieldRulesBase,
-    fields: sortDeep(fieldsRuntime)
+  const fieldRulesFull = sortDeep({
+    version: 1,
+    category,
+    generated_at: compileTimestamp,
+    source_workbook: path.basename(resolvedWorkbook),
+    workbook: {
+      path: resolvedWorkbook,
+      hash: workbook.workbook_hash
+    },
+    workbook_map_hash: hashJson(map),
+    key_source: {
+      sheet: normalizeText(map?.key_list?.sheet || ''),
+      range: keySourceRange
+    },
+    schema: {
+      identity_fields: identityKeys,
+      required_fields: requiredKeys,
+      critical_fields: criticalKeys,
+      expected_easy_fields: expectedEasy,
+      expected_sometimes_fields: expectedSometimes,
+      deep_fields: deepFields,
+      include_fields: stableSortStrings(Object.keys(canonicalFields)),
+      exclude_fields: ['id', 'brand', 'model', 'base_model', 'category', 'sku'],
+      preserve_existing_fields: false
+    },
+    workbook_tabs: workbookTabs,
+    enum_buckets: enumBuckets,
+    component_db_sources: componentDbSources,
+    parse_templates: parseTemplates,
+    fields: canonicalFields,
+    known_values: sortDeep(knownValues),
+    key_migrations_suggested: sortDeep(keyMigrations),
+    global: buildGlobalContractMetadata()
   });
 
   const uiFieldCatalog = {
     version: 1,
     category,
-    generated_at: DETERMINISTIC_TIMESTAMP,
+    generated_at: compileTimestamp,
     fields: uiFieldCatalogRows.sort((a, b) => (asInt(a.order, 0) - asInt(b.order, 0)) || a.key.localeCompare(b.key))
   };
 
   const knownValuesArtifact = {
     version: 1,
     category,
-    generated_at: DETERMINISTIC_TIMESTAMP,
+    generated_at: compileTimestamp,
     fields: sortDeep(knownValues)
   };
 
@@ -3720,21 +4509,15 @@ export async function compileCategoryWorkbook({
   const previousReport = await readJsonIfExists(path.join(generatedRoot, '_compile_report.json'));
   const previousFieldRulesArtifact = await readJsonIfExists(path.join(generatedRoot, 'field_rules.json'));
   const previousHash = previousReport?.artifacts?.field_rules?.hash || null;
-  const currentHash = hashBuffer(Buffer.from(`${stableStringify(fieldRulesRuntime)}\n`, 'utf8'));
+  const currentHash = hashBuffer(Buffer.from(JSON.stringify(fieldRulesCanonical, null, 2), 'utf8'));
   const changed = Boolean(previousHash && previousHash !== currentHash);
-  const fieldDiff = diffFieldRuleSets(previousFieldRulesArtifact, fieldRulesRuntime);
-  const patchSummary = fieldRulePatch
-    ? {
-      files: toArray(fieldRulePatch.files).map((filePath) => path.basename(filePath)),
-      version: normalizeText(fieldRulePatch.payload?.version || '') || null,
-      field_count: Object.keys(patchFields).length
-    }
-    : null;
+  const fieldDiff = diffFieldRuleSets(previousFieldRulesArtifact, fieldRulesCanonical);
 
   const compileReport = {
     version: 1,
     category,
-    compiled_at: nowIso(),
+    generated_at: compileTimestamp,
+    compiled_at: compileTimestamp,
     compiled: validation.errors.length === 0,
     workbook_path: resolvedWorkbook,
     workbook_hash: workbook.workbook_hash,
@@ -3758,8 +4541,7 @@ export async function compileCategoryWorkbook({
       sampled_product_columns: toArray(samples.columns).length,
       sampled_values: Object.values(samples.byField || {}).reduce((sum, list) => sum + toArray(list).length, 0),
       enum_lists: toArray(map.enum_lists).length,
-      component_sheets: toArray(map.component_sheets).length,
-      field_rule_patch: patchSummary
+      component_sheets: toArray(map.component_sheets).length
     },
     diff: {
       changed,
@@ -3771,6 +4553,10 @@ export async function compileCategoryWorkbook({
       field_rules_draft: {
         path: path.join(controlPlaneRoot, 'field_rules_draft.json'),
         hash: hashJson(fieldRulesDraft)
+      },
+      draft: {
+        path: path.join(controlPlaneRoot, 'draft.json'),
+        hash: hashJson(combinedDraft)
       },
       field_rules_full: {
         path: path.join(controlPlaneRoot, 'field_rules.full.json'),
@@ -3808,12 +4594,14 @@ export async function compileCategoryWorkbook({
 
   await fs.mkdir(controlPlaneRoot, { recursive: true });
   await writeJsonStable(controlMap.file_path || path.join(controlPlaneRoot, 'workbook_map.json'), map);
+  await writeJsonStable(path.join(controlPlaneRoot, 'draft.json'), combinedDraft);
   await writeJsonStable(path.join(controlPlaneRoot, 'field_rules_draft.json'), fieldRulesDraft);
   await writeJsonStable(path.join(controlPlaneRoot, 'field_rules.full.json'), fieldRulesFull);
   await writeJsonStable(path.join(controlPlaneRoot, 'ui_field_catalog_draft.json'), uiFieldCatalogDraft);
   const controlPlaneSnapshot = await writeControlPlaneSnapshot({
     controlPlaneRoot,
     workbookMap: map,
+    draft: combinedDraft,
     fieldRulesDraft,
     fieldRulesFull,
     uiFieldCatalogDraft,
@@ -3843,7 +4631,7 @@ export async function compileCategoryWorkbook({
   await fs.mkdir(generatedRoot, { recursive: true });
   const canonicalPair = await writeCanonicalFieldRulesPair({
     generatedRoot,
-    runtimePayload: fieldRulesRuntime
+    runtimePayload: fieldRulesCanonical
   });
   if (!canonicalPair.identical) {
     compileReport.errors.push('field_rules.json and field_rules.runtime.json must be byte-identical');
@@ -3892,7 +4680,7 @@ export async function compileCategoryWorkbook({
       version: 1,
       category,
       component_type: componentType,
-      generated_at: DETERMINISTIC_TIMESTAMP,
+      generated_at: compileTimestamp,
       items: rows
     };
     const outputName = normalizeText(componentTypeOutputName[normalizeToken(componentType)] || componentType) || componentType;
