@@ -265,14 +265,6 @@ export async function callOpenAI({
       deepseek_mode_detected: Boolean(deepSeekMode),
       json_schema_requested: Boolean(jsonSchemaRequested)
     });
-    // Backward compatibility for existing logs/consumers expecting legacy OpenAI event names.
-    if (providerLabel === 'openai') {
-      logger?.warn?.('openai_call_failed', {
-        reason,
-        model,
-        message: safeMessage
-      });
-    }
   };
 
   const emitUsage = async ({ usage, content, responseModel, retryWithoutSchema = false }) => {

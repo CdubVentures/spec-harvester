@@ -3536,7 +3536,7 @@ export async function compileCategoryWorkbook({
   const expectedSometimes = stableSortStrings(Object.keys(fieldsRuntime).filter((field) => fieldsRuntime[field].required_level === 'expected' && fieldsRuntime[field].difficulty !== 'easy'));
   const deepFields = stableSortStrings(Object.keys(fieldsRuntime).filter((field) => fieldsRuntime[field].required_level === 'optional' || fieldsRuntime[field].required_level === 'rare'));
 
-  const fieldRulesRuntime = {
+  const fieldRulesBase = {
     version: 1,
     category,
     generated_at: DETERMINISTIC_TIMESTAMP,
@@ -3578,7 +3578,7 @@ export async function compileCategoryWorkbook({
   );
 
   const fieldRules = {
-    ...fieldRulesRuntime,
+    ...fieldRulesBase,
     meta: {
       category,
       generated_at: DETERMINISTIC_TIMESTAMP,
@@ -3616,8 +3616,7 @@ export async function compileCategoryWorkbook({
     fields: sortDeep(fieldsStudio),
     global: buildGlobalContractMetadata(),
     parse_templates: buildParseTemplateCatalog(),
-    key_migrations_suggested: sortDeep(keyMigrations),
-    runtime_fields: sortDeep(fieldsRuntime)
+    key_migrations_suggested: sortDeep(keyMigrations)
   };
 
   const uiFieldCatalog = {
@@ -3634,54 +3633,9 @@ export async function compileCategoryWorkbook({
     fields: sortDeep(knownValues)
   };
 
-  const schema = {
-    category,
-    field_order: keyRows.map((row) => row.key),
-    selected_keys: stableSortStrings(keyRows.map((row) => row.key)),
-    critical_fields: criticalKeys,
-    expected_easy_fields: expectedEasy,
-    expected_sometimes_fields: expectedSometimes,
-    deep_fields: deepFields,
-    editorial_fields: [],
-    field_contract_overrides: sortDeep(Object.fromEntries(
-      Object.entries(fieldsRuntime).map(([field, rule]) => {
-        const override = {
-          type: fieldTypeForContract(rule)
-        };
-        if (rule.unit) {
-          override.unit = rule.unit;
-        }
-        if (rule.enum_policy === 'closed' && toArray(rule.vocab?.known_values).length > 0) {
-          override.enum = stableSortStrings(rule.vocab.known_values);
-        }
-        if (isObject(rule.validate) && normalizeToken(rule.validate.kind) === 'number_range') {
-          const min = asNumber(rule.validate.min);
-          const max = asNumber(rule.validate.max);
-          if (min !== null || max !== null) {
-            override.range = {
-              ...(min !== null ? { min } : {}),
-              ...(max !== null ? { max } : {})
-            };
-          }
-        }
-        if (isObject(rule.vocab?.synonyms)) {
-          override.aliases = rule.vocab.synonyms;
-        }
-        return [field, override];
-      })
-    )),
-    targets: {
-      targetCompleteness: 0.9,
-      targetConfidence: 0.8
-    }
-  };
-
-  const requiredFieldsArtifact = requiredKeys.map((field) => `fields.${field}`);
-
   const previousReport = await readJsonIfExists(path.join(generatedRoot, '_compile_report.json'));
   const previousHash = previousReport?.artifacts?.field_rules?.hash || null;
   const currentHash = hashJson(fieldRules);
-  const runtimeHash = hashJson(fieldRulesRuntime);
   const changed = Boolean(previousHash && previousHash !== currentHash);
   const patchSummary = fieldRulePatch
     ? {
@@ -3735,10 +3689,6 @@ export async function compileCategoryWorkbook({
         hash: currentHash,
         changed
       },
-      field_rules_runtime: {
-        path: path.join(generatedRoot, 'field_rules.runtime.json'),
-        hash: runtimeHash
-      },
       ui_field_catalog: {
         path: path.join(generatedRoot, 'ui_field_catalog.json'),
         hash: hashJson(uiFieldCatalog)
@@ -3790,11 +3740,11 @@ export async function compileCategoryWorkbook({
 
   await fs.mkdir(generatedRoot, { recursive: true });
   await writeJsonStable(path.join(generatedRoot, 'field_rules.json'), fieldRules);
-  await writeJsonStable(path.join(generatedRoot, 'field_rules.runtime.json'), fieldRulesRuntime);
+  await fs.rm(path.join(generatedRoot, 'field_rules.runtime.json'), { force: true });
   await writeJsonStable(path.join(generatedRoot, 'ui_field_catalog.json'), uiFieldCatalog);
   await writeJsonStable(path.join(generatedRoot, 'known_values.json'), knownValuesArtifact);
-  await writeJsonStable(path.join(generatedRoot, 'schema.json'), schema);
-  await writeJsonStable(path.join(generatedRoot, 'required_fields.json'), requiredFieldsArtifact);
+  await fs.rm(path.join(generatedRoot, 'schema.json'), { force: true });
+  await fs.rm(path.join(generatedRoot, 'required_fields.json'), { force: true });
   if (Object.keys(keyMigrations).length > 0) {
     await writeJsonStable(path.join(generatedRoot, 'key_migrations.json'), keyMigrations);
   } else {
@@ -3804,12 +3754,12 @@ export async function compileCategoryWorkbook({
   const componentRoot = path.join(generatedRoot, 'component_db');
   await fs.rm(componentRoot, { recursive: true, force: true });
   await fs.mkdir(componentRoot, { recursive: true });
-  const componentTypeAliases = {
-    sensor: ['sensors'],
-    switch: ['switches'],
-    encoder: ['encoders'],
-    mcu: ['mcus'],
-    material: ['materials']
+  const componentTypeOutputName = {
+    sensor: 'sensors',
+    switch: 'switches',
+    encoder: 'encoders',
+    mcu: 'mcus',
+    material: 'materials'
   };
   for (const [componentType, rows] of Object.entries(componentDb)) {
     const payload = {
@@ -3819,13 +3769,8 @@ export async function compileCategoryWorkbook({
       generated_at: DETERMINISTIC_TIMESTAMP,
       items: rows
     };
-    await writeJsonStable(path.join(componentRoot, `${componentType}.json`), payload);
-    for (const alias of toArray(componentTypeAliases[normalizeToken(componentType)])) {
-      if (!normalizeText(alias) || normalizeToken(alias) === normalizeToken(componentType)) {
-        continue;
-      }
-      await writeJsonStable(path.join(componentRoot, `${alias}.json`), payload);
-    }
+    const outputName = normalizeText(componentTypeOutputName[normalizeToken(componentType)] || componentType) || componentType;
+    await writeJsonStable(path.join(componentRoot, `${outputName}.json`), payload);
   }
   await writeJsonStable(path.join(generatedRoot, '_compile_report.json'), compileReport);
 

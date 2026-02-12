@@ -313,15 +313,12 @@ async function assertCategorySchemaReady({ category, storage, config }) {
     categoryConfig = await loadCategoryConfig(category, { storage, config });
   } catch (error) {
     throw new Error(
-      `Category '${category}' is not configured. Add categories/${category}/{schema,sources,required_fields,search_templates,anchors}.json first. (${error.message})`
+      `Category '${category}' is not configured. Generate helper_files/${category}/_generated/field_rules.json first. (${error.message})`
     );
   }
 
   if (!Array.isArray(categoryConfig.fieldOrder) || categoryConfig.fieldOrder.length === 0) {
-    throw new Error(`Category '${category}' has no schema field_order configured.`);
-  }
-  if (!Array.isArray(categoryConfig.requiredFields) || categoryConfig.requiredFields.length === 0) {
-    throw new Error(`Category '${category}' has no required_fields configured.`);
+    throw new Error(`Category '${category}' has no field order in generated field rules.`);
   }
 }
 

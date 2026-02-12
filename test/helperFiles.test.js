@@ -32,55 +32,25 @@ function mouseCategoryConfig() {
   };
 }
 
-test('helper files load and provide supportive evidence/fill for matched product', async () => {
+test('helper files load and provide active helper evidence/fill for matched product', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-helper-load-'));
   const helperRoot = path.join(tempRoot, 'helper_files');
-  const modelsDir = path.join(helperRoot, 'mouse', 'models-and-schema');
-  const supportiveDir = path.join(helperRoot, 'mouse', 'accurate-supportive-product-information');
-  await fs.mkdir(modelsDir, { recursive: true });
-  await fs.mkdir(supportiveDir, { recursive: true });
+  const categoryDir = path.join(helperRoot, 'mouse');
+  await fs.mkdir(categoryDir, { recursive: true });
 
   await fs.writeFile(
-    path.join(modelsDir, 'activeFiltering.json'),
+    path.join(categoryDir, 'activeFiltering.json'),
     JSON.stringify([
       {
         brand: 'Logitech',
         model: 'G Pro X Superlight 2',
         variant: 'Wireless',
         url: 'https://www.logitechg.com/specs',
-        switch_link: 'https://www.logitechg.com/switches'
-      }
-    ], null, 2),
-    'utf8'
-  );
-
-  await fs.writeFile(
-    path.join(supportiveDir, 'trusted-a.json'),
-    JSON.stringify([
-      {
-        brand: 'Logitech',
-        model: 'G Pro X Superlight 2',
-        variant: 'Wireless',
+        connection: 'wireless',
         weight: '60 g',
         polling_rate: '4000',
-        dpi: '32000'
-      }
-    ], null, 2),
-    'utf8'
-  );
-
-  await fs.writeFile(
-    path.join(supportiveDir, 'trusted-b.json'),
-    JSON.stringify([
-      {
-        general__id: 1001,
-        general__model: 'G Pro X Superlight 2',
-        general__variant: 'Wireless',
-        general__brand_names: ['Logitech'],
-        mouse__wireless: true,
-        mouse__weight: 60,
-        mouse__polling_rate: 8000,
-        mouse__dpi: 32000
+        dpi: '32000',
+        switch_link: 'https://www.logitechg.com/switches'
       }
     ], null, 2),
     'utf8'
@@ -100,8 +70,8 @@ test('helper files load and provide supportive evidence/fill for matched product
       forceRefresh: true
     });
     assert.equal(loaded.active.length, 1);
-    assert.equal(loaded.supportive.length >= 2, true);
-    assert.equal(loaded.supportive_files.length, 2);
+    assert.equal(loaded.supportive.length, 0);
+    assert.equal(loaded.supportive_files.length, 0);
 
     const job = {
       productId: 'mouse-logitech-g-pro-x-superlight-2-wireless',
@@ -118,7 +88,7 @@ test('helper files load and provide supportive evidence/fill for matched product
     });
     assert.equal(Boolean(context.active_match), true);
     assert.equal(context.seed_urls.includes('https://www.logitechg.com/specs'), true);
-    assert.equal(context.supportive_matches.length >= 1, true);
+    assert.equal(context.supportive_matches.length, 0);
 
     const synthetic = buildSupportiveSyntheticSources({
       helperContext: context,
@@ -172,11 +142,11 @@ test('helper files load and provide supportive evidence/fill for matched product
 test('syncJobsFromActiveFiltering creates jobs and queue records once', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-helper-sync-'));
   const helperRoot = path.join(tempRoot, 'helper_files');
-  const modelsDir = path.join(helperRoot, 'mouse', 'models-and-schema');
-  await fs.mkdir(modelsDir, { recursive: true });
+  const categoryDir = path.join(helperRoot, 'mouse');
+  await fs.mkdir(categoryDir, { recursive: true });
 
   await fs.writeFile(
-    path.join(modelsDir, 'activeFiltering.json'),
+    path.join(categoryDir, 'activeFiltering.json'),
     JSON.stringify([
       {
         brand: 'Logitech',
@@ -243,14 +213,14 @@ test('syncJobsFromActiveFiltering creates jobs and queue records once', async ()
   }
 });
 
-test('resolveHelperProductContext prefers no-variant supportive row when variant is not locked', async () => {
-  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-helper-variant-'));
+test('resolveHelperProductContext resolves active row by variant match', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-helper-variant-active-'));
   const helperRoot = path.join(tempRoot, 'helper_files');
-  const supportiveDir = path.join(helperRoot, 'mouse', 'accurate-supportive-product-information');
-  await fs.mkdir(supportiveDir, { recursive: true });
+  const categoryDir = path.join(helperRoot, 'mouse');
+  await fs.mkdir(categoryDir, { recursive: true });
 
   await fs.writeFile(
-    path.join(supportiveDir, 'trusted.json'),
+    path.join(categoryDir, 'activeFiltering.json'),
     JSON.stringify([
       {
         brand: 'Logitech',
@@ -292,8 +262,8 @@ test('resolveHelperProductContext prefers no-variant supportive row when variant
       }
     });
 
-    assert.equal(context.supportive_matches.length >= 2, true);
-    assert.equal(context.supportive_matches[0].variant, '');
+    assert.equal(context.supportive_matches.length, 0);
+    assert.equal(context.active_match?.variant, 'SE');
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }

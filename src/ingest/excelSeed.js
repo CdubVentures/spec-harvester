@@ -459,7 +459,6 @@ function categoryDir(category) {
 
 export function fieldRulesPathCandidates({ category, config = {} }) {
   return [
-    path.join(helperCategoryDir({ category, config }), '_generated', 'field_rules.runtime.json'),
     path.join(helperCategoryDir({ category, config }), '_generated', 'field_rules.json'),
     path.join(helperCategoryDir({ category, config }), 'field_rules.json'),
     path.join(categoryDir(category), 'field_rules.json')

@@ -7823,7 +7823,7 @@
         "short_label": null,
         "suffix": null,
         "tooltip_key": null,
-        "tooltip_md": "Colorway tokens. Use list<string>. Normalize grey\u2192gray; multi-colorways may use '+'.",
+        "tooltip_md": "Colorway tokens. Use list<string>. Normalize grey→gray; multi-colorways may use '+'.",
         "tooltip_source": null
       },
       "value_form": "set",
@@ -11187,8 +11187,8 @@
         ],
         "range_separators": [
           "-",
-          "\u2013",
-          "\u2014"
+          "–",
+          "—"
         ],
         "strict_unit_required": false,
         "template": "list_numbers_or_ranges_with_unit",
@@ -11213,8 +11213,8 @@
         ],
         "separators": [
           "-",
-          "\u2013",
-          "\u2014"
+          "–",
+          "—"
         ],
         "unit": "mm",
         "unit_accepts": [
@@ -13364,8 +13364,7 @@
         "separators": [],
         "unit": "Hz",
         "unit_accepts": [
-          "Hz",
-          "hz"
+          "Hz"
         ],
         "unit_conversions": {}
       },
@@ -17329,7 +17328,7 @@
         "short_label": null,
         "suffix": "g",
         "tooltip_key": "weight",
-        "tooltip_md": "Mouse weight in grams. Convert oz\u2192g when necessary; keep decimals if provided.",
+        "tooltip_md": "Mouse weight in grams. Convert oz→g when necessary; keep decimals if provided.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
       "unit": "g",

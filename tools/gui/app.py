@@ -21,18 +21,13 @@ def resolve_repo_root() -> Path:
 REPO_ROOT = resolve_repo_root()
 OUTPUT_ROOT = (REPO_ROOT / os.environ.get("LOCAL_OUTPUT_ROOT", "out")).resolve()
 HELPER_ROOT = REPO_ROOT / "helper_files"
-CATEGORIES_ROOT = REPO_ROOT / "categories"
 FINAL_ROOT = OUTPUT_ROOT / "final"
 EVENTS_PATH = OUTPUT_ROOT / "_runtime" / "events.jsonl"
 GUI_PROCESS_LOG_PATH = OUTPUT_ROOT / "_runtime" / "gui_process.log"
 QUEUE_ROOT = OUTPUT_ROOT / "_queue"
-QUEUE_ROOT_LEGACY = OUTPUT_ROOT / "specs" / "outputs" / "_queue"
 RUNS_ROOT = OUTPUT_ROOT / "runs"
-RUNS_ROOT_LEGACY = OUTPUT_ROOT / "specs" / "outputs"
 BILLING_ROOT = OUTPUT_ROOT / "_billing"
-BILLING_ROOT_LEGACY = OUTPUT_ROOT / "specs" / "outputs" / "_billing"
 LEARNING_ROOT = OUTPUT_ROOT / "_learning"
-LEARNING_ROOT_LEGACY = OUTPUT_ROOT / "specs" / "outputs" / "_learning"
 COMPONENT_ROOT = OUTPUT_ROOT / "_components"
 UNKNOWN = {"", "unk", "unknown", "na", "n/a", "none", "null"}
 
@@ -50,7 +45,6 @@ EVENT_MEANINGS = {
     "llm_call_usage": "LLM token/cost usage was recorded.",
     "llm_call_completed": "LLM call returned successfully.",
     "llm_call_failed": "LLM call failed for the configured provider.",
-    "openai_call_failed": "Legacy event name from old runs; for deepseek runs, use llm_call_failed.",
     "llm_discovery_planner_failed": "LLM discovery planner failed; deterministic fallback used.",
     "llm_extract_failed": "LLM extraction failed; deterministic extraction still continues.",
     "llm_extract_skipped_budget": "LLM extraction skipped because the current budget/call limit was reached.",
@@ -131,21 +125,20 @@ def read_tail_lines(path: Path, limit: int = 300):
 
 
 def effective_queue_root() -> Path:
-    return QUEUE_ROOT if QUEUE_ROOT.exists() else QUEUE_ROOT_LEGACY
+    return QUEUE_ROOT
 
 
 def effective_billing_root() -> Path:
-    return BILLING_ROOT if BILLING_ROOT.exists() else BILLING_ROOT_LEGACY
+    return BILLING_ROOT
 
 
 def effective_learning_root() -> Path:
-    return LEARNING_ROOT if LEARNING_ROOT.exists() else LEARNING_ROOT_LEGACY
+    return LEARNING_ROOT
 
 
 def run_root_paths(category: str, pid: str, run_id: str):
     return {
-        "new": RUNS_ROOT / category / pid / run_id,
-        "legacy_logs": RUNS_ROOT_LEGACY / category / pid / "runs" / run_id / "logs",
+        "run": RUNS_ROOT / category / pid / run_id,
     }
 
 
@@ -153,20 +146,16 @@ def read_run_bundle(category: str, pid: str, run_id: str):
     if not category or not pid or not run_id:
         return {}
     roots = run_root_paths(category, pid, run_id)
-    summary_detailed = read_json(roots["legacy_logs"] / "summary.json", {})
-    summary_compact = read_json(roots["new"] / "summary.json", {})
-    spec = read_json(roots["new"] / "spec.json", {})
-    provenance = read_json(roots["new"] / "provenance.json", {})
-    traffic_light = read_json(roots["new"] / "traffic_light.json", {})
-    if not spec:
-        normalized = read_json(roots["legacy_logs"] / "normalized.json", {})
-        spec = normalized.get("fields", {}) if isinstance(normalized, dict) else {}
+    summary_compact = read_json(roots["run"] / "summary.json", {})
+    spec = read_json(roots["run"] / "spec.json", {})
+    provenance = read_json(roots["run"] / "provenance.json", {})
+    traffic_light = read_json(roots["run"] / "traffic_light.json", {})
     return {
-        "exists": bool(summary_detailed or summary_compact or spec),
+        "exists": bool(summary_compact or spec),
         "run_id": run_id,
-        "summary": summary_detailed if summary_detailed else summary_compact,
+        "summary": summary_compact,
         "summary_compact": summary_compact,
-        "summary_detailed": summary_detailed,
+        "summary_detailed": {},
         "spec": spec,
         "provenance": provenance,
         "traffic_light": traffic_light,
@@ -298,22 +287,85 @@ def merge_display_llm_info(summary_llm, live_llm):
 @st.cache_data(ttl=30, show_spinner=False)
 def list_categories():
     names = set()
-    for root in (HELPER_ROOT, CATEGORIES_ROOT):
-        if root.exists():
-            for item in root.iterdir():
-                if item.is_dir():
-                    names.add(item.name)
+    if HELPER_ROOT.exists():
+        for item in HELPER_ROOT.iterdir():
+            if item.is_dir():
+                names.add(item.name)
     return sorted(names)
 
 
 @st.cache_data(ttl=30, show_spinner=False)
 def load_schema(category: str):
-    return read_json(CATEGORIES_ROOT / category / "schema.json", {})
+    generated_root = HELPER_ROOT / category / "_generated"
+    generated_schema = read_json(generated_root / "schema.json", {})
+    if isinstance(generated_schema, dict) and generated_schema:
+        return generated_schema
+
+    field_rules = read_json(generated_root / "field_rules.json", {})
+    ui_catalog = read_json(generated_root / "ui_field_catalog.json", {})
+    fields = field_rules.get("fields") if isinstance(field_rules, dict) else {}
+    if not isinstance(fields, dict) or not fields:
+        return {}
+
+    ui_order = {}
+    rows = ui_catalog.get("fields") if isinstance(ui_catalog, dict) else []
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            key = str(row.get("key", "")).strip()
+            if not key:
+                continue
+            try:
+                ui_order[key] = int(row.get("order", 10_000_000))
+            except Exception:
+                ui_order[key] = 10_000_000
+
+    def _norm(value):
+        return "".join(ch.lower() if ch.isalnum() or ch == "_" else "_" for ch in str(value or "")).strip("_")
+
+    entries = []
+    for raw_key, raw_rule in fields.items():
+        key = _norm(raw_key)
+        if not key or not isinstance(raw_rule, dict):
+            continue
+        entries.append((key, raw_rule))
+    entries.sort(key=lambda item: (ui_order.get(item[0], 10_000_000), item[0]))
+
+    critical = []
+    expected_easy = []
+    expected_sometimes = []
+    deep = []
+    order = []
+    for key, rule in entries:
+        order.append(key)
+        required_level = str(rule.get("required_level", "")).strip().lower()
+        availability = str(rule.get("availability", "")).strip().lower()
+        difficulty = str(rule.get("difficulty", "")).strip().lower()
+        if required_level == "critical":
+            critical.append(key)
+        if required_level in {"required", "critical", "expected"}:
+            if difficulty == "easy" or availability == "expected":
+                expected_easy.append(key)
+            else:
+                expected_sometimes.append(key)
+        else:
+            deep.append(key)
+
+    return {
+        "category": category,
+        "field_order": order,
+        "critical_fields": sorted(set(critical)),
+        "expected_easy_fields": sorted(set(expected_easy)),
+        "expected_sometimes_fields": sorted(set(expected_sometimes)),
+        "deep_fields": sorted(set(deep)),
+        "editorial_fields": []
+    }
 
 
 @st.cache_data(ttl=30, show_spinner=False)
 def load_active_filtering(category: str):
-    path = HELPER_ROOT / category / "models-and-schema" / "activeFiltering.json"
+    path = HELPER_ROOT / category / "activeFiltering.json"
     payload = read_json(path, [])
     out = []
     if not isinstance(payload, list):
@@ -357,7 +409,7 @@ def iter_supportive_nodes(payload):
 
 @st.cache_data(ttl=60, show_spinner=False)
 def load_supportive(category: str):
-    folder = HELPER_ROOT / category / "accurate-supportive-product-information"
+    folder = HELPER_ROOT / category / "supportive"
     files = {}
     records = []
     if not folder.exists():
@@ -736,7 +788,7 @@ with st.sidebar:
         "Category",
         categories,
         index=categories.index("mouse") if "mouse" in categories else 0,
-        help="Select category from `helper_files/<category>` and `categories/<category>`."
+        help="Select category from `helper_files/<category>`."
     )
     catalog = build_catalog(category)
     rows = catalog["rows"]
@@ -749,7 +801,7 @@ with st.sidebar:
     brand = st.selectbox(
         "Brand",
         brands,
-        help="Brand list is merged from active targets, supportive helper files, queue state, and final outputs."
+        help="Brand list is merged from active targets, queue state, and final outputs."
     )
     models = sorted({r["model"] for r in active_rows if r["brand"] == brand})
     model = st.selectbox("Model", models, help="Model target from helper catalog/final results.")
@@ -959,7 +1011,7 @@ with tab2:
             sum(
                 1
                 for event in events_for_selected_run
-                if str(event.get("event", "")) in {"llm_call_failed", "openai_call_failed", "llm_extract_failed"}
+                if str(event.get("event", "")) in {"llm_call_failed", "llm_extract_failed"}
             )
         ),
     )
@@ -1100,7 +1152,6 @@ with tab3:
         counts.get(name, 0)
         for name in (
             "llm_call_failed",
-            "openai_call_failed",
             "llm_extract_failed",
             "llm_discovery_planner_failed",
             "llm_summary_failed",
@@ -1109,13 +1160,9 @@ with tab3:
     )
     f1, f2, f3, f4 = st.columns(4)
     f1.metric("Fetch Failures", counts.get("source_fetch_failed", 0))
-    f2.metric("LLM Failures", counts.get("llm_call_failed", 0) + counts.get("openai_call_failed", 0))
+    f2.metric("LLM Failures", counts.get("llm_call_failed", 0))
     f3.metric("Extraction Failures", counts.get("llm_extract_failed", 0))
     f4.metric("Total Failure Signals", failure_total)
-    if counts.get("openai_call_failed", 0) > 0:
-        st.info(
-            "Legacy event detected: `openai_call_failed`. New runs now emit provider-aware `llm_call_failed`."
-        )
 
     st.subheader("Event Legend")
     st.dataframe(event_rows_with_help(counts), use_container_width=True, height=260)

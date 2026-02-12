@@ -104,8 +104,7 @@ function resolveCategoryPaths(config, category) {
   return {
     root,
     categoryRoot,
-    activeFilteringPath: path.join(categoryRoot, 'models-and-schema', 'activeFiltering.json'),
-    supportiveDir: path.join(categoryRoot, 'accurate-supportive-product-information')
+    activeFilteringPath: path.join(categoryRoot, 'activeFiltering.json')
   };
 }
 
@@ -385,23 +384,6 @@ function buildIndex(records) {
   };
 }
 
-async function listSupportiveJsonFiles(dirPath) {
-  let entries = [];
-  try {
-    entries = await fs.readdir(dirPath, { withFileTypes: true });
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      return [];
-    }
-    throw error;
-  }
-
-  return entries
-    .filter((entry) => entry.isFile() && /\.json$/i.test(entry.name))
-    .map((entry) => path.join(dirPath, entry.name))
-    .sort();
-}
-
 function pickBestByVariant(rows, identityLock = {}) {
   if (!rows.length) {
     return null;
@@ -464,23 +446,8 @@ export async function loadHelperCategoryData({
     }))
     .filter(Boolean);
 
-  const supportiveFiles = await listSupportiveJsonFiles(paths.supportiveDir);
   const supportiveRows = [];
-  for (const filePath of supportiveFiles) {
-    const raw = await readJsonFileOrNull(filePath);
-    const rows = extractSupportiveRows(raw);
-    rows.forEach((row, index) => {
-      supportiveRows.push(
-        ...parseSupportiveRow({
-          row,
-          index,
-          category,
-          categoryConfig,
-          sourceFile: path.basename(filePath)
-        })
-      );
-    });
-  }
+  const supportiveFiles = [];
 
   const data = {
     enabled: true,
@@ -527,31 +494,7 @@ export function resolveHelperProductContext({
 
   const identityLock = job.identityLock || {};
   const activeMatches = findIndexedRows(helperData.active_index, identityLock);
-  const supportiveMatches = findIndexedRows(helperData.supportive_index, identityLock);
   const activeMatch = pickBestByVariant(activeMatches, identityLock);
-  const supportiveBestFirst = [...supportiveMatches].sort((a, b) => {
-    const aVariant = normalizeVariant(a.variant);
-    const bVariant = normalizeVariant(b.variant);
-    const expectedVariant = normalizeVariant(identityLock.variant);
-    const variantScore = (variant) => {
-      if (expectedVariant) {
-        if (variant === expectedVariant) {
-          return 1;
-        }
-        if (variant && (variant.includes(expectedVariant) || expectedVariant.includes(variant))) {
-          return 0.7;
-        }
-        if (!variant) {
-          return 0.1;
-        }
-        return 0;
-      }
-      return variant ? 0 : 0.6;
-    };
-    const aScore = variantScore(aVariant);
-    const bScore = variantScore(bVariant);
-    return bScore - aScore || a.source.localeCompare(b.source);
-  });
 
   const seedUrls = [
     ...(activeMatch?.seed_urls || []),
@@ -561,14 +504,14 @@ export function resolveHelperProductContext({
   return {
     enabled: true,
     active_match: activeMatch,
-    supportive_matches: supportiveBestFirst,
+    supportive_matches: [],
     seed_urls: [...new Set(seedUrls)],
     stats: {
       active_total: helperData.active.length,
-      supportive_total: helperData.supportive.length,
-      supportive_file_count: helperData.supportive_files.length,
+      supportive_total: 0,
+      supportive_file_count: 0,
       active_matched_count: activeMatches.length,
-      supportive_matched_count: supportiveMatches.length
+      supportive_matched_count: 0
     }
   };
 }

@@ -239,9 +239,7 @@ export async function runAppDiagnostics({
     path.resolve(rootDir, 'tools', 'gui', '__pycache__')
   ];
   for (const category of selectedCategories) {
-    safePruneCandidates.push(path.resolve(helperRoot, category, 'accurate-supportive-product-information'));
     safePruneCandidates.push(path.resolve(helperRoot, category, 'site_compiler'));
-    safePruneCandidates.push(path.resolve(helperRoot, category, 'models-and-schema'));
   }
 
   const removed = [];

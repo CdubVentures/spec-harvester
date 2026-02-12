@@ -42,7 +42,6 @@ test('callOpenAI redacts API key from logged and thrown errors', async () => {
 
   assert.ok(warnings.length >= 1);
   assert.ok(warnings.some((row) => row.event === 'llm_call_failed'));
-  assert.ok(warnings.some((row) => row.event === 'openai_call_failed'));
   for (const warning of warnings) {
     assert.equal(String(warning.payload.message).includes(secret), false);
   }

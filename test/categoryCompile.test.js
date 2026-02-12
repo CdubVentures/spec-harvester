@@ -148,18 +148,14 @@ test('compileCategoryWorkbook writes deterministic generated artifacts', async (
     const fieldRulesPath = path.join(generatedRoot, 'field_rules.json');
     const knownValuesPath = path.join(generatedRoot, 'known_values.json');
     const uiCatalogPath = path.join(generatedRoot, 'ui_field_catalog.json');
-    const schemaPath = path.join(generatedRoot, 'schema.json');
-    const requiredPath = path.join(generatedRoot, 'required_fields.json');
     const componentRoot = path.join(generatedRoot, 'component_db');
     assert.equal(await fs.stat(fieldRulesPath).then(() => true).catch(() => false), true);
     assert.equal(await fs.stat(knownValuesPath).then(() => true).catch(() => false), true);
     assert.equal(await fs.stat(uiCatalogPath).then(() => true).catch(() => false), true);
-    assert.equal(await fs.stat(schemaPath).then(() => true).catch(() => false), true);
-    assert.equal(await fs.stat(requiredPath).then(() => true).catch(() => false), true);
-    assert.equal(await fs.stat(path.join(componentRoot, 'sensor.json')).then(() => true).catch(() => false), true);
-    assert.equal(await fs.stat(path.join(componentRoot, 'switch.json')).then(() => true).catch(() => false), true);
-    assert.equal(await fs.stat(path.join(componentRoot, 'encoder.json')).then(() => true).catch(() => false), true);
-    assert.equal(await fs.stat(path.join(componentRoot, 'material.json')).then(() => true).catch(() => false), true);
+    assert.equal(await fs.stat(path.join(componentRoot, 'sensors.json')).then(() => true).catch(() => false), true);
+    assert.equal(await fs.stat(path.join(componentRoot, 'switches.json')).then(() => true).catch(() => false), true);
+    assert.equal(await fs.stat(path.join(componentRoot, 'encoders.json')).then(() => true).catch(() => false), true);
+    assert.equal(await fs.stat(path.join(componentRoot, 'materials.json')).then(() => true).catch(() => false), true);
 
     const firstFieldRulesRaw = await fs.readFile(fieldRulesPath, 'utf8');
     const firstKnownValuesRaw = await fs.readFile(knownValuesPath, 'utf8');
@@ -233,8 +229,8 @@ test('compileCategoryWorkbook bootstraps generated artifacts from workbook + too
     assert.equal(await fs.stat(path.join(generatedRoot, 'ui_field_catalog.json')).then(() => true).catch(() => false), true);
     assert.equal(await fs.stat(path.join(generatedRoot, 'known_values.json')).then(() => true).catch(() => false), true);
     assert.equal(await fs.stat(path.join(generatedRoot, '_compile_report.json')).then(() => true).catch(() => false), true);
-    assert.equal(await fs.stat(path.join(generatedRoot, 'component_db', 'sensor.json')).then(() => true).catch(() => false), true);
-    assert.equal(await fs.stat(path.join(generatedRoot, 'component_db', 'switch.json')).then(() => true).catch(() => false), true);
+    assert.equal(await fs.stat(path.join(generatedRoot, 'component_db', 'sensors.json')).then(() => true).catch(() => false), true);
+    assert.equal(await fs.stat(path.join(generatedRoot, 'component_db', 'switches.json')).then(() => true).catch(() => false), true);
 
     const uiCatalog = JSON.parse(await fs.readFile(path.join(generatedRoot, 'ui_field_catalog.json'), 'utf8'));
     const rows = Array.isArray(uiCatalog.fields) ? uiCatalog.fields : [];
@@ -341,9 +337,75 @@ test('compileCategoryWorkbook applies field_rule_sample_v2 patch overrides for l
       // continue
     }
   }
-  assert.equal(Boolean(patchPath), true, 'patch sample source file must exist');
   const targetPatchPath = path.join(categoryRoot, 'field_rule_sample_v2.json');
-  if (patchPath.endsWith('field_rule_sample_v2.json')) {
+  if (!patchPath) {
+    const inlinePatch = {
+      version: 'inline_latency_patch_v2',
+      notes: ['Fallback inline patch for latency/force fields when sample files are absent.'],
+      fields: {
+        click_latency: {
+          priority: { required_level: 'expected', availability: 'sometimes', difficulty: 'hard', effort: 8 },
+          contract: { type: 'number', shape: 'scalar', unit: 'ms', round: '2dp', value_form: 'single' },
+          parse: { template: 'number_with_unit', unit: 'ms', unit_accepts: ['ms'], strict_unit_required: true },
+          evidence: { required: true, min_evidence_refs: 1, tier_preference: ['tier2', 'tier1', 'tier3'], conflict_policy: 'resolve_by_tier_else_unknown' },
+          selection_policy: { allow_scalar_when: 'deterministic_single_source_or_consensus', conflict_behavior: 'set_unknown_on_conflict' }
+        },
+        click_latency_list: {
+          priority: { required_level: 'optional', availability: 'sometimes', difficulty: 'hard', effort: 9 },
+          contract: {
+            type: 'object',
+            shape: 'list',
+            unit: 'ms',
+            value_form: 'set',
+            object_schema: {
+              mode: { type: 'string' },
+              ms: { type: 'number' },
+              source_host: { type: 'string', required: false },
+              method: { type: 'string', required: false }
+            }
+          },
+          parse: { template: 'latency_list_modes_ms' },
+          evidence: { required: true, min_evidence_refs: 1, tier_preference: ['tier2', 'tier1', 'tier3'], conflict_policy: 'preserve_all_candidates' }
+        },
+        sensor_latency: {
+          priority: { required_level: 'expected', availability: 'sometimes', difficulty: 'hard', effort: 8 },
+          contract: { type: 'number', shape: 'scalar', unit: 'ms', round: '2dp', value_form: 'single' },
+          parse: { template: 'number_with_unit', unit: 'ms', unit_accepts: ['ms'], strict_unit_required: true },
+          evidence: { required: true, min_evidence_refs: 1, tier_preference: ['tier2', 'tier1', 'tier3'], conflict_policy: 'resolve_by_tier_else_unknown' }
+        },
+        sensor_latency_list: {
+          priority: { required_level: 'optional', availability: 'sometimes', difficulty: 'hard', effort: 9 },
+          contract: {
+            type: 'object',
+            shape: 'list',
+            unit: 'ms',
+            value_form: 'set',
+            object_schema: {
+              mode: { type: 'string' },
+              ms: { type: 'number' },
+              source_host: { type: 'string', required: false },
+              method: { type: 'string', required: false }
+            }
+          },
+          parse: { template: 'latency_list_modes_ms' },
+          evidence: { required: true, min_evidence_refs: 1, tier_preference: ['tier2', 'tier1', 'tier3'], conflict_policy: 'preserve_all_candidates' }
+        },
+        shift_latency: {
+          priority: { required_level: 'optional', availability: 'sometimes', difficulty: 'hard', effort: 7 },
+          contract: { type: 'number', shape: 'scalar', unit: 'ms', round: '2dp', value_form: 'single' },
+          parse: { template: 'number_with_unit', unit: 'ms', unit_accepts: ['ms'], strict_unit_required: true },
+          evidence: { required: true, min_evidence_refs: 1, tier_preference: ['tier2', 'tier1', 'tier3'], conflict_policy: 'resolve_by_tier_else_unknown' }
+        },
+        click_force: {
+          priority: { required_level: 'optional', availability: 'rare', difficulty: 'hard', effort: 6 },
+          contract: { type: 'number', shape: 'scalar', unit: 'gf', round: 'int', value_form: 'single' },
+          parse: { template: 'number_with_unit', unit: 'gf', unit_accepts: ['gf', 'g'], strict_unit_required: true },
+          evidence: { required: true, min_evidence_refs: 1, tier_preference: ['tier2', 'tier1', 'tier3'], conflict_policy: 'resolve_by_tier_else_unknown' }
+        }
+      }
+    };
+    await fs.writeFile(targetPatchPath, JSON.stringify(inlinePatch, null, 2));
+  } else if (patchPath.endsWith('field_rule_sample_v2.json')) {
     await fs.copyFile(patchPath, targetPatchPath);
   } else {
     const sourcePayload = JSON.parse(await fs.readFile(patchPath, 'utf8'));
@@ -397,7 +459,6 @@ test('compileCategoryWorkbook applies field_rule_sample_v2 patch overrides for l
 
     const generatedRoot = path.join(categoryRoot, '_generated');
     const fieldRules = JSON.parse(await fs.readFile(path.join(generatedRoot, 'field_rules.json'), 'utf8'));
-    const fieldRulesRuntime = JSON.parse(await fs.readFile(path.join(generatedRoot, 'field_rules.runtime.json'), 'utf8'));
     const patch = JSON.parse(await fs.readFile(path.join(categoryRoot, 'field_rule_sample_v2.json'), 'utf8'));
     const patchFields = patch.fields || {};
 
@@ -406,12 +467,16 @@ test('compileCategoryWorkbook applies field_rule_sample_v2 patch overrides for l
       assertSubsetDeep(expectedRule, fieldRules.fields[fieldKey], `field_rules.fields.${fieldKey}`);
     }
 
-    assert.equal(fieldRulesRuntime.fields?.click_latency?.shape, 'scalar');
-    assert.equal(fieldRulesRuntime.fields?.click_latency_list?.shape, 'list');
-    assert.equal(fieldRulesRuntime.fields?.click_latency_list?.parse_template, 'latency_list_modes_ms');
-    assert.equal(fieldRulesRuntime.fields?.sensor_latency_list?.parse_template, 'latency_list_modes_ms');
-    assert.equal(fieldRulesRuntime.fields?.click_force?.unit, 'gf');
-    assert.equal(fieldRulesRuntime.fields?.click_latency?.selection_policy?.source_field, 'click_latency_list');
+    const clickLatency = fieldRules.fields?.click_latency || {};
+    const clickLatencyList = fieldRules.fields?.click_latency_list || {};
+    const sensorLatencyList = fieldRules.fields?.sensor_latency_list || {};
+    const clickForce = fieldRules.fields?.click_force || {};
+    assert.equal(clickLatency?.contract?.shape || clickLatency?.shape, 'scalar');
+    assert.equal(clickLatencyList?.contract?.shape || clickLatencyList?.shape, 'list');
+    assert.equal(clickLatencyList?.parse?.template || clickLatencyList?.parse_template, 'latency_list_modes_ms');
+    assert.equal(sensorLatencyList?.parse?.template || sensorLatencyList?.parse_template, 'latency_list_modes_ms');
+    assert.equal(clickForce?.contract?.unit || clickForce?.unit, 'gf');
+    assert.equal(clickLatency?.selection_policy?.source_field, 'click_latency_list');
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
