@@ -453,15 +453,10 @@ function helperCategoryDir({ category, config = {} }) {
   return path.resolve(config.helperFilesRoot || 'helper_files', category);
 }
 
-function categoryDir(category) {
-  return path.resolve('categories', category);
-}
-
 export function fieldRulesPathCandidates({ category, config = {} }) {
   return [
-    path.join(helperCategoryDir({ category, config }), '_generated', 'field_rules.json'),
-    path.join(helperCategoryDir({ category, config }), 'field_rules.json'),
-    path.join(categoryDir(category), 'field_rules.json')
+    path.join(helperCategoryDir({ category, config }), '_generated', 'field_rules.runtime.json'),
+    path.join(helperCategoryDir({ category, config }), '_generated', 'field_rules.json')
   ];
 }
 

@@ -60,13 +60,14 @@ test('buildFieldOrderFromExcelSeed can disable existing-field preservation', () 
   assert.deepEqual(fieldOrder, ['connection', 'weight']);
 });
 
-test('loadCategoryFieldRules prefers helper_files category path over categories fallback', async () => {
+test('loadCategoryFieldRules loads generated field rules only', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-field-rules-'));
   const category = 'test_category_xyz';
   const helperCategoryDir = path.join(tempRoot, category);
-  await fs.mkdir(helperCategoryDir, { recursive: true });
+  const generatedDir = path.join(helperCategoryDir, '_generated');
+  await fs.mkdir(generatedDir, { recursive: true });
   await fs.writeFile(
-    path.join(helperCategoryDir, 'field_rules.json'),
+    path.join(generatedDir, 'field_rules.runtime.json'),
     JSON.stringify({
       version: 1,
       schema: {
@@ -82,7 +83,7 @@ test('loadCategoryFieldRules prefers helper_files category path over categories 
     });
     assert.equal(Boolean(loaded), true);
     assert.equal(
-      String(loaded.file_path || '').replace(/\\/g, '/').endsWith(`/field_rules.json`),
+      String(loaded.file_path || '').replace(/\\/g, '/').endsWith(`/_generated/field_rules.runtime.json`),
       true
     );
     assert.deepEqual(loaded.value?.schema?.include_fields, ['edition']);

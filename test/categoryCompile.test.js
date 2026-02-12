@@ -145,25 +145,38 @@ test('compileCategoryWorkbook writes deterministic generated artifacts', async (
     assert.equal(first.field_count > 20, true);
 
     const generatedRoot = path.join(helperRoot, 'mouse', '_generated');
+    const controlRoot = path.join(helperRoot, 'mouse', '_control_plane');
+    const suggestionsRoot = path.join(helperRoot, 'mouse', '_suggestions');
     const fieldRulesPath = path.join(generatedRoot, 'field_rules.json');
+    const fieldRulesRuntimePath = path.join(generatedRoot, 'field_rules.runtime.json');
     const knownValuesPath = path.join(generatedRoot, 'known_values.json');
     const uiCatalogPath = path.join(generatedRoot, 'ui_field_catalog.json');
     const componentRoot = path.join(generatedRoot, 'component_db');
     assert.equal(await fs.stat(fieldRulesPath).then(() => true).catch(() => false), true);
+    assert.equal(await fs.stat(fieldRulesRuntimePath).then(() => true).catch(() => false), true);
     assert.equal(await fs.stat(knownValuesPath).then(() => true).catch(() => false), true);
     assert.equal(await fs.stat(uiCatalogPath).then(() => true).catch(() => false), true);
+    assert.equal(await fs.stat(path.join(controlRoot, 'field_rules.full.json')).then(() => true).catch(() => false), true);
+    assert.equal(await fs.stat(path.join(suggestionsRoot, 'enums.json')).then(() => true).catch(() => false), true);
+    assert.equal(await fs.stat(path.join(suggestionsRoot, 'components.json')).then(() => true).catch(() => false), true);
+    assert.equal(await fs.stat(path.join(suggestionsRoot, 'lexicon.json')).then(() => true).catch(() => false), true);
+    assert.equal(await fs.stat(path.join(suggestionsRoot, 'constraints.json')).then(() => true).catch(() => false), true);
     assert.equal(await fs.stat(path.join(componentRoot, 'sensors.json')).then(() => true).catch(() => false), true);
     assert.equal(await fs.stat(path.join(componentRoot, 'switches.json')).then(() => true).catch(() => false), true);
     assert.equal(await fs.stat(path.join(componentRoot, 'encoders.json')).then(() => true).catch(() => false), true);
     assert.equal(await fs.stat(path.join(componentRoot, 'materials.json')).then(() => true).catch(() => false), true);
 
     const firstFieldRulesRaw = await fs.readFile(fieldRulesPath, 'utf8');
+    const firstFieldRulesRuntimeRaw = await fs.readFile(fieldRulesRuntimePath, 'utf8');
     const firstKnownValuesRaw = await fs.readFile(knownValuesPath, 'utf8');
     const firstUiCatalogRaw = await fs.readFile(uiCatalogPath, 'utf8');
+    assert.equal(firstFieldRulesRuntimeRaw, firstFieldRulesRaw);
     const firstKnownValues = JSON.parse(firstKnownValuesRaw);
     assert.equal(typeof firstKnownValues.fields, 'object');
     assert.equal((first.compile_report?.counts?.component_types || 0) > 0, true);
     assert.equal((first.compile_report?.source_summary?.enum_lists || 0) > 0, true);
+    assert.equal(first.compile_report?.artifacts?.field_rules_runtime?.identical_to_field_rules, true);
+    assert.equal(typeof first.compile_report?.diff?.fields?.changed_count, 'number');
 
     const second = await compileCategoryWorkbook({
       category: 'mouse',
@@ -175,10 +188,12 @@ test('compileCategoryWorkbook writes deterministic generated artifacts', async (
     assert.equal(second.compiled, true);
 
     const secondFieldRulesRaw = await fs.readFile(fieldRulesPath, 'utf8');
+    const secondFieldRulesRuntimeRaw = await fs.readFile(fieldRulesRuntimePath, 'utf8');
     const secondKnownValuesRaw = await fs.readFile(knownValuesPath, 'utf8');
     const secondUiCatalogRaw = await fs.readFile(uiCatalogPath, 'utf8');
 
     assert.equal(secondFieldRulesRaw, firstFieldRulesRaw);
+    assert.equal(secondFieldRulesRuntimeRaw, firstFieldRulesRaw);
     assert.equal(secondKnownValuesRaw, firstKnownValuesRaw);
     assert.equal(secondUiCatalogRaw, firstUiCatalogRaw);
   } finally {
@@ -226,11 +241,13 @@ test('compileCategoryWorkbook bootstraps generated artifacts from workbook + too
 
     const generatedRoot = path.join(categoryRoot, '_generated');
     assert.equal(await fs.stat(path.join(generatedRoot, 'field_rules.json')).then(() => true).catch(() => false), true);
+    assert.equal(await fs.stat(path.join(generatedRoot, 'field_rules.runtime.json')).then(() => true).catch(() => false), true);
     assert.equal(await fs.stat(path.join(generatedRoot, 'ui_field_catalog.json')).then(() => true).catch(() => false), true);
     assert.equal(await fs.stat(path.join(generatedRoot, 'known_values.json')).then(() => true).catch(() => false), true);
     assert.equal(await fs.stat(path.join(generatedRoot, '_compile_report.json')).then(() => true).catch(() => false), true);
     assert.equal(await fs.stat(path.join(generatedRoot, 'component_db', 'sensors.json')).then(() => true).catch(() => false), true);
     assert.equal(await fs.stat(path.join(generatedRoot, 'component_db', 'switches.json')).then(() => true).catch(() => false), true);
+    assert.equal(await fs.stat(path.join(categoryRoot, '_control_plane', 'field_rules.full.json')).then(() => true).catch(() => false), true);
 
     const uiCatalog = JSON.parse(await fs.readFile(path.join(generatedRoot, 'ui_field_catalog.json'), 'utf8'));
     const rows = Array.isArray(uiCatalog.fields) ? uiCatalog.fields : [];

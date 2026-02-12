@@ -247,9 +247,10 @@ async function loadGeneratedCategoryArtifacts(category, runtimeConfig = {}) {
   const helperCategoryRoot = path.join(helperRoot, category);
   const generatedRoot = path.join(helperRoot, category, '_generated');
 
-  const [schemaRaw, requiredRaw, fieldRulesRaw, uiFieldCatalogRaw, generatedSourcesRaw, generatedAnchorsRaw, generatedSearchTemplatesRaw, helperSourcesRaw, helperAnchorsRaw, helperSearchTemplatesRaw] = await Promise.all([
+  const [schemaRaw, requiredRaw, fieldRulesRuntimeRaw, fieldRulesRaw, uiFieldCatalogRaw, generatedSourcesRaw, generatedAnchorsRaw, generatedSearchTemplatesRaw, helperSourcesRaw, helperAnchorsRaw, helperSearchTemplatesRaw] = await Promise.all([
     readJsonIfExists(path.join(generatedRoot, 'schema.json')),
     readJsonIfExists(path.join(generatedRoot, 'required_fields.json')),
+    readJsonIfExists(path.join(generatedRoot, 'field_rules.runtime.json')),
     readJsonIfExists(path.join(generatedRoot, 'field_rules.json')),
     readJsonIfExists(path.join(generatedRoot, 'ui_field_catalog.json')),
     readJsonIfExists(path.join(generatedRoot, 'sources.json')),
@@ -260,8 +261,12 @@ async function loadGeneratedCategoryArtifacts(category, runtimeConfig = {}) {
     readJsonIfExists(path.join(helperCategoryRoot, 'search_templates.json'))
   ]);
 
-  const fieldRulesPayload = isObject(fieldRulesRaw) ? fieldRulesRaw : null;
-  const fieldRulesPath = isObject(fieldRulesRaw) ? path.join(generatedRoot, 'field_rules.json') : null;
+  const fieldRulesPayload = isObject(fieldRulesRuntimeRaw)
+    ? fieldRulesRuntimeRaw
+    : (isObject(fieldRulesRaw) ? fieldRulesRaw : null);
+  const fieldRulesPath = isObject(fieldRulesRuntimeRaw)
+    ? path.join(generatedRoot, 'field_rules.runtime.json')
+    : (isObject(fieldRulesRaw) ? path.join(generatedRoot, 'field_rules.json') : null);
   const uiFieldCatalog = isObject(uiFieldCatalogRaw) ? uiFieldCatalogRaw : null;
   const schema = isObject(schemaRaw)
     ? schemaRaw
@@ -379,7 +384,7 @@ export async function loadCategoryConfig(category, options = {}) {
 
   const generated = await loadGeneratedCategoryArtifacts(category, runtimeConfig);
   if (!generated?.fieldRules) {
-    throw new Error(`Missing generated field rules: helper_files/${category}/_generated/field_rules.json`);
+    throw new Error(`Missing generated field rules: helper_files/${category}/_generated/field_rules.runtime.json (or field_rules.json)`);
   }
 
   const schema = generated?.schema || baseConfig.schema || defaultSchema(category);

@@ -1,17 +1,27 @@
 {
   "artifacts": {
     "control_plane_version": {
-      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\_control_plane\\_versions\\20260212T013451Z",
-      "version_id": "20260212T013451Z"
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\_control_plane\\_versions\\20260212T021342Z",
+      "version_id": "20260212T021342Z"
     },
     "field_rules": {
-      "changed": true,
-      "hash": "0cfa7c2940d928b5ce5db95ef9861a8bb070a57bdfc9871cf4c26a834232a0c8",
+      "changed": false,
+      "hash": "016724b7a2e5c00f051b8da9c8ed423095a9c9be7a89f171d0722a3eb8a76584",
       "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\_generated\\field_rules.json"
     },
     "field_rules_draft": {
       "hash": "294e21b79d40384fc4c1a49944410f6358411b7b7ee45f47d972a8115bccb2a9",
       "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\_control_plane\\field_rules_draft.json"
+    },
+    "field_rules_full": {
+      "hash": "0cfa7c2940d928b5ce5db95ef9861a8bb070a57bdfc9871cf4c26a834232a0c8",
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\_control_plane\\field_rules.full.json"
+    },
+    "field_rules_runtime": {
+      "bytes": 355966,
+      "hash": "016724b7a2e5c00f051b8da9c8ed423095a9c9be7a89f171d0722a3eb8a76584",
+      "identical_to_field_rules": true,
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\_generated\\field_rules.runtime.json"
     },
     "key_migrations": {
       "hash": "1c06259b779fca416248f078798553fcb9238104a1e22d6eeb8e010e0cf1b9c5",
@@ -32,7 +42,7 @@
   },
   "category": "mouse",
   "compiled": true,
-  "compiled_at": "2026-02-12T01:34:51.006Z",
+  "compiled_at": "2026-02-12T02:13:42.067Z",
   "counts": {
     "component_types": 4,
     "critical": 0,
@@ -43,6 +53,19 @@
     "fields": 75,
     "identity": 0,
     "required": 14
+  },
+  "diff": {
+    "changed": false,
+    "current_hash": "016724b7a2e5c00f051b8da9c8ed423095a9c9be7a89f171d0722a3eb8a76584",
+    "fields": {
+      "added_count": 0,
+      "added_keys": [],
+      "changed_count": 0,
+      "changed_keys": [],
+      "removed_count": 0,
+      "removed_keys": []
+    },
+    "previous_hash": "016724b7a2e5c00f051b8da9c8ed423095a9c9be7a89f171d0722a3eb8a76584"
   },
   "errors": [],
   "source_summary": {

@@ -389,63 +389,9 @@ def load_active_filtering(category: str):
     return out
 
 
-def iter_supportive_nodes(payload):
-    stack = [payload]
-    while stack:
-        current = stack.pop()
-        if isinstance(current, list):
-            for item in current:
-                if isinstance(item, dict):
-                    yield item
-                elif isinstance(item, list):
-                    stack.append(item)
-        elif isinstance(current, dict):
-            for key in ("data", "items", "rows", "results", "products", "records"):
-                child = current.get(key)
-                if isinstance(child, (list, dict)):
-                    stack.append(child)
-            yield current
-
-
 @st.cache_data(ttl=60, show_spinner=False)
 def load_supportive(category: str):
-    folder = HELPER_ROOT / category / "supportive"
-    files = {}
-    records = []
-    if not folder.exists():
-        return {"files": files, "records": records}
-    for json_file in sorted(folder.glob("*.json")):
-        payload = read_json(json_file, None)
-        if payload is None:
-            continue
-        count = 0
-        seen = set()
-        for node in iter_supportive_nodes(payload):
-            brand = (
-                norm(node.get("brand"))
-                or norm((node.get("general__brand_names") or [""])[0])
-                or norm(node.get("general__brand_name"))
-            )
-            model = norm(node.get("model")) or norm(node.get("general__model"))
-            variant = clean_variant(node.get("variant") or node.get("general__variant"))
-            if not brand or not model:
-                continue
-            key = (token(brand), token(model), token(variant), str(node.get("id", node.get("general__id", ""))))
-            if key in seen:
-                continue
-            seen.add(key)
-            count += 1
-            records.append(
-                {
-                    "brand": brand,
-                    "model": model,
-                    "variant": variant,
-                    "source_file": json_file.name,
-                    "raw": node,
-                }
-            )
-        files[json_file.name] = count
-    return {"files": files, "records": records}
+    return {"files": {}, "records": []}
 
 
 @st.cache_data(ttl=10, show_spinner=False)
@@ -583,7 +529,6 @@ def event_rows_with_help(counts: Counter):
 
 def build_catalog(category: str):
     active = load_active_filtering(category)
-    supportive = load_supportive(category)
     finals = list_final_rows(category)
     queue = load_queue(category)
 
@@ -597,8 +542,6 @@ def build_catalog(category: str):
                 "model": model,
                 "variant": variant,
                 "in_active": False,
-                "supportive_hits": 0,
-                "supportive_files": set(),
                 "has_final": False,
                 "validated": False,
                 "confidence": 0.0,
@@ -611,11 +554,6 @@ def build_catalog(category: str):
     for row in active:
         entry = put(row["brand"], row["model"], row["variant"])
         entry["in_active"] = True
-
-    for row in supportive["records"]:
-        entry = put(row["brand"], row["model"], row["variant"])
-        entry["supportive_hits"] += 1
-        entry["supportive_files"].add(row["source_file"])
 
     for row in finals:
         entry = put(row["brand"], row["model"], row["variant"])
@@ -634,10 +572,9 @@ def build_catalog(category: str):
         pid = product_id(category, entry["brand"], entry["model"], entry["variant"])
         entry["queue_status"] = qmap.get(pid, "")
         entry["product_id"] = pid
-        entry["supportive_files"] = sorted(entry["supportive_files"])
 
     out = sorted(rows.values(), key=lambda r: (token(r["brand"]), token(r["model"]), token(r["variant"])))
-    return {"rows": out, "active": active, "supportive": supportive, "queue": queue}
+    return {"rows": out, "active": active, "supportive": {"files": {}, "records": []}, "queue": queue}
 
 
 def find_bundle(category: str, brand: str, model: str, variant: str):
@@ -933,7 +870,6 @@ with tab1:
                 "variant": r["variant"],
                 "state": state,
                 "active_target": r["in_active"],
-                "supportive_hits": r["supportive_hits"],
                 "confidence": r["confidence"],
                 "completeness_required": r["completeness_required"],
             }
@@ -1200,8 +1136,8 @@ with tab4:
     st.dataframe(lfiles, use_container_width=True, height=250)
     st.subheader("Component Library Counts")
     st.json({name: len(read_jsonl(COMPONENT_ROOT / f"{name}.jsonl", limit=10000)) for name in ("sensors", "switches", "encoders", "mcus")})
-    st.subheader("Supportive Files")
-    st.json(catalog["supportive"]["files"])
+    st.subheader("Helper Files")
+    st.caption("Active helper input: `helper_files/<category>/activeFiltering.json`")
 
 st.caption("Use dropdowns from helper targets, run a product, and monitor events/fields/costs in real time.")
 if st.session_state.auto_refresh and st.session_state.proc and st.session_state.proc.poll() is None:

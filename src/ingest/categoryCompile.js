@@ -2989,16 +2989,76 @@ async function writeJsonStable(filePath, value) {
   await fs.writeFile(filePath, `${stableStringify(value)}\n`, 'utf8');
 }
 
+async function writeCanonicalFieldRulesPair({
+  generatedRoot,
+  runtimePayload
+}) {
+  const canonical = `${stableStringify(runtimePayload)}\n`;
+  const canonicalBuffer = Buffer.from(canonical, 'utf8');
+  const canonicalHash = hashBuffer(canonicalBuffer);
+  const canonicalBytes = canonicalBuffer.length;
+  const fieldRulesPath = path.join(generatedRoot, 'field_rules.json');
+  const runtimePath = path.join(generatedRoot, 'field_rules.runtime.json');
+
+  await fs.mkdir(generatedRoot, { recursive: true });
+  await fs.writeFile(fieldRulesPath, canonicalBuffer);
+  await fs.writeFile(runtimePath, canonicalBuffer);
+
+  const [fieldRulesWritten, runtimeWritten] = await Promise.all([
+    fs.readFile(fieldRulesPath),
+    fs.readFile(runtimePath)
+  ]);
+  const fieldRulesHash = hashBuffer(fieldRulesWritten);
+  const runtimeHash = hashBuffer(runtimeWritten);
+  const identical = fieldRulesHash === runtimeHash && fieldRulesHash === canonicalHash;
+
+  return {
+    field_rules_path: fieldRulesPath,
+    field_rules_runtime_path: runtimePath,
+    field_rules_hash: fieldRulesHash,
+    field_rules_runtime_hash: runtimeHash,
+    expected_hash: canonicalHash,
+    bytes: canonicalBytes,
+    identical
+  };
+}
+
 function snapshotVersionId() {
   return nowIso()
     .replace(/[-:]/g, '')
     .replace(/\.\d{3}Z$/, 'Z');
 }
 
+function diffFieldRuleSets(previousRules = {}, currentRules = {}) {
+  const previousFields = isObject(previousRules?.fields) ? previousRules.fields : {};
+  const currentFields = isObject(currentRules?.fields) ? currentRules.fields : {};
+  const previousKeys = stableSortStrings(Object.keys(previousFields));
+  const currentKeys = stableSortStrings(Object.keys(currentFields));
+  const previousSet = new Set(previousKeys);
+  const currentSet = new Set(currentKeys);
+  const addedKeys = currentKeys.filter((key) => !previousSet.has(key));
+  const removedKeys = previousKeys.filter((key) => !currentSet.has(key));
+  const changedKeys = currentKeys.filter((key) => {
+    if (!previousSet.has(key)) {
+      return false;
+    }
+    return stableStringify(previousFields[key]) !== stableStringify(currentFields[key]);
+  });
+  return {
+    added_count: addedKeys.length,
+    removed_count: removedKeys.length,
+    changed_count: changedKeys.length,
+    added_keys: addedKeys,
+    removed_keys: removedKeys,
+    changed_keys: changedKeys
+  };
+}
+
 async function writeControlPlaneSnapshot({
   controlPlaneRoot,
   workbookMap = null,
   fieldRulesDraft = null,
+  fieldRulesFull = null,
   uiFieldCatalogDraft = null,
   note = ''
 } = {}) {
@@ -3011,6 +3071,9 @@ async function writeControlPlaneSnapshot({
   if (isObject(fieldRulesDraft)) {
     await writeJsonStable(path.join(versionRoot, 'field_rules_draft.json'), fieldRulesDraft);
   }
+  if (isObject(fieldRulesFull)) {
+    await writeJsonStable(path.join(versionRoot, 'field_rules.full.json'), fieldRulesFull);
+  }
   if (isObject(uiFieldCatalogDraft)) {
     await writeJsonStable(path.join(versionRoot, 'ui_field_catalog_draft.json'), uiFieldCatalogDraft);
   }
@@ -3022,6 +3085,7 @@ async function writeControlPlaneSnapshot({
     files: {
       workbook_map: isObject(workbookMap),
       field_rules_draft: isObject(fieldRulesDraft),
+      field_rules_full: isObject(fieldRulesFull),
       ui_field_catalog_draft: isObject(uiFieldCatalogDraft)
     }
   });
@@ -3577,7 +3641,7 @@ export async function compileCategoryWorkbook({
         : `${keySourceColumn}${asInt(map?.key_list?.row_start, 1)}:${keySourceColumn}${asInt(map?.key_list?.row_end, asInt(map?.key_list?.row_start, 1))}`)
   );
 
-  const fieldRules = {
+  const fieldRulesFull = {
     ...fieldRulesBase,
     meta: {
       category,
@@ -3619,6 +3683,11 @@ export async function compileCategoryWorkbook({
     key_migrations_suggested: sortDeep(keyMigrations)
   };
 
+  const fieldRulesRuntime = sortDeep({
+    ...fieldRulesBase,
+    fields: sortDeep(fieldsRuntime)
+  });
+
   const uiFieldCatalog = {
     version: 1,
     category,
@@ -3633,10 +3702,27 @@ export async function compileCategoryWorkbook({
     fields: sortDeep(knownValues)
   };
 
+  const runtimeKeys = stableSortStrings(Object.keys(fieldsRuntime));
+  const uiKeys = stableSortStrings(toArray(uiFieldCatalog.fields).map((row) => normalizeFieldKey(row?.key || '')));
+  const uiKeySet = new Set(uiKeys);
+  for (const key of runtimeKeys) {
+    if (!uiKeySet.has(key)) {
+      validation.errors.push(`ui_field_catalog missing key '${key}'`);
+    }
+  }
+  const runtimeKeySet = new Set(runtimeKeys);
+  for (const key of uiKeys) {
+    if (!runtimeKeySet.has(key)) {
+      validation.errors.push(`field_rules missing key '${key}'`);
+    }
+  }
+
   const previousReport = await readJsonIfExists(path.join(generatedRoot, '_compile_report.json'));
+  const previousFieldRulesArtifact = await readJsonIfExists(path.join(generatedRoot, 'field_rules.json'));
   const previousHash = previousReport?.artifacts?.field_rules?.hash || null;
-  const currentHash = hashJson(fieldRules);
+  const currentHash = hashBuffer(Buffer.from(`${stableStringify(fieldRulesRuntime)}\n`, 'utf8'));
   const changed = Boolean(previousHash && previousHash !== currentHash);
+  const fieldDiff = diffFieldRuleSets(previousFieldRulesArtifact, fieldRulesRuntime);
   const patchSummary = fieldRulePatch
     ? {
       files: toArray(fieldRulePatch.files).map((filePath) => path.basename(filePath)),
@@ -3675,10 +3761,20 @@ export async function compileCategoryWorkbook({
       component_sheets: toArray(map.component_sheets).length,
       field_rule_patch: patchSummary
     },
+    diff: {
+      changed,
+      previous_hash: previousHash,
+      current_hash: currentHash,
+      fields: fieldDiff
+    },
     artifacts: {
       field_rules_draft: {
         path: path.join(controlPlaneRoot, 'field_rules_draft.json'),
         hash: hashJson(fieldRulesDraft)
+      },
+      field_rules_full: {
+        path: path.join(controlPlaneRoot, 'field_rules.full.json'),
+        hash: hashJson(fieldRulesFull)
       },
       ui_field_catalog_draft: {
         path: path.join(controlPlaneRoot, 'ui_field_catalog_draft.json'),
@@ -3688,6 +3784,10 @@ export async function compileCategoryWorkbook({
         path: path.join(generatedRoot, 'field_rules.json'),
         hash: currentHash,
         changed
+      },
+      field_rules_runtime: {
+        path: path.join(generatedRoot, 'field_rules.runtime.json'),
+        hash: currentHash
       },
       ui_field_catalog: {
         path: path.join(generatedRoot, 'ui_field_catalog.json'),
@@ -3709,11 +3809,13 @@ export async function compileCategoryWorkbook({
   await fs.mkdir(controlPlaneRoot, { recursive: true });
   await writeJsonStable(controlMap.file_path || path.join(controlPlaneRoot, 'workbook_map.json'), map);
   await writeJsonStable(path.join(controlPlaneRoot, 'field_rules_draft.json'), fieldRulesDraft);
+  await writeJsonStable(path.join(controlPlaneRoot, 'field_rules.full.json'), fieldRulesFull);
   await writeJsonStable(path.join(controlPlaneRoot, 'ui_field_catalog_draft.json'), uiFieldCatalogDraft);
   const controlPlaneSnapshot = await writeControlPlaneSnapshot({
     controlPlaneRoot,
     workbookMap: map,
     fieldRulesDraft,
+    fieldRulesFull,
     uiFieldCatalogDraft,
     note: 'category-compile'
   });
@@ -3739,8 +3841,32 @@ export async function compileCategoryWorkbook({
   }
 
   await fs.mkdir(generatedRoot, { recursive: true });
-  await writeJsonStable(path.join(generatedRoot, 'field_rules.json'), fieldRules);
-  await fs.rm(path.join(generatedRoot, 'field_rules.runtime.json'), { force: true });
+  const canonicalPair = await writeCanonicalFieldRulesPair({
+    generatedRoot,
+    runtimePayload: fieldRulesRuntime
+  });
+  if (!canonicalPair.identical) {
+    compileReport.errors.push('field_rules.json and field_rules.runtime.json must be byte-identical');
+    compileReport.compiled = false;
+    await writeJsonStable(path.join(generatedRoot, '_compile_report.json'), compileReport);
+    return {
+      category,
+      compiled: false,
+      workbook_path: resolvedWorkbook,
+      workbook_hash: workbook.workbook_hash,
+      map_path: controlMap.file_path,
+      map_hash: hashJson(map),
+      selected_key_count: keyRows.length,
+      errors: compileReport.errors,
+      warnings: compileReport.warnings,
+      compile_report: compileReport,
+      control_plane_version: controlPlaneSnapshot
+    };
+  }
+  compileReport.artifacts.field_rules.hash = canonicalPair.field_rules_hash;
+  compileReport.artifacts.field_rules_runtime.hash = canonicalPair.field_rules_runtime_hash;
+  compileReport.artifacts.field_rules_runtime.identical_to_field_rules = true;
+  compileReport.artifacts.field_rules_runtime.bytes = canonicalPair.bytes;
   await writeJsonStable(path.join(generatedRoot, 'ui_field_catalog.json'), uiFieldCatalog);
   await writeJsonStable(path.join(generatedRoot, 'known_values.json'), knownValuesArtifact);
   await fs.rm(path.join(generatedRoot, 'schema.json'), { force: true });
@@ -3772,6 +3898,23 @@ export async function compileCategoryWorkbook({
     const outputName = normalizeText(componentTypeOutputName[normalizeToken(componentType)] || componentType) || componentType;
     await writeJsonStable(path.join(componentRoot, `${outputName}.json`), payload);
   }
+
+  const suggestionsRoot = path.join(categoryRoot, '_suggestions');
+  await fs.mkdir(suggestionsRoot, { recursive: true });
+  const suggestionDefaults = {
+    enums: { version: 1, category, suggestions: [] },
+    components: { version: 1, category, suggestions: [] },
+    lexicon: { version: 1, category, suggestions: [] },
+    constraints: { version: 1, category, suggestions: [] }
+  };
+  for (const [name, payload] of Object.entries(suggestionDefaults)) {
+    const filePath = path.join(suggestionsRoot, `${name}.json`);
+    if (!(await fileExists(filePath))) {
+      await writeJsonStable(filePath, payload);
+    }
+  }
+  await fs.mkdir(path.join(categoryRoot, '_overrides'), { recursive: true });
+
   await writeJsonStable(path.join(generatedRoot, '_compile_report.json'), compileReport);
 
   return {
