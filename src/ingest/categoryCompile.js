@@ -974,6 +974,7 @@ export async function introspectWorkbook({
         brand_column: '',
         link_columns: [],
         property_columns: [],
+        auto_derive_aliases: true,
         stop_after_blank_names: 10,
         row_start: 2,
         row_end: ''
@@ -1081,6 +1082,7 @@ export async function introspectWorkbook({
         brand_column: '',
         link_columns: [],
         property_columns: [],
+        auto_derive_aliases: true,
         stop_after_blank_names: 10,
         row_start: 2,
         row_end: 0
@@ -1328,6 +1330,7 @@ function normalizeWorkbookMap(map = {}) {
       brand_column: normalizeText(row.brand_column || '').toUpperCase(),
       link_columns: stableSortStrings(toArray(row.link_columns || row.links_columns).map((entry) => normalizeText(entry).toUpperCase())),
       property_columns: stableSortStrings(toArray(row.property_columns || row.props_columns).map((entry) => normalizeText(entry).toUpperCase())),
+      auto_derive_aliases: row.auto_derive_aliases !== false,
       header_row: headerRow,
       first_data_row: firstDataRow,
       stop_after_blank_names: Math.max(1, asInt(row.stop_after_blank_names, 10)),
@@ -1409,6 +1412,7 @@ function normalizeWorkbookMap(map = {}) {
         alias_columns: row.alias_columns,
         link_columns: row.link_columns,
         property_columns: row.property_columns,
+        auto_derive_aliases: row.auto_derive_aliases,
         stop_after_blank_names: row.stop_after_blank_names,
         start_row: row.first_data_row,
         end_row: row.row_end > 0 ? row.row_end : null
@@ -1974,6 +1978,28 @@ function extractHttpLinks(value = '') {
   return [];
 }
 
+function deriveSafeAliases(name = '') {
+  const base = normalizeWhitespace(name);
+  if (!base) {
+    return [];
+  }
+  const spaced = normalizeWhitespace(base.replace(/[^0-9A-Za-z]+/g, ' '));
+  const compact = normalizeWhitespace(base.replace(/[^0-9A-Za-z]+/g, ''));
+  const out = [];
+  if (spaced && spaced.toLowerCase() !== base.toLowerCase()) {
+    out.push(spaced);
+  }
+  if (
+    compact
+    && compact.length >= 4
+    && compact.toLowerCase() !== base.toLowerCase()
+    && compact.toLowerCase() !== spaced.toLowerCase()
+  ) {
+    out.push(compact);
+  }
+  return orderedUniqueStrings(out).filter((alias) => alias.toLowerCase() !== base.toLowerCase());
+}
+
 function pullComponentDbs(workbook, map) {
   const out = {};
   const sourceAssertions = [];
@@ -2024,12 +2050,17 @@ function pullComponentDbs(workbook, map) {
         firstTwentyNames.push(name);
       }
 
-      const aliases = orderedUniqueStrings(
+      const aliasColumns = toArray(row.alias_columns);
+      const shouldAutoDeriveAliases = row.auto_derive_aliases !== false;
+      let aliases = orderedUniqueStrings(
         toArray(row.alias_columns)
           .flatMap((col) => splitComponentTokens(getCell(sheet, col, idx)))
           .map((alias) => normalizeWhitespace(alias))
           .filter((alias) => alias && alias.toLowerCase() !== name.toLowerCase())
       );
+      if (aliases.length === 0 && shouldAutoDeriveAliases) {
+        aliases = deriveSafeAliases(name);
+      }
       const brand = row.brand_column ? normalizeWhitespace(getCell(sheet, row.brand_column, idx)) : '';
       const links = orderedUniqueStrings(
         toArray(row.link_columns)
@@ -2049,7 +2080,7 @@ function pullComponentDbs(workbook, map) {
       if (row.brand_column && brand) {
         entity.brand = brand;
       }
-      if (toArray(row.alias_columns).length > 0 && aliases.length > 0) {
+      if ((aliasColumns.length > 0 || shouldAutoDeriveAliases) && aliases.length > 0) {
         entity.aliases = aliases;
       }
       if (toArray(row.link_columns).length > 0 && links.length > 0) {
@@ -2580,6 +2611,7 @@ function buildComponentSourceSummary({
       first_data_row: asInt(row.first_data_row || row.row_start, 2),
       canonical_name_column: normalizeText(row.canonical_name_column || row.name_column || ''),
       alias_columns: stableSortStrings(toArray(row.alias_columns || [])),
+      auto_derive_aliases: row.auto_derive_aliases !== false,
       brand_column: normalizeText(row.brand_column || '') || null,
       link_columns: stableSortStrings(toArray(row.link_columns || [])),
       property_columns: stableSortStrings(toArray(row.property_columns || [])),

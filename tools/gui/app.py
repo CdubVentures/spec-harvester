@@ -445,6 +445,7 @@ def normalize_component_rows(workbook_map: dict):
                 "alias_columns": stable_sort_columns(row.get("alias_columns", [])),
                 "link_columns": stable_sort_columns(row.get("link_columns", [])),
                 "property_columns": stable_sort_columns(row.get("property_columns", [])),
+                "auto_derive_aliases": bool(row.get("auto_derive_aliases", True)),
                 "stop_after_blank_names": max(1, stop_after_blank_names),
             }
         )
@@ -460,6 +461,7 @@ def normalize_component_rows(workbook_map: dict):
                 "alias_columns": [],
                 "link_columns": [],
                 "property_columns": [],
+                "auto_derive_aliases": True,
                 "stop_after_blank_names": 10,
             }
         ]
@@ -524,6 +526,20 @@ def _toggle_csv_column(raw_csv: str, col: str):
     return csv_join(stable_sort_columns(values))
 
 
+def derive_safe_aliases(name: str):
+    base = norm(name)
+    if not base:
+        return []
+    variants = []
+    spaced = norm(re.sub(r"[^0-9A-Za-z]+", " ", base))
+    compact = norm(re.sub(r"[^0-9A-Za-z]+", "", base))
+    if spaced and token(spaced) != token(base):
+        variants.append(spaced)
+    if compact and len(compact) >= 4 and token(compact) not in {token(base), token(spaced)}:
+        variants.append(compact)
+    return ordered_unique_text([value for value in variants if token(value) != token(base)])
+
+
 @st.cache_data(ttl=20, show_spinner=False)
 def workbook_component_preview(workbook_path: str, sheet_name: str, header_row: int, first_data_row: int):
     if load_workbook is None:
@@ -577,6 +593,7 @@ def workbook_component_entities_preview(
     brand_column: str = "",
     alias_columns_csv: str = "",
     link_columns_csv: str = "",
+    auto_derive_aliases: bool = True,
     stop_after_blank_names: int = 10,
 ):
     if load_workbook is None:
@@ -634,6 +651,8 @@ def workbook_component_entities_preview(
         alias_values = []
         for col in alias_cols:
             alias_values.extend(split_component_tokens(ws.cell(row=row_idx, column=col_to_index(col) or 1).value))
+        if not alias_values and bool(auto_derive_aliases):
+            alias_values.extend(derive_safe_aliases(name))
         aliases = [value for value in ordered_unique_text(alias_values) if token(value) != token(name)]
 
         link_values = []
@@ -1548,6 +1567,7 @@ def render_field_rules_studio(category: str, local_mode: bool):
                         "alias_columns": [],
                         "link_columns": [],
                         "property_columns": [],
+                        "auto_derive_aliases": True,
                         "stop_after_blank_names": 10,
                     }
                 )
@@ -1611,6 +1631,7 @@ def render_field_rules_studio(category: str, local_mode: bool):
             alias_enabled_key = f"studio_comp_alias_enabled_{category}_{idx}"
             link_enabled_key = f"studio_comp_link_enabled_{category}_{idx}"
             property_enabled_key = f"studio_comp_property_enabled_{category}_{idx}"
+            auto_alias_key = f"studio_comp_auto_alias_{category}_{idx}"
             clear_optional_key = f"studio_comp_clear_optional_{category}_{idx}"
 
             selected_name_col = normalize_col(
@@ -1637,13 +1658,20 @@ def render_field_rules_studio(category: str, local_mode: bool):
                 st.session_state[link_enabled_key] = bool(stable_sort_columns(row.get("link_columns", [])))
             if property_enabled_key not in st.session_state:
                 st.session_state[property_enabled_key] = bool(stable_sort_columns(row.get("property_columns", [])))
+            if auto_alias_key not in st.session_state:
+                st.session_state[auto_alias_key] = bool(row.get("auto_derive_aliases", True))
 
-            r1, r2, r3, r4, r5 = st.columns([1.1, 1.1, 1.1, 1.1, 1.6])
+            r1, r2, r3, r4, r5, r6 = st.columns([1.0, 1.0, 1.0, 1.0, 1.3, 1.6])
             brand_enabled = r1.toggle("Use Brand", key=brand_enabled_key, help="Optional manufacturer/brand role.")
             alias_enabled = r2.toggle("Use Aliases", key=alias_enabled_key, help="Optional synonym columns (CSV tokens supported).")
             link_enabled = r3.toggle("Use Links", key=link_enabled_key, help="Optional URL/source columns.")
             property_enabled = r4.toggle("Use Properties", key=property_enabled_key, help="Optional structured property columns.")
-            if r5.button("Clear Optional Roles", key=clear_optional_key, use_container_width=True):
+            auto_derive_aliases = r5.toggle(
+                "Auto-Derive Aliases",
+                key=auto_alias_key,
+                help="If alias columns are empty, generate safe aliases from punctuation/spacing variants of Name/Model.",
+            )
+            if r6.button("Clear Optional Roles", key=clear_optional_key, use_container_width=True):
                 st.session_state[brand_enabled_key] = False
                 st.session_state[alias_enabled_key] = False
                 st.session_state[link_enabled_key] = False
@@ -1771,6 +1799,7 @@ def render_field_rules_studio(category: str, local_mode: bool):
                 brand_column=selected_brand_col,
                 alias_columns_csv=csv_join(selected_alias_cols),
                 link_columns_csv=csv_join(selected_link_cols),
+                auto_derive_aliases=bool(auto_derive_aliases),
                 stop_after_blank_names=int(stop_after_blank_names),
             )
             if "error" in entity_preview:
@@ -1812,6 +1841,7 @@ def render_field_rules_studio(category: str, local_mode: bool):
                     "alias_columns": selected_alias_cols,
                     "link_columns": selected_link_cols,
                     "property_columns": selected_property_cols,
+                    "auto_derive_aliases": bool(auto_derive_aliases),
                     "stop_after_blank_names": int(stop_after_blank_names),
                 }
             )
@@ -1864,6 +1894,7 @@ def render_field_rules_studio(category: str, local_mode: bool):
                         "alias_columns": row.get("alias_columns", []),
                         "link_columns": row.get("link_columns", []),
                         "property_columns": row.get("property_columns", []),
+                        "auto_derive_aliases": bool(row.get("auto_derive_aliases", True)),
                         "stop_after_blank_names": row.get("stop_after_blank_names", 10),
                     }
                     for row in component_rows_out
