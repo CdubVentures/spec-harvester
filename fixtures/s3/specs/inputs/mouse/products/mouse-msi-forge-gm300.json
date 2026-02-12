@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-msi-forge-gm300",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "MSI",
+    "model": "Forge GM300",
+    "variant": "",
+    "sku": "",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

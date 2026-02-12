@@ -1,0 +1,1289 @@
+{
+  "version": 1,
+  "generated_at": "2026-02-12T00:08:47.261585+00:00",
+  "category": "mouse",
+  "authoritative_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\field_rules.json",
+  "summary": {
+    "authoritative_fields": 75,
+    "current_fields": 76,
+    "matched_fields": 0,
+    "mismatched_fields": 75,
+    "missing_in_current": 0,
+    "extra_in_current": 1,
+    "match_percent": 0.0
+  },
+  "missing_in_current": [],
+  "extra_in_current": [
+    "switch_link"
+  ],
+  "mismatches": [
+    {
+      "field": "acceleration",
+      "diff_count": 6,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"acceleration\"",
+      "paths": [
+        "canonical_key",
+        "contract.range",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.allow_unitless"
+      ]
+    },
+    {
+      "field": "adjustable_scroll_wheel",
+      "diff_count": 10,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"adjustable_scroll_wheel\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.falsy",
+        "parse.template",
+        "parse.truthy",
+        "parse.unit",
+        "parse.unknown"
+      ]
+    },
+    {
+      "field": "adjustable_weight",
+      "diff_count": 10,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"adjustable_weight\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.falsy",
+        "parse.template",
+        "parse.truthy",
+        "parse.unit",
+        "parse.unknown"
+      ]
+    },
+    {
+      "field": "battery_hours",
+      "diff_count": 5,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"battery_hours\"",
+      "paths": [
+        "canonical_key",
+        "contract.range",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target"
+      ]
+    },
+    {
+      "field": "bluetooth",
+      "diff_count": 10,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"bluetooth\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.falsy",
+        "parse.template",
+        "parse.truthy",
+        "parse.unit",
+        "parse.unknown"
+      ]
+    },
+    {
+      "field": "cable_type",
+      "diff_count": 7,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"cable_type\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.template",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "click_force",
+      "diff_count": 4,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"click_force\"",
+      "paths": [
+        "canonical_key",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target"
+      ]
+    },
+    {
+      "field": "click_latency",
+      "diff_count": 4,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"click_latency\"",
+      "paths": [
+        "canonical_key",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target"
+      ]
+    },
+    {
+      "field": "click_latency_list",
+      "diff_count": 4,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"click_latency_list\"",
+      "paths": [
+        "canonical_key",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target"
+      ]
+    },
+    {
+      "field": "coating",
+      "diff_count": 10,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"coating\"",
+      "paths": [
+        "canonical_key",
+        "contract.list_rules.dedupe",
+        "contract.list_rules.max_items",
+        "contract.list_rules.min_items",
+        "contract.list_rules.sort",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "colors",
+      "diff_count": 10,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"colors\"",
+      "paths": [
+        "canonical_key",
+        "contract.list_rules.dedupe",
+        "contract.list_rules.max_items",
+        "contract.list_rules.min_items",
+        "contract.list_rules.sort",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "computer_side_connector",
+      "diff_count": 8,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"computer_side_connector\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.modes",
+        "parse.template",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "connection",
+      "diff_count": 9,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"connection\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "enum.source",
+        "parse.modes",
+        "parse.template",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "connectivity",
+      "diff_count": 11,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"connectivity\"",
+      "paths": [
+        "canonical_key",
+        "contract.list_rules.dedupe",
+        "contract.list_rules.max_items",
+        "contract.list_rules.min_items",
+        "contract.list_rules.sort",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.modes",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "debounce",
+      "diff_count": 5,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"debounce\"",
+      "paths": [
+        "canonical_key",
+        "contract.range",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target"
+      ]
+    },
+    {
+      "field": "design",
+      "diff_count": 10,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"design\"",
+      "paths": [
+        "canonical_key",
+        "contract.list_rules.dedupe",
+        "contract.list_rules.max_items",
+        "contract.list_rules.min_items",
+        "contract.list_rules.sort",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "discontinued",
+      "diff_count": 7,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"discontinued\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.template",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "dpi",
+      "diff_count": 5,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"dpi\"",
+      "paths": [
+        "canonical_key",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.allow_unitless"
+      ]
+    },
+    {
+      "field": "encoder",
+      "diff_count": 8,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"encoder\"",
+      "paths": [
+        "canonical_key",
+        "component",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "enum.source",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "encoder_brand",
+      "diff_count": 7,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"encoder_brand\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.template",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "encoder_link",
+      "diff_count": 6,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"encoder_link\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "feet_material",
+      "diff_count": 8,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"feet_material\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "enum.source",
+        "parse.template",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "flawless_sensor",
+      "diff_count": 10,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"flawless_sensor\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.falsy",
+        "parse.template",
+        "parse.truthy",
+        "parse.unit",
+        "parse.unknown"
+      ]
+    },
+    {
+      "field": "form_factor",
+      "diff_count": 8,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"form_factor\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "enum.source",
+        "parse.template",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "front_flare",
+      "diff_count": 8,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"front_flare\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "enum.source",
+        "parse.template",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "grip",
+      "diff_count": 11,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"grip\"",
+      "paths": [
+        "canonical_key",
+        "contract.list_rules.dedupe",
+        "contract.list_rules.max_items",
+        "contract.list_rules.min_items",
+        "contract.list_rules.sort",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "enum.source",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "hand_size",
+      "diff_count": 11,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"hand_size\"",
+      "paths": [
+        "canonical_key",
+        "contract.list_rules.dedupe",
+        "contract.list_rules.max_items",
+        "contract.list_rules.min_items",
+        "contract.list_rules.sort",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "enum.source",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "hardware_acceleration",
+      "diff_count": 10,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"hardware_acceleration\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.falsy",
+        "parse.template",
+        "parse.truthy",
+        "parse.unit",
+        "parse.unknown"
+      ]
+    },
+    {
+      "field": "height",
+      "diff_count": 6,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"height\"",
+      "paths": [
+        "canonical_key",
+        "contract.range",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.allow_unitless"
+      ]
+    },
+    {
+      "field": "honeycomb_frame",
+      "diff_count": 10,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"honeycomb_frame\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.falsy",
+        "parse.template",
+        "parse.truthy",
+        "parse.unit",
+        "parse.unknown"
+      ]
+    },
+    {
+      "field": "hot_swappable",
+      "diff_count": 10,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"hot_swappable\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.falsy",
+        "parse.template",
+        "parse.truthy",
+        "parse.unit",
+        "parse.unknown"
+      ]
+    },
+    {
+      "field": "hump",
+      "diff_count": 8,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"hump\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "enum.source",
+        "parse.template",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "ips",
+      "diff_count": 6,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"ips\"",
+      "paths": [
+        "canonical_key",
+        "contract.range",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.allow_unitless"
+      ]
+    },
+    {
+      "field": "lift",
+      "diff_count": 9,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"lift\"",
+      "paths": [
+        "canonical_key",
+        "contract.list_rules.dedupe",
+        "contract.list_rules.max_items",
+        "contract.list_rules.min_items",
+        "contract.list_rules.sort",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.allow_unitless"
+      ]
+    },
+    {
+      "field": "lift_settings",
+      "diff_count": 10,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"lift_settings\"",
+      "paths": [
+        "canonical_key",
+        "contract.list_rules.dedupe",
+        "contract.list_rules.max_items",
+        "contract.list_rules.min_items",
+        "contract.list_rules.sort",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "lighting",
+      "diff_count": 10,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"lighting\"",
+      "paths": [
+        "canonical_key",
+        "contract.list_rules.dedupe",
+        "contract.list_rules.max_items",
+        "contract.list_rules.min_items",
+        "contract.list_rules.sort",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "lngth",
+      "diff_count": 5,
+      "sample_path": "contract.range",
+      "sample_expected": "{\"max\": 250, \"min\": 20}",
+      "sample_actual": "\"__missing__\"",
+      "paths": [
+        "contract.range",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.allow_unitless"
+      ]
+    },
+    {
+      "field": "material",
+      "diff_count": 8,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"material\"",
+      "paths": [
+        "canonical_key",
+        "component",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "enum.source",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "mcu",
+      "diff_count": 8,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"mcu\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "enum.source",
+        "parse.template",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "mcu_link",
+      "diff_count": 6,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"mcu_link\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "middle_buttons",
+      "diff_count": 9,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"middle_buttons\"",
+      "paths": [
+        "canonical_key",
+        "contract.range",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.allow_unitless",
+        "parse.template",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "motion_sync",
+      "diff_count": 7,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"motion_sync\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.template",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "mouse_side_connector",
+      "diff_count": 8,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"mouse_side_connector\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.modes",
+        "parse.template",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "nvidia_reflex",
+      "diff_count": 10,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"nvidia_reflex\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.falsy",
+        "parse.template",
+        "parse.truthy",
+        "parse.unit",
+        "parse.unknown"
+      ]
+    },
+    {
+      "field": "onboard_memory",
+      "diff_count": 10,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"onboard_memory\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.falsy",
+        "parse.template",
+        "parse.truthy",
+        "parse.unit",
+        "parse.unknown"
+      ]
+    },
+    {
+      "field": "onboard_memory_value",
+      "diff_count": 8,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"onboard_memory_value\"",
+      "paths": [
+        "canonical_key",
+        "contract.range",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.template",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "paracord",
+      "diff_count": 10,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"paracord\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.falsy",
+        "parse.template",
+        "parse.truthy",
+        "parse.unit",
+        "parse.unknown"
+      ]
+    },
+    {
+      "field": "polling_rate",
+      "diff_count": 10,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"polling_rate\"",
+      "paths": [
+        "canonical_key",
+        "contract.list_rules.dedupe",
+        "contract.list_rules.max_items",
+        "contract.list_rules.min_items",
+        "contract.list_rules.sort",
+        "contract.range",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "enum.source"
+      ]
+    },
+    {
+      "field": "price_range",
+      "diff_count": 8,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"price_range\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.allow_unitless",
+        "parse.template",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "profile_switching",
+      "diff_count": 10,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"profile_switching\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.falsy",
+        "parse.template",
+        "parse.truthy",
+        "parse.unit",
+        "parse.unknown"
+      ]
+    },
+    {
+      "field": "programmable_buttons",
+      "diff_count": 9,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"programmable_buttons\"",
+      "paths": [
+        "canonical_key",
+        "contract.range",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.allow_unitless",
+        "parse.template",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "release_date",
+      "diff_count": 6,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"release_date\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "rgb",
+      "diff_count": 10,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"rgb\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.falsy",
+        "parse.template",
+        "parse.truthy",
+        "parse.unit",
+        "parse.unknown"
+      ]
+    },
+    {
+      "field": "sensor",
+      "diff_count": 8,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"sensor\"",
+      "paths": [
+        "canonical_key",
+        "component",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "enum.source",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "sensor_brand",
+      "diff_count": 7,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"sensor_brand\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.template",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "sensor_date",
+      "diff_count": 5,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"sensor_date\"",
+      "paths": [
+        "canonical_key",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.template"
+      ]
+    },
+    {
+      "field": "sensor_latency",
+      "diff_count": 4,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"sensor_latency\"",
+      "paths": [
+        "canonical_key",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target"
+      ]
+    },
+    {
+      "field": "sensor_latency_list",
+      "diff_count": 4,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"sensor_latency_list\"",
+      "paths": [
+        "canonical_key",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target"
+      ]
+    },
+    {
+      "field": "sensor_link",
+      "diff_count": 6,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"sensor_link\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "sensor_type",
+      "diff_count": 8,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"sensor_type\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "enum.source",
+        "parse.template",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "shape",
+      "diff_count": 8,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"shape\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "enum.source",
+        "parse.template",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "shift_latency",
+      "diff_count": 4,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"shift_latency\"",
+      "paths": [
+        "canonical_key",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target"
+      ]
+    },
+    {
+      "field": "side_buttons",
+      "diff_count": 9,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"side_buttons\"",
+      "paths": [
+        "canonical_key",
+        "contract.range",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.allow_unitless",
+        "parse.template",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "silent_clicks",
+      "diff_count": 10,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"silent_clicks\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.falsy",
+        "parse.template",
+        "parse.truthy",
+        "parse.unit",
+        "parse.unknown"
+      ]
+    },
+    {
+      "field": "sku",
+      "diff_count": 7,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"sku\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.template",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "smoothing",
+      "diff_count": 10,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"smoothing\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.falsy",
+        "parse.template",
+        "parse.truthy",
+        "parse.unit",
+        "parse.unknown"
+      ]
+    },
+    {
+      "field": "switch",
+      "diff_count": 8,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"switch\"",
+      "paths": [
+        "canonical_key",
+        "component",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "enum.source",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "switch_brand",
+      "diff_count": 7,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"switch_brand\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.template",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "switch_type",
+      "diff_count": 8,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"switch_type\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "enum.source",
+        "parse.template",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "switches_link",
+      "diff_count": 4,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"switches_link\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "parse.template",
+        "parse.unit"
+      ]
+    },
+    {
+      "field": "thumb_rest",
+      "diff_count": 10,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"thumb_rest\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.falsy",
+        "parse.template",
+        "parse.truthy",
+        "parse.unit",
+        "parse.unknown"
+      ]
+    },
+    {
+      "field": "tilt_scroll_wheel",
+      "diff_count": 10,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"tilt_scroll_wheel\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.falsy",
+        "parse.template",
+        "parse.truthy",
+        "parse.unit",
+        "parse.unknown"
+      ]
+    },
+    {
+      "field": "weight",
+      "diff_count": 7,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"weight\"",
+      "paths": [
+        "canonical_key",
+        "contract.range.max",
+        "contract.range.min",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.allow_unitless"
+      ]
+    },
+    {
+      "field": "width",
+      "diff_count": 6,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"width\"",
+      "paths": [
+        "canonical_key",
+        "contract.range",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.allow_unitless"
+      ]
+    },
+    {
+      "field": "wireless_charging",
+      "diff_count": 10,
+      "sample_path": "canonical_key",
+      "sample_expected": "\"__missing__\"",
+      "sample_actual": "\"wireless_charging\"",
+      "paths": [
+        "canonical_key",
+        "contract.unit",
+        "enum.new_value_policy.accept_if_evidence",
+        "enum.new_value_policy.mark_needs_curation",
+        "enum.new_value_policy.suggestion_target",
+        "parse.falsy",
+        "parse.template",
+        "parse.truthy",
+        "parse.unit",
+        "parse.unknown"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-alienware-alienware-pro",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Alienware",
+    "model": "Alienware Pro",
+    "variant": "",
+    "sku": "570-BBGJ",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

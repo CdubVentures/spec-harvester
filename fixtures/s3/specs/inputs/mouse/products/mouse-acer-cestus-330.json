@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-acer-cestus-330",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Acer",
+    "model": "Cestus 330",
+    "variant": "",
+    "sku": "NP.MCE11.00V",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-cooler-master-mm712-wired",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Cooler Master",
+    "model": "MM712 Wired",
+    "variant": "",
+    "sku": "MM-712-KKOL1",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

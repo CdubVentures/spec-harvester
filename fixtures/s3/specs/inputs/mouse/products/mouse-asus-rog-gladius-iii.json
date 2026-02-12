@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-asus-rog-gladius-iii",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Asus",
+    "model": "ROG Gladius III",
+    "variant": "",
+    "sku": "90MP0270-BMUA00",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-razer-cobra-pro",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Razer",
+    "model": "Cobra Pro",
+    "variant": "",
+    "sku": "",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

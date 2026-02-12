@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-glorious-model-o-2-mini-wireless-o2-mini",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Glorious",
+    "model": "Model O 2 Mini Wireless",
+    "variant": "O2 Mini"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "BY",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:55.562Z"
+  }
+}

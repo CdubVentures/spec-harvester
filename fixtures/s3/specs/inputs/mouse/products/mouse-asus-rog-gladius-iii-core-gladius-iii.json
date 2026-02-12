@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-asus-rog-gladius-iii-core-gladius-iii",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Asus",
+    "model": "ROG Gladius III Core",
+    "variant": "Gladius III"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "BO",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:55.493Z"
+  }
+}

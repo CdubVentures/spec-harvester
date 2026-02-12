@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-fnatic-x-lamzu-thorn-thorn",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Fnatic",
+    "model": "x Lamzu THORN",
+    "variant": "Thorn"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "HL",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:56.580Z"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-asus-rog-chakram",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Asus",
+    "model": "ROG Chakram",
+    "variant": "",
+    "sku": "90MP01K0-BMUA00",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

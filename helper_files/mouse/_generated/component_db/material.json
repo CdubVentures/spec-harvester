@@ -1,0 +1,78 @@
+{
+  "category": "mouse",
+  "component_type": "material",
+  "generated_at": "1970-01-01T00:00:00.000Z",
+  "items": [
+    {
+      "aliases": [],
+      "brand": "",
+      "links": [],
+      "name": "1",
+      "properties": {}
+    },
+    {
+      "aliases": [],
+      "brand": "",
+      "links": [],
+      "name": "10",
+      "properties": {}
+    },
+    {
+      "aliases": [],
+      "brand": "",
+      "links": [],
+      "name": "2",
+      "properties": {}
+    },
+    {
+      "aliases": [],
+      "brand": "",
+      "links": [],
+      "name": "3",
+      "properties": {}
+    },
+    {
+      "aliases": [],
+      "brand": "",
+      "links": [],
+      "name": "4",
+      "properties": {}
+    },
+    {
+      "aliases": [],
+      "brand": "",
+      "links": [],
+      "name": "5",
+      "properties": {}
+    },
+    {
+      "aliases": [],
+      "brand": "",
+      "links": [],
+      "name": "6",
+      "properties": {}
+    },
+    {
+      "aliases": [],
+      "brand": "",
+      "links": [],
+      "name": "7",
+      "properties": {}
+    },
+    {
+      "aliases": [],
+      "brand": "",
+      "links": [],
+      "name": "8",
+      "properties": {}
+    },
+    {
+      "aliases": [],
+      "brand": "",
+      "links": [],
+      "name": "9",
+      "properties": {}
+    }
+  ],
+  "version": 1
+}

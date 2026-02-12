@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "workbook_path": "helper_files/mouse/mouseData.xlsm",
+  "sheet_roles": [
+    {
+      "sheet": "dataEntry",
+      "role": "product_table"
+    },
+    {
+      "sheet": "dataEntry",
+      "role": "field_key_list"
+    }
+  ],
+  "key_list": {
+    "sheet": "dataEntry",
+    "source": "column_range",
+    "column": "B",
+    "row_start": 9,
+    "row_end": 83
+  },
+  "product_table": {
+    "sheet": "dataEntry",
+    "layout": "matrix",
+    "brand_row": 3,
+    "model_row": 4,
+    "variant_row": 5,
+    "value_col_start": "C",
+    "value_col_end": "",
+    "sample_columns": 18
+  },
+  "expectations": {
+    "required_fields": [
+      "connection",
+      "weight",
+      "dpi"
+    ],
+    "critical_fields": [
+      "polling_rate"
+    ],
+    "expected_easy_fields": [
+      "side_buttons"
+    ],
+    "expected_sometimes_fields": [
+      "sensor"
+    ],
+    "deep_fields": [
+      "release_date"
+    ]
+  },
+  "enum_lists": [],
+  "component_sheets": [
+    {
+      "sheet": "sensors",
+      "component_type": "sensor",
+      "name_column": "C",
+      "alias_columns": [],
+      "brand_column": "B",
+      "link_columns": [],
+      "property_columns": [
+        "E",
+        "F",
+        "G",
+        "H"
+      ],
+      "row_start": 2,
+      "row_end": 0
+    },
+    {
+      "sheet": "switches",
+      "component_type": "switch",
+      "name_column": "C",
+      "alias_columns": [],
+      "brand_column": "B",
+      "link_columns": [],
+      "property_columns": [
+        "D",
+        "F",
+        "G",
+        "H"
+      ],
+      "row_start": 2,
+      "row_end": 0
+    }
+  ],
+  "field_overrides": {}
+}

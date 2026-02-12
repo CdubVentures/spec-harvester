@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-glorious-model-d-2-pro-series-wireless-d2",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Glorious",
+    "model": "Model D 2 PRO Series Wireless",
+    "variant": "D2"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "CF",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:55.605Z"
+  }
+}

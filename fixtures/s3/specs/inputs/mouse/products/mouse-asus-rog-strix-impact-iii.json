@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-asus-rog-strix-impact-iii",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Asus",
+    "model": "ROG Strix Impact III",
+    "variant": "",
+    "sku": "90MP0300-BMUA00",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

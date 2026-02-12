@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-lenovo-legion-m210-rgb",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Lenovo Legion",
+    "model": "M210 RGB",
+    "variant": "",
+    "sku": "",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

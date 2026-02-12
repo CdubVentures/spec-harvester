@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-corsair-m55-wireless",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Corsair",
+    "model": "M55 Wireless",
+    "variant": "",
+    "sku": "CH-931F000-WW",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

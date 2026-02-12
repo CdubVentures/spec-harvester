@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-logitech-g-pro-2-lightspeed-pro-2",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Logitech G",
+    "model": "Pro 2 Lightspeed",
+    "variant": "Pro 2"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "CW",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:55.717Z"
+  }
+}

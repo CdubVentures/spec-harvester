@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-corsair-m55-wired-m55",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Corsair",
+    "model": "M55 Wired",
+    "variant": "M55"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "W",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:55.212Z"
+  }
+}

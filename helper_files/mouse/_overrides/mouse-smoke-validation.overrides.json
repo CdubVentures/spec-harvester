@@ -1,0 +1,21 @@
+{
+  "category": "mouse",
+  "created_at": "2026-02-12T00:34:01.925Z",
+  "overrides": {
+    "weight": {
+      "candidate_id": "1b15e5198e1f040d",
+      "field": "weight",
+      "set_at": "2026-02-12T00:37:43.560Z",
+      "source": {
+        "evidence_key": "https://razer.com/products/gaming-mice/razer-viper-v3-pro-wireless#weight",
+        "host": "razer.com",
+        "method": "embedded_state",
+        "tier": 1
+      },
+      "value": "54"
+    }
+  },
+  "product_id": "mouse-smoke-validation",
+  "updated_at": "2026-02-12T00:37:43.559Z",
+  "version": 1
+}

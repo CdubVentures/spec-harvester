@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-g-wolves-htr-pro-8k-wireless-htr",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "G-Wolves",
+    "model": "HTR PRO 8k Wireless",
+    "variant": "HTR"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "HN",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:56.599Z"
+  }
+}

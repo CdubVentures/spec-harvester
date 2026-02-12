@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-pulsar-x2a-x2a",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Pulsar",
+    "model": "X2A",
+    "variant": "X2A"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "LD",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:57.481Z"
+  }
+}

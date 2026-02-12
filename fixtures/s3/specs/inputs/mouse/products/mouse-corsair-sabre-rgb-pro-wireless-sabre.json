@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-corsair-sabre-rgb-pro-wireless-sabre",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Corsair",
+    "model": "Sabre RGB Pro Wireless",
+    "variant": "Sabre"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "AY",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:55.389Z"
+  }
+}

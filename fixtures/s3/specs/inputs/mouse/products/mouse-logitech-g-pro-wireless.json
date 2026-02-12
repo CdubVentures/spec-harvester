@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-logitech-g-pro-wireless",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Logitech G",
+    "model": "Pro Wireless",
+    "variant": "",
+    "sku": "",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

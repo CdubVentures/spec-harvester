@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-redragon-devourer-m993-devourer-m993",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Redragon",
+    "model": "Devourer M993",
+    "variant": "Devourer M993"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "FC",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:56.124Z"
+  }
+}

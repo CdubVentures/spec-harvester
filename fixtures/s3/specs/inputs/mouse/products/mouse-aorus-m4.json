@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-aorus-m4",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Aorus",
+    "model": "M4",
+    "variant": "",
+    "sku": "GM-AORUS-M4",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

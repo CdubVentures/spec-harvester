@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-asus-rog-harpe-ace-aim-lab-harpe",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Asus",
+    "model": "ROG Harpe Ace Aim Lab",
+    "variant": "Harpe"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "BF",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:55.435Z"
+  }
+}

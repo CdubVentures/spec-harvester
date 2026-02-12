@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-mad-catz-r-a-t-4-r-a-t-4",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Mad Catz",
+    "model": "R.A.T. 4+",
+    "variant": "R.A.T. 4+"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "JL",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:57.069Z"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-acer-cestus-330-330",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Acer",
+    "model": "Cestus 330",
+    "variant": "330"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "I",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:55.130Z"
+  }
+}

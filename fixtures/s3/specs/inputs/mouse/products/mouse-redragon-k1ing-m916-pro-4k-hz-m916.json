@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-redragon-k1ing-m916-pro-4k-hz-m916",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Redragon",
+    "model": "K1ING M916 Pro (4K Hz)",
+    "variant": "M916"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "FJ",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:56.172Z"
+  }
+}

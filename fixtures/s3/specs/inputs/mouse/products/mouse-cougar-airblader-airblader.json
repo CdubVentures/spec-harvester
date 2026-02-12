@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-cougar-airblader-airblader",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Cougar",
+    "model": "Airblader",
+    "variant": "Airblader"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "GK",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:56.357Z"
+  }
+}

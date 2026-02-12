@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-corsair-sabre-v2-pro",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Corsair",
+    "model": "Sabre v2 Pro",
+    "variant": "",
+    "sku": "CH-931G000-WW",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

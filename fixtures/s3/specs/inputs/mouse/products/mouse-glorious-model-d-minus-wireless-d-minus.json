@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-glorious-model-d-minus-wireless-d-minus",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Glorious",
+    "model": "Model D Minus Wireless",
+    "variant": "D Minus"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "CE",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:55.599Z"
+  }
+}

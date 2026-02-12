@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-aorus-m5",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Aorus",
+    "model": "M5",
+    "variant": "",
+    "sku": "GM-AORUS-M5",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

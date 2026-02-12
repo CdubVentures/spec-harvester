@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-redragon-predator-m612-pro-m612",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Redragon",
+    "model": "Predator M612 Pro",
+    "variant": "M612"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "FW",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:56.261Z"
+  }
+}

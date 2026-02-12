@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-cooler-master-mm310",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Cooler Master",
+    "model": "MM310",
+    "variant": "",
+    "sku": "MM-310-KKOL1",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

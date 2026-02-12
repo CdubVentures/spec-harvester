@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-redragon-rind-m813-pro-m813",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Redragon",
+    "model": "Rind M813 Pro",
+    "variant": "M813"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "FX",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:56.268Z"
+  }
+}

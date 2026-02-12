@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-cooler-master-mm712",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Cooler Master",
+    "model": "MM712",
+    "variant": "",
+    "sku": "MM-712-KKOH1",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

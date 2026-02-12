@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-alienware-aw320m",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Alienware",
+    "model": "AW320M",
+    "variant": "",
+    "sku": "570-ABMQ",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

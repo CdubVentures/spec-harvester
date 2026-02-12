@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-alienware-aw610m",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Alienware",
+    "model": "AW610M",
+    "variant": "",
+    "sku": "570-ABCQ",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

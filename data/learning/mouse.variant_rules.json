@@ -1,0 +1,389 @@
+{
+  "version": 1,
+  "updated_at": "2026-02-12T00:37:29.358Z",
+  "identity_grammar": {
+    "version": 1,
+    "updated_at": "2026-02-12T00:37:29.347Z",
+    "brands": {
+      "razer": {
+        "brand": "Razer",
+        "brand_key": "razer",
+        "models": {
+          "viper-v3-pro": {
+            "model": "Viper V3 Pro",
+            "model_key": "viper-v3-pro",
+            "count": 43,
+            "variant_tokens": {
+              "wireless": 23,
+              "unk": 19,
+              "viper": 1
+            },
+            "sku_prefixes": {
+              "RZ01-": 19,
+              "UNK": 24
+            },
+            "mpn_prefixes": {
+              "UNK": 43
+            },
+            "gtin_prefixes": {
+              "UNK": 43
+            },
+            "updated_at": "2026-02-12T00:37:29.347Z"
+          },
+          "basilisk-v3-35k": {
+            "model": "Basilisk V3 35k",
+            "model_key": "basilisk-v3-35k",
+            "count": 12,
+            "variant_tokens": {
+              "unk": 12
+            },
+            "sku_prefixes": {
+              "UNK": 12
+            },
+            "mpn_prefixes": {
+              "UNK": 12
+            },
+            "gtin_prefixes": {
+              "UNK": 12
+            },
+            "updated_at": "2026-02-10T22:34:43.200Z"
+          },
+          "basilisk-v3-x-hyperspeed": {
+            "model": "Basilisk V3 X Hyperspeed",
+            "model_key": "basilisk-v3-x-hyperspeed",
+            "count": 1,
+            "variant_tokens": {
+              "unk": 1
+            },
+            "sku_prefixes": {
+              "UNK": 1
+            },
+            "mpn_prefixes": {
+              "UNK": 1
+            },
+            "gtin_prefixes": {
+              "UNK": 1
+            },
+            "updated_at": "2026-02-10T08:09:09.185Z"
+          },
+          "naga-v2-hyperspeed": {
+            "model": "Naga V2 Hyperspeed",
+            "model_key": "naga-v2-hyperspeed",
+            "count": 3,
+            "variant_tokens": {
+              "unk": 3
+            },
+            "sku_prefixes": {
+              "UNK": 3
+            },
+            "mpn_prefixes": {
+              "UNK": 3
+            },
+            "gtin_prefixes": {
+              "UNK": 3
+            },
+            "updated_at": "2026-02-11T00:47:03.383Z"
+          },
+          "viper-v3-hyperspeed": {
+            "model": "Viper V3 Hyperspeed",
+            "model_key": "viper-v3-hyperspeed",
+            "count": 3,
+            "variant_tokens": {
+              "unk": 3
+            },
+            "sku_prefixes": {
+              "UNK": 3
+            },
+            "mpn_prefixes": {
+              "UNK": 3
+            },
+            "gtin_prefixes": {
+              "UNK": 3
+            },
+            "updated_at": "2026-02-11T02:09:54.127Z"
+          },
+          "viper": {
+            "model": "Viper",
+            "model_key": "viper",
+            "count": 1,
+            "variant_tokens": {
+              "v3": 1,
+              "pro": 1,
+              "viper": 1
+            },
+            "sku_prefixes": {
+              "UNK": 1
+            },
+            "mpn_prefixes": {
+              "UNK": 1
+            },
+            "gtin_prefixes": {
+              "UNK": 1
+            },
+            "updated_at": "2026-02-11T09:29:42.829Z"
+          }
+        },
+        "updated_at": "2026-02-12T00:37:29.347Z"
+      },
+      "logitech": {
+        "brand": "Logitech",
+        "brand_key": "logitech",
+        "models": {
+          "g-pro-x-superlight-2": {
+            "model": "G Pro X Superlight 2",
+            "model_key": "g-pro-x-superlight-2",
+            "count": 52,
+            "variant_tokens": {
+              "se": 9,
+              "unk": 43
+            },
+            "sku_prefixes": {
+              "UNK": 52
+            },
+            "mpn_prefixes": {
+              "UNK": 52
+            },
+            "gtin_prefixes": {
+              "UNK": 52
+            },
+            "updated_at": "2026-02-11T01:17:51.225Z"
+          }
+        },
+        "updated_at": "2026-02-11T01:17:51.225Z"
+      },
+      "corsair": {
+        "brand": "Corsair",
+        "brand_key": "corsair",
+        "models": {
+          "dark-core-rgb-pro": {
+            "model": "Dark Core RGB Pro",
+            "model_key": "dark-core-rgb-pro",
+            "count": 1,
+            "variant_tokens": {
+              "unk": 1
+            },
+            "sku_prefixes": {
+              "UNK": 1
+            },
+            "mpn_prefixes": {
+              "UNK": 1
+            },
+            "gtin_prefixes": {
+              "UNK": 1
+            },
+            "updated_at": "2026-02-10T20:47:18.108Z"
+          },
+          "sabre-pro-optical": {
+            "model": "Sabre Pro Optical",
+            "model_key": "sabre-pro-optical",
+            "count": 1,
+            "variant_tokens": {
+              "unk": 1
+            },
+            "sku_prefixes": {
+              "CH-93": 1
+            },
+            "mpn_prefixes": {
+              "UNK": 1
+            },
+            "gtin_prefixes": {
+              "UNK": 1
+            },
+            "updated_at": "2026-02-10T21:17:09.110Z"
+          }
+        },
+        "updated_at": "2026-02-10T21:17:09.110Z"
+      },
+      "nzxt": {
+        "brand": "NZXT",
+        "brand_key": "nzxt",
+        "models": {
+          "lift-2-ergo": {
+            "model": "Lift 2 Ergo",
+            "model_key": "lift-2-ergo",
+            "count": 1,
+            "variant_tokens": {
+              "unk": 1
+            },
+            "sku_prefixes": {
+              "UNK": 1
+            },
+            "mpn_prefixes": {
+              "UNK": 1
+            },
+            "gtin_prefixes": {
+              "UNK": 1
+            },
+            "updated_at": "2026-02-10T22:10:37.867Z"
+          }
+        },
+        "updated_at": "2026-02-10T22:10:37.867Z"
+      },
+      "acer": {
+        "brand": "Acer",
+        "brand_key": "acer",
+        "models": {
+          "cestus-310": {
+            "model": "Cestus 310",
+            "model_key": "cestus-310",
+            "count": 14,
+            "variant_tokens": {
+              "310": 5,
+              "unk": 9
+            },
+            "sku_prefixes": {
+              "NP.MC": 9,
+              "UNK": 5
+            },
+            "mpn_prefixes": {
+              "UNK": 14
+            },
+            "gtin_prefixes": {
+              "UNK": 14
+            },
+            "updated_at": "2026-02-11T09:42:14.027Z"
+          },
+          "cestus-330": {
+            "model": "Cestus 330",
+            "model_key": "cestus-330",
+            "count": 2,
+            "variant_tokens": {
+              "330": 1,
+              "unk": 1
+            },
+            "sku_prefixes": {
+              "UNK": 1,
+              "NP.MC": 1
+            },
+            "mpn_prefixes": {
+              "UNK": 2
+            },
+            "gtin_prefixes": {
+              "UNK": 2
+            },
+            "updated_at": "2026-02-11T08:45:28.235Z"
+          },
+          "cestus-335": {
+            "model": "Cestus 335",
+            "model_key": "cestus-335",
+            "count": 2,
+            "variant_tokens": {
+              "335": 1,
+              "unk": 1
+            },
+            "sku_prefixes": {
+              "UNK": 1,
+              "GP.MC": 1
+            },
+            "mpn_prefixes": {
+              "UNK": 2
+            },
+            "gtin_prefixes": {
+              "UNK": 2
+            },
+            "updated_at": "2026-02-11T08:45:30.647Z"
+          },
+          "cestus-350": {
+            "model": "Cestus 350",
+            "model_key": "cestus-350",
+            "count": 2,
+            "variant_tokens": {
+              "350": 1,
+              "unk": 1
+            },
+            "sku_prefixes": {
+              "UNK": 1,
+              "GP.MC": 1
+            },
+            "mpn_prefixes": {
+              "UNK": 2
+            },
+            "gtin_prefixes": {
+              "UNK": 2
+            },
+            "updated_at": "2026-02-11T08:45:33.025Z"
+          }
+        },
+        "updated_at": "2026-02-11T09:42:14.027Z"
+      },
+      "pulsar": {
+        "brand": "Pulsar",
+        "brand_key": "pulsar",
+        "models": {
+          "x2-crazylight": {
+            "model": "X2 Crazylight",
+            "model_key": "x2-crazylight",
+            "count": 2,
+            "variant_tokens": {
+              "x2": 2,
+              "crazylight": 2
+            },
+            "sku_prefixes": {
+              "UNK": 2
+            },
+            "mpn_prefixes": {
+              "UNK": 2
+            },
+            "gtin_prefixes": {
+              "UNK": 2
+            },
+            "updated_at": "2026-02-11T08:32:11.173Z"
+          }
+        },
+        "updated_at": "2026-02-11T08:32:11.173Z"
+      },
+      "alienware": {
+        "brand": "Alienware",
+        "brand_key": "alienware",
+        "models": {
+          "alienware-pro": {
+            "model": "Alienware Pro",
+            "model_key": "alienware-pro",
+            "count": 2,
+            "variant_tokens": {
+              "pro": 1,
+              "unk": 1
+            },
+            "sku_prefixes": {
+              "UNK": 1,
+              "570-B": 1
+            },
+            "mpn_prefixes": {
+              "UNK": 2
+            },
+            "gtin_prefixes": {
+              "UNK": 2
+            },
+            "updated_at": "2026-02-11T08:45:35.347Z"
+          },
+          "aw620m": {
+            "model": "AW620M",
+            "model_key": "aw620m",
+            "count": 4,
+            "variant_tokens": {
+              "620": 4
+            },
+            "sku_prefixes": {
+              "UNK": 4
+            },
+            "mpn_prefixes": {
+              "UNK": 4
+            },
+            "gtin_prefixes": {
+              "UNK": 4
+            },
+            "updated_at": "2026-02-11T20:20:12.462Z"
+          }
+        },
+        "updated_at": "2026-02-11T20:20:12.462Z"
+      }
+    },
+    "normalization_rules": {
+      "token_aliases": {}
+    },
+    "stats": {
+      "updates_total": 146,
+      "validated_updates": 24
+    }
+  }
+}

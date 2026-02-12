@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-lenovo-legion-m300s-rgb",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Lenovo Legion",
+    "model": "M300s RGB",
+    "variant": "",
+    "sku": "",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

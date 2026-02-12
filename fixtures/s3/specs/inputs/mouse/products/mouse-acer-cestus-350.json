@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-acer-cestus-350",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Acer",
+    "model": "Cestus 350",
+    "variant": "",
+    "sku": "GP.MCE11.00Q",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

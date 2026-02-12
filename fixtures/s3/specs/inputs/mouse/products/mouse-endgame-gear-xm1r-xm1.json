@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-endgame-gear-xm1r-xm1",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Endgame Gear",
+    "model": "XM1r",
+    "variant": "XM1"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "GZ",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:56.475Z"
+  }
+}

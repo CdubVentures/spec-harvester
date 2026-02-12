@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-logitech-g-g502-x",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Logitech G",
+    "model": "G502 X",
+    "variant": "",
+    "sku": "",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

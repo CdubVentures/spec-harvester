@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-corsair-m75-wireless",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Corsair",
+    "model": "M75 Wireless",
+    "variant": "",
+    "sku": "CH-931D010-NA",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-razer-viper-wireless",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Razer",
+    "model": "Viper",
+    "variant": "Wireless",
+    "sku": "",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

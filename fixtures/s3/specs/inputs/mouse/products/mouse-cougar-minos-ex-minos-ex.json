@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-cougar-minos-ex-minos-ex",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Cougar",
+    "model": "Minos EX",
+    "variant": "Minos EX"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "GO",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:56.385Z"
+  }
+}

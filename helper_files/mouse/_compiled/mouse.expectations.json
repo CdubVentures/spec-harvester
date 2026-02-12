@@ -1,0 +1,1747 @@
+{
+  "version": 1,
+  "category": "mouse",
+  "contract_hash": "f5e2a5113466b2056368d4cf05be6526148969a93d46e3b91da55b90a446306e",
+  "source_files": [
+    "helper_files/mouse/mouseData.xlsm",
+    "helper_files/mouse/schema.json",
+    "helper_files/mouse/_generated/field_rules.runtime.json"
+  ],
+  "required_fields": [
+    "connection",
+    "connectivity",
+    "dpi",
+    "height",
+    "lngth",
+    "middle_buttons",
+    "polling_rate",
+    "sensor",
+    "sensor_brand",
+    "side_buttons",
+    "switch",
+    "switch_brand",
+    "weight",
+    "width"
+  ],
+  "expected_easy_fields": [
+    "acceleration",
+    "adjustable_scroll_wheel",
+    "adjustable_weight",
+    "bluetooth",
+    "cable_type",
+    "coating",
+    "colors",
+    "computer_side_connector",
+    "connection",
+    "connectivity",
+    "design",
+    "discontinued",
+    "dpi",
+    "feet_material",
+    "flawless_sensor",
+    "form_factor",
+    "front_flare",
+    "grip",
+    "hand_size",
+    "hardware_acceleration",
+    "height",
+    "honeycomb_frame",
+    "hot_swappable",
+    "hump",
+    "ips",
+    "lift",
+    "lift_settings",
+    "lighting",
+    "lngth",
+    "material",
+    "middle_buttons",
+    "motion_sync",
+    "mouse_side_connector",
+    "onboard_memory",
+    "onboard_memory_value",
+    "paracord",
+    "polling_rate",
+    "price_range",
+    "profile_switching",
+    "programmable_buttons",
+    "rgb",
+    "sensor",
+    "sensor_brand",
+    "sensor_date",
+    "sensor_link",
+    "sensor_type",
+    "shape",
+    "side_buttons",
+    "silent_clicks",
+    "smoothing",
+    "switch",
+    "switch_brand",
+    "switch_type",
+    "thumb_rest",
+    "tilt_scroll_wheel",
+    "weight",
+    "width"
+  ],
+  "expected_sometimes_fields": [
+    "battery_hours",
+    "encoder",
+    "encoder_brand",
+    "encoder_link",
+    "mcu",
+    "mcu_link",
+    "release_date",
+    "wireless_charging"
+  ],
+  "deep_fields": [
+    "click_force",
+    "click_latency",
+    "click_latency_list",
+    "debounce",
+    "nvidia_reflex",
+    "sensor_latency",
+    "sensor_latency_list",
+    "shift_latency",
+    "switch_link"
+  ],
+  "coverage_rates": {
+    "release_date": {
+      "seen": 342,
+      "filled": 69,
+      "fill_rate": 0.201754
+    },
+    "discontinued": {
+      "seen": 342,
+      "filled": 0,
+      "fill_rate": 0
+    },
+    "sku": {
+      "seen": 342,
+      "filled": 0,
+      "fill_rate": 0
+    },
+    "price_range": {
+      "seen": 342,
+      "filled": 69,
+      "fill_rate": 0.201754
+    },
+    "colors": {
+      "seen": 342,
+      "filled": 69,
+      "fill_rate": 0.201754
+    },
+    "design": {
+      "seen": 342,
+      "filled": 69,
+      "fill_rate": 0.201754
+    },
+    "lighting": {
+      "seen": 342,
+      "filled": 69,
+      "fill_rate": 0.201754
+    },
+    "rgb": {
+      "seen": 342,
+      "filled": 69,
+      "fill_rate": 0.201754
+    },
+    "connection": {
+      "seen": 342,
+      "filled": 69,
+      "fill_rate": 0.201754
+    },
+    "connectivity": {
+      "seen": 342,
+      "filled": 69,
+      "fill_rate": 0.201754
+    },
+    "computer_side_connector": {
+      "seen": 342,
+      "filled": 69,
+      "fill_rate": 0.201754
+    },
+    "mouse_side_connector": {
+      "seen": 342,
+      "filled": 69,
+      "fill_rate": 0.201754
+    },
+    "bluetooth": {
+      "seen": 342,
+      "filled": 69,
+      "fill_rate": 0.201754
+    },
+    "cable_type": {
+      "seen": 342,
+      "filled": 68,
+      "fill_rate": 0.19883
+    },
+    "paracord": {
+      "seen": 342,
+      "filled": 68,
+      "fill_rate": 0.19883
+    },
+    "wireless_charging": {
+      "seen": 342,
+      "filled": 68,
+      "fill_rate": 0.19883
+    },
+    "battery_hours": {
+      "seen": 342,
+      "filled": 69,
+      "fill_rate": 0.201754
+    },
+    "adjustable_weight": {
+      "seen": 342,
+      "filled": 69,
+      "fill_rate": 0.201754
+    },
+    "feet_material": {
+      "seen": 342,
+      "filled": 69,
+      "fill_rate": 0.201754
+    },
+    "coating": {
+      "seen": 342,
+      "filled": 69,
+      "fill_rate": 0.201754
+    },
+    "honeycomb_frame": {
+      "seen": 342,
+      "filled": 69,
+      "fill_rate": 0.201754
+    },
+    "silent_clicks": {
+      "seen": 342,
+      "filled": 69,
+      "fill_rate": 0.201754
+    },
+    "weight": {
+      "seen": 342,
+      "filled": 71,
+      "fill_rate": 0.207602
+    },
+    "material": {
+      "seen": 342,
+      "filled": 71,
+      "fill_rate": 0.207602
+    },
+    "lngth": {
+      "seen": 342,
+      "filled": 71,
+      "fill_rate": 0.207602
+    },
+    "width": {
+      "seen": 342,
+      "filled": 71,
+      "fill_rate": 0.207602
+    },
+    "height": {
+      "seen": 342,
+      "filled": 71,
+      "fill_rate": 0.207602
+    },
+    "form_factor": {
+      "seen": 342,
+      "filled": 71,
+      "fill_rate": 0.207602
+    },
+    "shape": {
+      "seen": 342,
+      "filled": 71,
+      "fill_rate": 0.207602
+    },
+    "hump": {
+      "seen": 342,
+      "filled": 71,
+      "fill_rate": 0.207602
+    },
+    "front_flare": {
+      "seen": 342,
+      "filled": 71,
+      "fill_rate": 0.207602
+    },
+    "thumb_rest": {
+      "seen": 342,
+      "filled": 71,
+      "fill_rate": 0.207602
+    },
+    "grip": {
+      "seen": 342,
+      "filled": 71,
+      "fill_rate": 0.207602
+    },
+    "hand_size": {
+      "seen": 342,
+      "filled": 71,
+      "fill_rate": 0.207602
+    },
+    "mcu": {
+      "seen": 342,
+      "filled": 20,
+      "fill_rate": 0.05848
+    },
+    "mcu_link": {
+      "seen": 342,
+      "filled": 18,
+      "fill_rate": 0.052632
+    },
+    "sensor": {
+      "seen": 342,
+      "filled": 69,
+      "fill_rate": 0.201754
+    },
+    "sensor_brand": {
+      "seen": 342,
+      "filled": 65,
+      "fill_rate": 0.190058
+    },
+    "sensor_date": {
+      "seen": 342,
+      "filled": 37,
+      "fill_rate": 0.108187
+    },
+    "sensor_link": {
+      "seen": 342,
+      "filled": 39,
+      "fill_rate": 0.114035
+    },
+    "sensor_type": {
+      "seen": 342,
+      "filled": 68,
+      "fill_rate": 0.19883
+    },
+    "flawless_sensor": {
+      "seen": 342,
+      "filled": 55,
+      "fill_rate": 0.160819
+    },
+    "sensor_latency": {
+      "seen": 342,
+      "filled": 6,
+      "fill_rate": 0.017544
+    },
+    "sensor_latency_list": {
+      "seen": 342,
+      "filled": 5,
+      "fill_rate": 0.01462
+    },
+    "shift_latency": {
+      "seen": 342,
+      "filled": 1,
+      "fill_rate": 0.002924
+    },
+    "polling_rate": {
+      "seen": 342,
+      "filled": 71,
+      "fill_rate": 0.207602
+    },
+    "dpi": {
+      "seen": 342,
+      "filled": 71,
+      "fill_rate": 0.207602
+    },
+    "ips": {
+      "seen": 342,
+      "filled": 71,
+      "fill_rate": 0.207602
+    },
+    "acceleration": {
+      "seen": 342,
+      "filled": 71,
+      "fill_rate": 0.207602
+    },
+    "lift": {
+      "seen": 342,
+      "filled": 61,
+      "fill_rate": 0.178363
+    },
+    "lift_settings": {
+      "seen": 342,
+      "filled": 60,
+      "fill_rate": 0.175439
+    },
+    "motion_sync": {
+      "seen": 342,
+      "filled": 35,
+      "fill_rate": 0.102339
+    },
+    "hardware_acceleration": {
+      "seen": 342,
+      "filled": 57,
+      "fill_rate": 0.166667
+    },
+    "smoothing": {
+      "seen": 342,
+      "filled": 49,
+      "fill_rate": 0.143275
+    },
+    "nvidia_reflex": {
+      "seen": 342,
+      "filled": 66,
+      "fill_rate": 0.192982
+    },
+    "switch": {
+      "seen": 342,
+      "filled": 70,
+      "fill_rate": 0.204678
+    },
+    "switch_brand": {
+      "seen": 342,
+      "filled": 64,
+      "fill_rate": 0.187135
+    },
+    "switch_type": {
+      "seen": 342,
+      "filled": 70,
+      "fill_rate": 0.204678
+    },
+    "switch_link": {
+      "seen": 342,
+      "filled": 12,
+      "fill_rate": 0.035088
+    },
+    "hot_swappable": {
+      "seen": 342,
+      "filled": 71,
+      "fill_rate": 0.207602
+    },
+    "debounce": {
+      "seen": 342,
+      "filled": 8,
+      "fill_rate": 0.023392
+    },
+    "click_latency": {
+      "seen": 342,
+      "filled": 45,
+      "fill_rate": 0.131579
+    },
+    "click_latency_list": {
+      "seen": 342,
+      "filled": 46,
+      "fill_rate": 0.134503
+    },
+    "click_force": {
+      "seen": 342,
+      "filled": 7,
+      "fill_rate": 0.020468
+    },
+    "encoder": {
+      "seen": 342,
+      "filled": 2,
+      "fill_rate": 0.005848
+    },
+    "encoder_brand": {
+      "seen": 342,
+      "filled": 2,
+      "fill_rate": 0.005848
+    },
+    "encoder_link": {
+      "seen": 342,
+      "filled": 0,
+      "fill_rate": 0
+    },
+    "side_buttons": {
+      "seen": 342,
+      "filled": 71,
+      "fill_rate": 0.207602
+    },
+    "middle_buttons": {
+      "seen": 342,
+      "filled": 71,
+      "fill_rate": 0.207602
+    },
+    "programmable_buttons": {
+      "seen": 342,
+      "filled": 69,
+      "fill_rate": 0.201754
+    },
+    "tilt_scroll_wheel": {
+      "seen": 342,
+      "filled": 69,
+      "fill_rate": 0.201754
+    },
+    "adjustable_scroll_wheel": {
+      "seen": 342,
+      "filled": 69,
+      "fill_rate": 0.201754
+    },
+    "onboard_memory": {
+      "seen": 342,
+      "filled": 69,
+      "fill_rate": 0.201754
+    },
+    "onboard_memory_value": {
+      "seen": 342,
+      "filled": 47,
+      "fill_rate": 0.137427
+    },
+    "profile_switching": {
+      "seen": 342,
+      "filled": 69,
+      "fill_rate": 0.201754
+    }
+  },
+  "field_rules": {
+    "release_date": {
+      "type": "string",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 2,
+      "time_target": "medium",
+      "acceptance_policy": "standard"
+    },
+    "discontinued": {
+      "type": "string",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "price_range": {
+      "type": "string",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "colors": {
+      "type": "list",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "design": {
+      "type": "list",
+      "enum": [
+        "collaboration",
+        "limited edition",
+        "multiple",
+        "standard"
+      ],
+      "aliases": {
+        "collaboration": "collaboration",
+        "limited edition": "limited edition",
+        "limitededition": "limited edition",
+        "multiple": "multiple",
+        "standard": "standard"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "lighting": {
+      "type": "list",
+      "enum": [
+        "1 zone rgb",
+        "2 zone rgb",
+        "3 zone led",
+        "3 zone rgb",
+        "4 zone rgb",
+        "7 zone rgb",
+        "9 zone rgb",
+        "none"
+      ],
+      "aliases": {
+        "1 zone rgb": "1 zone rgb",
+        "1zonergb": "1 zone rgb",
+        "2 zone rgb": "2 zone rgb",
+        "2zonergb": "2 zone rgb",
+        "3 zone led": "3 zone led",
+        "3 zone rgb": "3 zone rgb",
+        "3zoneled": "3 zone led",
+        "3zonergb": "3 zone rgb",
+        "4 zone rgb": "4 zone rgb",
+        "4zonergb": "4 zone rgb",
+        "7 zone rgb": "7 zone rgb",
+        "7zonergb": "7 zone rgb",
+        "9 zone rgb": "9 zone rgb",
+        "9zonergb": "9 zone rgb",
+        "none": "none"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "rgb": {
+      "type": "string",
+      "enum": [
+        "no",
+        "yes"
+      ],
+      "aliases": {
+        "0": "no",
+        "1": "yes",
+        "disabled": "no",
+        "enabled": "yes",
+        "false": "no",
+        "no": "no",
+        "off": "no",
+        "on": "yes",
+        "true": "yes",
+        "yes": "yes"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "connection": {
+      "type": "string",
+      "enum": [
+        "hybrid",
+        "wired",
+        "wireless"
+      ],
+      "aliases": {
+        "2 4 ghz": "wireless",
+        "2 4ghz": "wireless",
+        "2 4ghz wired": "hybrid",
+        "24ghz": "wireless",
+        "24ghzwired": "hybrid",
+        "bluetooth 2 4ghz": "hybrid",
+        "bluetooth 2 4ghz wired": "hybrid",
+        "bluetooth wired": "hybrid",
+        "bluetooth24ghz": "hybrid",
+        "bluetooth24ghzwired": "hybrid",
+        "bluetoothwired": "hybrid",
+        "dongle": "wireless",
+        "dual": "hybrid",
+        "dual mode": "hybrid",
+        "dualmode": "hybrid",
+        "hybrid": "hybrid",
+        "receiver": "wireless",
+        "rf": "wireless",
+        "usb": "wired",
+        "usb wired": "wired",
+        "usbwired": "wired",
+        "wire": "wired",
+        "wired": "wired",
+        "wired wireless": "hybrid",
+        "wiredwireless": "hybrid",
+        "wireless": "wireless",
+        "wireless wired": "hybrid",
+        "wirelesswired": "hybrid"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "connectivity": {
+      "type": "list",
+      "enum": [
+        "2 4ghz dongle",
+        "2 4ghz rf dongle",
+        "2 4ghz wifi dongle",
+        "n a"
+      ],
+      "aliases": {
+        "2 4ghz dongle": "2 4ghz dongle",
+        "2 4ghz rf dongle": "2 4ghz rf dongle",
+        "2 4ghz wifi dongle": "2 4ghz wifi dongle",
+        "24ghzdongle": "2 4ghz dongle",
+        "24ghzrfdongle": "2 4ghz rf dongle",
+        "24ghzwifidongle": "2 4ghz wifi dongle",
+        "n a": "n a",
+        "na": "n a"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "computer_side_connector": {
+      "type": "string",
+      "enum": [
+        "usb a",
+        "usb c"
+      ],
+      "aliases": {
+        "usb a": "usb a",
+        "usb c": "usb c",
+        "usba": "usb a",
+        "usbc": "usb c"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "mouse_side_connector": {
+      "type": "string",
+      "enum": [
+        "micro b",
+        "n a",
+        "usb c"
+      ],
+      "aliases": {
+        "micro b": "micro b",
+        "microb": "micro b",
+        "n a": "n a",
+        "na": "n a",
+        "usb c": "usb c",
+        "usbc": "usb c"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "bluetooth": {
+      "type": "string",
+      "enum": [
+        "no",
+        "yes"
+      ],
+      "aliases": {
+        "0": "no",
+        "1": "yes",
+        "disabled": "no",
+        "enabled": "yes",
+        "false": "no",
+        "no": "no",
+        "off": "no",
+        "on": "yes",
+        "true": "yes",
+        "yes": "yes"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "cable_type": {
+      "type": "string",
+      "enum": [
+        "braided",
+        "rubber",
+        "ultraweave"
+      ],
+      "aliases": {
+        "braided": "braided",
+        "rubber": "rubber",
+        "ultraweave": "ultraweave"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "paracord": {
+      "type": "string",
+      "enum": [
+        "no",
+        "yes"
+      ],
+      "aliases": {
+        "0": "no",
+        "1": "yes",
+        "disabled": "no",
+        "enabled": "yes",
+        "false": "no",
+        "no": "no",
+        "off": "no",
+        "on": "yes",
+        "true": "yes",
+        "yes": "yes"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "wireless_charging": {
+      "type": "string",
+      "enum": [
+        "no",
+        "yes"
+      ],
+      "aliases": {
+        "0": "no",
+        "1": "yes",
+        "disabled": "no",
+        "enabled": "yes",
+        "false": "no",
+        "no": "no",
+        "off": "no",
+        "on": "yes",
+        "true": "yes",
+        "yes": "yes"
+      },
+      "evidence_min_tier": 2,
+      "time_target": "medium",
+      "acceptance_policy": "standard"
+    },
+    "battery_hours": {
+      "type": "number",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 2,
+      "time_target": "medium",
+      "acceptance_policy": "standard"
+    },
+    "adjustable_weight": {
+      "type": "string",
+      "enum": [
+        "no",
+        "yes"
+      ],
+      "aliases": {
+        "0": "no",
+        "1": "yes",
+        "disabled": "no",
+        "enabled": "yes",
+        "false": "no",
+        "no": "no",
+        "off": "no",
+        "on": "yes",
+        "true": "yes",
+        "yes": "yes"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "feet_material": {
+      "type": "string",
+      "enum": [
+        "glass",
+        "ptfe",
+        "ptfe 95",
+        "ptfe black dyed",
+        "ptfe virgin grade"
+      ],
+      "aliases": {
+        "glass": "glass",
+        "ptfe": "ptfe",
+        "ptfe 95": "ptfe 95",
+        "ptfe black dyed": "ptfe black dyed",
+        "ptfe virgin grade": "ptfe virgin grade",
+        "ptfe95": "ptfe 95",
+        "ptfeblackdyed": "ptfe black dyed",
+        "ptfevirgingrade": "ptfe virgin grade"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "coating": {
+      "type": "list",
+      "enum": [
+        "matte",
+        "matte rubber grips",
+        "rubber grips"
+      ],
+      "aliases": {
+        "matte": "matte",
+        "matte rubber grips": "matte rubber grips",
+        "matterubbergrips": "matte rubber grips",
+        "rubber grips": "rubber grips",
+        "rubbergrips": "rubber grips"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "honeycomb_frame": {
+      "type": "string",
+      "enum": [
+        "no",
+        "yes"
+      ],
+      "aliases": {
+        "0": "no",
+        "1": "yes",
+        "disabled": "no",
+        "enabled": "yes",
+        "false": "no",
+        "no": "no",
+        "off": "no",
+        "on": "yes",
+        "true": "yes",
+        "yes": "yes"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "silent_clicks": {
+      "type": "string",
+      "enum": [
+        "no"
+      ],
+      "aliases": {
+        "0": "no",
+        "disabled": "no",
+        "false": "no",
+        "no": "no",
+        "off": "no"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "weight": {
+      "type": "number",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "material": {
+      "type": "string",
+      "enum": [
+        "bio based nylon",
+        "carbon fiber",
+        "plastic",
+        "plastic aluminum",
+        "plastic rubber"
+      ],
+      "aliases": {
+        "bio based nylon": "bio based nylon",
+        "biobasednylon": "bio based nylon",
+        "carbon fiber": "carbon fiber",
+        "carbonfiber": "carbon fiber",
+        "plastic": "plastic",
+        "plastic aluminum": "plastic aluminum",
+        "plastic rubber": "plastic rubber",
+        "plasticaluminum": "plastic aluminum",
+        "plasticrubber": "plastic rubber"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "lngth": {
+      "type": "number",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "width": {
+      "type": "number",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "height": {
+      "type": "number",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "form_factor": {
+      "type": "string",
+      "enum": [
+        "ambidextrous",
+        "right"
+      ],
+      "aliases": {
+        "ambidextrous": "ambidextrous",
+        "right": "right"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "shape": {
+      "type": "string",
+      "enum": [
+        "ergonomic",
+        "symmetrical"
+      ],
+      "aliases": {
+        "ergonomic": "ergonomic",
+        "symmetrical": "symmetrical"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "hump": {
+      "type": "string",
+      "enum": [
+        "back front",
+        "back mid",
+        "middle"
+      ],
+      "aliases": {
+        "back front": "back front",
+        "back mid": "back mid",
+        "backfront": "back front",
+        "backmid": "back mid",
+        "middle": "middle"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "front_flare": {
+      "type": "string",
+      "enum": [
+        "flat",
+        "inward",
+        "outward"
+      ],
+      "aliases": {
+        "flat": "flat",
+        "inward": "inward",
+        "outward": "outward"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "thumb_rest": {
+      "type": "string",
+      "enum": [
+        "no",
+        "yes"
+      ],
+      "aliases": {
+        "no": "no",
+        "yes": "yes"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "grip": {
+      "type": "list",
+      "enum": [
+        "claw fingertip",
+        "palm",
+        "palm claw",
+        "palm claw fingertip"
+      ],
+      "aliases": {
+        "claw fingertip": "claw fingertip",
+        "clawfingertip": "claw fingertip",
+        "palm": "palm",
+        "palm claw": "palm claw",
+        "palm claw fingertip": "palm claw fingertip",
+        "palmclaw": "palm claw",
+        "palmclawfingertip": "palm claw fingertip"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "hand_size": {
+      "type": "list",
+      "enum": [
+        "large",
+        "large medium",
+        "medium",
+        "medium large",
+        "small medium",
+        "small medium large"
+      ],
+      "aliases": {
+        "large": "large",
+        "large medium": "large medium",
+        "largemedium": "large medium",
+        "medium": "medium",
+        "medium large": "medium large",
+        "mediumlarge": "medium large",
+        "small medium": "small medium",
+        "small medium large": "small medium large",
+        "smallmedium": "small medium",
+        "smallmediumlarge": "small medium large"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "mcu": {
+      "type": "string",
+      "enum": [
+        "holtek ht32f52352",
+        "nordic nrf52832",
+        "nordic nrf52833",
+        "nordic nrf52840",
+        "nuvoton m484sidae",
+        "nxp lpc11u68",
+        "nxp lpc54605j512",
+        "stm32f072cbu6",
+        "stm32l412c8u6"
+      ],
+      "aliases": {
+        "holtek ht32f52352": "holtek ht32f52352",
+        "holtekht32f52352": "holtek ht32f52352",
+        "nordic nrf52832": "nordic nrf52832",
+        "nordic nrf52833": "nordic nrf52833",
+        "nordic nrf52840": "nordic nrf52840",
+        "nordicnrf52832": "nordic nrf52832",
+        "nordicnrf52833": "nordic nrf52833",
+        "nordicnrf52840": "nordic nrf52840",
+        "nuvoton m484sidae": "nuvoton m484sidae",
+        "nuvotonm484sidae": "nuvoton m484sidae",
+        "nxp lpc11u68": "nxp lpc11u68",
+        "nxp lpc54605j512": "nxp lpc54605j512",
+        "nxplpc11u68": "nxp lpc11u68",
+        "nxplpc54605j512": "nxp lpc54605j512",
+        "stm32f072cbu6": "stm32f072cbu6",
+        "stm32l412c8u6": "stm32l412c8u6"
+      },
+      "evidence_min_tier": 2,
+      "time_target": "medium",
+      "acceptance_policy": "standard"
+    },
+    "mcu_link": {
+      "type": "string",
+      "enum": [
+        "https app ultralibrarian com details 01ac463e 8630 11ea 8c00 0ad2c9526b44 stmicroelectronics stm32f072cbu6",
+        "https www holtek com page vg ht32f52352",
+        "https www nordicsemi com products nrf52832",
+        "https www nordicsemi com products nrf52833",
+        "https www nordicsemi com products nrf52840",
+        "https www nxp com docs en data sheet lpc11u6x pdf utm source chatgpt com",
+        "https www nxp com products lpc546xx",
+        "https www st com resource en datasheet stm32l412c8 pdf"
+      ],
+      "aliases": {
+        "https app ultralibrarian com details 01ac463e 8630 11ea 8c00 0ad2c9526b44 stmicroelectronics stm32f072cbu6": "https app ultralibrarian com details 01ac463e 8630 11ea 8c00 0ad2c9526b44 stmicroelectronics stm32f072cbu6",
+        "https www holtek com page vg ht32f52352": "https www holtek com page vg ht32f52352",
+        "https www nordicsemi com products nrf52832": "https www nordicsemi com products nrf52832",
+        "https www nordicsemi com products nrf52833": "https www nordicsemi com products nrf52833",
+        "https www nordicsemi com products nrf52840": "https www nordicsemi com products nrf52840",
+        "https www nxp com docs en data sheet lpc11u6x pdf utm source chatgpt com": "https www nxp com docs en data sheet lpc11u6x pdf utm source chatgpt com",
+        "https www nxp com products lpc546xx": "https www nxp com products lpc546xx",
+        "https www st com resource en datasheet stm32l412c8 pdf": "https www st com resource en datasheet stm32l412c8 pdf",
+        "httpsappultralibrariancomdetails01ac463e863011ea8c000ad2c9526b44stmicroelectronicsstm32f072cbu6": "https app ultralibrarian com details 01ac463e 8630 11ea 8c00 0ad2c9526b44 stmicroelectronics stm32f072cbu6",
+        "httpswwwholtekcompagevght32f52352": "https www holtek com page vg ht32f52352",
+        "httpswwwnordicsemicomproductsnrf52832": "https www nordicsemi com products nrf52832",
+        "httpswwwnordicsemicomproductsnrf52833": "https www nordicsemi com products nrf52833",
+        "httpswwwnordicsemicomproductsnrf52840": "https www nordicsemi com products nrf52840",
+        "httpswwwnxpcomdocsendatasheetlpc11u6xpdfutmsourcechatgptcom": "https www nxp com docs en data sheet lpc11u6x pdf utm source chatgpt com",
+        "httpswwwnxpcomproductslpc546xx": "https www nxp com products lpc546xx",
+        "httpswwwstcomresourceendatasheetstm32l412c8pdf": "https www st com resource en datasheet stm32l412c8 pdf"
+      },
+      "evidence_min_tier": 2,
+      "time_target": "medium",
+      "acceptance_policy": "standard"
+    },
+    "sensor": {
+      "type": "string",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "sensor_brand": {
+      "type": "string",
+      "enum": [
+        "asus",
+        "avago",
+        "corsair",
+        "pixart"
+      ],
+      "aliases": {
+        "asus": "asus",
+        "avago": "avago",
+        "corsair": "corsair",
+        "pixart": "pixart"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "sensor_date": {
+      "type": "number",
+      "enum": [
+        "40909",
+        "42948",
+        "43101",
+        "43374",
+        "43466",
+        "44044",
+        "44105",
+        "44562",
+        "44652",
+        "44866",
+        "45383",
+        "45778"
+      ],
+      "aliases": {
+        "40909": "40909",
+        "42948": "42948",
+        "43101": "43101",
+        "43374": "43374",
+        "43466": "43466",
+        "44044": "44044",
+        "44105": "44105",
+        "44562": "44562",
+        "44652": "44652",
+        "44866": "44866",
+        "45383": "45383",
+        "45778": "45778"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "sensor_link": {
+      "type": "string",
+      "enum": [
+        "https datasheet octopart com adns 9800 avago datasheet 10666463 pdf",
+        "https edit wpgdadawant com uploads news file blog 2021 3481 tech files sv 1619399703 pdf",
+        "https www corsair com newsroom press release corsair launches three new gaming mice alongside slipstream corsair wireless technology",
+        "https www corsair com us en explorer gamer mice get to know the corsair marksman s 33k dpi sensor",
+        "https www pixart com products detail 12 paw3327db twqu",
+        "https www pixart com products detail 129 paw3395dm t6qu",
+        "https www pixart com products detail 131 paw3311db t2mu",
+        "https www pixart com products detail 22 paw3519dl tkst",
+        "https www pixart com products detail 4 paw3370dm t4qu",
+        "https www pixart com products detail 4 paw3395dm t6qu",
+        "https www pixart com products detail 4 pmw3389dm t3qu"
+      ],
+      "aliases": {
+        "https datasheet octopart com adns 9800 avago datasheet 10666463 pdf": "https datasheet octopart com adns 9800 avago datasheet 10666463 pdf",
+        "https edit wpgdadawant com uploads news file blog 2021 3481 tech files sv 1619399703 pdf": "https edit wpgdadawant com uploads news file blog 2021 3481 tech files sv 1619399703 pdf",
+        "https www corsair com newsroom press release corsair launches three new gaming mice alongside slipstream corsair wireless technology": "https www corsair com newsroom press release corsair launches three new gaming mice alongside slipstream corsair wireless technology",
+        "https www corsair com us en explorer gamer mice get to know the corsair marksman s 33k dpi sensor": "https www corsair com us en explorer gamer mice get to know the corsair marksman s 33k dpi sensor",
+        "https www pixart com products detail 12 paw3327db twqu": "https www pixart com products detail 12 paw3327db twqu",
+        "https www pixart com products detail 129 paw3395dm t6qu": "https www pixart com products detail 129 paw3395dm t6qu",
+        "https www pixart com products detail 131 paw3311db t2mu": "https www pixart com products detail 131 paw3311db t2mu",
+        "https www pixart com products detail 22 paw3519dl tkst": "https www pixart com products detail 22 paw3519dl tkst",
+        "https www pixart com products detail 4 paw3370dm t4qu": "https www pixart com products detail 4 paw3370dm t4qu",
+        "https www pixart com products detail 4 paw3395dm t6qu": "https www pixart com products detail 4 paw3395dm t6qu",
+        "https www pixart com products detail 4 pmw3389dm t3qu": "https www pixart com products detail 4 pmw3389dm t3qu",
+        "httpsdatasheetoctopartcomadns9800avagodatasheet10666463pdf": "https datasheet octopart com adns 9800 avago datasheet 10666463 pdf",
+        "httpseditwpgdadawantcomuploadsnewsfileblog20213481techfilessv1619399703pdf": "https edit wpgdadawant com uploads news file blog 2021 3481 tech files sv 1619399703 pdf",
+        "httpswwwcorsaircomnewsroompressreleasecorsairlaunchesthreenewgamingmicealongsideslipstreamcorsairwirelesstechnology": "https www corsair com newsroom press release corsair launches three new gaming mice alongside slipstream corsair wireless technology",
+        "httpswwwcorsaircomusenexplorergamermicegettoknowthecorsairmarksmans33kdpisensor": "https www corsair com us en explorer gamer mice get to know the corsair marksman s 33k dpi sensor",
+        "httpswwwpixartcomproductsdetail129paw3395dmt6qu": "https www pixart com products detail 129 paw3395dm t6qu",
+        "httpswwwpixartcomproductsdetail12paw3327dbtwqu": "https www pixart com products detail 12 paw3327db twqu",
+        "httpswwwpixartcomproductsdetail131paw3311dbt2mu": "https www pixart com products detail 131 paw3311db t2mu",
+        "httpswwwpixartcomproductsdetail22paw3519dltkst": "https www pixart com products detail 22 paw3519dl tkst",
+        "httpswwwpixartcomproductsdetail4paw3370dmt4qu": "https www pixart com products detail 4 paw3370dm t4qu",
+        "httpswwwpixartcomproductsdetail4paw3395dmt6qu": "https www pixart com products detail 4 paw3395dm t6qu",
+        "httpswwwpixartcomproductsdetail4pmw3389dmt3qu": "https www pixart com products detail 4 pmw3389dm t3qu"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "sensor_type": {
+      "type": "string",
+      "enum": [
+        "laser",
+        "optical"
+      ],
+      "aliases": {
+        "laser": "laser",
+        "optical": "optical"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "flawless_sensor": {
+      "type": "string",
+      "enum": [
+        "no",
+        "yes"
+      ],
+      "aliases": {
+        "0": "no",
+        "1": "yes",
+        "disabled": "no",
+        "enabled": "yes",
+        "false": "no",
+        "no": "no",
+        "off": "no",
+        "on": "yes",
+        "true": "yes",
+        "yes": "yes"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "sensor_latency": {
+      "type": "number",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 2,
+      "time_target": "slow",
+      "acceptance_policy": "standard"
+    },
+    "sensor_latency_list": {
+      "type": "list",
+      "enum": [
+        "10 1 start 3 6 half 4 0 end",
+        "11 1 start 4 0 half 6 2 end",
+        "14 4 start 7 0 half 7 7 end",
+        "14 start 4 half 4 0 end",
+        "3 0 wired"
+      ],
+      "aliases": {
+        "10 1 start 3 6 half 4 0 end": "10 1 start 3 6 half 4 0 end",
+        "101start36half40end": "10 1 start 3 6 half 4 0 end",
+        "11 1 start 4 0 half 6 2 end": "11 1 start 4 0 half 6 2 end",
+        "111start40half62end": "11 1 start 4 0 half 6 2 end",
+        "14 4 start 7 0 half 7 7 end": "14 4 start 7 0 half 7 7 end",
+        "14 start 4 half 4 0 end": "14 start 4 half 4 0 end",
+        "144start70half77end": "14 4 start 7 0 half 7 7 end",
+        "14start4half40end": "14 start 4 half 4 0 end",
+        "3 0 wired": "3 0 wired",
+        "30wired": "3 0 wired"
+      },
+      "evidence_min_tier": 2,
+      "time_target": "slow",
+      "acceptance_policy": "standard"
+    },
+    "shift_latency": {
+      "type": "number",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 2,
+      "time_target": "slow",
+      "acceptance_policy": "standard"
+    },
+    "polling_rate": {
+      "type": "list",
+      "enum": [
+        "1000 500 250 125",
+        "2000 1000 500 250 125",
+        "8000 4000 2000 1000 500 250 125"
+      ],
+      "aliases": {
+        "1000 500 250 125": "1000 500 250 125",
+        "1000500250125": "1000 500 250 125",
+        "2000 1000 500 250 125": "2000 1000 500 250 125",
+        "20001000500250125": "2000 1000 500 250 125",
+        "8000 4000 2000 1000 500 250 125": "8000 4000 2000 1000 500 250 125",
+        "8000400020001000500250125": "8000 4000 2000 1000 500 250 125"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "dpi": {
+      "type": "number",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "ips": {
+      "type": "number",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "acceleration": {
+      "type": "number",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "lift": {
+      "type": "list",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "lift_settings": {
+      "type": "list",
+      "enum": [
+        "adjustable",
+        "fixed high",
+        "fixed low",
+        "surface tuned"
+      ],
+      "aliases": {
+        "adjustable": "adjustable",
+        "fixed high": "fixed high",
+        "fixed low": "fixed low",
+        "fixedhigh": "fixed high",
+        "fixedlow": "fixed low",
+        "surface tuned": "surface tuned",
+        "surfacetuned": "surface tuned"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "motion_sync": {
+      "type": "string",
+      "enum": [
+        "no",
+        "yes"
+      ],
+      "aliases": {
+        "0": "no",
+        "1": "yes",
+        "disabled": "no",
+        "enabled": "yes",
+        "false": "no",
+        "no": "no",
+        "off": "no",
+        "on": "yes",
+        "true": "yes",
+        "yes": "yes"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "hardware_acceleration": {
+      "type": "string",
+      "enum": [
+        "no",
+        "yes"
+      ],
+      "aliases": {
+        "0": "no",
+        "1": "yes",
+        "disabled": "no",
+        "enabled": "yes",
+        "false": "no",
+        "no": "no",
+        "off": "no",
+        "on": "yes",
+        "true": "yes",
+        "yes": "yes"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "smoothing": {
+      "type": "string",
+      "enum": [
+        "no",
+        "yes"
+      ],
+      "aliases": {
+        "0": "no",
+        "1": "yes",
+        "disabled": "no",
+        "enabled": "yes",
+        "false": "no",
+        "no": "no",
+        "off": "no",
+        "on": "yes",
+        "true": "yes",
+        "yes": "yes"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "nvidia_reflex": {
+      "type": "string",
+      "enum": [
+        "no",
+        "yes"
+      ],
+      "aliases": {
+        "0": "no",
+        "1": "yes",
+        "disabled": "no",
+        "enabled": "yes",
+        "false": "no",
+        "no": "no",
+        "off": "no",
+        "on": "yes",
+        "true": "yes",
+        "yes": "yes"
+      },
+      "evidence_min_tier": 2,
+      "time_target": "slow",
+      "acceptance_policy": "standard"
+    },
+    "switch": {
+      "type": "string",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "switch_brand": {
+      "type": "string",
+      "enum": [
+        "asus",
+        "corsair",
+        "huano",
+        "kailh",
+        "lk",
+        "omron",
+        "ttc"
+      ],
+      "aliases": {
+        "asus": "asus",
+        "corsair": "corsair",
+        "huano": "huano",
+        "kailh": "kailh",
+        "lk": "lk",
+        "omron": "omron",
+        "ttc": "ttc"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "switch_type": {
+      "type": "string",
+      "enum": [
+        "mechanical",
+        "optical",
+        "optical mechanical"
+      ],
+      "aliases": {
+        "mechanical": "mechanical",
+        "optical": "optical",
+        "optical mechanical": "optical mechanical",
+        "opticalmechanical": "optical mechanical"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "switch_link": {
+      "type": "string",
+      "enum": [
+        "https rog asus com us articles gaming keyboards gaming mice guide how to replace the switches in your rog gladius iii gaming mouse",
+        "https www amazon com acinkeety transparent switch microswitch million dp b0cmqrmtn8 linkcode ll1 tag eggear 20 linkid c0844220fc8fd56d9e1870ad75c86ffb language en us ref as li ss tl",
+        "https www logitechg com en us discover technology lightforce",
+        "https www mouser com productdetail omron electronics d2fc f 7n20m qs 17ckdybrdek0 2fvhx1flcuq 3d 3d"
+      ],
+      "aliases": {
+        "https rog asus com us articles gaming keyboards gaming mice guide how to replace the switches in your rog gladius iii gaming mouse": "https rog asus com us articles gaming keyboards gaming mice guide how to replace the switches in your rog gladius iii gaming mouse",
+        "https www amazon com acinkeety transparent switch microswitch million dp b0cmqrmtn8 linkcode ll1 tag eggear 20 linkid c0844220fc8fd56d9e1870ad75c86ffb language en us ref as li ss tl": "https www amazon com acinkeety transparent switch microswitch million dp b0cmqrmtn8 linkcode ll1 tag eggear 20 linkid c0844220fc8fd56d9e1870ad75c86ffb language en us ref as li ss tl",
+        "https www logitechg com en us discover technology lightforce": "https www logitechg com en us discover technology lightforce",
+        "https www mouser com productdetail omron electronics d2fc f 7n20m qs 17ckdybrdek0 2fvhx1flcuq 3d 3d": "https www mouser com productdetail omron electronics d2fc f 7n20m qs 17ckdybrdek0 2fvhx1flcuq 3d 3d",
+        "httpsrogasuscomusarticlesgamingkeyboardsgamingmiceguidehowtoreplacetheswitchesinyourroggladiusiiigamingmouse": "https rog asus com us articles gaming keyboards gaming mice guide how to replace the switches in your rog gladius iii gaming mouse",
+        "httpswwwamazoncomacinkeetytransparentswitchmicroswitchmilliondpb0cmqrmtn8linkcodell1tageggear20linkidc0844220fc8fd56d9e1870ad75c86ffblanguageenusrefaslisstl": "https www amazon com acinkeety transparent switch microswitch million dp b0cmqrmtn8 linkcode ll1 tag eggear 20 linkid c0844220fc8fd56d9e1870ad75c86ffb language en us ref as li ss tl",
+        "httpswwwlogitechgcomenusdiscovertechnologylightforce": "https www logitechg com en us discover technology lightforce",
+        "httpswwwmousercomproductdetailomronelectronicsd2fcf7n20mqs17ckdybrdek02fvhx1flcuq3d3d": "https www mouser com productdetail omron electronics d2fc f 7n20m qs 17ckdybrdek0 2fvhx1flcuq 3d 3d"
+      },
+      "evidence_min_tier": 2,
+      "time_target": "slow",
+      "acceptance_policy": "standard"
+    },
+    "hot_swappable": {
+      "type": "string",
+      "enum": [
+        "no",
+        "yes"
+      ],
+      "aliases": {
+        "0": "no",
+        "1": "yes",
+        "disabled": "no",
+        "enabled": "yes",
+        "false": "no",
+        "no": "no",
+        "off": "no",
+        "on": "yes",
+        "true": "yes",
+        "yes": "yes"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "debounce": {
+      "type": "number",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 2,
+      "time_target": "slow",
+      "acceptance_policy": "standard"
+    },
+    "click_latency": {
+      "type": "number",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 2,
+      "time_target": "slow",
+      "acceptance_policy": "standard"
+    },
+    "click_latency_list": {
+      "type": "list",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 2,
+      "time_target": "slow",
+      "acceptance_policy": "standard"
+    },
+    "click_force": {
+      "type": "number",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 2,
+      "time_target": "slow",
+      "acceptance_policy": "standard"
+    },
+    "encoder": {
+      "type": "string",
+      "enum": [
+        "black"
+      ],
+      "aliases": {
+        "black": "black"
+      },
+      "evidence_min_tier": 2,
+      "time_target": "medium",
+      "acceptance_policy": "standard"
+    },
+    "encoder_brand": {
+      "type": "string",
+      "enum": [
+        "kailh"
+      ],
+      "aliases": {
+        "kailh": "kailh"
+      },
+      "evidence_min_tier": 2,
+      "time_target": "medium",
+      "acceptance_policy": "standard"
+    },
+    "encoder_link": {
+      "type": "string",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 2,
+      "time_target": "medium",
+      "acceptance_policy": "standard"
+    },
+    "side_buttons": {
+      "type": "number",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "middle_buttons": {
+      "type": "number",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "programmable_buttons": {
+      "type": "number",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "tilt_scroll_wheel": {
+      "type": "string",
+      "enum": [
+        "no",
+        "yes"
+      ],
+      "aliases": {
+        "0": "no",
+        "1": "yes",
+        "disabled": "no",
+        "enabled": "yes",
+        "false": "no",
+        "no": "no",
+        "off": "no",
+        "on": "yes",
+        "true": "yes",
+        "yes": "yes"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "adjustable_scroll_wheel": {
+      "type": "string",
+      "enum": [
+        "no"
+      ],
+      "aliases": {
+        "0": "no",
+        "disabled": "no",
+        "false": "no",
+        "no": "no",
+        "off": "no"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "onboard_memory": {
+      "type": "string",
+      "enum": [
+        "no",
+        "yes"
+      ],
+      "aliases": {
+        "0": "no",
+        "1": "yes",
+        "disabled": "no",
+        "enabled": "yes",
+        "false": "no",
+        "no": "no",
+        "off": "no",
+        "on": "yes",
+        "true": "yes",
+        "yes": "yes"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "onboard_memory_value": {
+      "type": "number",
+      "enum": [],
+      "aliases": {},
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    },
+    "profile_switching": {
+      "type": "string",
+      "enum": [
+        "no",
+        "yes"
+      ],
+      "aliases": {
+        "0": "no",
+        "1": "yes",
+        "disabled": "no",
+        "enabled": "yes",
+        "false": "no",
+        "no": "no",
+        "off": "no",
+        "on": "yes",
+        "true": "yes",
+        "yes": "yes"
+      },
+      "evidence_min_tier": 1,
+      "time_target": "fast",
+      "acceptance_policy": "strict"
+    }
+  },
+  "generated_at": "2026-02-12T00:37:29.191Z",
+  "hash": "9e5dde4c15ed09fb2cf9d36be69d9857e1429a17a31f22de00c3a92ef36566ba",
+  "counts": {
+    "required_fields": 14,
+    "expected_easy_fields": 57,
+    "expected_sometimes_fields": 8,
+    "deep_fields": 9
+  }
+}

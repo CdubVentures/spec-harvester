@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-logitech-g-g703-hero-lightspeed-g703",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Logitech G",
+    "model": "G703 Hero Lightspeed",
+    "variant": "G703"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "DL",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:55.814Z"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-lenovo-legion-m600-wireless",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Lenovo Legion",
+    "model": "M600 Wireless",
+    "variant": "",
+    "sku": "",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

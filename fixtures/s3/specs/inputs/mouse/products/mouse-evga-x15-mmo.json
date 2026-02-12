@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-evga-x15-mmo",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "EVGA",
+    "model": "X15 MMO",
+    "variant": "",
+    "sku": "",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

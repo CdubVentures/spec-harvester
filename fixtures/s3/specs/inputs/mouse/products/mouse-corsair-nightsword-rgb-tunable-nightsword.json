@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-corsair-nightsword-rgb-tunable-nightsword",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Corsair",
+    "model": "Nightsword RGB Tunable",
+    "variant": "Nightsword"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "BA",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:55.402Z"
+  }
+}

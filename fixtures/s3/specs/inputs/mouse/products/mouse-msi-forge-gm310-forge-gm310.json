@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-msi-forge-gm310-forge-gm310",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "MSI",
+    "model": "Forge GM310",
+    "variant": "Forge GM310"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "DZ",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:55.900Z"
+  }
+}

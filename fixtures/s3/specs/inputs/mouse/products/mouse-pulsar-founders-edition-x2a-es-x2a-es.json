@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-pulsar-founders-edition-x2a-es-x2a-es",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Pulsar",
+    "model": "[Founders Edition] X2A eS",
+    "variant": "X2A eS"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "LA",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:57.451Z"
+  }
+}

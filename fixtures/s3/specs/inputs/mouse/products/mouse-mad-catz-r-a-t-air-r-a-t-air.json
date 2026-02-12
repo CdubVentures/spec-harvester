@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-mad-catz-r-a-t-air-r-a-t-air",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Mad Catz",
+    "model": "R.A.T. AIR",
+    "variant": "R.A.T. AIR"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "JQ",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:57.116Z"
+  }
+}

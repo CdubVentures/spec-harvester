@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-cooler-master-mm311",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Cooler Master",
+    "model": "MM311",
+    "variant": "",
+    "sku": "MM-311-KKOW1",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

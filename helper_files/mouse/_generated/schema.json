@@ -1,0 +1,542 @@
+{
+  "category": "mouse",
+  "critical_fields": [],
+  "deep_fields": [
+    "click_force",
+    "click_latency",
+    "click_latency_list",
+    "debounce",
+    "nvidia_reflex",
+    "sensor_latency",
+    "sensor_latency_list",
+    "shift_latency"
+  ],
+  "editorial_fields": [],
+  "expected_easy_fields": [
+    "acceleration",
+    "adjustable_scroll_wheel",
+    "adjustable_weight",
+    "bluetooth",
+    "cable_type",
+    "coating",
+    "colors",
+    "computer_side_connector",
+    "design",
+    "discontinued",
+    "feet_material",
+    "flawless_sensor",
+    "form_factor",
+    "front_flare",
+    "grip",
+    "hand_size",
+    "hardware_acceleration",
+    "honeycomb_frame",
+    "hot_swappable",
+    "hump",
+    "ips",
+    "lift",
+    "lift_settings",
+    "lighting",
+    "material",
+    "motion_sync",
+    "mouse_side_connector",
+    "onboard_memory",
+    "onboard_memory_value",
+    "paracord",
+    "price_range",
+    "profile_switching",
+    "programmable_buttons",
+    "rgb",
+    "sensor_date",
+    "sensor_link",
+    "sensor_type",
+    "shape",
+    "silent_clicks",
+    "sku",
+    "smoothing",
+    "switch_link",
+    "switch_type",
+    "thumb_rest",
+    "tilt_scroll_wheel"
+  ],
+  "expected_sometimes_fields": [
+    "battery_hours",
+    "encoder",
+    "encoder_brand",
+    "encoder_link",
+    "mcu",
+    "mcu_link",
+    "release_date",
+    "wireless_charging"
+  ],
+  "field_contract_overrides": {
+    "acceleration": {
+      "type": "number",
+      "unit": "g"
+    },
+    "adjustable_scroll_wheel": {
+      "type": "string"
+    },
+    "adjustable_weight": {
+      "type": "string",
+      "unit": "g"
+    },
+    "battery_hours": {
+      "type": "number",
+      "unit": "h"
+    },
+    "bluetooth": {
+      "type": "string"
+    },
+    "cable_type": {
+      "type": "string"
+    },
+    "click_force": {
+      "type": "number",
+      "unit": "gf"
+    },
+    "click_latency": {
+      "type": "number",
+      "unit": "ms"
+    },
+    "click_latency_list": {
+      "type": "list",
+      "unit": "ms"
+    },
+    "coating": {
+      "type": "list"
+    },
+    "colors": {
+      "type": "list"
+    },
+    "computer_side_connector": {
+      "type": "string"
+    },
+    "connection": {
+      "enum": [
+        "bluetooth",
+        "hybrid",
+        "unk",
+        "wired",
+        "wireless"
+      ],
+      "type": "string"
+    },
+    "connectivity": {
+      "type": "list"
+    },
+    "debounce": {
+      "type": "number",
+      "unit": "ms"
+    },
+    "design": {
+      "type": "list"
+    },
+    "discontinued": {
+      "type": "string"
+    },
+    "dpi": {
+      "range": {
+        "max": 100000,
+        "min": 50
+      },
+      "type": "number",
+      "unit": "dpi"
+    },
+    "encoder": {
+      "type": "string"
+    },
+    "encoder_brand": {
+      "type": "string"
+    },
+    "encoder_link": {
+      "type": "string"
+    },
+    "feet_material": {
+      "enum": [
+        "glass",
+        "ptfe",
+        "ptfe (95%)",
+        "ptfe (black-dyed)",
+        "ptfe (teflon)",
+        "ptfe (virgin-grade)"
+      ],
+      "type": "string"
+    },
+    "flawless_sensor": {
+      "type": "string"
+    },
+    "form_factor": {
+      "enum": [
+        "ambidextrous",
+        "left",
+        "right"
+      ],
+      "type": "string"
+    },
+    "front_flare": {
+      "enum": [
+        "flat",
+        "inward",
+        "outward"
+      ],
+      "type": "string"
+    },
+    "grip": {
+      "type": "list"
+    },
+    "hand_size": {
+      "type": "list"
+    },
+    "hardware_acceleration": {
+      "type": "string"
+    },
+    "height": {
+      "type": "number",
+      "unit": "mm"
+    },
+    "honeycomb_frame": {
+      "type": "string"
+    },
+    "hot_swappable": {
+      "type": "string"
+    },
+    "hump": {
+      "enum": [
+        "back - front",
+        "back - rear",
+        "back mid",
+        "front",
+        "middle"
+      ],
+      "type": "string"
+    },
+    "ips": {
+      "type": "number",
+      "unit": "ips"
+    },
+    "lift": {
+      "type": "list",
+      "unit": "mm"
+    },
+    "lift_settings": {
+      "type": "list"
+    },
+    "lighting": {
+      "type": "list"
+    },
+    "lngth": {
+      "type": "number",
+      "unit": "mm"
+    },
+    "material": {
+      "type": "string"
+    },
+    "mcu": {
+      "type": "string"
+    },
+    "mcu_link": {
+      "type": "string"
+    },
+    "middle_buttons": {
+      "type": "number",
+      "unit": "none"
+    },
+    "motion_sync": {
+      "type": "string"
+    },
+    "mouse_side_connector": {
+      "type": "string"
+    },
+    "nvidia_reflex": {
+      "type": "string"
+    },
+    "onboard_memory": {
+      "type": "string"
+    },
+    "onboard_memory_value": {
+      "type": "number",
+      "unit": "none"
+    },
+    "paracord": {
+      "type": "string"
+    },
+    "polling_rate": {
+      "range": {
+        "max": 10000,
+        "min": 10
+      },
+      "type": "list",
+      "unit": "Hz"
+    },
+    "price_range": {
+      "type": "string",
+      "unit": "usd"
+    },
+    "profile_switching": {
+      "type": "string"
+    },
+    "programmable_buttons": {
+      "type": "number",
+      "unit": "none"
+    },
+    "release_date": {
+      "type": "string"
+    },
+    "rgb": {
+      "type": "string"
+    },
+    "sensor": {
+      "type": "string"
+    },
+    "sensor_brand": {
+      "type": "string"
+    },
+    "sensor_date": {
+      "type": "number",
+      "unit": "year"
+    },
+    "sensor_latency": {
+      "type": "number",
+      "unit": "ms"
+    },
+    "sensor_latency_list": {
+      "type": "list",
+      "unit": "ms"
+    },
+    "sensor_link": {
+      "type": "string"
+    },
+    "sensor_type": {
+      "enum": [
+        "laser",
+        "optical",
+        "unk"
+      ],
+      "type": "string"
+    },
+    "shape": {
+      "enum": [
+        "asymmetrical",
+        "ergonomic",
+        "symmetrical"
+      ],
+      "type": "string"
+    },
+    "shift_latency": {
+      "type": "number",
+      "unit": "ms"
+    },
+    "side_buttons": {
+      "type": "number",
+      "unit": "none"
+    },
+    "silent_clicks": {
+      "type": "string"
+    },
+    "sku": {
+      "type": "string"
+    },
+    "smoothing": {
+      "type": "string"
+    },
+    "switch": {
+      "type": "string"
+    },
+    "switch_brand": {
+      "type": "string"
+    },
+    "switch_link": {
+      "type": "string"
+    },
+    "switch_type": {
+      "enum": [
+        "mechanical",
+        "optical",
+        "optical / mechanical",
+        "optical-mechanical",
+        "unk"
+      ],
+      "type": "string"
+    },
+    "thumb_rest": {
+      "type": "string"
+    },
+    "tilt_scroll_wheel": {
+      "type": "string"
+    },
+    "weight": {
+      "range": {
+        "max": 500,
+        "min": 1
+      },
+      "type": "number",
+      "unit": "g"
+    },
+    "width": {
+      "type": "number",
+      "unit": "mm"
+    },
+    "wireless_charging": {
+      "type": "string"
+    }
+  },
+  "field_order": [
+    "release_date",
+    "discontinued",
+    "sku",
+    "price_range",
+    "colors",
+    "design",
+    "lighting",
+    "rgb",
+    "connection",
+    "connectivity",
+    "computer_side_connector",
+    "mouse_side_connector",
+    "bluetooth",
+    "cable_type",
+    "paracord",
+    "wireless_charging",
+    "battery_hours",
+    "adjustable_weight",
+    "feet_material",
+    "coating",
+    "honeycomb_frame",
+    "silent_clicks",
+    "weight",
+    "material",
+    "lngth",
+    "width",
+    "height",
+    "form_factor",
+    "shape",
+    "hump",
+    "front_flare",
+    "thumb_rest",
+    "grip",
+    "hand_size",
+    "mcu",
+    "mcu_link",
+    "sensor",
+    "sensor_brand",
+    "sensor_date",
+    "sensor_link",
+    "sensor_type",
+    "flawless_sensor",
+    "sensor_latency",
+    "sensor_latency_list",
+    "shift_latency",
+    "polling_rate",
+    "dpi",
+    "ips",
+    "acceleration",
+    "lift",
+    "lift_settings",
+    "motion_sync",
+    "hardware_acceleration",
+    "smoothing",
+    "nvidia_reflex",
+    "switch",
+    "switch_brand",
+    "switch_type",
+    "switch_link",
+    "hot_swappable",
+    "debounce",
+    "click_latency",
+    "click_latency_list",
+    "click_force",
+    "encoder",
+    "encoder_brand",
+    "encoder_link",
+    "side_buttons",
+    "middle_buttons",
+    "programmable_buttons",
+    "tilt_scroll_wheel",
+    "adjustable_scroll_wheel",
+    "onboard_memory",
+    "onboard_memory_value",
+    "profile_switching"
+  ],
+  "selected_keys": [
+    "acceleration",
+    "adjustable_scroll_wheel",
+    "adjustable_weight",
+    "battery_hours",
+    "bluetooth",
+    "cable_type",
+    "click_force",
+    "click_latency",
+    "click_latency_list",
+    "coating",
+    "colors",
+    "computer_side_connector",
+    "connection",
+    "connectivity",
+    "debounce",
+    "design",
+    "discontinued",
+    "dpi",
+    "encoder",
+    "encoder_brand",
+    "encoder_link",
+    "feet_material",
+    "flawless_sensor",
+    "form_factor",
+    "front_flare",
+    "grip",
+    "hand_size",
+    "hardware_acceleration",
+    "height",
+    "honeycomb_frame",
+    "hot_swappable",
+    "hump",
+    "ips",
+    "lift",
+    "lift_settings",
+    "lighting",
+    "lngth",
+    "material",
+    "mcu",
+    "mcu_link",
+    "middle_buttons",
+    "motion_sync",
+    "mouse_side_connector",
+    "nvidia_reflex",
+    "onboard_memory",
+    "onboard_memory_value",
+    "paracord",
+    "polling_rate",
+    "price_range",
+    "profile_switching",
+    "programmable_buttons",
+    "release_date",
+    "rgb",
+    "sensor",
+    "sensor_brand",
+    "sensor_date",
+    "sensor_latency",
+    "sensor_latency_list",
+    "sensor_link",
+    "sensor_type",
+    "shape",
+    "shift_latency",
+    "side_buttons",
+    "silent_clicks",
+    "sku",
+    "smoothing",
+    "switch",
+    "switch_brand",
+    "switch_link",
+    "switch_type",
+    "thumb_rest",
+    "tilt_scroll_wheel",
+    "weight",
+    "width",
+    "wireless_charging"
+  ],
+  "targets": {
+    "targetCompleteness": 0.9,
+    "targetConfidence": 0.8
+  }
+}

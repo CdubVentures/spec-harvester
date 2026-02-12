@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-msi-forge-gm100",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "MSI",
+    "model": "Forge GM100",
+    "variant": "",
+    "sku": "",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

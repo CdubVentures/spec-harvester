@@ -1,0 +1,3897 @@
+{
+  "version": 1,
+  "updated_at": "2026-02-12T00:37:29.347Z",
+  "fields": {
+    "id": {
+      "synonyms": {
+        "id": {
+          "count": 105,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        }
+      },
+      "units": {
+        "g": {
+          "count": 52,
+          "last_seen_at": "2026-02-11T01:17:51.225Z"
+        }
+      }
+    },
+    "brand": {
+      "synonyms": {
+        "brand": {
+          "count": 105,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        }
+      },
+      "units": {}
+    },
+    "model": {
+      "synonyms": {
+        "model": {
+          "count": 105,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        }
+      },
+      "units": {
+        "g": {
+          "count": 52,
+          "last_seen_at": "2026-02-11T01:17:51.225Z"
+        }
+      }
+    },
+    "base_model": {
+      "synonyms": {
+        "base model": {
+          "count": 105,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        }
+      },
+      "units": {
+        "g": {
+          "count": 52,
+          "last_seen_at": "2026-02-11T01:17:51.225Z"
+        }
+      }
+    },
+    "category": {
+      "synonyms": {
+        "category": {
+          "count": 29,
+          "hosts": {},
+          "last_seen_at": "2026-02-10T07:40:46.568Z"
+        }
+      },
+      "units": {}
+    },
+    "sku": {
+      "synonyms": {
+        "sku": {
+          "count": 13,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T02:28:17.360Z"
+        }
+      },
+      "units": {}
+    },
+    "connection": {
+      "synonyms": {
+        "connection": {
+          "count": 764,
+          "hosts": {
+            "razer.com": 460,
+            "rtings.com": 57,
+            "techpowerup.com": 38,
+            "helper-files.local": 103
+          },
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "network json": {
+          "count": 352,
+          "hosts": {
+            "razer.com": 276,
+            "rtings.com": 57,
+            "techpowerup.com": 19
+          },
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "embedded state": {
+          "count": 203,
+          "hosts": {
+            "razer.com": 184,
+            "techpowerup.com": 19
+          },
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "helper": {
+          "count": 103,
+          "hosts": {
+            "helper-files.local": 103
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "pageprops": {
+          "count": 92,
+          "hosts": {
+            "razer.com": 92
+          },
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "props": {
+          "count": 92,
+          "hosts": {
+            "razer.com": 92
+          },
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "helper supportive": {
+          "count": 86,
+          "hosts": {
+            "helper-files.local": 86
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "supportive": {
+          "count": 86,
+          "hosts": {
+            "helper-files.local": 86
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "active": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "weight": {
+      "synonyms": {
+        "weight": {
+          "count": 203,
+          "hosts": {
+            "helper-files.local": 95,
+            "critic.local": 2
+          },
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "helper": {
+          "count": 95,
+          "hosts": {
+            "helper-files.local": 95
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "active": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "critic": {
+          "count": 2,
+          "hosts": {
+            "critic.local": 2
+          },
+          "last_seen_at": "2026-02-11T08:45:30.647Z"
+        },
+        "critic normalize": {
+          "count": 2,
+          "hosts": {
+            "critic.local": 2
+          },
+          "last_seen_at": "2026-02-11T08:45:30.647Z"
+        }
+      },
+      "units": {}
+    },
+    "material": {
+      "synonyms": {
+        "material": {
+          "count": 201,
+          "hosts": {
+            "helper-files.local": 95
+          },
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "helper": {
+          "count": 95,
+          "hosts": {
+            "helper-files.local": 95
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "active": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "lngth": {
+      "synonyms": {
+        "lngth": {
+          "count": 211,
+          "hosts": {
+            "helper-files.local": 95,
+            "critic.local": 10
+          },
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "helper": {
+          "count": 95,
+          "hosts": {
+            "helper-files.local": 95
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "active": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "critic": {
+          "count": 10,
+          "hosts": {
+            "critic.local": 10
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "critic normalize": {
+          "count": 10,
+          "hosts": {
+            "critic.local": 10
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "width": {
+      "synonyms": {
+        "width": {
+          "count": 209,
+          "hosts": {
+            "helper-files.local": 95,
+            "critic.local": 8
+          },
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "helper": {
+          "count": 95,
+          "hosts": {
+            "helper-files.local": 95
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "active": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "critic": {
+          "count": 8,
+          "hosts": {
+            "critic.local": 8
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "critic normalize": {
+          "count": 8,
+          "hosts": {
+            "critic.local": 8
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "height": {
+      "synonyms": {
+        "height": {
+          "count": 211,
+          "hosts": {
+            "helper-files.local": 95,
+            "critic.local": 10
+          },
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "helper": {
+          "count": 95,
+          "hosts": {
+            "helper-files.local": 95
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "active": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "critic": {
+          "count": 10,
+          "hosts": {
+            "critic.local": 10
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "critic normalize": {
+          "count": 10,
+          "hosts": {
+            "critic.local": 10
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "form_factor": {
+      "synonyms": {
+        "factor": {
+          "count": 211,
+          "hosts": {
+            "helper-files.local": 103,
+            "razer.com": 100,
+            "rtings.com": 4,
+            "techpowerup.com": 4
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "form": {
+          "count": 211,
+          "hosts": {
+            "helper-files.local": 103,
+            "razer.com": 100,
+            "rtings.com": 4,
+            "techpowerup.com": 4
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 103,
+          "hosts": {
+            "helper-files.local": 103
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "form factor": {
+          "count": 92,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper supportive": {
+          "count": 86,
+          "hosts": {
+            "helper-files.local": 86
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "supportive": {
+          "count": 86,
+          "hosts": {
+            "helper-files.local": 86
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "network json": {
+          "count": 64,
+          "hosts": {
+            "razer.com": 60,
+            "techpowerup.com": 4
+          },
+          "last_seen_at": "2026-02-11T01:21:33.864Z"
+        },
+        "embedded state": {
+          "count": 44,
+          "hosts": {
+            "razer.com": 40,
+            "rtings.com": 4
+          },
+          "last_seen_at": "2026-02-11T01:21:33.864Z"
+        },
+        "pageprops": {
+          "count": 20,
+          "hosts": {
+            "razer.com": 20
+          },
+          "last_seen_at": "2026-02-11T01:21:33.864Z"
+        },
+        "props": {
+          "count": 20,
+          "hosts": {
+            "razer.com": 20
+          },
+          "last_seen_at": "2026-02-11T01:21:33.864Z"
+        },
+        "active": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "review": {
+          "count": 4,
+          "hosts": {
+            "rtings.com": 4
+          },
+          "last_seen_at": "2026-02-11T01:21:33.864Z"
+        }
+      },
+      "units": {}
+    },
+    "shape": {
+      "synonyms": {
+        "shape": {
+          "count": 211,
+          "hosts": {
+            "helper-files.local": 95,
+            "razer.com": 25,
+            "rtings.com": 1,
+            "techpowerup.com": 1
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 95,
+          "hosts": {
+            "helper-files.local": 95
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "active": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "network json": {
+          "count": 16,
+          "hosts": {
+            "razer.com": 15,
+            "techpowerup.com": 1
+          },
+          "last_seen_at": "2026-02-11T00:27:06.233Z"
+        },
+        "embedded state": {
+          "count": 11,
+          "hosts": {
+            "razer.com": 10,
+            "rtings.com": 1
+          },
+          "last_seen_at": "2026-02-11T00:27:06.233Z"
+        },
+        "pageprops": {
+          "count": 5,
+          "hosts": {
+            "razer.com": 5
+          },
+          "last_seen_at": "2026-02-11T00:27:06.233Z"
+        },
+        "props": {
+          "count": 5,
+          "hosts": {
+            "razer.com": 5
+          },
+          "last_seen_at": "2026-02-11T00:27:06.233Z"
+        },
+        "review": {
+          "count": 1,
+          "hosts": {
+            "rtings.com": 1
+          },
+          "last_seen_at": "2026-02-11T00:27:06.233Z"
+        }
+      },
+      "units": {}
+    },
+    "hump": {
+      "synonyms": {
+        "hump": {
+          "count": 65,
+          "hosts": {
+            "helper-files.local": 18,
+            "razer.com": 25,
+            "rtings.com": 1,
+            "techpowerup.com": 1
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "network json": {
+          "count": 16,
+          "hosts": {
+            "razer.com": 15,
+            "techpowerup.com": 1
+          },
+          "last_seen_at": "2026-02-11T00:27:06.233Z"
+        },
+        "embedded state": {
+          "count": 11,
+          "hosts": {
+            "razer.com": 10,
+            "rtings.com": 1
+          },
+          "last_seen_at": "2026-02-11T00:27:06.233Z"
+        },
+        "pageprops": {
+          "count": 5,
+          "hosts": {
+            "razer.com": 5
+          },
+          "last_seen_at": "2026-02-11T00:27:06.233Z"
+        },
+        "props": {
+          "count": 5,
+          "hosts": {
+            "razer.com": 5
+          },
+          "last_seen_at": "2026-02-11T00:27:06.233Z"
+        },
+        "review": {
+          "count": 1,
+          "hosts": {
+            "rtings.com": 1
+          },
+          "last_seen_at": "2026-02-11T00:27:06.233Z"
+        }
+      },
+      "units": {}
+    },
+    "front_flare": {
+      "synonyms": {
+        "flare": {
+          "count": 45,
+          "hosts": {
+            "helper-files.local": 18,
+            "razer.com": 25,
+            "rtings.com": 1,
+            "techpowerup.com": 1
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "front": {
+          "count": 45,
+          "hosts": {
+            "helper-files.local": 18,
+            "razer.com": 25,
+            "rtings.com": 1,
+            "techpowerup.com": 1
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "front flare": {
+          "count": 20,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "network json": {
+          "count": 16,
+          "hosts": {
+            "razer.com": 15,
+            "techpowerup.com": 1
+          },
+          "last_seen_at": "2026-02-11T00:27:06.233Z"
+        },
+        "embedded state": {
+          "count": 11,
+          "hosts": {
+            "razer.com": 10,
+            "rtings.com": 1
+          },
+          "last_seen_at": "2026-02-11T00:27:06.233Z"
+        },
+        "pageprops": {
+          "count": 5,
+          "hosts": {
+            "razer.com": 5
+          },
+          "last_seen_at": "2026-02-11T00:27:06.233Z"
+        },
+        "props": {
+          "count": 5,
+          "hosts": {
+            "razer.com": 5
+          },
+          "last_seen_at": "2026-02-11T00:27:06.233Z"
+        },
+        "review": {
+          "count": 1,
+          "hosts": {
+            "rtings.com": 1
+          },
+          "last_seen_at": "2026-02-11T00:27:06.233Z"
+        }
+      },
+      "units": {}
+    },
+    "thumb_rest": {
+      "synonyms": {
+        "rest": {
+          "count": 589,
+          "hosts": {
+            "helper-files.local": 103,
+            "razer.com": 450,
+            "rtings.com": 18,
+            "techpowerup.com": 18
+          },
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "thumb": {
+          "count": 589,
+          "hosts": {
+            "helper-files.local": 103,
+            "razer.com": 450,
+            "rtings.com": 18,
+            "techpowerup.com": 18
+          },
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "network json": {
+          "count": 288,
+          "hosts": {
+            "razer.com": 270,
+            "techpowerup.com": 18
+          },
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "embedded state": {
+          "count": 198,
+          "hosts": {
+            "razer.com": 180,
+            "rtings.com": 18
+          },
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "thumb rest": {
+          "count": 106,
+          "hosts": {},
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "helper": {
+          "count": 103,
+          "hosts": {
+            "helper-files.local": 103
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "pageprops": {
+          "count": 90,
+          "hosts": {
+            "razer.com": 90
+          },
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "props": {
+          "count": 90,
+          "hosts": {
+            "razer.com": 90
+          },
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "helper supportive": {
+          "count": 86,
+          "hosts": {
+            "helper-files.local": 86
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "supportive": {
+          "count": 86,
+          "hosts": {
+            "helper-files.local": 86
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "review": {
+          "count": 18,
+          "hosts": {
+            "rtings.com": 18
+          },
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "active": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "sensor": {
+      "synonyms": {
+        "sensor": {
+          "count": 201,
+          "hosts": {
+            "helper-files.local": 95
+          },
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "helper": {
+          "count": 95,
+          "hosts": {
+            "helper-files.local": 95
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "active": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "sensor_brand": {
+      "synonyms": {
+        "sensor brand": {
+          "count": 103,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "brand": {
+          "count": 95,
+          "hosts": {
+            "helper-files.local": 95
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 95,
+          "hosts": {
+            "helper-files.local": 95
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "sensor": {
+          "count": 95,
+          "hosts": {
+            "helper-files.local": 95
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "active": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "polling_rate": {
+      "synonyms": {
+        "polling rate": {
+          "count": 86,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T09:19:05.789Z"
+        },
+        "polling": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 74,
+            "critic.local": 4
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "rate": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 74,
+            "critic.local": 4
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "helper": {
+          "count": 74,
+          "hosts": {
+            "helper-files.local": 74
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "helper supportive": {
+          "count": 74,
+          "hosts": {
+            "helper-files.local": 74
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "supportive": {
+          "count": 74,
+          "hosts": {
+            "helper-files.local": 74
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "critic": {
+          "count": 4,
+          "hosts": {
+            "critic.local": 4
+          },
+          "last_seen_at": "2026-02-11T01:21:33.864Z"
+        },
+        "critic normalize": {
+          "count": 4,
+          "hosts": {
+            "critic.local": 4
+          },
+          "last_seen_at": "2026-02-11T01:21:33.864Z"
+        }
+      },
+      "units": {}
+    },
+    "dpi": {
+      "synonyms": {
+        "dpi": {
+          "count": 201,
+          "hosts": {
+            "helper-files.local": 95
+          },
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "helper": {
+          "count": 95,
+          "hosts": {
+            "helper-files.local": 95
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "active": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "ips": {
+      "synonyms": {
+        "ips": {
+          "count": 55,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "acceleration": {
+      "synonyms": {
+        "acceleration": {
+          "count": 55,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "switch": {
+      "synonyms": {
+        "switch": {
+          "count": 197,
+          "hosts": {
+            "helper-files.local": 93
+          },
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "helper": {
+          "count": 93,
+          "hosts": {
+            "helper-files.local": 93
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "active": {
+          "count": 15,
+          "hosts": {
+            "helper-files.local": 15
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 15,
+          "hosts": {
+            "helper-files.local": 15
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 15,
+          "hosts": {
+            "helper-files.local": 15
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "switch_brand": {
+      "synonyms": {
+        "switch brand": {
+          "count": 92,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T09:19:05.789Z"
+        },
+        "brand": {
+          "count": 84,
+          "hosts": {
+            "helper-files.local": 84
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "helper": {
+          "count": 84,
+          "hosts": {
+            "helper-files.local": 84
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "switch": {
+          "count": 84,
+          "hosts": {
+            "helper-files.local": 84
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "helper supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "active": {
+          "count": 6,
+          "hosts": {
+            "helper-files.local": 6
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "filtering": {
+          "count": 6,
+          "hosts": {
+            "helper-files.local": 6
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "helper active filtering": {
+          "count": 6,
+          "hosts": {
+            "helper-files.local": 6
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        }
+      },
+      "units": {}
+    },
+    "hot_swappable": {
+      "synonyms": {
+        "hot swappable": {
+          "count": 106,
+          "hosts": {},
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "helper": {
+          "count": 95,
+          "hosts": {
+            "helper-files.local": 95
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "hot": {
+          "count": 95,
+          "hosts": {
+            "helper-files.local": 95
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "swappable": {
+          "count": 95,
+          "hosts": {
+            "helper-files.local": 95
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "active": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "side_buttons": {
+      "synonyms": {
+        "side buttons": {
+          "count": 106,
+          "hosts": {},
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "buttons": {
+          "count": 95,
+          "hosts": {
+            "helper-files.local": 95
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 95,
+          "hosts": {
+            "helper-files.local": 95
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "side": {
+          "count": 95,
+          "hosts": {
+            "helper-files.local": 95
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "active": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "middle_buttons": {
+      "synonyms": {
+        "middle buttons": {
+          "count": 106,
+          "hosts": {},
+          "last_seen_at": "2026-02-12T00:37:29.347Z"
+        },
+        "buttons": {
+          "count": 95,
+          "hosts": {
+            "helper-files.local": 95
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 95,
+          "hosts": {
+            "helper-files.local": 95
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "middle": {
+          "count": 95,
+          "hosts": {
+            "helper-files.local": 95
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "supportive": {
+          "count": 78,
+          "hosts": {
+            "helper-files.local": 78
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "active": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "connectivity": {
+      "synonyms": {
+        "connectivity": {
+          "count": 180,
+          "hosts": {
+            "helper-files.local": 98
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 98,
+          "hosts": {
+            "helper-files.local": 98
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper supportive": {
+          "count": 90,
+          "hosts": {
+            "helper-files.local": 90
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "supportive": {
+          "count": 90,
+          "hosts": {
+            "helper-files.local": 90
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "active": {
+          "count": 8,
+          "hosts": {
+            "helper-files.local": 8
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 8,
+          "hosts": {
+            "helper-files.local": 8
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 8,
+          "hosts": {
+            "helper-files.local": 8
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "sensor_type": {
+      "synonyms": {
+        "helper": {
+          "count": 107,
+          "hosts": {
+            "helper-files.local": 107
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "sensor": {
+          "count": 107,
+          "hosts": {
+            "helper-files.local": 107
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "type": {
+          "count": 107,
+          "hosts": {
+            "helper-files.local": 107
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "sensor type": {
+          "count": 91,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper supportive": {
+          "count": 90,
+          "hosts": {
+            "helper-files.local": 90
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "supportive": {
+          "count": 90,
+          "hosts": {
+            "helper-files.local": 90
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "active": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "encoder": {
+      "synonyms": {
+        "encoder": {
+          "count": 164,
+          "hosts": {
+            "helper-files.local": 90
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "helper": {
+          "count": 90,
+          "hosts": {
+            "helper-files.local": 90
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "helper supportive": {
+          "count": 90,
+          "hosts": {
+            "helper-files.local": 90
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "supportive": {
+          "count": 90,
+          "hosts": {
+            "helper-files.local": 90
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        }
+      },
+      "units": {}
+    },
+    "encoder_brand": {
+      "synonyms": {
+        "brand": {
+          "count": 90,
+          "hosts": {
+            "helper-files.local": 90
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "encoder": {
+          "count": 90,
+          "hosts": {
+            "helper-files.local": 90
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "helper": {
+          "count": 90,
+          "hosts": {
+            "helper-files.local": 90
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "helper supportive": {
+          "count": 90,
+          "hosts": {
+            "helper-files.local": 90
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "supportive": {
+          "count": 90,
+          "hosts": {
+            "helper-files.local": 90
+          },
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        },
+        "encoder brand": {
+          "count": 74,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T02:30:29.706Z"
+        }
+      },
+      "units": {}
+    },
+    "cardTags": {
+      "synonyms": {
+        "cardtags": {
+          "count": 7,
+          "hosts": {
+            "helper-files.local": 4
+          },
+          "last_seen_at": "2026-02-10T07:36:17.084Z"
+        },
+        "active": {
+          "count": 4,
+          "hosts": {
+            "helper-files.local": 4
+          },
+          "last_seen_at": "2026-02-10T07:36:17.084Z"
+        },
+        "filtering": {
+          "count": 4,
+          "hosts": {
+            "helper-files.local": 4
+          },
+          "last_seen_at": "2026-02-10T07:36:17.084Z"
+        },
+        "helper": {
+          "count": 4,
+          "hosts": {
+            "helper-files.local": 4
+          },
+          "last_seen_at": "2026-02-10T07:36:17.084Z"
+        },
+        "helper active filtering": {
+          "count": 4,
+          "hosts": {
+            "helper-files.local": 4
+          },
+          "last_seen_at": "2026-02-10T07:36:17.084Z"
+        }
+      },
+      "units": {}
+    },
+    "release_date": {
+      "synonyms": {
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "date": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "release": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "release date": {
+          "count": 18,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "price_range": {
+      "synonyms": {
+        "price": {
+          "count": 24,
+          "hosts": {
+            "helper-files.local": 18,
+            "critic.local": 6
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "range": {
+          "count": 24,
+          "hosts": {
+            "helper-files.local": 18,
+            "critic.local": 6
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "price range": {
+          "count": 18,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "critic": {
+          "count": 6,
+          "hosts": {
+            "critic.local": 6
+          },
+          "last_seen_at": "2026-02-11T08:45:33.025Z"
+        },
+        "critic normalize": {
+          "count": 6,
+          "hosts": {
+            "critic.local": 6
+          },
+          "last_seen_at": "2026-02-11T08:45:33.025Z"
+        }
+      },
+      "units": {}
+    },
+    "colors": {
+      "synonyms": {
+        "colors": {
+          "count": 36,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "design": {
+      "synonyms": {
+        "design": {
+          "count": 36,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "lighting": {
+      "synonyms": {
+        "lighting": {
+          "count": 36,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "rgb": {
+      "synonyms": {
+        "rgb": {
+          "count": 36,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "computer_side_connector": {
+      "synonyms": {
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "computer": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "computer side connector": {
+          "count": 18,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "connector": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "side": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "mouse_side_connector": {
+      "synonyms": {
+        "active": {
+          "count": 9,
+          "hosts": {
+            "helper-files.local": 9
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "connector": {
+          "count": 9,
+          "hosts": {
+            "helper-files.local": 9
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 9,
+          "hosts": {
+            "helper-files.local": 9
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 9,
+          "hosts": {
+            "helper-files.local": 9
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 9,
+          "hosts": {
+            "helper-files.local": 9
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "mouse side connector": {
+          "count": 9,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "side": {
+          "count": 9,
+          "hosts": {
+            "helper-files.local": 9
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "bluetooth": {
+      "synonyms": {
+        "bluetooth": {
+          "count": 36,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "cable_type": {
+      "synonyms": {
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "cable": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "cable type": {
+          "count": 18,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "type": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "paracord": {
+      "synonyms": {
+        "paracord": {
+          "count": 36,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "wireless_charging": {
+      "synonyms": {
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "charging": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "wireless": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "wireless charging": {
+          "count": 18,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "battery_hours": {
+      "synonyms": {
+        "active": {
+          "count": 9,
+          "hosts": {
+            "helper-files.local": 9
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "battery": {
+          "count": 9,
+          "hosts": {
+            "helper-files.local": 9
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "battery hours": {
+          "count": 9,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 9,
+          "hosts": {
+            "helper-files.local": 9
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 9,
+          "hosts": {
+            "helper-files.local": 9
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 9,
+          "hosts": {
+            "helper-files.local": 9
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "hours": {
+          "count": 9,
+          "hosts": {
+            "helper-files.local": 9
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "adjustable_weight": {
+      "synonyms": {
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "adjustable": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "adjustable weight": {
+          "count": 18,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "weight": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "feet_material": {
+      "synonyms": {
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "feet": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "feet material": {
+          "count": 18,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "material": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "coating": {
+      "synonyms": {
+        "coating": {
+          "count": 36,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "honeycomb_frame": {
+      "synonyms": {
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "frame": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "honeycomb": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "honeycomb frame": {
+          "count": 18,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "silent_clicks": {
+      "synonyms": {
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "clicks": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "silent": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "silent clicks": {
+          "count": 18,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "grip": {
+      "synonyms": {
+        "grip": {
+          "count": 34,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T17:55:37.280Z"
+        },
+        "active": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T17:55:37.280Z"
+        },
+        "filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T17:55:37.280Z"
+        },
+        "helper": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T17:55:37.280Z"
+        },
+        "helper active filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T17:55:37.280Z"
+        }
+      },
+      "units": {}
+    },
+    "hand_size": {
+      "synonyms": {
+        "active": {
+          "count": 2,
+          "hosts": {
+            "helper-files.local": 2
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 2,
+          "hosts": {
+            "helper-files.local": 2
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "hand": {
+          "count": 2,
+          "hosts": {
+            "helper-files.local": 2
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "hand size": {
+          "count": 2,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 2,
+          "hosts": {
+            "helper-files.local": 2
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 2,
+          "hosts": {
+            "helper-files.local": 2
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "size": {
+          "count": 2,
+          "hosts": {
+            "helper-files.local": 2
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "flawless_sensor": {
+      "synonyms": {
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "flawless": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "flawless sensor": {
+          "count": 18,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "sensor": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "lift": {
+      "synonyms": {
+        "lift": {
+          "count": 22,
+          "hosts": {
+            "helper-files.local": 11
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "active": {
+          "count": 11,
+          "hosts": {
+            "helper-files.local": 11
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 11,
+          "hosts": {
+            "helper-files.local": 11
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 11,
+          "hosts": {
+            "helper-files.local": 11
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 11,
+          "hosts": {
+            "helper-files.local": 11
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "lift_settings": {
+      "synonyms": {
+        "active": {
+          "count": 11,
+          "hosts": {
+            "helper-files.local": 11
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 11,
+          "hosts": {
+            "helper-files.local": 11
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 11,
+          "hosts": {
+            "helper-files.local": 11
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 11,
+          "hosts": {
+            "helper-files.local": 11
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "lift": {
+          "count": 11,
+          "hosts": {
+            "helper-files.local": 11
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "lift settings": {
+          "count": 11,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "settings": {
+          "count": 11,
+          "hosts": {
+            "helper-files.local": 11
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "hardware_acceleration": {
+      "synonyms": {
+        "acceleration": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "hardware": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "hardware acceleration": {
+          "count": 18,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "nvidia_reflex": {
+      "synonyms": {
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "nvidia": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "nvidia reflex": {
+          "count": 18,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "reflex": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "switch_type": {
+      "synonyms": {
+        "active": {
+          "count": 16,
+          "hosts": {
+            "helper-files.local": 16
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 16,
+          "hosts": {
+            "helper-files.local": 16
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 16,
+          "hosts": {
+            "helper-files.local": 16
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 16,
+          "hosts": {
+            "helper-files.local": 16
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "switch": {
+          "count": 16,
+          "hosts": {
+            "helper-files.local": 16
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "switch type": {
+          "count": 16,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "type": {
+          "count": 16,
+          "hosts": {
+            "helper-files.local": 16
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "click_latency": {
+      "synonyms": {
+        "active": {
+          "count": 3,
+          "hosts": {
+            "helper-files.local": 3
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "click": {
+          "count": 3,
+          "hosts": {
+            "helper-files.local": 3
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "click latency": {
+          "count": 3,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "filtering": {
+          "count": 3,
+          "hosts": {
+            "helper-files.local": 3
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "helper": {
+          "count": 3,
+          "hosts": {
+            "helper-files.local": 3
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "helper active filtering": {
+          "count": 3,
+          "hosts": {
+            "helper-files.local": 3
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "latency": {
+          "count": 3,
+          "hosts": {
+            "helper-files.local": 3
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        }
+      },
+      "units": {}
+    },
+    "click_latency_list": {
+      "synonyms": {
+        "active": {
+          "count": 3,
+          "hosts": {
+            "helper-files.local": 3
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "click": {
+          "count": 3,
+          "hosts": {
+            "helper-files.local": 3
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "click latency list": {
+          "count": 3,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "filtering": {
+          "count": 3,
+          "hosts": {
+            "helper-files.local": 3
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "helper": {
+          "count": 3,
+          "hosts": {
+            "helper-files.local": 3
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "helper active filtering": {
+          "count": 3,
+          "hosts": {
+            "helper-files.local": 3
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "latency": {
+          "count": 3,
+          "hosts": {
+            "helper-files.local": 3
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        }
+      },
+      "units": {}
+    },
+    "programmable_buttons": {
+      "synonyms": {
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "buttons": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "programmable": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "programmable buttons": {
+          "count": 18,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "tilt_scroll_wheel": {
+      "synonyms": {
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "scroll": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "tilt": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "tilt scroll wheel": {
+          "count": 18,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "wheel": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "adjustable_scroll_wheel": {
+      "synonyms": {
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "adjustable": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "adjustable scroll wheel": {
+          "count": 18,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "scroll": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "wheel": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "onboard_memory": {
+      "synonyms": {
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "memory": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "onboard": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "onboard memory": {
+          "count": 18,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "onboard_memory_value": {
+      "synonyms": {
+        "active": {
+          "count": 12,
+          "hosts": {
+            "helper-files.local": 12
+          },
+          "last_seen_at": "2026-02-11T09:42:14.027Z"
+        },
+        "filtering": {
+          "count": 12,
+          "hosts": {
+            "helper-files.local": 12
+          },
+          "last_seen_at": "2026-02-11T09:42:14.027Z"
+        },
+        "helper": {
+          "count": 12,
+          "hosts": {
+            "helper-files.local": 12
+          },
+          "last_seen_at": "2026-02-11T09:42:14.027Z"
+        },
+        "helper active filtering": {
+          "count": 12,
+          "hosts": {
+            "helper-files.local": 12
+          },
+          "last_seen_at": "2026-02-11T09:42:14.027Z"
+        },
+        "memory": {
+          "count": 12,
+          "hosts": {
+            "helper-files.local": 12
+          },
+          "last_seen_at": "2026-02-11T09:42:14.027Z"
+        },
+        "onboard": {
+          "count": 12,
+          "hosts": {
+            "helper-files.local": 12
+          },
+          "last_seen_at": "2026-02-11T09:42:14.027Z"
+        },
+        "onboard memory value": {
+          "count": 12,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T09:42:14.027Z"
+        }
+      },
+      "units": {}
+    },
+    "profile_switching": {
+      "synonyms": {
+        "active": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "profile": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "profile switching": {
+          "count": 18,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "switching": {
+          "count": 18,
+          "hosts": {
+            "helper-files.local": 18
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "sensor_date": {
+      "synonyms": {
+        "active": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "date": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "sensor": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "sensor date": {
+          "count": 17,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "sensor_link": {
+      "synonyms": {
+        "active": {
+          "count": 11,
+          "hosts": {
+            "helper-files.local": 11
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 11,
+          "hosts": {
+            "helper-files.local": 11
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 11,
+          "hosts": {
+            "helper-files.local": 11
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 11,
+          "hosts": {
+            "helper-files.local": 11
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "link": {
+          "count": 11,
+          "hosts": {
+            "helper-files.local": 11
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "sensor": {
+          "count": 11,
+          "hosts": {
+            "helper-files.local": 11
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "sensor link": {
+          "count": 11,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "motion_sync": {
+      "synonyms": {
+        "active": {
+          "count": 13,
+          "hosts": {
+            "helper-files.local": 13
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 13,
+          "hosts": {
+            "helper-files.local": 13
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 13,
+          "hosts": {
+            "helper-files.local": 13
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 13,
+          "hosts": {
+            "helper-files.local": 13
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "motion": {
+          "count": 13,
+          "hosts": {
+            "helper-files.local": 13
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "motion sync": {
+          "count": 13,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "sync": {
+          "count": 13,
+          "hosts": {
+            "helper-files.local": 13
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "smoothing": {
+      "synonyms": {
+        "smoothing": {
+          "count": 34,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "active": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        },
+        "helper active filtering": {
+          "count": 17,
+          "hosts": {
+            "helper-files.local": 17
+          },
+          "last_seen_at": "2026-02-11T20:20:12.462Z"
+        }
+      },
+      "units": {}
+    },
+    "mcu": {
+      "synonyms": {
+        "mcu": {
+          "count": 4,
+          "hosts": {
+            "helper-files.local": 2
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "active": {
+          "count": 2,
+          "hosts": {
+            "helper-files.local": 2
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "filtering": {
+          "count": 2,
+          "hosts": {
+            "helper-files.local": 2
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "helper": {
+          "count": 2,
+          "hosts": {
+            "helper-files.local": 2
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "helper active filtering": {
+          "count": 2,
+          "hosts": {
+            "helper-files.local": 2
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        }
+      },
+      "units": {}
+    },
+    "mcu_link": {
+      "synonyms": {
+        "active": {
+          "count": 2,
+          "hosts": {
+            "helper-files.local": 2
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "filtering": {
+          "count": 2,
+          "hosts": {
+            "helper-files.local": 2
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "helper": {
+          "count": 2,
+          "hosts": {
+            "helper-files.local": 2
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "helper active filtering": {
+          "count": 2,
+          "hosts": {
+            "helper-files.local": 2
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "link": {
+          "count": 2,
+          "hosts": {
+            "helper-files.local": 2
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "mcu": {
+          "count": 2,
+          "hosts": {
+            "helper-files.local": 2
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "mcu link": {
+          "count": 2,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        }
+      },
+      "units": {}
+    },
+    "click_force": {
+      "synonyms": {
+        "active": {
+          "count": 2,
+          "hosts": {
+            "helper-files.local": 2
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "click": {
+          "count": 2,
+          "hosts": {
+            "helper-files.local": 2
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "click force": {
+          "count": 2,
+          "hosts": {},
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "filtering": {
+          "count": 2,
+          "hosts": {
+            "helper-files.local": 2
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "force": {
+          "count": 2,
+          "hosts": {
+            "helper-files.local": 2
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "helper": {
+          "count": 2,
+          "hosts": {
+            "helper-files.local": 2
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        },
+        "helper active filtering": {
+          "count": 2,
+          "hosts": {
+            "helper-files.local": 2
+          },
+          "last_seen_at": "2026-02-11T08:45:35.347Z"
+        }
+      },
+      "units": {}
+    }
+  },
+  "stats": {
+    "updates_total": 146
+  }
+}

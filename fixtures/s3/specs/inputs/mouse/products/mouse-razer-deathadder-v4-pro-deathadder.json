@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-razer-deathadder-v4-pro-deathadder",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Razer",
+    "model": "Deathadder V4 Pro",
+    "variant": "Deathadder"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "MF",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:57.764Z"
+  }
+}

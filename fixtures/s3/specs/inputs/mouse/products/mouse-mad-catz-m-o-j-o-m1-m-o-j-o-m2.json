@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-mad-catz-m-o-j-o-m1-m-o-j-o-m2",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Mad Catz",
+    "model": "M.O.J.O. M1",
+    "variant": "M.O.J.O. M2"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "JE",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:57.002Z"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-logitech-g-g502-hero",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Logitech G",
+    "model": "G502 Hero",
+    "variant": "",
+    "sku": "",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

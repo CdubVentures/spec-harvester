@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-redragon-gainer-m656-gainer-m656",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Redragon",
+    "model": "Gainer M656",
+    "variant": "Gainer M656"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "FF",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:56.144Z"
+  }
+}

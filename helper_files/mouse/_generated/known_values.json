@@ -1,0 +1,135 @@
+{
+  "category": "mouse",
+  "fields": {
+    "coating": [
+      "matte",
+      "rubber grips"
+    ],
+    "connection": [
+      "bluetooth",
+      "hybrid",
+      "unk",
+      "wired",
+      "wireless"
+    ],
+    "connectivity": [
+      "2.4ghz dongle",
+      "2.4ghz rf dongle",
+      "2.4ghz wifi dongle",
+      "n/a",
+      "unk"
+    ],
+    "feet_material": [
+      "glass",
+      "ptfe",
+      "ptfe (95%)",
+      "ptfe (black-dyed)",
+      "ptfe (teflon)",
+      "ptfe (virgin-grade)"
+    ],
+    "form_factor": [
+      "ambidextrous",
+      "left",
+      "right"
+    ],
+    "front_flare": [
+      "flat",
+      "inward",
+      "outward"
+    ],
+    "hump": [
+      "back - front",
+      "back - rear",
+      "back mid",
+      "front",
+      "middle"
+    ],
+    "lighting": [
+      "1 zone (led)",
+      "1 zone (rgb)",
+      "2 zone (led)",
+      "2 zone (rgb)",
+      "3 zone (led)",
+      "3 zone (rgb)",
+      "4 zone (led)",
+      "4 zone (rgb)",
+      "5 zone (led)",
+      "5 zone (rgb)",
+      "6 zone (led)",
+      "6 zone (rgb)",
+      "7 zone (led)",
+      "7 zone (rgb)",
+      "8 zone (rgb)",
+      "9 zone (rgb)",
+      "none"
+    ],
+    "mcu": [
+      "holtek ht32f52352",
+      "nordic nrf52832",
+      "nordic nrf52833",
+      "nordic nrf52840",
+      "nuvoton m484sidae",
+      "nxp lpc11u68",
+      "nxp lpc54605j512",
+      "stm32",
+      "stm32f072cbu6",
+      "stm32l412c8u6",
+      "ti cc2462r",
+      "unk",
+      "unspecified"
+    ],
+    "sensor": [
+      "adns-9800",
+      "corsair marksman 26k",
+      "focus pro 30k",
+      "hero 25k",
+      "marksman s",
+      "pixart paw3327",
+      "pixart paw3335",
+      "pixart paw3370",
+      "pixart paw3392",
+      "pixart paw3393",
+      "pixart paw3395",
+      "pixart paw3399",
+      "pixart paw3519",
+      "pixart pmw3320",
+      "pixart pmw3325",
+      "pixart pmw3327",
+      "pixart pmw3335",
+      "pixart pmw3367",
+      "pixart pmw3370",
+      "pixart pmw3389",
+      "pixart pmw3391",
+      "pixart pmw3395",
+      "pixart sdns3988",
+      "rog aimpoint",
+      "rog aimpoint pro (pixart paw3950)",
+      "truemove pro",
+      "unk",
+      "unspecified"
+    ],
+    "sensor_type": [
+      "laser",
+      "optical",
+      "unk"
+    ],
+    "shape": [
+      "asymmetrical",
+      "ergonomic",
+      "symmetrical"
+    ],
+    "switch_type": [
+      "mechanical",
+      "optical",
+      "optical / mechanical",
+      "optical-mechanical",
+      "unk"
+    ],
+    "yes_no": [
+      "yes",
+      "no"
+    ]
+  },
+  "generated_at": "1970-01-01T00:00:00.000Z",
+  "version": 1
+}

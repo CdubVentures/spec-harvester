@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-lenovo-legion-m410-wireless-rgb-m410",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Lenovo Legion",
+    "model": "M410 Wireless RGB",
+    "variant": "M410"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "JA",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:56.963Z"
+  }
+}

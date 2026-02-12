@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-lamzu-atlantis-mini-pro-4k-compatible-atlantis",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Lamzu",
+    "model": "Atlantis Mini Pro (4k Compatible)",
+    "variant": "Atlantis"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "IU",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:56.904Z"
+  }
+}

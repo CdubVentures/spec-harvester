@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-alienware-aw620m-620",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Alienware",
+    "model": "AW620M",
+    "variant": "620",
+    "sku": "",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

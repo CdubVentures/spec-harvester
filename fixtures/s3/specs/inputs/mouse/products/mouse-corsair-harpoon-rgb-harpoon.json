@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-corsair-harpoon-rgb-harpoon",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Corsair",
+    "model": "Harpoon RGB",
+    "variant": "Harpoon"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "AV",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:55.372Z"
+  }
+}

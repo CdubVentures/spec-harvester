@@ -1,0 +1,14 @@
+{
+  "productId": "mouse-evga-x20-wireless",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "EVGA",
+    "model": "X20 Wireless",
+    "variant": "",
+    "sku": "",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [],
+  "anchors": {}
+}

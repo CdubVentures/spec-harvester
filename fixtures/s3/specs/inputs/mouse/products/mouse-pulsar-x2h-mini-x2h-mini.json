@@ -1,0 +1,22 @@
+{
+  "productId": "mouse-pulsar-x2h-mini-x2h-mini",
+  "category": "mouse",
+  "identityLock": {
+    "brand": "Pulsar",
+    "model": "X2H Mini",
+    "variant": "X2H Mini"
+  },
+  "seedUrls": [],
+  "anchors": {},
+  "requirements": {
+    "requiredFields": []
+  },
+  "seed": {
+    "source": "excel",
+    "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2\\helper_files\\mouse\\mouseData.xlsm",
+    "sheet": "dataEntry",
+    "source_column": "KT",
+    "source_type": "user_helper_seed",
+    "captured_at": "2026-02-11T08:09:57.384Z"
+  }
+}
