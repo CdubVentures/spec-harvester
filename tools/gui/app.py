@@ -1627,10 +1627,13 @@ def render_field_rules_studio(category: str, local_mode: bool):
             link_input_key = f"studio_comp_link_cols_{category}_{idx}"
             property_input_key = f"studio_comp_prop_cols_{category}_{idx}"
             picker_target_key = f"studio_comp_picker_target_{category}_{idx}"
-            brand_enabled_key = f"studio_comp_brand_enabled_{category}_{idx}"
-            alias_enabled_key = f"studio_comp_alias_enabled_{category}_{idx}"
-            link_enabled_key = f"studio_comp_link_enabled_{category}_{idx}"
-            property_enabled_key = f"studio_comp_property_enabled_{category}_{idx}"
+            active_roles_key = f"studio_comp_active_roles_{category}_{idx}"
+            add_brand_key = f"studio_comp_add_brand_{category}_{idx}"
+            remove_brand_key = f"studio_comp_remove_brand_{category}_{idx}"
+            add_link_key = f"studio_comp_add_link_{category}_{idx}"
+            remove_link_key = f"studio_comp_remove_link_{category}_{idx}"
+            add_property_key = f"studio_comp_add_property_{category}_{idx}"
+            remove_property_key = f"studio_comp_remove_property_{category}_{idx}"
             auto_alias_key = f"studio_comp_auto_alias_{category}_{idx}"
             clear_optional_key = f"studio_comp_clear_optional_{category}_{idx}"
 
@@ -1650,37 +1653,75 @@ def render_field_rules_studio(category: str, local_mode: bool):
                 st.session_state[link_input_key] = csv_join(stable_sort_columns(row.get("link_columns", [])))
             if property_input_key not in st.session_state:
                 st.session_state[property_input_key] = csv_join(stable_sort_columns(row.get("property_columns", [])))
-            if brand_enabled_key not in st.session_state:
-                st.session_state[brand_enabled_key] = bool(normalize_col(row.get("brand_column", ""), ""))
-            if alias_enabled_key not in st.session_state:
-                st.session_state[alias_enabled_key] = bool(stable_sort_columns(row.get("alias_columns", [])))
-            if link_enabled_key not in st.session_state:
-                st.session_state[link_enabled_key] = bool(stable_sort_columns(row.get("link_columns", [])))
-            if property_enabled_key not in st.session_state:
-                st.session_state[property_enabled_key] = bool(stable_sort_columns(row.get("property_columns", [])))
+            if active_roles_key not in st.session_state:
+                role_tokens = []
+                if normalize_col(row.get("brand_column", ""), ""):
+                    role_tokens.append("brand")
+                if stable_sort_columns(row.get("link_columns", [])):
+                    role_tokens.append("links")
+                if stable_sort_columns(row.get("property_columns", [])):
+                    role_tokens.append("properties")
+                st.session_state[active_roles_key] = role_tokens
             if auto_alias_key not in st.session_state:
                 st.session_state[auto_alias_key] = bool(row.get("auto_derive_aliases", True))
 
-            r1, r2, r3, r4, r5, r6 = st.columns([1.0, 1.0, 1.0, 1.0, 1.3, 1.6])
-            brand_enabled = r1.toggle("Use Brand", key=brand_enabled_key, help="Optional manufacturer/brand role.")
-            alias_enabled = r2.toggle("Use Aliases", key=alias_enabled_key, help="Optional synonym columns (CSV tokens supported).")
-            link_enabled = r3.toggle("Use Links", key=link_enabled_key, help="Optional URL/source columns.")
-            property_enabled = r4.toggle("Use Properties", key=property_enabled_key, help="Optional structured property columns.")
-            auto_derive_aliases = r5.toggle(
+            active_roles = set([str(v) for v in st.session_state.get(active_roles_key, []) if str(v)])
+            role_cols = st.columns([1.2, 1.2, 1.3, 1.3, 2.0])
+
+            if "brand" in active_roles:
+                if role_cols[0].button("Remove Brand Role", key=remove_brand_key, use_container_width=True):
+                    active_roles.discard("brand")
+                    st.session_state[active_roles_key] = sorted(active_roles)
+                    st.session_state[brand_input_key] = ""
+                    st.rerun()
+            else:
+                if role_cols[0].button("Add Brand Role", key=add_brand_key, use_container_width=True):
+                    active_roles.add("brand")
+                    st.session_state[active_roles_key] = sorted(active_roles)
+                    st.rerun()
+
+            role_cols[1].caption("Aliases role is always available.")
+
+            if "links" in active_roles:
+                if role_cols[2].button("Remove Links Role", key=remove_link_key, use_container_width=True):
+                    active_roles.discard("links")
+                    st.session_state[active_roles_key] = sorted(active_roles)
+                    st.session_state[link_input_key] = ""
+                    st.rerun()
+            else:
+                if role_cols[2].button("Add Links Role", key=add_link_key, use_container_width=True):
+                    active_roles.add("links")
+                    st.session_state[active_roles_key] = sorted(active_roles)
+                    st.rerun()
+
+            if "properties" in active_roles:
+                if role_cols[3].button("Remove Properties Role", key=remove_property_key, use_container_width=True):
+                    active_roles.discard("properties")
+                    st.session_state[active_roles_key] = sorted(active_roles)
+                    st.session_state[property_input_key] = ""
+                    st.rerun()
+            else:
+                if role_cols[3].button("Add Properties Role", key=add_property_key, use_container_width=True):
+                    active_roles.add("properties")
+                    st.session_state[active_roles_key] = sorted(active_roles)
+                    st.rerun()
+
+            if role_cols[4].button("Clear Optional Roles", key=clear_optional_key, use_container_width=True):
+                st.session_state[active_roles_key] = []
+                st.session_state[brand_input_key] = ""
+                st.session_state[link_input_key] = ""
+                st.session_state[property_input_key] = ""
+                st.rerun()
+
+            brand_enabled = "brand" in active_roles
+            link_enabled = "links" in active_roles
+            property_enabled = "properties" in active_roles
+
+            auto_derive_aliases = st.toggle(
                 "Auto-Derive Aliases",
                 key=auto_alias_key,
                 help="If alias columns are empty, generate safe aliases from punctuation/spacing variants of Name/Model.",
             )
-            if r6.button("Clear Optional Roles", key=clear_optional_key, use_container_width=True):
-                st.session_state[brand_enabled_key] = False
-                st.session_state[alias_enabled_key] = False
-                st.session_state[link_enabled_key] = False
-                st.session_state[property_enabled_key] = False
-                st.session_state[brand_input_key] = ""
-                st.session_state[alias_input_key] = ""
-                st.session_state[link_input_key] = ""
-                st.session_state[property_input_key] = ""
-                st.rerun()
             st.caption(
                 "Role-based mapping: `Name/Model` is required. Optional roles can stay off. "
                 "Example: material often uses only `Name/Model`, optionally `Aliases`."
@@ -1688,8 +1729,6 @@ def render_field_rules_studio(category: str, local_mode: bool):
 
             if not brand_enabled:
                 st.session_state[brand_input_key] = ""
-            if not alias_enabled:
-                st.session_state[alias_input_key] = ""
             if not link_enabled:
                 st.session_state[link_input_key] = ""
             if not property_enabled:
@@ -1705,11 +1744,9 @@ def render_field_rules_studio(category: str, local_mode: bool):
                 preview_cols = preview.get("columns", []) if isinstance(preview.get("columns"), list) else []
                 if preview_cols:
                     st.caption("Column Picker (click a header to map the selected role)")
-                    picker_targets = ["Name/Model"]
+                    picker_targets = ["Name/Model", "Aliases"]
                     if brand_enabled:
                         picker_targets.append("Brand")
-                    if alias_enabled:
-                        picker_targets.append("Aliases")
                     if link_enabled:
                         picker_targets.append("Links")
                     if property_enabled:
@@ -1770,23 +1807,29 @@ def render_field_rules_studio(category: str, local_mode: bool):
                 disabled=not brand_enabled,
             )
             alias_columns = m_d3.text_input(
-                "Alias Columns (optional csv)",
+                "Alias Columns (csv)",
                 key=alias_input_key,
-                disabled=not alias_enabled,
+                help="Alias role is always available; leave blank if not needed.",
             )
-            link_columns = m_d4.text_input(
-                "Link Columns (optional csv)",
-                key=link_input_key,
-                disabled=not link_enabled,
-            )
-            property_columns = st.text_input(
-                "Property Columns (optional csv)",
-                key=property_input_key,
-                disabled=not property_enabled,
-            )
+            if link_enabled:
+                link_columns = m_d4.text_input(
+                    "Link Columns (optional csv)",
+                    key=link_input_key,
+                )
+            else:
+                m_d4.caption("Links role not added.")
+                link_columns = ""
+            if property_enabled:
+                property_columns = st.text_input(
+                    "Property Columns (optional csv)",
+                    key=property_input_key,
+                )
+            else:
+                st.caption("Properties role not added.")
+                property_columns = ""
 
             selected_brand_col = normalize_col(brand_column if brand_enabled else "", "")
-            selected_alias_cols = stable_sort_columns(csv_tokens(alias_columns if alias_enabled else ""))
+            selected_alias_cols = stable_sort_columns(csv_tokens(alias_columns))
             selected_link_cols = stable_sort_columns(csv_tokens(link_columns if link_enabled else ""))
             selected_property_cols = stable_sort_columns(csv_tokens(property_columns if property_enabled else ""))
 
