@@ -1628,12 +1628,8 @@ def render_field_rules_studio(category: str, local_mode: bool):
             property_input_key = f"studio_comp_prop_cols_{category}_{idx}"
             picker_target_key = f"studio_comp_picker_target_{category}_{idx}"
             active_roles_key = f"studio_comp_active_roles_{category}_{idx}"
-            add_brand_key = f"studio_comp_add_brand_{category}_{idx}"
-            remove_brand_key = f"studio_comp_remove_brand_{category}_{idx}"
-            add_link_key = f"studio_comp_add_link_{category}_{idx}"
-            remove_link_key = f"studio_comp_remove_link_{category}_{idx}"
-            add_property_key = f"studio_comp_add_property_{category}_{idx}"
-            remove_property_key = f"studio_comp_remove_property_{category}_{idx}"
+            role_picker_key = f"studio_comp_role_picker_{category}_{idx}"
+            add_role_key = f"studio_comp_add_role_{category}_{idx}"
             auto_alias_key = f"studio_comp_auto_alias_{category}_{idx}"
             clear_optional_key = f"studio_comp_clear_optional_{category}_{idx}"
 
@@ -1664,58 +1660,65 @@ def render_field_rules_studio(category: str, local_mode: bool):
                 st.session_state[active_roles_key] = role_tokens
             if auto_alias_key not in st.session_state:
                 st.session_state[auto_alias_key] = bool(row.get("auto_derive_aliases", True))
+            role_defs = [
+                {"id": "brand", "label": "Brand", "input_key": brand_input_key},
+                {"id": "links", "label": "Links", "input_key": link_input_key},
+                {"id": "properties", "label": "Properties", "input_key": property_input_key},
+            ]
+            role_def_by_id = {row["id"]: row for row in role_defs}
+            known_role_ids = [row["id"] for row in role_defs]
+            active_roles = [role for role in st.session_state.get(active_roles_key, []) if role in known_role_ids]
+            active_role_set = set(active_roles)
+            st.session_state[active_roles_key] = active_roles
 
-            active_roles = set([str(v) for v in st.session_state.get(active_roles_key, []) if str(v)])
-            role_cols = st.columns([1.2, 1.2, 1.3, 1.3, 2.0])
-
-            if "brand" in active_roles:
-                if role_cols[0].button("Remove Brand Role", key=remove_brand_key, use_container_width=True):
-                    active_roles.discard("brand")
-                    st.session_state[active_roles_key] = sorted(active_roles)
-                    st.session_state[brand_input_key] = ""
-                    st.rerun()
+            addable_roles = [role for role in role_defs if role["id"] not in active_role_set]
+            role_mgr_a, role_mgr_b, role_mgr_c = st.columns([1.4, 1.3, 1.3])
+            role_mgr_a.caption("Aliases role is always available.")
+            if addable_roles:
+                add_labels = [role["label"] for role in addable_roles]
+                if role_picker_key not in st.session_state or st.session_state.get(role_picker_key) not in add_labels:
+                    st.session_state[role_picker_key] = add_labels[0]
+                selected_role_label = role_mgr_b.selectbox(
+                    "Add Optional Role",
+                    add_labels,
+                    key=role_picker_key,
+                    label_visibility="collapsed",
+                )
+                if role_mgr_c.button("Add Role", key=add_role_key, use_container_width=True):
+                    selected_role = next((role for role in addable_roles if role["label"] == selected_role_label), None)
+                    if selected_role:
+                        active_role_set.add(selected_role["id"])
+                        st.session_state[active_roles_key] = sorted(active_role_set)
+                        st.rerun()
             else:
-                if role_cols[0].button("Add Brand Role", key=add_brand_key, use_container_width=True):
-                    active_roles.add("brand")
-                    st.session_state[active_roles_key] = sorted(active_roles)
-                    st.rerun()
+                role_mgr_b.caption("All optional roles added.")
+                role_mgr_c.write("")
 
-            role_cols[1].caption("Aliases role is always available.")
+            if active_roles:
+                st.caption("Active optional roles")
+                remove_cols = st.columns(max(1, min(4, len(active_roles))))
+                for ridx, role_id in enumerate(active_roles):
+                    role_def = role_def_by_id.get(role_id, {})
+                    label = str(role_def.get("label", role_id))
+                    remove_key = f"studio_comp_remove_role_{category}_{idx}_{role_id}"
+                    if remove_cols[ridx % len(remove_cols)].button(f"Remove {label}", key=remove_key, use_container_width=True):
+                        active_role_set.discard(role_id)
+                        st.session_state[active_roles_key] = sorted(active_role_set)
+                        input_key = str(role_def.get("input_key", "") or "")
+                        if input_key:
+                            st.session_state[input_key] = ""
+                        st.rerun()
 
-            if "links" in active_roles:
-                if role_cols[2].button("Remove Links Role", key=remove_link_key, use_container_width=True):
-                    active_roles.discard("links")
-                    st.session_state[active_roles_key] = sorted(active_roles)
-                    st.session_state[link_input_key] = ""
-                    st.rerun()
-            else:
-                if role_cols[2].button("Add Links Role", key=add_link_key, use_container_width=True):
-                    active_roles.add("links")
-                    st.session_state[active_roles_key] = sorted(active_roles)
-                    st.rerun()
-
-            if "properties" in active_roles:
-                if role_cols[3].button("Remove Properties Role", key=remove_property_key, use_container_width=True):
-                    active_roles.discard("properties")
-                    st.session_state[active_roles_key] = sorted(active_roles)
-                    st.session_state[property_input_key] = ""
-                    st.rerun()
-            else:
-                if role_cols[3].button("Add Properties Role", key=add_property_key, use_container_width=True):
-                    active_roles.add("properties")
-                    st.session_state[active_roles_key] = sorted(active_roles)
-                    st.rerun()
-
-            if role_cols[4].button("Clear Optional Roles", key=clear_optional_key, use_container_width=True):
+            if st.button("Clear Optional Roles", key=clear_optional_key, use_container_width=True):
                 st.session_state[active_roles_key] = []
                 st.session_state[brand_input_key] = ""
                 st.session_state[link_input_key] = ""
                 st.session_state[property_input_key] = ""
                 st.rerun()
 
-            brand_enabled = "brand" in active_roles
-            link_enabled = "links" in active_roles
-            property_enabled = "properties" in active_roles
+            brand_enabled = "brand" in active_role_set
+            link_enabled = "links" in active_role_set
+            property_enabled = "properties" in active_role_set
 
             auto_derive_aliases = st.toggle(
                 "Auto-Derive Aliases",
