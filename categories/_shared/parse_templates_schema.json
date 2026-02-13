@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specfactory.local/schemas/parse_templates_schema.json",
+  "title": "Parse Templates",
+  "type": "object",
+  "required": [
+    "category",
+    "templates"
+  ],
+  "properties": {
+    "category": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "templates": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "template": {
+            "type": "string"
+          },
+          "patterns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "regex"
+              ],
+              "properties": {
+                "regex": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "group": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "unit": {
+                  "type": "string"
+                },
+                "convert": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "context_keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "negative_keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "template_library": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": true
+}

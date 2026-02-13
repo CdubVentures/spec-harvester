@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specfactory.local/schemas/base_field_schema.json",
+  "title": "Generated Field Rules",
+  "type": "object",
+  "required": [
+    "category",
+    "generated_at",
+    "fields"
+  ],
+  "properties": {
+    "category": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": [
+        "string",
+        "number"
+      ]
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "field_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "fields": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/FieldRule"
+      }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "FieldRule": {
+      "type": "object",
+      "required": [
+        "contract",
+        "priority",
+        "parse",
+        "evidence"
+      ],
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "ui": {
+          "type": "object"
+        },
+        "priority": {
+          "type": "object",
+          "required": [
+            "required_level",
+            "availability",
+            "difficulty",
+            "effort"
+          ],
+          "properties": {
+            "required_level": {
+              "type": "string",
+              "minLength": 1
+            },
+            "availability": {
+              "type": "string",
+              "minLength": 1
+            },
+            "difficulty": {
+              "type": "string",
+              "minLength": 1
+            },
+            "effort": {
+              "type": "number",
+              "minimum": 1
+            }
+          },
+          "additionalProperties": true
+        },
+        "contract": {
+          "type": "object",
+          "required": [
+            "type",
+            "shape"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "minLength": 1
+            },
+            "shape": {
+              "type": "string",
+              "minLength": 1
+            },
+            "unit": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": true
+        },
+        "parse": {
+          "type": "object"
+        },
+        "evidence": {
+          "type": "object",
+          "required": [
+            "required"
+          ],
+          "properties": {
+            "required": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

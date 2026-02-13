@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specfactory.local/schemas/key_migrations_schema.json",
+  "title": "Key Migrations",
+  "type": "object",
+  "additionalProperties": {
+    "oneOf": [
+      {
+        "type": "string"
+      },
+      {
+        "type": "object",
+        "additionalProperties": true
+      }
+    ]
+  }
+}

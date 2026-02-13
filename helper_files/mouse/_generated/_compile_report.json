@@ -1,52 +1,52 @@
 {
   "artifacts": {
     "control_plane_version": {
-      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2 - Copy (3)\\helper_files\\mouse\\_control_plane\\_versions\\20260212T093716Z",
-      "version_id": "20260212T093716Z"
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_control_plane\\_versions\\20260213T001112Z",
+      "version_id": "20260213T001112Z"
     },
     "draft": {
-      "hash": "1d2023a9fc3f3cd6cd3df9bce3fb638f161ac4a0db504b4807d911547f072b16",
-      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2 - Copy (3)\\helper_files\\mouse\\_control_plane\\draft.json"
+      "hash": "d44ce6a97eade8b70a7b3e4ec06802e3b5b9e5969031f2bcdd4851759ef52410",
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_control_plane\\draft.json"
     },
     "field_rules": {
       "changed": true,
-      "hash": "431202315137a3f4c7785f27873508e804d9af6302731d3b6d9d83857623e3d7",
-      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2 - Copy (3)\\helper_files\\mouse\\_generated\\field_rules.json"
+      "hash": "3d68b6b20da774f770c4c530f1afebfca6cd900662701c618dc1ceafeae47ab3",
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_generated\\field_rules.json"
     },
     "field_rules_draft": {
-      "hash": "c08581b04b7574b7b61d6b564850848f656f20342e5cd4949a518d11bb3bafbb",
-      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2 - Copy (3)\\helper_files\\mouse\\_control_plane\\field_rules_draft.json"
+      "hash": "59cff50732d21ab605fa747822858dfa435635b4129aebdcc8c8e0ce3718b8da",
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_control_plane\\field_rules_draft.json"
     },
     "field_rules_full": {
-      "hash": "6f5220c15eae587232a6ab45fa785668e5c42d1978fba430578dd30b6e4d9ce6",
-      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2 - Copy (3)\\helper_files\\mouse\\_control_plane\\field_rules.full.json"
+      "hash": "8c5b7247305e33fbc760e7b4da7af44127af3d987ba53a1e25e843a19d58aa50",
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_control_plane\\field_rules.full.json"
     },
     "field_rules_runtime": {
       "bytes": 246284,
-      "hash": "431202315137a3f4c7785f27873508e804d9af6302731d3b6d9d83857623e3d7",
+      "hash": "3d68b6b20da774f770c4c530f1afebfca6cd900662701c618dc1ceafeae47ab3",
       "identical_to_field_rules": true,
-      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2 - Copy (3)\\helper_files\\mouse\\_generated\\field_rules.runtime.json"
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_generated\\field_rules.runtime.json"
     },
     "key_migrations": {
       "hash": "1c06259b779fca416248f078798553fcb9238104a1e22d6eeb8e010e0cf1b9c5",
-      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2 - Copy (3)\\helper_files\\mouse\\_generated\\key_migrations.json"
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_generated\\key_migrations.json"
     },
     "known_values": {
-      "hash": "038b35f6313f285e4b55d50d50f600e7200383145817f8768b751545fc611e35",
-      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2 - Copy (3)\\helper_files\\mouse\\_generated\\known_values.json"
+      "hash": "f447dd70cca5bc7e11495f52dfc1c057f1ce277b4ed261cd565fd474e5f485d4",
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_generated\\known_values.json"
     },
     "ui_field_catalog": {
-      "hash": "6bed368e751e1de5506d47c42c144eab9808292ef5d46965a9af860fcd1a4dff",
-      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2 - Copy (3)\\helper_files\\mouse\\_generated\\ui_field_catalog.json"
+      "hash": "507f4bd2f9c4992df998b1bcfe22bc436b9683abb88b28c9ff839520f5f18bc8",
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_generated\\ui_field_catalog.json"
     },
     "ui_field_catalog_draft": {
-      "hash": "4ccc3a92d7a8b9b2594dbe056fed9cd79d4997b5063443c842a3ff0b8e73df12",
-      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2 - Copy (3)\\helper_files\\mouse\\_control_plane\\ui_field_catalog_draft.json"
+      "hash": "3741f11ef40c3818a104f0bed4045e90be5ee954eb4484f37c068d97c35104bd",
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_control_plane\\ui_field_catalog_draft.json"
     }
   },
   "category": "mouse",
   "compiled": true,
-  "compiled_at": "2026-02-12T09:37:15.231Z",
+  "compiled_at": "2026-02-13T00:11:11.523Z",
   "counts": {
     "component_types": 4,
     "critical": 0,
@@ -60,21 +60,19 @@
   },
   "diff": {
     "changed": true,
-    "current_hash": "431202315137a3f4c7785f27873508e804d9af6302731d3b6d9d83857623e3d7",
+    "current_hash": "3d68b6b20da774f770c4c530f1afebfca6cd900662701c618dc1ceafeae47ab3",
     "fields": {
       "added_count": 0,
       "added_keys": [],
-      "changed_count": 1,
-      "changed_keys": [
-        "acceleration"
-      ],
+      "changed_count": 0,
+      "changed_keys": [],
       "removed_count": 0,
       "removed_keys": []
     },
-    "previous_hash": "edc0e5ef089cf1d6e67a71a3fd83b565ed21414eeab2aba45e8666b2710e42af"
+    "previous_hash": "431202315137a3f4c7785f27873508e804d9af6302731d3b6d9d83857623e3d7"
   },
   "errors": [],
-  "generated_at": "2026-02-12T09:37:15.231Z",
+  "generated_at": "2026-02-13T00:11:11.523Z",
   "source_summary": {
     "component_sources": 4,
     "enum_lists": 15,
@@ -86,6 +84,6 @@
   "warnings": [],
   "workbook_hash": "1038c577075766a29b20229ef8d9631bb4c6283ddc46e85a2ce4cecce703a727",
   "workbook_map_hash": "1e285f6d3228c36aee387a0a911e9a858e5d435ef0a8ed879ab78d6855052b32",
-  "workbook_map_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2 - Copy (3)\\helper_files\\mouse\\_control_plane\\workbook_map.json",
-  "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - 2 - Copy (3)\\helper_files\\mouse\\mouseData.xlsm"
+  "workbook_map_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_control_plane\\workbook_map.json",
+  "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\mouseData.xlsm"
 }

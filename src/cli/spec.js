@@ -26,6 +26,13 @@ import { buildLearningReport } from '../learning/categoryBrain.js';
 import { syncJobsFromActiveFiltering } from '../helperFiles/index.js';
 import { runLlmHealthCheck } from '../llm/healthCheck.js';
 import { verifyGeneratedFieldRules } from '../ingest/fieldRulesVerify.js';
+import {
+  compileRules,
+  fieldReport,
+  initCategory,
+  listFields,
+  validateRules
+} from '../field-rules/compiler.js';
 
 function usage() {
   return [
@@ -38,6 +45,11 @@ function usage() {
     '  run-batch --category <category> [--brand <brand>] [--strategy <explore|exploit|mixed|bandit>] [--local] [--dry-run]',
     '  run-until-complete --s3key <key> [--max-rounds <n>] [--mode aggressive|balanced] [--local]',
     '  category-compile --category <category> [--workbook <path>] [--map <path>] [--local]',
+    '  compile-rules --category <category> [--workbook <path>] [--map <path>] [--dry-run] [--local]',
+    '  validate-rules --category <category> [--local]',
+    '  init-category --category <category> [--template electronics] [--local]',
+    '  list-fields --category <category> [--group <group>] [--required-level <level>] [--local]',
+    '  field-report --category <category> [--format md|json] [--local]',
     '  field-rules-verify --category <category> [--fixture <path>] [--local]',
     '  discover --category <category> [--brand <brand>] [--local]',
     '  ingest-csv --category <category> --path <csv> [--imports-root <path>] [--local]',
@@ -468,6 +480,93 @@ async function commandCategoryCompile(config, _storage, args) {
   });
   return {
     command: 'category-compile',
+    ...result
+  };
+}
+
+async function commandCompileRules(config, _storage, args) {
+  const category = String(args.category || '').trim();
+  if (!category) {
+    throw new Error('compile-rules requires --category <category>');
+  }
+  const workbookPath = String(args.workbook || '').trim();
+  const mapPath = String(args.map || '').trim();
+  const dryRun = asBool(args['dry-run'], false);
+  const result = await compileRules({
+    category,
+    workbookPath,
+    dryRun,
+    config,
+    mapPath: mapPath || null
+  });
+  return {
+    command: 'compile-rules',
+    ...result
+  };
+}
+
+async function commandValidateRules(config, _storage, args) {
+  const category = String(args.category || '').trim();
+  if (!category) {
+    throw new Error('validate-rules requires --category <category>');
+  }
+  const result = await validateRules({
+    category,
+    config
+  });
+  return {
+    command: 'validate-rules',
+    ...result
+  };
+}
+
+async function commandInitCategory(config, _storage, args) {
+  const category = String(args.category || '').trim();
+  if (!category) {
+    throw new Error('init-category requires --category <category>');
+  }
+  const template = String(args.template || 'electronics').trim() || 'electronics';
+  const result = await initCategory({
+    category,
+    template,
+    config
+  });
+  return {
+    command: 'init-category',
+    ...result
+  };
+}
+
+async function commandListFields(config, _storage, args) {
+  const category = String(args.category || '').trim();
+  if (!category) {
+    throw new Error('list-fields requires --category <category>');
+  }
+  const result = await listFields({
+    category,
+    config,
+    group: String(args.group || ''),
+    requiredLevel: String(args['required-level'] || '')
+  });
+  return {
+    command: 'list-fields',
+    ...result
+  };
+}
+
+async function commandFieldReport(config, _storage, args) {
+  const category = String(args.category || '').trim();
+  if (!category) {
+    throw new Error('field-report requires --category <category>');
+  }
+  const format = String(args.format || 'md').trim().toLowerCase();
+  const result = await fieldReport({
+    category,
+    config,
+    format
+  });
+  return {
+    command: 'field-report',
     ...result
   };
 }
@@ -954,6 +1053,16 @@ async function main() {
     output = await commandRunUntilComplete(config, storage, args);
   } else if (command === 'category-compile') {
     output = await commandCategoryCompile(config, storage, args);
+  } else if (command === 'compile-rules') {
+    output = await commandCompileRules(config, storage, args);
+  } else if (command === 'validate-rules') {
+    output = await commandValidateRules(config, storage, args);
+  } else if (command === 'init-category') {
+    output = await commandInitCategory(config, storage, args);
+  } else if (command === 'list-fields') {
+    output = await commandListFields(config, storage, args);
+  } else if (command === 'field-report') {
+    output = await commandFieldReport(config, storage, args);
   } else if (command === 'field-rules-verify') {
     output = await commandFieldRulesVerify(config, storage, args);
   } else if (command === 'run-batch') {

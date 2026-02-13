@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specfactory.local/schemas/known_values_schema.json",
+  "title": "Known Values",
+  "type": "object",
+  "required": [
+    "category"
+  ],
+  "properties": {
+    "category": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "fields": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "enums": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "policy",
+          "values"
+        ],
+        "properties": {
+          "policy": {
+            "type": "string"
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "canonical"
+                  ],
+                  "properties": {
+                    "canonical": {
+                      "type": "string"
+                    },
+                    "aliases": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              ]
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "anyOf": [
+    {
+      "required": [
+        "fields"
+      ]
+    },
+    {
+      "required": [
+        "enums"
+      ]
+    }
+  ],
+  "additionalProperties": true
+}

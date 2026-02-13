@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specfactory.local/schemas/base_component_schema.json",
+  "title": "Component Database",
+  "type": "object",
+  "required": [
+    "category"
+  ],
+  "properties": {
+    "category": {
+      "type": "string",
+      "minLength": 1
+    },
+    "db_name": {
+      "type": "string"
+    },
+    "component_type": {
+      "type": "string"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "entries": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/ComponentEntry"
+      }
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ComponentEntry"
+      }
+    }
+  },
+  "anyOf": [
+    {
+      "required": [
+        "entries"
+      ]
+    },
+    {
+      "required": [
+        "items"
+      ]
+    }
+  ],
+  "additionalProperties": true,
+  "$defs": {
+    "ComponentEntry": {
+      "type": "object",
+      "properties": {
+        "canonical_name": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "brand": {
+          "type": "string"
+        },
+        "maker": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}
