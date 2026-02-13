@@ -1,0 +1,4310 @@
+{
+  "category": "monitor",
+  "fields": {
+    "affiliate_links": {
+      "aliases": [
+        "Affiliate Links",
+        "affiliate_links"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 1,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B26",
+          "row": 26,
+          "sample_values": [
+            "Affiliate Links",
+            "string",
+            "list",
+            "commerce",
+            "sometimes",
+            "easy",
+            "3",
+            "1",
+            "not_found_after_search",
+            "Starter commerce field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "affiliate_links",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "sometimes",
+        "block_publish_when_unk": false,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": false,
+        "required_level": "expected"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "manual",
+          "spec",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Affiliate Links"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "general",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "affiliate_links",
+        "order": 25,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "base_model": {
+      "aliases": [
+        "Base Model",
+        "base_model"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 2,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B5",
+          "row": 5,
+          "sample_values": [
+            "Base Model",
+            "string",
+            "scalar",
+            "expected",
+            "expected",
+            "easy",
+            "3",
+            "1",
+            "not_found_after_search",
+            "Starter identity field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "base_model",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "expected",
+        "block_publish_when_unk": true,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": true,
+        "required_level": "identity"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "spec",
+          "manual",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Base Model"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "general",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "base_model",
+        "order": 4,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "brand": {
+      "aliases": [
+        "brand"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 2,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B2",
+          "row": 2,
+          "sample_values": [
+            "Brand",
+            "string",
+            "scalar",
+            "required",
+            "expected",
+            "easy",
+            "3",
+            "1",
+            "not_found_after_search",
+            "Starter identity field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "brand",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "expected",
+        "block_publish_when_unk": true,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": true,
+        "required_level": "identity"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "spec",
+          "manual",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Brand"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "general",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "brand",
+        "order": 1,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "cable_length": {
+      "aliases": [
+        "Cable Length",
+        "cable_length"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unit": "mm",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 1,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B19",
+          "row": 19,
+          "sample_values": [
+            "Cable Length",
+            "string",
+            "scalar",
+            "expected",
+            "expected",
+            "easy",
+            "3",
+            "1",
+            "not_found_after_search",
+            "Starter connectivity field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "cable_length",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "sometimes",
+        "block_publish_when_unk": false,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": false,
+        "required_level": "expected"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "manual",
+          "spec",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Cable Length"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "dimensions",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "cable_length",
+        "order": 18,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": "mm",
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "cable_type": {
+      "aliases": [
+        "Cable Type",
+        "cable_type"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 1,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B18",
+          "row": 18,
+          "sample_values": [
+            "Cable Type",
+            "string",
+            "scalar",
+            "expected",
+            "expected",
+            "easy",
+            "3",
+            "1",
+            "not_found_after_search",
+            "Starter connectivity field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "cable_type",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "sometimes",
+        "block_publish_when_unk": false,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": false,
+        "required_level": "expected"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "manual",
+          "spec",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Cable Type"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "general",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "cable_type",
+        "order": 17,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "category": {
+      "aliases": [
+        "category"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 2,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B9",
+          "row": 9,
+          "sample_values": [
+            "Category",
+            "string",
+            "scalar",
+            "required",
+            "expected",
+            "easy",
+            "3",
+            "1",
+            "not_found_after_search",
+            "Starter identity field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "category",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "expected",
+        "block_publish_when_unk": true,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": true,
+        "required_level": "identity"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "spec",
+          "manual",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Category"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "general",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "category",
+        "order": 8,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "color": {
+      "aliases": [
+        "color"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "list_rules": {
+          "dedupe": true,
+          "max_items": 100,
+          "min_items": 0,
+          "sort": "none"
+        },
+        "shape": "list",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 1,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B15",
+          "row": 15,
+          "sample_values": [
+            "Color",
+            "string",
+            "scalar",
+            "expected",
+            "expected",
+            "easy",
+            "3",
+            "1",
+            "not_found_after_search",
+            "Starter physical field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "color",
+      "parse": {
+        "delimiters": [
+          ",",
+          "/",
+          "|",
+          ";"
+        ],
+        "template": "list_of_tokens_delimited"
+      },
+      "priority": {
+        "availability": "sometimes",
+        "block_publish_when_unk": false,
+        "difficulty": "medium",
+        "effort": 6,
+        "publish_gate": false,
+        "required_level": "expected"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "manual",
+          "spec",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Color"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "appearance",
+        "guidance_md": null,
+        "input_control": "list_editor",
+        "label": "color",
+        "order": 14,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "list"
+    },
+    "connection": {
+      "aliases": [
+        "connection"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "list_rules": {
+          "dedupe": true,
+          "max_items": 100,
+          "min_items": 0,
+          "sort": "none"
+        },
+        "shape": "list",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 2,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B16",
+          "row": 16,
+          "sample_values": [
+            "Connection",
+            "string",
+            "scalar",
+            "expected",
+            "expected",
+            "easy",
+            "3",
+            "1",
+            "not_found_after_search",
+            "Starter connectivity field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "connection",
+      "parse": {
+        "template": "mode_tagged_list"
+      },
+      "priority": {
+        "availability": "expected",
+        "block_publish_when_unk": true,
+        "difficulty": "medium",
+        "effort": 6,
+        "publish_gate": true,
+        "required_level": "required"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "spec",
+          "manual",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Connection"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "connectivity",
+        "guidance_md": null,
+        "input_control": "list_editor",
+        "label": "connection",
+        "order": 15,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "list"
+    },
+    "cons": {
+      "aliases": [
+        "cons"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 1,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B22",
+          "row": 22,
+          "sample_values": [
+            "Cons",
+            "string",
+            "list",
+            "editorial",
+            "editorial_only",
+            "easy",
+            "3",
+            "1",
+            "editorial_not_generated",
+            "Starter editorial field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "cons",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "sometimes",
+        "block_publish_when_unk": false,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": false,
+        "required_level": "expected"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "manual",
+          "spec",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Cons"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "general",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "cons",
+        "order": 21,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "feature_image": {
+      "aliases": [
+        "Feature Image",
+        "feature_image"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 1,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B29",
+          "row": 29,
+          "sample_values": [
+            "Feature Image",
+            "string",
+            "scalar",
+            "optional",
+            "sometimes",
+            "easy",
+            "3",
+            "1",
+            "not_found_after_search",
+            "Starter media field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "feature_image",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "sometimes",
+        "block_publish_when_unk": false,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": false,
+        "required_level": "expected"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "manual",
+          "spec",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Feature Image"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "general",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "feature_image",
+        "order": 28,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "gallery_images": {
+      "aliases": [
+        "Gallery Images",
+        "gallery_images"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 1,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B30",
+          "row": 30,
+          "sample_values": [
+            "Gallery Images",
+            "string",
+            "list",
+            "optional",
+            "sometimes",
+            "easy",
+            "3",
+            "1",
+            "not_found_after_search",
+            "Starter media field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "gallery_images",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "sometimes",
+        "block_publish_when_unk": false,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": false,
+        "required_level": "expected"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "manual",
+          "spec",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Gallery Images"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "general",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "gallery_images",
+        "order": 29,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "gtin": {
+      "aliases": [
+        "gtin"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 2,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B8",
+          "row": 8,
+          "sample_values": [
+            "Gtin",
+            "string",
+            "scalar",
+            "expected",
+            "expected",
+            "easy",
+            "3",
+            "1",
+            "not_found_after_search",
+            "Starter identity field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "gtin",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "expected",
+        "block_publish_when_unk": true,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": true,
+        "required_level": "identity"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "spec",
+          "manual",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Gtin"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "general",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "gtin",
+        "order": 7,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "height": {
+      "aliases": [
+        "height"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unit": "mm",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 2,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B13",
+          "row": 13,
+          "sample_values": [
+            "Height",
+            "string",
+            "scalar",
+            "expected",
+            "expected",
+            "easy",
+            "3",
+            "1",
+            "not_found_after_search",
+            "Starter physical field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "height",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "expected",
+        "block_publish_when_unk": true,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": true,
+        "required_level": "required"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "spec",
+          "manual",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Height"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "dimensions",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "height",
+        "order": 12,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": "mm",
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "images": {
+      "aliases": [
+        "images"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 1,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B27",
+          "row": 27,
+          "sample_values": [
+            "Images",
+            "string",
+            "list",
+            "commerce",
+            "sometimes",
+            "easy",
+            "3",
+            "1",
+            "not_found_after_search",
+            "Starter commerce field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "images",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "sometimes",
+        "block_publish_when_unk": false,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": false,
+        "required_level": "expected"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "manual",
+          "spec",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Images"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "general",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "images",
+        "order": 26,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "key_takeaway": {
+      "aliases": [
+        "Key Takeaway",
+        "key_takeaway"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 1,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B24",
+          "row": 24,
+          "sample_values": [
+            "Key Takeaway",
+            "string",
+            "scalar",
+            "editorial",
+            "editorial_only",
+            "easy",
+            "3",
+            "1",
+            "editorial_not_generated",
+            "Starter editorial field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "key_takeaway",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "sometimes",
+        "block_publish_when_unk": false,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": false,
+        "required_level": "expected"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "manual",
+          "spec",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Key Takeaway"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "general",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "key_takeaway",
+        "order": 23,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "length": {
+      "aliases": [
+        "length"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unit": "mm",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 1,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B11",
+          "row": 11,
+          "sample_values": [
+            "Length",
+            "string",
+            "scalar",
+            "expected",
+            "expected",
+            "easy",
+            "3",
+            "1",
+            "not_found_after_search",
+            "Starter physical field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "length",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "sometimes",
+        "block_publish_when_unk": false,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": false,
+        "required_level": "expected"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "manual",
+          "spec",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Length"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "dimensions",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "length",
+        "order": 10,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": "mm",
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "material": {
+      "aliases": [
+        "material"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 1,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B14",
+          "row": 14,
+          "sample_values": [
+            "Material",
+            "string",
+            "scalar",
+            "expected",
+            "expected",
+            "easy",
+            "3",
+            "1",
+            "not_found_after_search",
+            "Starter physical field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "material",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "sometimes",
+        "block_publish_when_unk": false,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": false,
+        "required_level": "expected"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "manual",
+          "spec",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Material"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "general",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "material",
+        "order": 13,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "model": {
+      "aliases": [
+        "model"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 2,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B3",
+          "row": 3,
+          "sample_values": [
+            "Model",
+            "string",
+            "scalar",
+            "required",
+            "expected",
+            "easy",
+            "3",
+            "1",
+            "not_found_after_search",
+            "Starter identity field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "model",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "expected",
+        "block_publish_when_unk": true,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": true,
+        "required_level": "identity"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "spec",
+          "manual",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Model"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "general",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "model",
+        "order": 2,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "mpn": {
+      "aliases": [
+        "mpn"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 2,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B7",
+          "row": 7,
+          "sample_values": [
+            "Mpn",
+            "string",
+            "scalar",
+            "expected",
+            "expected",
+            "easy",
+            "3",
+            "1",
+            "not_found_after_search",
+            "Starter identity field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "mpn",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "expected",
+        "block_publish_when_unk": true,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": true,
+        "required_level": "identity"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "spec",
+          "manual",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Mpn"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "general",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "mpn",
+        "order": 6,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "overall_score": {
+      "aliases": [
+        "Overall Score",
+        "overall_score"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 1,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B20",
+          "row": 20,
+          "sample_values": [
+            "Overall Score",
+            "number",
+            "scalar",
+            "editorial",
+            "editorial_only",
+            "easy",
+            "4",
+            "1",
+            "editorial_not_generated",
+            "Starter editorial field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "overall_score",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "sometimes",
+        "block_publish_when_unk": false,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": false,
+        "required_level": "expected"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "manual",
+          "spec",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Overall Score"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "general",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "overall_score",
+        "order": 19,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "price_range": {
+      "aliases": [
+        "Price Range",
+        "price_range"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unit": "usd",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 1,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B25",
+          "row": 25,
+          "sample_values": [
+            "Price Range",
+            "string",
+            "scalar",
+            "commerce",
+            "sometimes",
+            "easy",
+            "3",
+            "1",
+            "not_found_after_search",
+            "Starter commerce field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "price_range",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "sometimes",
+        "block_publish_when_unk": false,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": false,
+        "required_level": "expected"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "manual",
+          "spec",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Price Range"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "general",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "price_range",
+        "order": 24,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": "usd",
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "pros": {
+      "aliases": [
+        "pros"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 1,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B21",
+          "row": 21,
+          "sample_values": [
+            "Pros",
+            "string",
+            "list",
+            "editorial",
+            "editorial_only",
+            "easy",
+            "3",
+            "1",
+            "editorial_not_generated",
+            "Starter editorial field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "pros",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "sometimes",
+        "block_publish_when_unk": false,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": false,
+        "required_level": "expected"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "manual",
+          "spec",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Pros"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "general",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "pros",
+        "order": 20,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "sku": {
+      "aliases": [
+        "sku"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 2,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B6",
+          "row": 6,
+          "sample_values": [
+            "Sku",
+            "string",
+            "scalar",
+            "expected",
+            "expected",
+            "easy",
+            "3",
+            "1",
+            "not_found_after_search",
+            "Starter identity field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "sku",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "expected",
+        "block_publish_when_unk": true,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": true,
+        "required_level": "identity"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "spec",
+          "manual",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Sku"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "general",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "sku",
+        "order": 5,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "variant": {
+      "aliases": [
+        "variant"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 2,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B4",
+          "row": 4,
+          "sample_values": [
+            "Variant",
+            "string",
+            "scalar",
+            "expected",
+            "expected",
+            "easy",
+            "3",
+            "1",
+            "not_found_after_search",
+            "Starter identity field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "variant",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "expected",
+        "block_publish_when_unk": true,
+        "difficulty": "hard",
+        "effort": 9,
+        "publish_gate": true,
+        "required_level": "identity"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "spec",
+          "manual",
+          "pdf",
+          "support",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Variant"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "general",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "variant",
+        "order": 3,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "verdict": {
+      "aliases": [
+        "verdict"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 1,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B23",
+          "row": 23,
+          "sample_values": [
+            "Verdict",
+            "string",
+            "scalar",
+            "editorial",
+            "editorial_only",
+            "easy",
+            "3",
+            "1",
+            "editorial_not_generated",
+            "Starter editorial field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "verdict",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "sometimes",
+        "block_publish_when_unk": false,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": false,
+        "required_level": "expected"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "manual",
+          "spec",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Verdict"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "general",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "verdict",
+        "order": 22,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "weight": {
+      "aliases": [
+        "weight"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unit": "g",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 2,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B10",
+          "row": 10,
+          "sample_values": [
+            "Weight",
+            "string",
+            "scalar",
+            "expected",
+            "expected",
+            "easy",
+            "3",
+            "1",
+            "not_found_after_search",
+            "Starter physical field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "weight",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "expected",
+        "block_publish_when_unk": true,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": true,
+        "required_level": "required"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "spec",
+          "manual",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Weight"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "dimensions",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "weight",
+        "order": 9,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": "g",
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "width": {
+      "aliases": [
+        "width"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unit": "mm",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 2,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B12",
+          "row": 12,
+          "sample_values": [
+            "Width",
+            "string",
+            "scalar",
+            "expected",
+            "expected",
+            "easy",
+            "3",
+            "1",
+            "not_found_after_search",
+            "Starter physical field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "width",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "expected",
+        "block_publish_when_unk": true,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": true,
+        "required_level": "required"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "spec",
+          "manual",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Width"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "dimensions",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "width",
+        "order": 11,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": "mm",
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "wireless_technology": {
+      "aliases": [
+        "Wireless Technology",
+        "wireless_technology"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 1,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B17",
+          "row": 17,
+          "sample_values": [
+            "Wireless Technology",
+            "string",
+            "scalar",
+            "expected",
+            "expected",
+            "easy",
+            "3",
+            "1",
+            "not_found_after_search",
+            "Starter connectivity field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "wireless_technology",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "sometimes",
+        "block_publish_when_unk": false,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": false,
+        "required_level": "expected"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "manual",
+          "spec",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Wireless Technology"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "connectivity",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "wireless_technology",
+        "order": 16,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    },
+    "youtube_url": {
+      "aliases": [
+        "Youtube Url",
+        "youtube_url"
+      ],
+      "canonical_key": null,
+      "component": null,
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "enum": {
+        "match": {
+          "strategy": "exact"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 1,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B28",
+          "row": 28,
+          "sample_values": [
+            "Youtube Url",
+            "url",
+            "scalar",
+            "optional",
+            "sometimes",
+            "easy",
+            "3",
+            "1",
+            "not_found_after_search",
+            "Starter media field"
+          ],
+          "sheet": "field_catalog"
+        }
+      },
+      "key": "youtube_url",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "sometimes",
+        "block_publish_when_unk": false,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": false,
+        "required_level": "expected"
+      },
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "manual",
+          "spec",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Youtube Url"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "general",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "youtube_url",
+        "order": 27,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
+    }
+  },
+  "generated_at": "2026-02-13T06:42:18.218Z",
+  "selected_keys": [
+    "affiliate_links",
+    "base_model",
+    "brand",
+    "cable_length",
+    "cable_type",
+    "category",
+    "color",
+    "connection",
+    "cons",
+    "feature_image",
+    "gallery_images",
+    "gtin",
+    "height",
+    "images",
+    "key_takeaway",
+    "length",
+    "material",
+    "model",
+    "mpn",
+    "overall_score",
+    "price_range",
+    "pros",
+    "sku",
+    "variant",
+    "verdict",
+    "weight",
+    "width",
+    "wireless_technology",
+    "youtube_url"
+  ],
+  "ui_field_catalog": [
+    {
+      "aliases": [
+        "brand",
+        "Brand"
+      ],
+      "array_handling": "none",
+      "canonical_key": "brand",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Brand",
+        "string",
+        "scalar",
+        "required",
+        "expected",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "general",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "brand",
+      "label": "brand",
+      "order": 1,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": null,
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "model",
+        "Model"
+      ],
+      "array_handling": "none",
+      "canonical_key": "model",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Model",
+        "string",
+        "scalar",
+        "required",
+        "expected",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "general",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "model",
+      "label": "model",
+      "order": 2,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": null,
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "variant",
+        "Variant"
+      ],
+      "array_handling": "none",
+      "canonical_key": "variant",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Variant",
+        "string",
+        "scalar",
+        "expected",
+        "expected",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "general",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "variant",
+      "label": "variant",
+      "order": 3,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": null,
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "Base Model",
+        "base_model"
+      ],
+      "array_handling": "none",
+      "canonical_key": "base_model",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Base Model",
+        "string",
+        "scalar",
+        "expected",
+        "expected",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "general",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "base_model",
+      "label": "base_model",
+      "order": 4,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": null,
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "sku",
+        "Sku"
+      ],
+      "array_handling": "none",
+      "canonical_key": "sku",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Sku",
+        "string",
+        "scalar",
+        "expected",
+        "expected",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "general",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "sku",
+      "label": "sku",
+      "order": 5,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": null,
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "mpn",
+        "Mpn"
+      ],
+      "array_handling": "none",
+      "canonical_key": "mpn",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Mpn",
+        "string",
+        "scalar",
+        "expected",
+        "expected",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "general",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "mpn",
+      "label": "mpn",
+      "order": 6,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": null,
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "gtin",
+        "Gtin"
+      ],
+      "array_handling": "none",
+      "canonical_key": "gtin",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Gtin",
+        "string",
+        "scalar",
+        "expected",
+        "expected",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "general",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "gtin",
+      "label": "gtin",
+      "order": 7,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": null,
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "category",
+        "Category"
+      ],
+      "array_handling": "none",
+      "canonical_key": "category",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Category",
+        "string",
+        "scalar",
+        "required",
+        "expected",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "general",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "category",
+      "label": "category",
+      "order": 8,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": null,
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "weight",
+        "Weight"
+      ],
+      "array_handling": "none",
+      "canonical_key": "weight",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Weight",
+        "string",
+        "scalar",
+        "expected",
+        "expected",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "dimensions",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "weight",
+      "label": "weight",
+      "order": 9,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": "g",
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "length",
+        "Length"
+      ],
+      "array_handling": "none",
+      "canonical_key": "length",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Length",
+        "string",
+        "scalar",
+        "expected",
+        "expected",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "dimensions",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "length",
+      "label": "length",
+      "order": 10,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": "mm",
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "width",
+        "Width"
+      ],
+      "array_handling": "none",
+      "canonical_key": "width",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Width",
+        "string",
+        "scalar",
+        "expected",
+        "expected",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "dimensions",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "width",
+      "label": "width",
+      "order": 11,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": "mm",
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "height",
+        "Height"
+      ],
+      "array_handling": "none",
+      "canonical_key": "height",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Height",
+        "string",
+        "scalar",
+        "expected",
+        "expected",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "dimensions",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "height",
+      "label": "height",
+      "order": 12,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": "mm",
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "material",
+        "Material"
+      ],
+      "array_handling": "none",
+      "canonical_key": "material",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Material",
+        "string",
+        "scalar",
+        "expected",
+        "expected",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "general",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "material",
+      "label": "material",
+      "order": 13,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": null,
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "color",
+        "Color"
+      ],
+      "array_handling": "none",
+      "canonical_key": "color",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Color",
+        "string",
+        "scalar",
+        "expected",
+        "expected",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "appearance",
+      "guidance_md": null,
+      "input_control": "list_editor",
+      "key": "color",
+      "label": "color",
+      "order": 14,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": null,
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "connection",
+        "Connection"
+      ],
+      "array_handling": "none",
+      "canonical_key": "connection",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Connection",
+        "string",
+        "scalar",
+        "expected",
+        "expected",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "connectivity",
+      "guidance_md": null,
+      "input_control": "list_editor",
+      "key": "connection",
+      "label": "connection",
+      "order": 15,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": null,
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "Wireless Technology",
+        "wireless_technology"
+      ],
+      "array_handling": "none",
+      "canonical_key": "wireless_technology",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Wireless Technology",
+        "string",
+        "scalar",
+        "expected",
+        "expected",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "connectivity",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "wireless_technology",
+      "label": "wireless_technology",
+      "order": 16,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": null,
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "Cable Type",
+        "cable_type"
+      ],
+      "array_handling": "none",
+      "canonical_key": "cable_type",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Cable Type",
+        "string",
+        "scalar",
+        "expected",
+        "expected",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "general",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "cable_type",
+      "label": "cable_type",
+      "order": 17,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": null,
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "Cable Length",
+        "cable_length"
+      ],
+      "array_handling": "none",
+      "canonical_key": "cable_length",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Cable Length",
+        "string",
+        "scalar",
+        "expected",
+        "expected",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "dimensions",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "cable_length",
+      "label": "cable_length",
+      "order": 18,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": "mm",
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "Overall Score",
+        "overall_score"
+      ],
+      "array_handling": "none",
+      "canonical_key": "overall_score",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Overall Score",
+        "number",
+        "scalar",
+        "editorial",
+        "editorial_only",
+        "easy",
+        "4",
+        "1"
+      ],
+      "group": "general",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "overall_score",
+      "label": "overall_score",
+      "order": 19,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": null,
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "pros",
+        "Pros"
+      ],
+      "array_handling": "none",
+      "canonical_key": "pros",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Pros",
+        "string",
+        "list",
+        "editorial",
+        "editorial_only",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "general",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "pros",
+      "label": "pros",
+      "order": 20,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": null,
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "cons",
+        "Cons"
+      ],
+      "array_handling": "none",
+      "canonical_key": "cons",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Cons",
+        "string",
+        "list",
+        "editorial",
+        "editorial_only",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "general",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "cons",
+      "label": "cons",
+      "order": 21,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": null,
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "verdict",
+        "Verdict"
+      ],
+      "array_handling": "none",
+      "canonical_key": "verdict",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Verdict",
+        "string",
+        "scalar",
+        "editorial",
+        "editorial_only",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "general",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "verdict",
+      "label": "verdict",
+      "order": 22,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": null,
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "Key Takeaway",
+        "key_takeaway"
+      ],
+      "array_handling": "none",
+      "canonical_key": "key_takeaway",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Key Takeaway",
+        "string",
+        "scalar",
+        "editorial",
+        "editorial_only",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "general",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "key_takeaway",
+      "label": "key_takeaway",
+      "order": 23,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": null,
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "Price Range",
+        "price_range"
+      ],
+      "array_handling": "none",
+      "canonical_key": "price_range",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Price Range",
+        "string",
+        "scalar",
+        "commerce",
+        "sometimes",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "general",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "price_range",
+      "label": "price_range",
+      "order": 24,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": "usd",
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "Affiliate Links",
+        "affiliate_links"
+      ],
+      "array_handling": "none",
+      "canonical_key": "affiliate_links",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Affiliate Links",
+        "string",
+        "list",
+        "commerce",
+        "sometimes",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "general",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "affiliate_links",
+      "label": "affiliate_links",
+      "order": 25,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": null,
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "images",
+        "Images"
+      ],
+      "array_handling": "none",
+      "canonical_key": "images",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Images",
+        "string",
+        "list",
+        "commerce",
+        "sometimes",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "general",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "images",
+      "label": "images",
+      "order": 26,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": null,
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "Youtube Url",
+        "youtube_url"
+      ],
+      "array_handling": "none",
+      "canonical_key": "youtube_url",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Youtube Url",
+        "url",
+        "scalar",
+        "optional",
+        "sometimes",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "general",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "youtube_url",
+      "label": "youtube_url",
+      "order": 27,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": null,
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "Feature Image",
+        "feature_image"
+      ],
+      "array_handling": "none",
+      "canonical_key": "feature_image",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Feature Image",
+        "string",
+        "scalar",
+        "optional",
+        "sometimes",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "general",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "feature_image",
+      "label": "feature_image",
+      "order": 28,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": null,
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    },
+    {
+      "aliases": [
+        "Gallery Images",
+        "gallery_images"
+      ],
+      "array_handling": "none",
+      "canonical_key": "gallery_images",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [
+        "Gallery Images",
+        "string",
+        "list",
+        "optional",
+        "sometimes",
+        "easy",
+        "3",
+        "1"
+      ],
+      "group": "general",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "gallery_images",
+      "label": "gallery_images",
+      "order": 29,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": null,
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
+    }
+  ],
+  "version": 1,
+  "workbook_map_hash": "c4ac4f6267c02b9c9ff1edd69e6b38aecb99ac8d37ec152d93ae4acc4835397f"
+}

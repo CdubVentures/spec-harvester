@@ -1,0 +1,49 @@
+{
+  "algorithm": "sha256",
+  "artifact_count": 8,
+  "artifacts": [
+    {
+      "bytes": 471,
+      "path": "cross_validation_rules.json",
+      "sha256": "9847a8108e323040a4574510f608d225e028dde32c9a3d0377fd295b406c2162"
+    },
+    {
+      "bytes": 1871,
+      "path": "field_groups.json",
+      "sha256": "5590d4406b0e7cdde8accd37eeac50abd4a0b3abb074080217eea14190b26e75"
+    },
+    {
+      "bytes": 94884,
+      "path": "field_rules.json",
+      "sha256": "eeeadebbca7589c4a4cd565794566c2222660a69830a2c2de27a104ea7caba80"
+    },
+    {
+      "bytes": 94884,
+      "path": "field_rules.runtime.json",
+      "sha256": "eeeadebbca7589c4a4cd565794566c2222660a69830a2c2de27a104ea7caba80"
+    },
+    {
+      "bytes": 201,
+      "path": "key_migrations.json",
+      "sha256": "f586186d31cee70ccb52f334fc38e4b83e4768abed23aab8b1e711cd73aeecf5"
+    },
+    {
+      "bytes": 106,
+      "path": "known_values.json",
+      "sha256": "3547a1a48d13af83d4a8328baa6f02228d6d2931b2c7f9d78985378ec788000f"
+    },
+    {
+      "bytes": 7972,
+      "path": "parse_templates.json",
+      "sha256": "61c9102336cdf8fef2b5ac3844650d5d8cc83b200c99fc7ab519294f6c3b762c"
+    },
+    {
+      "bytes": 27915,
+      "path": "ui_field_catalog.json",
+      "sha256": "ccf4060254e6c529b14be91577522b75b830fc433254ea964b14b7df4d8973d5"
+    }
+  ],
+  "category": "monitor",
+  "generated_at": "2026-02-13T06:42:18.265Z",
+  "version": 1
+}

@@ -86,6 +86,101 @@ function buildAvailabilityQueries({
   return [...new Set(queries.map((query) => query.trim()).filter(Boolean))].slice(0, 24);
 }
 
+function normalizeFieldContractToken(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^fields\./, '')
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function readRuleToken(rule = {}, key) {
+  const direct = rule?.[key];
+  if (direct !== undefined && direct !== null && String(direct).trim() !== '') {
+    return direct;
+  }
+  const nested = rule?.priority?.[key];
+  return nested !== undefined ? nested : '';
+}
+
+function inferRuleEffort(rule = {}) {
+  const effortRaw = Number.parseFloat(String(readRuleToken(rule, 'effort') || ''));
+  if (Number.isFinite(effortRaw) && effortRaw > 0) {
+    return effortRaw;
+  }
+  const difficulty = String(readRuleToken(rule, 'difficulty') || '').trim().toLowerCase();
+  if (difficulty === 'hard') {
+    return 8;
+  }
+  if (difficulty === 'medium') {
+    return 5;
+  }
+  if (difficulty === 'easy') {
+    return 2;
+  }
+  return 3;
+}
+
+export function buildContractEffortPlan({
+  missingRequiredFields = [],
+  missingCriticalFields = [],
+  categoryConfig = {}
+} = {}) {
+  const ruleMap = categoryConfig?.fieldRules?.fields || {};
+  const fieldOrder = categoryConfig?.fieldOrder || [];
+  const requiredFields = normalizeFieldList(toArray(missingRequiredFields), { fieldOrder })
+    .map((field) => normalizeFieldContractToken(field))
+    .filter(Boolean);
+  const criticalSet = new Set(
+    normalizeFieldList(toArray(missingCriticalFields), { fieldOrder })
+      .map((field) => normalizeFieldContractToken(field))
+      .filter(Boolean)
+  );
+  const dedupedRequired = [...new Set(requiredFields)];
+
+  const fieldPlans = [];
+  let totalEffort = 0;
+  let hardMissingCount = 0;
+  let expectedRequiredCount = 0;
+
+  for (const field of dedupedRequired) {
+    const rule = ruleMap[field] || ruleMap[`fields.${field}`] || {};
+    const requiredLevel = String(readRuleToken(rule, 'required_level') || '').trim().toLowerCase();
+    const availability = String(readRuleToken(rule, 'availability') || '').trim().toLowerCase();
+    const difficulty = String(readRuleToken(rule, 'difficulty') || '').trim().toLowerCase();
+    const effort = inferRuleEffort(rule);
+    totalEffort += effort;
+
+    if (difficulty === 'hard') {
+      hardMissingCount += 1;
+    }
+    if (availability === 'expected') {
+      expectedRequiredCount += 1;
+    }
+    if (requiredLevel === 'critical') {
+      criticalSet.add(field);
+    }
+
+    fieldPlans.push({
+      field,
+      required_level: requiredLevel || null,
+      availability: availability || null,
+      difficulty: difficulty || null,
+      effort
+    });
+  }
+
+  return {
+    total_effort: Math.round(totalEffort),
+    required_missing_count: dedupedRequired.length,
+    critical_missing_count: criticalSet.size,
+    hard_missing_count: hardMissingCount,
+    expected_required_count: expectedRequiredCount,
+    fields: fieldPlans
+  };
+}
+
 export function selectRoundSearchProvider({
   baseConfig = {},
   discoveryEnabled = true,
@@ -225,6 +320,7 @@ export function buildRoundConfig(baseConfig, {
   round,
   mode,
   availabilityEffort = {},
+  contractEffort = {},
   missingRequiredCount,
   missingExpectedCount,
   requiredSearchIteration
@@ -276,6 +372,20 @@ export function buildRoundConfig(baseConfig, {
     next.discoveryMaxQueries = Math.min(next.discoveryMaxQueries || 8, 6);
     next.maxUrlsPerProduct = Math.min(next.maxUrlsPerProduct || 60, 70);
     next.maxCandidateUrls = Math.min(next.maxCandidateUrls || 90, 90);
+  }
+
+  const contractTotalEffort = Math.max(0, toInt(contractEffort.total_effort, 0));
+  const hardMissingCount = Math.max(0, toInt(contractEffort.hard_missing_count, 0));
+  const contractCriticalMissingCount = Math.max(0, toInt(contractEffort.critical_missing_count, 0));
+  const expectedRequiredCount = Math.max(0, toInt(contractEffort.expected_required_count, 0));
+  if (round > 0 && contractTotalEffort > 0) {
+    const effortTier = Math.min(4, Math.floor(contractTotalEffort / 8));
+    const queryBoost = effortTier + Math.min(6, expectedRequiredCount);
+    const urlBoost = (effortTier * 20) + (hardMissingCount * 14) + (contractCriticalMissingCount * 10);
+    const candidateBoost = (effortTier * 30) + (hardMissingCount * 18) + (contractCriticalMissingCount * 12);
+    next.discoveryMaxQueries = Math.max(next.discoveryMaxQueries || 0, (next.discoveryMaxQueries || 0) + queryBoost);
+    next.maxUrlsPerProduct = Math.max(next.maxUrlsPerProduct || 0, (next.maxUrlsPerProduct || 0) + urlBoost);
+    next.maxCandidateUrls = Math.max(next.maxCandidateUrls || 0, (next.maxCandidateUrls || 0) + candidateBoost);
   }
 
   if (round === 0) {
@@ -441,7 +551,7 @@ export async function runUntilComplete({
   const categoryBrain = await loadCategoryBrain({ storage, category });
   const fieldAvailabilityArtifact = categoryBrain?.artifacts?.fieldAvailability?.value || {};
   const normalizedModeValue = normalizedMode(mode, config.accuracyMode || 'balanced');
-  const roundsLimit = normalizedRoundCount(maxRounds, normalizedModeValue === 'aggressive' ? 8 : 4);
+  let roundsLimit = normalizedRoundCount(maxRounds, normalizedModeValue === 'aggressive' ? 8 : 4);
   const rounds = [];
 
   await upsertQueueProduct({
@@ -467,6 +577,9 @@ export async function runUntilComplete({
   let noNewUrlsRounds = 0;
   let noNewFieldsRounds = 0;
   let lowQualityRounds = 0;
+  let requiredSearchIteration = 0;
+  let expectedRetryOverrideCount = 0;
+  let forcedExpectedRetryFields = [];
 
   for (let round = 0; round < roundsLimit; round += 1) {
     const roundHint = makeRoundHint(round);
@@ -497,6 +610,21 @@ export async function runUntilComplete({
       missingFields: missingRequiredForPlanning,
       fieldOrder: categoryConfig.fieldOrder || []
     });
+    const contractEffort = buildContractEffortPlan({
+      missingRequiredFields: missingRequiredForPlanning,
+      missingCriticalFields: missingCriticalForPlanning,
+      categoryConfig
+    });
+    const missingRequiredCount = missingRequiredForPlanning.length;
+    const missingExpectedCount = Math.max(
+      0,
+      toInt(availabilityEffort.expected_count, 0)
+    );
+    if (round > 0 && missingRequiredCount > 0) {
+      requiredSearchIteration += 1;
+    } else if (missingRequiredCount === 0) {
+      requiredSearchIteration = 0;
+    }
     const extraQueries = buildAvailabilityQueries({
       job,
       expectedFields: availabilityEffort.missing_expected_fields || [],
@@ -507,12 +635,20 @@ export async function runUntilComplete({
     const roundConfig = buildRoundConfig(config, {
       round,
       mode: normalizedModeValue,
-      availabilityEffort
+      availabilityEffort,
+      contractEffort,
+      missingRequiredCount,
+      missingExpectedCount,
+      requiredSearchIteration
     });
-    const llmTargetFields = makeLlmTargetFields({
+    let llmTargetFields = makeLlmTargetFields({
       previousSummary,
       categoryConfig
     });
+    if (forcedExpectedRetryFields.length > 0) {
+      llmTargetFields = [...new Set([...llmTargetFields, ...forcedExpectedRetryFields])];
+      forcedExpectedRetryFields = [];
+    }
     const jobOverride = buildRoundRequirements(job, llmTargetFields, previousSummary);
 
     const roundResult = await runProduct({
@@ -531,6 +667,7 @@ export async function runUntilComplete({
         missing_required_fields: missingRequiredForPlanning,
         missing_critical_fields: missingCriticalForPlanning,
         availability: availabilityEffort,
+        contract_effort: contractEffort,
         extra_queries: extraQueries,
         llm_target_fields: llmTargetFields
       }
@@ -596,6 +733,7 @@ export async function runUntilComplete({
       confidence: progress.confidence,
       llm_budget_blocked_reason: budgetBlockedReason || null,
       availability_effort: availabilityEffort,
+      contract_effort: contractEffort,
       improved: delta.improved,
       improvement_reasons: delta.reasons
     });
@@ -613,6 +751,19 @@ export async function runUntilComplete({
       break;
     }
 
+    const requiredSearchStop = evaluateRequiredSearchExhaustion({
+      round,
+      missingRequiredCount: progress.missingRequiredCount,
+      noNewUrlsRounds,
+      noNewFieldsRounds,
+      threshold: Math.max(1, toInt(config.requiredSearchExhaustionThreshold, 2))
+    });
+    if (requiredSearchStop.stop) {
+      exhausted = true;
+      stopReason = requiredSearchStop.reason;
+      break;
+    }
+
     const stopDecision = evaluateSearchLoopStop({
       noNewUrlsRounds,
       noNewFieldsRounds,
@@ -624,6 +775,28 @@ export async function runUntilComplete({
 
     const noProgressLimit = (availabilityEffort.expected_count || 0) > 0 ? 3 : 2;
     if (stopDecision.stop || noProgressStreak >= noProgressLimit) {
+      const expectedRetryDecision = shouldForceExpectedFieldRetry({
+        summary: roundResult.summary,
+        categoryConfig,
+        fieldAvailabilityArtifact,
+        overrideCount: expectedRetryOverrideCount
+      });
+      if (expectedRetryDecision.force) {
+        expectedRetryOverrideCount += 1;
+        forcedExpectedRetryFields = expectedRetryDecision.fields;
+        noProgressStreak = 0;
+        noNewFieldsRounds = 0;
+        if (round + 1 >= roundsLimit) {
+          roundsLimit = normalizedRoundCount(roundsLimit + 1, 12);
+        }
+        logger.info('expected_retry_forced', {
+          round,
+          fields: expectedRetryDecision.fields
+        });
+        previousSummary = roundResult.summary;
+        previousProgress = progress;
+        continue;
+      }
       exhausted = true;
       stopReason = stopDecision.stop ? stopDecision.reason : `no_progress_${noProgressLimit}_rounds`;
       break;

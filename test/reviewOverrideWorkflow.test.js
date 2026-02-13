@@ -5,9 +5,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { createStorage } from '../src/s3/storage.js';
 import {
+  approveGreenOverrides,
+  buildReviewMetrics,
   finalizeOverrides,
   readReviewArtifacts,
   resolveOverrideFilePath,
+  setManualOverride,
   setOverrideFromCandidate
 } from '../src/review/overrideWorkflow.js';
 
@@ -85,10 +88,21 @@ async function seedReviewCandidates(storage, category, productId, value = '59') 
           candidate_id: 'cand_1',
           field: 'weight',
           value,
+          score: 0.91,
           host: 'manufacturer.example',
+          source_id: 'manufacturer_example',
           method: 'dom',
           tier: 1,
-          evidence_key: 'https://manufacturer.example/spec#weight'
+          evidence_key: 'https://manufacturer.example/spec#weight',
+          evidence: {
+            url: 'https://manufacturer.example/spec',
+            snippet_id: 'snp_weight_1',
+            snippet_hash: 'sha256:abc123',
+            quote: `Weight: ${value} g`,
+            quote_span: [0, 12],
+            snippet_text: `Weight: ${value} g without cable`,
+            source_id: 'manufacturer_example'
+          }
         }
       ],
       by_field: {
@@ -153,6 +167,57 @@ async function seedLatestArtifacts(storage, category, productId) {
   );
 }
 
+async function seedReviewProductPayload(storage, category, productId, fieldStates = {}) {
+  const reviewBase = storage.resolveOutputKey(category, productId, 'review');
+  const payload = {
+    product_id: productId,
+    category,
+    identity: {
+      brand: 'Razer',
+      model: 'Viper V3 Pro',
+      variant: ''
+    },
+    fields: {
+      weight: {
+        selected: {
+          value: '59',
+          confidence: 0.95,
+          status: 'ok',
+          color: 'green'
+        },
+        needs_review: false,
+        reason_codes: [],
+        candidates: [
+          {
+            candidate_id: 'cand_1',
+            value: '59',
+            score: 0.91,
+            source_id: 'manufacturer_example',
+            source: 'manufacturer.example',
+            tier: 1,
+            method: 'dom',
+            evidence: {
+              url: 'https://manufacturer.example/spec',
+              snippet_id: 'snp_weight_1',
+              snippet_hash: 'sha256:abc123',
+              quote: 'Weight: 59 g',
+              quote_span: [0, 12],
+              snippet_text: 'Weight: 59 g without cable',
+              source_id: 'manufacturer_example'
+            }
+          }
+        ]
+      },
+      ...fieldStates
+    }
+  };
+  await storage.writeObject(
+    `${reviewBase}/product.json`,
+    Buffer.from(JSON.stringify(payload, null, 2), 'utf8'),
+    { contentType: 'application/json' }
+  );
+}
+
 test('setOverrideFromCandidate writes helper override file and finalize applies it to latest artifacts', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-review-override-'));
   const storage = makeStorage(tempRoot);
@@ -177,7 +242,9 @@ test('setOverrideFromCandidate writes helper override file and finalize applies 
     assert.equal(setResult.value, '59');
     const overridePath = resolveOverrideFilePath({ config, category, productId });
     const overridePayload = JSON.parse(await fs.readFile(overridePath, 'utf8'));
-    assert.equal(overridePayload.overrides.weight.value, '59');
+    assert.equal(overridePayload.overrides.weight.override_value, '59');
+    assert.equal(overridePayload.overrides.weight.override_source, 'candidate_selection');
+    assert.equal(overridePayload.overrides.weight.override_provenance.snippet_id, 'snp_weight_1');
 
     const previewFinalize = await finalizeOverrides({
       storage,
@@ -233,12 +300,24 @@ test('finalizeOverrides demotes invalid override values through runtime engine g
       field: 'weight',
       candidateId: 'cand_1'
     });
-    const finalizeResult = await finalizeOverrides({
+    const blocked = await finalizeOverrides({
       storage,
       config,
       category,
       productId,
       applyOverrides: true
+    });
+    assert.equal(blocked.applied, false);
+    assert.equal(blocked.reason, 'runtime_validation_failed');
+    assert.equal(blocked.runtime_gate.failure_count > 0, true);
+
+    const finalizeResult = await finalizeOverrides({
+      storage,
+      config,
+      category,
+      productId,
+      applyOverrides: true,
+      saveAsDraft: true
     });
     assert.equal(finalizeResult.applied, true);
     assert.equal(finalizeResult.runtime_gate.failure_count > 0, true);
@@ -268,6 +347,150 @@ test('readReviewArtifacts returns safe defaults when review files do not exist',
     assert.equal(Array.isArray(result.candidates.items), true);
     assert.equal(Array.isArray(result.reviewQueue.items), true);
     assert.equal(result.reviewQueue.count, 0);
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('setManualOverride requires evidence and writes manual_snp audit payload', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-review-manual-override-'));
+  const storage = makeStorage(tempRoot);
+  const config = {
+    helperFilesRoot: path.join(tempRoot, 'helper_files')
+  };
+  const category = 'mouse';
+  const productId = 'mouse-review-manual';
+  try {
+    await assert.rejects(
+      () => setManualOverride({
+        storage,
+        config,
+        category,
+        productId,
+        field: 'weight',
+        value: '59',
+        evidence: {
+          url: '',
+          quote: ''
+        }
+      }),
+      /requires evidence.url and evidence.quote/i
+    );
+
+    const manual = await setManualOverride({
+      storage,
+      config,
+      category,
+      productId,
+      field: 'weight',
+      value: '59',
+      reason: 'Official spec table',
+      reviewer: 'reviewer_1',
+      evidence: {
+        url: 'https://manufacturer.example/spec',
+        quote: 'Weight: 59 g',
+        quote_span: [0, 12]
+      }
+    });
+    assert.equal(String(manual.candidate_id).startsWith('manual_snp_'), true);
+
+    const overridePath = resolveOverrideFilePath({ config, category, productId });
+    const overridePayload = JSON.parse(await fs.readFile(overridePath, 'utf8'));
+    assert.equal(overridePayload.overrides.weight.override_source, 'manual_entry');
+    assert.equal(overridePayload.overrides.weight.override_provenance.url, 'https://manufacturer.example/spec');
+    assert.equal(overridePayload.overrides.weight.override_value, '59');
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('approveGreenOverrides writes candidate overrides only for green known fields', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-review-approve-greens-'));
+  const storage = makeStorage(tempRoot);
+  const config = {
+    helperFilesRoot: path.join(tempRoot, 'helper_files')
+  };
+  const category = 'mouse';
+  const productId = 'mouse-review-approve-greens';
+  try {
+    await seedFieldRulesArtifacts(config.helperFilesRoot, category);
+    await seedReviewCandidates(storage, category, productId);
+    await seedLatestArtifacts(storage, category, productId);
+    await seedReviewProductPayload(storage, category, productId, {
+      dpi: {
+        selected: {
+          value: 'unk',
+          confidence: 0,
+          status: 'needs_review',
+          color: 'gray'
+        },
+        needs_review: true,
+        reason_codes: ['missing_value'],
+        candidates: []
+      }
+    });
+
+    const result = await approveGreenOverrides({
+      storage,
+      config,
+      category,
+      productId,
+      reviewer: 'reviewer_1',
+      reason: 'bulk_green_approve'
+    });
+
+    assert.equal(result.approved_count, 1);
+    assert.equal(result.skipped_count >= 1, true);
+    assert.equal(result.approved_fields.includes('weight'), true);
+
+    const overridePath = resolveOverrideFilePath({ config, category, productId });
+    const overridePayload = JSON.parse(await fs.readFile(overridePath, 'utf8'));
+    assert.equal(overridePayload.review_status, 'in_progress');
+    assert.equal(overridePayload.overrides.weight.override_source, 'candidate_selection');
+    assert.equal(overridePayload.overrides.weight.override_reason, 'bulk_green_approve');
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('buildReviewMetrics reports throughput and override ratios from override docs', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-review-metrics-'));
+  const storage = makeStorage(tempRoot);
+  const config = {
+    helperFilesRoot: path.join(tempRoot, 'helper_files')
+  };
+  const category = 'mouse';
+  const productId = 'mouse-review-metrics';
+  try {
+    await seedFieldRulesArtifacts(config.helperFilesRoot, category);
+    await seedReviewCandidates(storage, category, productId);
+    await seedLatestArtifacts(storage, category, productId);
+    await seedReviewProductPayload(storage, category, productId);
+    await approveGreenOverrides({
+      storage,
+      config,
+      category,
+      productId,
+      reviewer: 'reviewer_metrics',
+      reason: 'bulk_green_approve'
+    });
+    await finalizeOverrides({
+      storage,
+      config,
+      category,
+      productId,
+      applyOverrides: true
+    });
+
+    const metrics = await buildReviewMetrics({
+      config,
+      category,
+      windowHours: 24
+    });
+    assert.equal(metrics.category, category);
+    assert.equal(metrics.reviewed_products >= 1, true);
+    assert.equal(metrics.overrides_total >= 1, true);
+    assert.equal(metrics.products_per_hour > 0, true);
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }

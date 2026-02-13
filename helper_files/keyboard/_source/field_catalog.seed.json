@@ -1,0 +1,49 @@
+{
+  "category": "keyboard",
+  "groups": {
+    "commerce": [
+      "price_range",
+      "affiliate_links",
+      "images"
+    ],
+    "connectivity": [
+      "connection",
+      "wireless_technology",
+      "cable_type",
+      "cable_length"
+    ],
+    "editorial": [
+      "overall_score",
+      "pros",
+      "cons",
+      "verdict",
+      "key_takeaway"
+    ],
+    "features": [],
+    "identity": [
+      "brand",
+      "model",
+      "variant",
+      "base_model",
+      "sku",
+      "mpn",
+      "gtin",
+      "category"
+    ],
+    "media": [
+      "youtube_url",
+      "feature_image",
+      "gallery_images"
+    ],
+    "performance": [],
+    "physical": [
+      "weight",
+      "length",
+      "width",
+      "height",
+      "material",
+      "color"
+    ]
+  },
+  "template": "electronics"
+}

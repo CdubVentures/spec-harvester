@@ -47,6 +47,14 @@ function normalizeBaseUrl(value) {
   return String(value || '').trim().replace(/\/+$/, '');
 }
 
+function defaultChatmockDir() {
+  const profile = String(process.env.USERPROFILE || '').trim();
+  if (!profile) {
+    return '';
+  }
+  return path.join(profile, 'Desktop', 'ChatMock');
+}
+
 function inferLlmProvider(baseUrl, model, hasDeepSeekKey) {
   const baseToken = normalizeBaseUrl(baseUrl).toLowerCase();
   const modelToken = String(model || '').toLowerCase();
@@ -275,11 +283,48 @@ export function loadConfig(overrides = {}) {
     llmBaseUrl: resolvedBaseUrl,
     llmModelExtract: process.env.LLM_MODEL_EXTRACT || defaultModel,
     llmModelPlan: process.env.LLM_MODEL_PLAN || process.env.LLM_MODEL_EXTRACT || defaultModel,
+    llmModelFast:
+      process.env.LLM_MODEL_FAST ||
+      process.env.LLM_MODEL_PLAN ||
+      process.env.LLM_MODEL_EXTRACT ||
+      defaultModel,
+    llmModelReasoning:
+      process.env.LLM_MODEL_REASONING ||
+      process.env.LLM_MODEL_EXTRACT ||
+      defaultModel,
     llmModelValidate:
       process.env.LLM_MODEL_VALIDATE ||
       process.env.LLM_MODEL_PLAN ||
       process.env.LLM_MODEL_EXTRACT ||
       defaultModel,
+    cortexEnabled: parseBoolEnv('CORTEX_ENABLED', false),
+    chatmockDir: process.env.CHATMOCK_DIR || defaultChatmockDir(),
+    chatmockComposeFile: process.env.CHATMOCK_COMPOSE_FILE
+      || path.join(process.env.CHATMOCK_DIR || defaultChatmockDir(), 'docker-compose.yml'),
+    cortexBaseUrl: process.env.CORTEX_BASE_URL || 'http://localhost:8000/v1',
+    cortexApiKey: process.env.CORTEX_API_KEY || 'key',
+    cortexAsyncBaseUrl: process.env.CORTEX_ASYNC_BASE_URL || 'http://localhost:4000/api',
+    cortexAsyncEnabled: parseBoolEnv('CORTEX_ASYNC_ENABLED', true),
+    cortexModelFast: process.env.CORTEX_MODEL_FAST || 'gpt-5-low',
+    cortexModelAudit: process.env.CORTEX_MODEL_AUDIT || process.env.CORTEX_MODEL_FAST || 'gpt-5-low',
+    cortexModelDom: process.env.CORTEX_MODEL_DOM || process.env.CORTEX_MODEL_FAST || 'gpt-5-low',
+    cortexModelReasoningDeep: process.env.CORTEX_MODEL_REASONING_DEEP || 'gpt-5-high',
+    cortexModelVision: process.env.CORTEX_MODEL_VISION || process.env.CORTEX_MODEL_REASONING_DEEP || 'gpt-5-high',
+    cortexModelSearchFast: process.env.CORTEX_MODEL_SEARCH_FAST || process.env.CORTEX_MODEL_FAST || 'gpt-5-low',
+    cortexModelSearchDeep: process.env.CORTEX_MODEL_SEARCH_DEEP || process.env.CORTEX_MODEL_REASONING_DEEP || 'gpt-5-high',
+    cortexEscalateConfidenceLt: parseFloatEnv('CORTEX_ESCALATE_CONFIDENCE_LT', 0.85),
+    cortexEscalateIfConflict: parseBoolEnv('CORTEX_ESCALATE_IF_CONFLICT', true),
+    cortexEscalateCriticalOnly: parseBoolEnv('CORTEX_ESCALATE_CRITICAL_ONLY', true),
+    cortexMaxDeepFieldsPerProduct: parseIntEnv('CORTEX_MAX_DEEP_FIELDS_PER_PRODUCT', 12),
+    cortexSyncTimeoutMs: parseIntEnv('CORTEX_SYNC_TIMEOUT_MS', 60_000),
+    cortexAsyncPollIntervalMs: parseIntEnv('CORTEX_ASYNC_POLL_INTERVAL_MS', 5_000),
+    cortexAsyncMaxWaitMs: parseIntEnv('CORTEX_ASYNC_MAX_WAIT_MS', 900_000),
+    cortexAutoStart: parseBoolEnv('CORTEX_AUTO_START', true),
+    cortexAutoRestartOnAuth: parseBoolEnv('CORTEX_AUTO_RESTART_ON_AUTH', true),
+    cortexEnsureReadyTimeoutMs: parseIntEnv('CORTEX_ENSURE_READY_TIMEOUT_MS', 15_000),
+    cortexStartReadyTimeoutMs: parseIntEnv('CORTEX_START_READY_TIMEOUT_MS', 60_000),
+    cortexFailureThreshold: parseIntEnv('CORTEX_FAILURE_THRESHOLD', 3),
+    cortexCircuitOpenMs: parseIntEnv('CORTEX_CIRCUIT_OPEN_MS', 30_000),
     llmTimeoutMs: timeoutMs,
     openaiApiKey: resolvedApiKey,
     openaiBaseUrl: resolvedBaseUrl,
@@ -318,6 +363,10 @@ export function loadConfig(overrides = {}) {
     llmCostCachedInputPer1MDeepseekReasoner: parseFloatEnv('LLM_COST_CACHED_INPUT_PER_1M_DEEPSEEK_REASONER', -1),
     llmMonthlyBudgetUsd: parseFloatEnv('LLM_MONTHLY_BUDGET_USD', 200),
     llmPerProductBudgetUsd: parseFloatEnv('LLM_PER_PRODUCT_BUDGET_USD', 0.1),
+    llmMaxBatchesPerProduct: parseIntEnv('LLM_MAX_BATCHES_PER_PRODUCT', 7),
+    llmExtractionCacheEnabled: parseBoolEnv('LLM_EXTRACTION_CACHE_ENABLED', true),
+    llmExtractionCacheDir: process.env.LLM_EXTRACTION_CACHE_DIR || '.specfactory_tmp/llm_cache',
+    llmExtractionCacheTtlMs: parseIntEnv('LLM_EXTRACTION_CACHE_TTL_MS', 7 * 24 * 60 * 60 * 1000),
     llmMaxCallsPerProductTotal: parseIntEnv('LLM_MAX_CALLS_PER_PRODUCT_TOTAL', 10),
     llmMaxCallsPerProductFast: parseIntEnv('LLM_MAX_CALLS_PER_PRODUCT_FAST', 2),
     llmMaxCallsPerRound: parseIntEnv('LLM_MAX_CALLS_PER_ROUND', 4),
@@ -332,6 +381,13 @@ export function loadConfig(overrides = {}) {
     accuracyMode: (process.env.ACCURACY_MODE || 'balanced').trim().toLowerCase(),
     importsRoot: process.env.IMPORTS_ROOT || 'imports',
     importsPollSeconds: parseIntEnv('IMPORTS_POLL_SECONDS', 10),
+    daemonConcurrency: parseIntEnv('DAEMON_CONCURRENCY', 3),
+    reCrawlStaleAfterDays: parseIntEnv('RECRAWL_STALE_AFTER_DAYS', 30),
+    daemonGracefulShutdownTimeoutMs: parseIntEnv('DAEMON_GRACEFUL_SHUTDOWN_TIMEOUT_MS', 60_000),
+    driftDetectionEnabled: parseBoolEnv('DRIFT_DETECTION_ENABLED', true),
+    driftPollSeconds: parseIntEnv('DRIFT_POLL_SECONDS', 24 * 60 * 60),
+    driftScanMaxProducts: parseIntEnv('DRIFT_SCAN_MAX_PRODUCTS', 250),
+    driftAutoRepublish: parseBoolEnv('DRIFT_AUTO_REPUBLISH', true),
     helperFilesEnabled: parseBoolEnv('HELPER_FILES_ENABLED', true),
     helperFilesRoot: process.env.HELPER_FILES_ROOT || 'helper_files',
     helperSupportiveEnabled: parseBoolEnv('HELPER_SUPPORTIVE_ENABLED', true),
@@ -391,6 +447,8 @@ export function loadConfig(overrides = {}) {
   merged.llmBaseUrl = merged.llmBaseUrl || merged.openaiBaseUrl;
   merged.llmModelExtract = merged.llmModelExtract || merged.openaiModelExtract;
   merged.llmModelPlan = merged.llmModelPlan || merged.openaiModelPlan;
+  merged.llmModelFast = merged.llmModelFast || merged.llmModelPlan || merged.llmModelExtract;
+  merged.llmModelReasoning = merged.llmModelReasoning || merged.llmModelExtract;
   merged.llmModelValidate = merged.llmModelValidate || merged.openaiModelWrite;
   merged.llmTimeoutMs = merged.llmTimeoutMs || merged.openaiTimeoutMs;
   merged.openaiApiKey = merged.llmApiKey;

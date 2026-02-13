@@ -27,6 +27,9 @@ function compactSummary(summary) {
     anchor_conflicts: summary.anchor_conflicts || [],
     identity_confidence: summary.identity_confidence,
     identity_gate_validated: summary.identity_gate_validated,
+    publishable: typeof summary.publishable === 'boolean' ? summary.publishable : Boolean(summary.validated),
+    publish_blockers: summary.publish_blockers || [],
+    identity_report: summary.identity_report || null,
     hypothesis_queue: summary.hypothesis_queue || [],
     constraint_analysis: summary.constraint_analysis || {},
     field_reasoning: summary.field_reasoning || {},
@@ -237,6 +240,14 @@ export async function exportRunArtifacts({
     storage.writeObject(
       `${latestBase}/summary.json`,
       jsonBuffer(compactSummary(summary)),
+      { contentType: 'application/json' }
+    )
+  );
+
+  writes.push(
+    storage.writeObject(
+      `${latestBase}/candidates.json`,
+      jsonBuffer(candidates || {}),
       { contentType: 'application/json' }
     )
   );

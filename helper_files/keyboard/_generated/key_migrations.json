@@ -1,0 +1,12 @@
+{
+  "bump": "patch",
+  "key_map": {},
+  "migrations": [],
+  "previous_version": "1.0.0",
+  "summary": {
+    "added_count": 0,
+    "changed_count": 0,
+    "removed_count": 0
+  },
+  "version": "1.0.0"
+}

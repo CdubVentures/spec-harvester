@@ -1,0 +1,103 @@
+{
+  "category": "keyboard",
+  "generated_at": "2026-02-13T06:42:18.146Z",
+  "group_index": {
+    "appearance": [
+      "color"
+    ],
+    "connectivity": [
+      "connection",
+      "wireless_technology"
+    ],
+    "dimensions": [
+      "cable_length",
+      "height",
+      "length",
+      "weight",
+      "width"
+    ],
+    "general": [
+      "affiliate_links",
+      "base_model",
+      "brand",
+      "cable_type",
+      "category",
+      "cons",
+      "feature_image",
+      "gallery_images",
+      "gtin",
+      "images",
+      "key_takeaway",
+      "material",
+      "model",
+      "mpn",
+      "overall_score",
+      "price_range",
+      "pros",
+      "sku",
+      "variant",
+      "verdict",
+      "youtube_url"
+    ]
+  },
+  "groups": [
+    {
+      "count": 1,
+      "display_name": "appearance",
+      "field_keys": [
+        "color"
+      ],
+      "group_key": "appearance"
+    },
+    {
+      "count": 2,
+      "display_name": "connectivity",
+      "field_keys": [
+        "connection",
+        "wireless_technology"
+      ],
+      "group_key": "connectivity"
+    },
+    {
+      "count": 5,
+      "display_name": "dimensions",
+      "field_keys": [
+        "cable_length",
+        "height",
+        "length",
+        "weight",
+        "width"
+      ],
+      "group_key": "dimensions"
+    },
+    {
+      "count": 21,
+      "display_name": "general",
+      "field_keys": [
+        "affiliate_links",
+        "base_model",
+        "brand",
+        "cable_type",
+        "category",
+        "cons",
+        "feature_image",
+        "gallery_images",
+        "gtin",
+        "images",
+        "key_takeaway",
+        "material",
+        "model",
+        "mpn",
+        "overall_score",
+        "price_range",
+        "pros",
+        "sku",
+        "variant",
+        "verdict",
+        "youtube_url"
+      ],
+      "group_key": "general"
+    }
+  ],
+  "version": 1
+}

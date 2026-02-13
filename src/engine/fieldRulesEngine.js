@@ -393,6 +393,19 @@ export class FieldRulesEngine {
     return isObject(this.parseTemplates[key]) ? this.parseTemplates[key] : null;
   }
 
+  getAllParseTemplates() {
+    return this.parseTemplates;
+  }
+
+  getAllRules() {
+    return this.rules;
+  }
+
+  getFieldRule(fieldKey) {
+    const key = normalizeFieldKey(fieldKey);
+    return this.rules[key] || null;
+  }
+
   applyParseTemplate(fieldKey, text) {
     const template = this.getParseTemplate(fieldKey);
     if (!template) {

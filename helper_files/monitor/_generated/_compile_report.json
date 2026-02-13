@@ -1,0 +1,120 @@
+{
+  "artifacts": {
+    "control_plane_version": {
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\monitor\\_control_plane\\_versions\\20260213T064218Z",
+      "version_id": "20260213T064218Z"
+    },
+    "draft": {
+      "hash": "2b31381b079673fa082e1c98c2fc3f3d13fd0b9d56e284410beeb821ce4ef8cb",
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\monitor\\_control_plane\\draft.json"
+    },
+    "field_rules": {
+      "changed": false,
+      "hash": "49cf1a32791d7979e9a549af184fd5fe79a819a503b09c4f9ed171e8b9544af3",
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\monitor\\_generated\\field_rules.json"
+    },
+    "field_rules_draft": {
+      "hash": "ea30ebefadd6dc957e1c58a60d0ad976479a65f0a2fd175f7e8b8adec084d2e0",
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\monitor\\_control_plane\\field_rules_draft.json"
+    },
+    "field_rules_full": {
+      "hash": "52eae3e16d24b2cbfaa2c10f5146d804d8301ed180e68b2b51e2cb44dfc07b92",
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\monitor\\_control_plane\\field_rules.full.json"
+    },
+    "field_rules_runtime": {
+      "bytes": 84357,
+      "hash": "49cf1a32791d7979e9a549af184fd5fe79a819a503b09c4f9ed171e8b9544af3",
+      "identical_to_field_rules": true,
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\monitor\\_generated\\field_rules.runtime.json"
+    },
+    "key_migrations": null,
+    "known_values": {
+      "hash": "f2102e7a93583499ce55060f2750d6dfa72832e2a08ca1f751a272a896d48aed",
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\monitor\\_generated\\known_values.json"
+    },
+    "ui_field_catalog": {
+      "hash": "a2c2474192aab5e83f2729a47f864585105d0e64b8070ba873cc98d9acc01bea",
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\monitor\\_generated\\ui_field_catalog.json"
+    },
+    "ui_field_catalog_draft": {
+      "hash": "b145ba971e1ca1f32bb50b6e10a516ff4833e4ae50e09e554b9a1e0454441e8d",
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\monitor\\_control_plane\\ui_field_catalog_draft.json"
+    }
+  },
+  "category": "monitor",
+  "compiled": true,
+  "compiled_at": "2026-02-13T06:42:18.218Z",
+  "counts": {
+    "component_types": 0,
+    "critical": 0,
+    "deep": 0,
+    "enums": 0,
+    "expected_easy": 16,
+    "expected_sometimes": 1,
+    "fields": 29,
+    "identity": 8,
+    "required": 4
+  },
+  "diff": {
+    "changed": false,
+    "current_hash": "49cf1a32791d7979e9a549af184fd5fe79a819a503b09c4f9ed171e8b9544af3",
+    "fields": {
+      "added_count": 29,
+      "added_keys": [
+        "affiliate_links",
+        "base_model",
+        "brand",
+        "cable_length",
+        "cable_type",
+        "category",
+        "color",
+        "connection",
+        "cons",
+        "feature_image",
+        "gallery_images",
+        "gtin",
+        "height",
+        "images",
+        "key_takeaway",
+        "length",
+        "material",
+        "model",
+        "mpn",
+        "overall_score",
+        "price_range",
+        "pros",
+        "sku",
+        "variant",
+        "verdict",
+        "weight",
+        "width",
+        "wireless_technology",
+        "youtube_url"
+      ],
+      "changed_count": 0,
+      "changed_keys": [],
+      "removed_count": 0,
+      "removed_keys": []
+    },
+    "previous_hash": null
+  },
+  "errors": [],
+  "generated_at": "2026-02-13T06:42:18.218Z",
+  "source_summary": {
+    "component_sheets": 0,
+    "component_sources": 0,
+    "enum_lists": 0,
+    "key_rows": 29,
+    "sampled_product_columns": 10,
+    "sampled_values": 290
+  },
+  "version": 1,
+  "warnings": [
+    "selected_keys: empty (compiler will include all extracted keys)",
+    "selected_keys: empty (compiler will include all extracted keys)"
+  ],
+  "workbook_hash": "fe3054c17b139286dd8fc345db3445f7e8f276ecb6dc859ceb3fa9060156efd9",
+  "workbook_map_hash": "c4ac4f6267c02b9c9ff1edd69e6b38aecb99ac8d37ec152d93ae4acc4835397f",
+  "workbook_map_path": null,
+  "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\monitor\\_source\\field_catalog.xlsx"
+}

@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   compileRules,
   compileRulesAll,
+  initCategory,
   readCompileReport,
   rulesDiff,
   watchCompileRules
@@ -76,6 +77,37 @@ test('compileRulesAll discovers and compiles initialized categories', async () =
     assert.equal(all.categories.includes('mouse'), true);
     assert.equal(all.results.length, 1);
     assert.equal(all.results[0].compiled, true);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('compileRulesAll discovers starter workbook categories and bootstraps workbook_map', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'phase2-compile-starter-'));
+  const helperRoot = path.join(root, 'helper_files');
+  const categoriesRoot = path.join(root, 'categories');
+  try {
+    await initCategory({
+      category: 'monitor',
+      template: 'electronics',
+      config: { helperFilesRoot: helperRoot, categoriesRoot }
+    });
+
+    const all = await compileRulesAll({
+      config: { helperFilesRoot: helperRoot, categoriesRoot }
+    });
+    assert.equal(all.compiled, true);
+    assert.equal(all.categories.includes('monitor'), true);
+    assert.equal(all.results.length, 1);
+    assert.equal(all.results[0].compiled, true);
+
+    const mapPath = path.join(helperRoot, 'monitor', '_control_plane', 'workbook_map.json');
+    const map = JSON.parse(await fs.readFile(mapPath, 'utf8'));
+    assert.equal(map.key_list.sheet, 'field_catalog');
+    assert.equal(map.key_list.column, 'B');
+
+    const generatedRulesPath = path.join(helperRoot, 'monitor', '_generated', 'field_rules.json');
+    await fs.access(generatedRulesPath);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

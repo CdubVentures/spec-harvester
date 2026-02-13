@@ -256,3 +256,68 @@ test('writeFinalOutputs applies runtime engine migrations and enum normalization
     await fs.rm(fixture.root, { recursive: true, force: true });
   }
 });
+
+test('writeFinalOutputs does not promote when summary is explicitly unpublishable', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-final-export-unpublishable-'));
+  const storage = makeStorage(tempRoot);
+
+  try {
+    const normalized = baseNormalized();
+    const provenance = {};
+    const trafficLight = {};
+
+    const blocked = await writeFinalOutputs({
+      storage,
+      category: 'mouse',
+      productId: 'mouse-logitech-g-pro-x-superlight-2',
+      runId: 'run-blocked',
+      normalized,
+      provenance,
+      trafficLight,
+      summary: {
+        validated: false,
+        confidence: 0.97,
+        completeness_required: 0.99,
+        coverage_overall: 0.99,
+        publishable: false,
+        publish_blockers: ['MODEL_AMBIGUITY_ALERT'],
+        constraint_analysis: { contradiction_count: 0 },
+        missing_required_fields: []
+      },
+      sourceResults: []
+    });
+    assert.equal(blocked.promoted, false);
+    assert.equal(
+      await storage.objectExists('final/mouse/logitech/g-pro-x-superlight-2/spec.json'),
+      false
+    );
+
+    const promoted = await writeFinalOutputs({
+      storage,
+      category: 'mouse',
+      productId: 'mouse-logitech-g-pro-x-superlight-2',
+      runId: 'run-promoted',
+      normalized,
+      provenance,
+      trafficLight,
+      summary: {
+        validated: true,
+        confidence: 0.97,
+        completeness_required: 0.99,
+        coverage_overall: 0.99,
+        publishable: true,
+        publish_blockers: [],
+        constraint_analysis: { contradiction_count: 0 },
+        missing_required_fields: []
+      },
+      sourceResults: []
+    });
+    assert.equal(promoted.promoted, true);
+    assert.equal(
+      await storage.objectExists('final/mouse/logitech/g-pro-x-superlight-2/spec.json'),
+      true
+    );
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});

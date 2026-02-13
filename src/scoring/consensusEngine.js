@@ -323,7 +323,8 @@ export function runConsensusEngine({
         instrumentedHost: Boolean(isInstrumentedEvidenceSource(source)),
         keyPath: candidate.keyPath,
         url: source.finalUrl || source.url,
-        citation: resolveCitationFromCandidate(source, candidate, evidenceIndexCache)
+        citation: resolveCitationFromCandidate(source, candidate, evidenceIndexCache),
+        score: (TIER_WEIGHT[source.tier] || 0.4) * (METHOD_WEIGHT[candidate.method] || 0.4)
       });
     }
   }
@@ -333,14 +334,28 @@ export function runConsensusEngine({
 
   for (const field of fieldOrder) {
     const rows = byField.get(field) || [];
-    candidates[field] = rows.map((row) => ({
+    candidates[field] = rows.map((row, index) => ({
+      candidate_id: `cand_${field}_${index + 1}`,
       value: row.value,
+      score: Number.parseFloat(Math.max(0, Math.min(1, row.score || 0)).toFixed(6)),
       host: row.host,
+      rootDomain: row.rootDomain,
+      source_id: row.rootDomain ? row.rootDomain.replace(/[^a-z0-9]+/gi, '_').toLowerCase() : '',
+      url: row.url,
       tier: row.tier,
       method: row.method,
       evidenceKey: row.evidenceKey,
       ts: row.ts,
-      approvedDomain: row.approvedDomain
+      approvedDomain: row.approvedDomain,
+      evidence: {
+        url: row.url,
+        snippet_id: row.citation?.snippetId || '',
+        snippet_hash: row.citation?.snippetHash || '',
+        source_id: row.citation?.sourceId || '',
+        quote: row.citation?.quote || '',
+        quote_span: null,
+        snippet_text: row.citation?.quote || ''
+      }
     }));
 
     const anchorValue = anchors?.[field];

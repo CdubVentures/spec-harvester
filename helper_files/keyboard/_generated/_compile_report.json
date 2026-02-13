@@ -1,0 +1,120 @@
+{
+  "artifacts": {
+    "control_plane_version": {
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\keyboard\\_control_plane\\_versions\\20260213T064218Z",
+      "version_id": "20260213T064218Z"
+    },
+    "draft": {
+      "hash": "04fc8fc3d835423d103c273437f902a0a680978481a00474427c891c33f7fa8c",
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\keyboard\\_control_plane\\draft.json"
+    },
+    "field_rules": {
+      "changed": false,
+      "hash": "5c21f816d6a5b509e7f3f5165cd57e3625f004f82b100352f129295bda93b2cf",
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\keyboard\\_generated\\field_rules.json"
+    },
+    "field_rules_draft": {
+      "hash": "51b57b354ea81c88af33ed09c67a08ada28dfa8aced2c0318c1070c45944202f",
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\keyboard\\_control_plane\\field_rules_draft.json"
+    },
+    "field_rules_full": {
+      "hash": "7ec00234e253f6d5135bc3565176228841a362fe7f895c0b1ef1c3e882a2bd79",
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\keyboard\\_control_plane\\field_rules.full.json"
+    },
+    "field_rules_runtime": {
+      "bytes": 84359,
+      "hash": "5c21f816d6a5b509e7f3f5165cd57e3625f004f82b100352f129295bda93b2cf",
+      "identical_to_field_rules": true,
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\keyboard\\_generated\\field_rules.runtime.json"
+    },
+    "key_migrations": null,
+    "known_values": {
+      "hash": "fe35f995b3b82e89eb4cd211ae27ac7a47d064d5dce0bf3e21ce51a09f9b3a79",
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\keyboard\\_generated\\known_values.json"
+    },
+    "ui_field_catalog": {
+      "hash": "73ee2a18b202cf3fcc434ffa0fa67195ebb07e1cb6c20f9b3b87af9955642575",
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\keyboard\\_generated\\ui_field_catalog.json"
+    },
+    "ui_field_catalog_draft": {
+      "hash": "1681c10862fceb2b57025a8c56d17ab8c745faa5a275060e8adfe5793807ab66",
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\keyboard\\_control_plane\\ui_field_catalog_draft.json"
+    }
+  },
+  "category": "keyboard",
+  "compiled": true,
+  "compiled_at": "2026-02-13T06:42:18.146Z",
+  "counts": {
+    "component_types": 0,
+    "critical": 0,
+    "deep": 0,
+    "enums": 0,
+    "expected_easy": 16,
+    "expected_sometimes": 1,
+    "fields": 29,
+    "identity": 8,
+    "required": 4
+  },
+  "diff": {
+    "changed": false,
+    "current_hash": "5c21f816d6a5b509e7f3f5165cd57e3625f004f82b100352f129295bda93b2cf",
+    "fields": {
+      "added_count": 29,
+      "added_keys": [
+        "affiliate_links",
+        "base_model",
+        "brand",
+        "cable_length",
+        "cable_type",
+        "category",
+        "color",
+        "connection",
+        "cons",
+        "feature_image",
+        "gallery_images",
+        "gtin",
+        "height",
+        "images",
+        "key_takeaway",
+        "length",
+        "material",
+        "model",
+        "mpn",
+        "overall_score",
+        "price_range",
+        "pros",
+        "sku",
+        "variant",
+        "verdict",
+        "weight",
+        "width",
+        "wireless_technology",
+        "youtube_url"
+      ],
+      "changed_count": 0,
+      "changed_keys": [],
+      "removed_count": 0,
+      "removed_keys": []
+    },
+    "previous_hash": null
+  },
+  "errors": [],
+  "generated_at": "2026-02-13T06:42:18.146Z",
+  "source_summary": {
+    "component_sheets": 0,
+    "component_sources": 0,
+    "enum_lists": 0,
+    "key_rows": 29,
+    "sampled_product_columns": 10,
+    "sampled_values": 290
+  },
+  "version": 1,
+  "warnings": [
+    "selected_keys: empty (compiler will include all extracted keys)",
+    "selected_keys: empty (compiler will include all extracted keys)"
+  ],
+  "workbook_hash": "d16dbf24d5043d29bd839e0cd58ce9c091e93ff9c95faaab531159f582544936",
+  "workbook_map_hash": "cfef420bbaa588acd705f29ce2e0d372cd8d631f243282f75745987c302a4e74",
+  "workbook_map_path": null,
+  "workbook_path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\keyboard\\_source\\field_catalog.xlsx"
+}

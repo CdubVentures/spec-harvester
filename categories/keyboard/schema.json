@@ -1,0 +1,14 @@
+{
+  "category": "keyboard",
+  "critical_fields": [],
+  "deep_fields": [],
+  "editorial_fields": [],
+  "expected_easy_fields": [],
+  "expected_sometimes_fields": [],
+  "field_order": [],
+  "targets": {
+    "targetCompleteness": 0.9,
+    "targetConfidence": 0.8
+  },
+  "template": "electronics"
+}

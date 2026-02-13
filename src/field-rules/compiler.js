@@ -966,37 +966,78 @@ async function compileIntoRoot({
   const preferredHelperRoot = path.resolve(config.helperFilesRoot || 'helper_files');
   const preferredCategoryRoot = path.join(preferredHelperRoot, category);
 
+  async function resolveWorkbookFromDir(dirPath) {
+    const entries = await fs.readdir(dirPath, { withFileTypes: true }).catch(() => []);
+    const workbookCandidate = entries.find((entry) => (
+      entry.isFile() && /\.(xlsm|xlsx)$/i.test(entry.name) && !entry.name.startsWith('~$')
+    ));
+    return workbookCandidate ? path.join(dirPath, workbookCandidate.name) : '';
+  }
+
   async function resolveFallbackWorkbookPath() {
     const direct = String(workbookPath || '').trim();
     if (direct) {
       return path.resolve(direct);
     }
-    const namedDefault = path.join(categoryRoot, `${category}Data.xlsm`);
-    if (await fileExists(namedDefault)) {
-      return namedDefault;
+    const explicitCandidates = [
+      path.join(categoryRoot, `${category}Data.xlsm`),
+      path.join(categoryRoot, `${category}Data.xlsx`),
+      path.join(preferredCategoryRoot, `${category}Data.xlsm`),
+      path.join(preferredCategoryRoot, `${category}Data.xlsx`),
+      path.join(categoryRoot, '_source', 'field_catalog.xlsx'),
+      path.join(preferredCategoryRoot, '_source', 'field_catalog.xlsx')
+    ];
+    for (const candidate of explicitCandidates) {
+      if (await fileExists(candidate)) {
+        return candidate;
+      }
     }
-    const preferredNamedDefault = path.join(preferredCategoryRoot, `${category}Data.xlsm`);
-    if (await fileExists(preferredNamedDefault)) {
-      return preferredNamedDefault;
-    }
-    const entries = await fs.readdir(categoryRoot, { withFileTypes: true }).catch(() => []);
-    const workbookCandidate = entries.find((entry) => (
-      entry.isFile() && /\.(xlsm|xlsx)$/i.test(entry.name) && !entry.name.startsWith('~$')
-    ));
-    if (workbookCandidate) {
-      return path.join(categoryRoot, workbookCandidate.name);
-    }
-    const preferredEntries = await fs.readdir(preferredCategoryRoot, { withFileTypes: true }).catch(() => []);
-    const preferredCandidate = preferredEntries.find((entry) => (
-      entry.isFile() && /\.(xlsm|xlsx)$/i.test(entry.name) && !entry.name.startsWith('~$')
-    ));
-    if (preferredCandidate) {
-      return path.join(preferredCategoryRoot, preferredCandidate.name);
+
+    const scanDirs = [
+      categoryRoot,
+      preferredCategoryRoot,
+      path.join(categoryRoot, '_source'),
+      path.join(preferredCategoryRoot, '_source')
+    ];
+    for (const dirPath of scanDirs) {
+      const workbookCandidate = await resolveWorkbookFromDir(dirPath);
+      if (workbookCandidate) {
+        return workbookCandidate;
+      }
     }
     return '';
   }
 
   function buildDefaultWorkbookMap(resolvedWorkbookPath) {
+    const normalizedName = path.basename(String(resolvedWorkbookPath || '')).toLowerCase();
+    const isStarterCatalog = normalizedName === 'field_catalog.xlsx';
+    if (isStarterCatalog) {
+      return {
+        version: 1,
+        workbook_path: resolvedWorkbookPath,
+        sheet_roles: [
+          { sheet: 'field_catalog', role: 'field_key_list' }
+        ],
+        key_list: {
+          sheet: 'field_catalog',
+          source: 'column_range',
+          column: 'B',
+          row_start: 2,
+          row_end: 2000
+        },
+        expectations: {
+          required_fields: [],
+          critical_fields: [],
+          expected_easy_fields: [],
+          expected_sometimes_fields: [],
+          deep_fields: []
+        },
+        enum_lists: [],
+        component_sheets: [],
+        field_overrides: {}
+      };
+    }
+
     // Safe bootstrap map used only when no workbook_map exists yet.
     return {
       version: 1,
@@ -1837,8 +1878,10 @@ export async function discoverCompileCategories({
     const categoryRoot = path.join(helperRoot, category);
     const hasWorkbookMap = await fileExists(path.join(categoryRoot, '_control_plane', 'workbook_map.json'));
     const hasGeneratedRules = await fileExists(path.join(categoryRoot, '_generated', 'field_rules.json'));
+    const sourceRoot = path.join(categoryRoot, '_source');
     const hasWorkbook = await fileExists(path.join(categoryRoot, `${category}Data.xlsm`))
-      || await fileExists(path.join(categoryRoot, `${category}Data.xlsx`));
+      || await fileExists(path.join(categoryRoot, `${category}Data.xlsx`))
+      || await fileExists(path.join(sourceRoot, 'field_catalog.xlsx'));
     if (hasWorkbookMap || hasGeneratedRules || hasWorkbook) {
       categories.push(category);
     }

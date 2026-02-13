@@ -4,7 +4,11 @@ import { SourcePlanner, buildSourceSummary } from '../planner/sourcePlanner.js';
 import { PlaywrightFetcher, DryRunFetcher, HttpFetcher } from '../fetcher/playwrightFetcher.js';
 import { extractCandidatesFromPage } from '../extractors/fieldExtractor.js';
 import { evaluateAnchorConflicts, mergeAnchorConflictLists } from '../validator/anchors.js';
-import { evaluateSourceIdentity, evaluateIdentityGate } from '../validator/identityGate.js';
+import {
+  buildIdentityReport,
+  evaluateSourceIdentity,
+  evaluateIdentityGate
+} from '../validator/identityGate.js';
 import {
   computeCompletenessRequired,
   computeCoverageOverall,
@@ -31,6 +35,8 @@ import {
 import {
   extractCandidatesLLM
 } from '../llm/extractCandidatesLLM.js';
+import { DeterministicParser } from '../extract/deterministicParser.js';
+import { ComponentResolver } from '../extract/componentResolver.js';
 import { retrieveGoldenExamples } from '../llm/goldenExamples.js';
 import {
   writeSummaryMarkdownLLM
@@ -75,6 +81,11 @@ import { normalizeFieldList, toRawFieldKey } from '../utils/fieldKeys.js';
 import { createFieldRulesEngine } from '../engine/fieldRulesEngine.js';
 import { applyRuntimeFieldRules } from '../engine/runtimeGate.js';
 import { appendEnumCurationSuggestions } from '../engine/curationSuggestions.js';
+import {
+  writeCategoryReviewArtifacts,
+  writeProductReviewArtifacts
+} from '../review/reviewGridData.js';
+import { CortexClient } from '../llm/cortex_client.js';
 import {
   availabilityClassForField,
   undisclosedThresholdForField
@@ -132,10 +143,16 @@ function bestIdentityFromSources(sourceResults, identityLock = {}) {
 
 const METHOD_PRIORITY = {
   network_json: 5,
+  adapter_api: 5,
+  spec_table_match: 5,
+  parse_template: 4.5,
+  json_ld: 4,
   embedded_state: 4,
   ldjson: 3,
+  pdf_table: 3,
   pdf: 3,
   dom: 2,
+  component_db_inference: 2,
   llm_extract: 1
 };
 
@@ -832,6 +849,12 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       message: error.message
     });
   }
+  const deterministicParser = runtimeFieldRulesEngine
+    ? new DeterministicParser(runtimeFieldRulesEngine)
+    : null;
+  const componentResolver = runtimeFieldRulesEngine
+    ? new ComponentResolver(runtimeFieldRulesEngine)
+    : null;
   const billingMonth = new Date().toISOString().slice(0, 7);
 
   const fieldOrder = categoryConfig.fieldOrder;
@@ -1189,10 +1212,11 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       for (const url of adapterExtra.additionalUrls || []) {
         planner.enqueue(url, `adapter:${source.url}`);
       }
-      const deterministicFieldCandidates = dedupeCandidates([
+      const baseDeterministicFieldCandidates = dedupeCandidates([
         ...(extraction.fieldCandidates || []),
         ...(adapterExtra.fieldCandidates || [])
       ]);
+      let deterministicFieldCandidates = [...baseDeterministicFieldCandidates];
 
       let llmExtraction = {
         identityCandidates: {},
@@ -1221,21 +1245,50 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
           adapterExtra,
           config,
           targetFields: llmTargetFields,
-          deterministicCandidates: deterministicFieldCandidates
+          deterministicCandidates: baseDeterministicFieldCandidates
         });
       }
+
+      if (deterministicParser && evidencePack) {
+        const parserCandidates = deterministicParser.extractFromEvidencePack(evidencePack, {
+          targetFields: llmTargetFields
+        });
+        if (parserCandidates.length > 0) {
+          deterministicFieldCandidates = dedupeCandidates([
+            ...deterministicFieldCandidates,
+            ...parserCandidates
+          ]);
+        }
+      }
+
+      if (componentResolver) {
+        deterministicFieldCandidates = componentResolver.resolveFromCandidates(deterministicFieldCandidates);
+      }
+
+      const deterministicFilledFieldSet = new Set(
+        deterministicFieldCandidates
+          .filter((row) => String(row?.value || '').trim().toLowerCase() !== 'unk')
+          .map((row) => String(row?.field || '').trim())
+          .filter(Boolean)
+      );
+      const llmTargetFieldsForSource = llmTargetFields.filter((field) => (
+        !deterministicFilledFieldSet.has(field) &&
+        !isIdentityLockedField(field) &&
+        !isAnchorLocked(field, anchors)
+      ));
 
       const llmEligibleSource =
         config.llmEnabled &&
         Boolean(evidencePack) &&
-        sourceStatusCode < 400;
+        sourceStatusCode < 400 &&
+        llmTargetFieldsForSource.length > 0;
       if (llmEligibleSource) {
         llmExtraction = await extractCandidatesLLM({
           job,
           categoryConfig,
           evidencePack,
           goldenExamples,
-          targetFields: llmTargetFields,
+          targetFields: llmTargetFieldsForSource,
           config,
           logger,
           llmContext
@@ -1250,6 +1303,8 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
               ? 'http_status_source_unavailable'
               : sourceStatusCode >= 400
               ? 'http_status_not_extractable'
+              : llmTargetFieldsForSource.length === 0
+                ? 'no_remaining_llm_target_fields'
               : 'source_not_extractable'
         });
       }
@@ -1546,6 +1601,12 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
 
   const identityGate = evaluateIdentityGate(sourceResults);
   const identityConfidence = identityGate.certainty;
+  const identityReport = buildIdentityReport({
+    productId,
+    runId,
+    sourceResults,
+    identityGate
+  });
   const extractedIdentity = bestIdentityFromSources(sourceResults, job.identityLock || {});
   const identity = buildIdentityObject(job, extractedIdentity, {
     allowDerivedVariant: Boolean(identityGate.validated)
@@ -1899,6 +1960,18 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
   });
 
   gate.coverageOverallPercent = Number.parseFloat((coverageStats.coverageOverall * 100).toFixed(2));
+  const publishable =
+    gate.validated &&
+    identityGate.validated &&
+    identityConfidence >= 0.99 &&
+    !identityGate.needsReview;
+  const publishBlockers = [...new Set([
+    ...(gate.validated ? [] : (gate.reasons || [])),
+    ...(identityGate.reasonCodes || [])
+  ])].filter(Boolean);
+  if (!publishable && publishBlockers.length === 0) {
+    publishBlockers.push(gate.validatedReason || 'MODEL_AMBIGUITY_ALERT');
+  }
 
   normalized.quality.completeness_required = completenessStats.completenessRequired;
   normalized.quality.coverage_overall = coverageStats.coverageOverall;
@@ -1969,6 +2042,77 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     provenance
   });
 
+  let cortexSidecar = {
+    enabled: Boolean(config.cortexEnabled),
+    attempted: false,
+    mode: 'disabled',
+    fallback_to_non_sidecar: true,
+    fallback_reason: 'sidecar_disabled',
+    deep_task_count: 0
+  };
+  if (config.cortexEnabled) {
+    const cortexTasks = [
+      {
+        id: 'evidence-audit',
+        type: 'evidence_audit',
+        critical: true,
+        payload: {
+          critical_fields_below_pass_target: criticalFieldsBelowPassTarget
+        }
+      },
+      {
+        id: 'conflict-triage',
+        type: 'conflict_resolution',
+        critical: true,
+        payload: {
+          anchor_major_conflicts_count: anchorMajorConflictsCount,
+          contradiction_count: constraintAnalysis?.contradictionCount || 0
+        }
+      },
+      {
+        id: 'critical-gap-fill',
+        type: 'critical_gap_fill',
+        critical: true,
+        payload: {
+          missing_required_fields: completenessStats.missingRequiredFields
+        }
+      }
+    ];
+    try {
+      const client = new CortexClient({ config });
+      const cortexResult = await client.runPass({
+        tasks: cortexTasks,
+        context: {
+          confidence,
+          critical_conflicts_remain:
+            anchorMajorConflictsCount > 0 || (constraintAnalysis?.contradictionCount || 0) > 0,
+          critical_gaps_remain: criticalFieldsBelowPassTarget.length > 0,
+          evidence_audit_failed_on_critical: false
+        }
+      });
+      cortexSidecar = {
+        enabled: true,
+        attempted: true,
+        mode: cortexResult.mode,
+        fallback_to_non_sidecar: Boolean(cortexResult.fallback_to_non_sidecar),
+        fallback_reason: cortexResult.fallback_reason || null,
+        deep_task_count: Number(cortexResult?.plan?.deep_task_count || 0)
+      };
+    } catch (error) {
+      logger.warn('cortex_sidecar_failed', {
+        message: error.message
+      });
+      cortexSidecar = {
+        enabled: true,
+        attempted: true,
+        mode: 'fallback',
+        fallback_to_non_sidecar: true,
+        fallback_reason: 'sidecar_execution_error',
+        deep_task_count: 0
+      };
+    }
+  }
+
   const summary = {
     productId,
     runId,
@@ -1996,6 +2140,14 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     identity_confidence: identityConfidence,
     identity_gate_validated: identityGate.validated,
     identity_gate: identityGate,
+    publishable,
+    publish_blockers: publishBlockers,
+    identity_report: {
+      status: identityReport.status,
+      needs_review: identityReport.needs_review,
+      reason_codes: identityReport.reason_codes || [],
+      page_count: identityReport.pages.length
+    },
     fields_below_pass_target: fieldsBelowPassTarget,
     critical_fields_below_pass_target: criticalFieldsBelowPassTarget,
     new_values_proposed: newValuesProposed,
@@ -2101,6 +2253,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         blocked_reason: llmBudgetBlockedReason || null
       }
     },
+    cortex_sidecar: cortexSidecar,
     source_registry: {
       override_key: categoryConfig.sources_override_key || null
     },
@@ -2197,6 +2350,16 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
   }
 
   const runBase = storage.resolveOutputKey(category, productId, 'runs', runId);
+  const identityReportKey = `${runBase}/identity_report.json`;
+  summary.identity_report = {
+    ...(summary.identity_report || {}),
+    key: identityReportKey
+  };
+  await storage.writeObject(
+    identityReportKey,
+    Buffer.from(JSON.stringify(identityReport, null, 2), 'utf8'),
+    { contentType: 'application/json' }
+  );
   const intelResult = await persistSourceIntel({
     storage,
     config,
@@ -2293,6 +2456,40 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     runtimeEnforceEvidence: Boolean(config.fieldRulesEngineEnforceEvidence)
   });
   summary.final_export = finalExport;
+
+  try {
+    const reviewProduct = await writeProductReviewArtifacts({
+      storage,
+      config,
+      category,
+      productId
+    });
+    const reviewCategory = await writeCategoryReviewArtifacts({
+      storage,
+      config,
+      category,
+      status: 'needs_review',
+      limit: 500
+    });
+    summary.review_artifacts = {
+      product_review_candidates_key: reviewProduct.keys.candidatesKey,
+      product_review_queue_key: reviewProduct.keys.reviewQueueKey,
+      category_review_queue_key: reviewCategory.key,
+      candidate_count: reviewProduct.candidate_count,
+      review_field_count: reviewProduct.review_field_count,
+      queue_count: reviewCategory.count
+    };
+  } catch (error) {
+    summary.review_artifacts = {
+      error: error.message
+    };
+    logger.warn('review_artifacts_write_failed', {
+      category,
+      productId,
+      runId,
+      message: error.message
+    });
+  }
   emitFieldDecisionEvents({
     logger,
     fieldOrder,

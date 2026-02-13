@@ -108,6 +108,94 @@ function str(value) {
   return String(value || '').trim();
 }
 
+function nonEmptyArray(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((row) => String(row || '').trim())
+    .filter(Boolean);
+}
+
+function unique(values = []) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function expectedRequiredTokens(identityLock = {}) {
+  return unique([
+    ...tokenize(identityLock.brand),
+    ...tokenize(identityLock.model)
+  ]);
+}
+
+function expectedNegativeTokens(identityLock = {}) {
+  const fromFlat = nonEmptyArray(identityLock.negativeTokens);
+  const fromSnake = nonEmptyArray(identityLock.negative_tokens);
+  const fromAnchorTokens = nonEmptyArray(identityLock.anchorTokens?.negative);
+  const fromAnchorTokensSnake = nonEmptyArray(identityLock.anchor_tokens?.negative);
+  return unique([
+    ...fromFlat,
+    ...fromSnake,
+    ...fromAnchorTokens,
+    ...fromAnchorTokensSnake
+  ].map((token) => normalizeToken(token)));
+}
+
+function buildSourceTokenSet(source, candidate) {
+  const tokens = tokenize([
+    source?.title || '',
+    source?.url || '',
+    source?.finalUrl || '',
+    candidate?.brand || '',
+    candidate?.model || '',
+    candidate?.variant || '',
+    candidate?.sku || '',
+    candidate?.mpn || '',
+    candidate?.gtin || '',
+    source?.connectionHint || ''
+  ].join(' '));
+  return new Set(tokens);
+}
+
+function scoreDecisionBand(score) {
+  if (score >= 0.85) {
+    return 'CONFIRMED';
+  }
+  if (score >= 0.6) {
+    return 'WARNING';
+  }
+  if (score >= 0.4) {
+    return 'QUARANTINE';
+  }
+  return 'REJECTED';
+}
+
+function gateStatusFromIdentityResult(identityResult = {}) {
+  if (identityResult.match) {
+    return 'CONFIRMED';
+  }
+  if ((identityResult.criticalConflicts || []).length > 0) {
+    return 'REJECTED';
+  }
+  return scoreDecisionBand(identityResult.score || 0);
+}
+
+function canonicalSourceId(source = {}, index = 0) {
+  if (source.source_id) {
+    return String(source.source_id);
+  }
+  if (source.sourceId) {
+    return String(source.sourceId);
+  }
+  if (source.rootDomain) {
+    return String(source.rootDomain);
+  }
+  if (source.host) {
+    return String(source.host);
+  }
+  return `source_${String(index + 1).padStart(3, '0')}`;
+}
+
 function firstFieldValue(source, field) {
   const hit = (source.fieldCandidates || []).find((row) => row.field === field && row.value !== 'unk');
   return hit?.value || null;
@@ -175,6 +263,7 @@ export function evaluateSourceIdentity(source, identityLock = {}) {
   const candidate = source.identityCandidates || {};
   const reasons = [];
   const criticalConflicts = [];
+  const reasonCodes = [];
   let score = 0;
 
   const expectedBrand = str(identityLock.brand);
@@ -187,14 +276,19 @@ export function evaluateSourceIdentity(source, identityLock = {}) {
   const candidateBrandToken = normalizeToken(candidate.brand);
   const candidateModelToken = normalizeToken(candidate.model);
   const candidateVariantToken = normalizeToken(candidate.variant || source.connectionHint || '');
+  const requiredTokens = expectedRequiredTokens(identityLock);
+  const negativeTokens = expectedNegativeTokens(identityLock);
+  const sourceTokenSet = buildSourceTokenSet(source, candidate);
 
   if (expectedBrand) {
     const brandTokens = tokenize(expectedBrand);
     if (includesAllTokens(candidateBrandToken, brandTokens) || includesAllTokens(candidateModelToken, brandTokens)) {
       score += 0.35;
       reasons.push('brand_match');
+      reasonCodes.push('brand_match');
     } else if (candidateBrandToken) {
       criticalConflicts.push('brand_mismatch');
+      reasonCodes.push('brand_mismatch');
     }
   } else {
     score += 0.1;
@@ -226,8 +320,10 @@ export function evaluateSourceIdentity(source, identityLock = {}) {
     ) {
       score += 0.35;
       reasons.push('model_match');
+      reasonCodes.push('model_match');
     } else if (candidateModelToken && likelyProductSpecificSource(source)) {
       criticalConflicts.push('model_mismatch');
+      reasonCodes.push('model_mismatch');
     }
   } else {
     score += 0.1;
@@ -244,55 +340,119 @@ export function evaluateSourceIdentity(source, identityLock = {}) {
       if (normalizeToken(expectedVariant) && normalizeToken(expectedVariant) === candidateVariantToken) {
         score += 0.15;
         reasons.push('variant_match');
+        reasonCodes.push('variant_match');
       }
     } else if (candidateClass === expectedClass || candidateClass === 'dual') {
       score += 0.15;
       reasons.push('variant_match');
+      reasonCodes.push('variant_match');
     } else if (candidateClass !== 'unk') {
       criticalConflicts.push('variant_mismatch');
+      reasonCodes.push('variant_mismatch');
     }
   } else {
     score += 0.05;
   }
 
   const idMatches = [];
+  const hardIdMatches = {};
+  const hardIdMismatches = [];
   if (expectedSku) {
     if (normalizeToken(expectedSku) === normalizeToken(candidate.sku)) {
       idMatches.push('sku');
+      hardIdMatches.sku = expectedSku;
     } else if (candidate.sku) {
       criticalConflicts.push('sku_mismatch');
+      hardIdMismatches.push('sku_mismatch');
+      reasonCodes.push('sku_mismatch');
     }
   }
   if (expectedMpn) {
     if (normalizeToken(expectedMpn) === normalizeToken(candidate.mpn)) {
       idMatches.push('mpn');
+      hardIdMatches.mpn = expectedMpn;
     } else if (candidate.mpn) {
       criticalConflicts.push('mpn_mismatch');
+      hardIdMismatches.push('mpn_mismatch');
+      reasonCodes.push('mpn_mismatch');
     }
   }
   if (expectedGtin) {
     if (normalizeToken(expectedGtin) === normalizeToken(candidate.gtin)) {
       idMatches.push('gtin');
+      hardIdMatches.gtin = expectedGtin;
     } else if (candidate.gtin) {
       criticalConflicts.push('gtin_mismatch');
+      hardIdMismatches.push('gtin_mismatch');
+      reasonCodes.push('gtin_mismatch');
     }
   }
 
   if (idMatches.length > 0) {
     score += 0.15;
-    reasons.push(`${idMatches.join('_')}_match`);
+    reasons.push('hard_id_match');
+    reasonCodes.push('hard_id_match');
+    for (const id of idMatches) {
+      const code = `${id}_match`;
+      reasons.push(code);
+      reasonCodes.push(code);
+    }
   }
 
   score = Math.max(0, Math.min(1, score));
   const matchThreshold = dynamicMatchThreshold(identityLock);
-  const match = score >= matchThreshold && criticalConflicts.length === 0;
+  const matchedRequiredTokens = requiredTokens.filter((token) => sourceTokenSet.has(token));
+  const missingRequiredTokens = requiredTokens.filter((token) => !sourceTokenSet.has(token));
+  const matchedNegativeTokens = negativeTokens.filter((token) => sourceTokenSet.has(token));
+  if (matchedNegativeTokens.length > 0) {
+    reasonCodes.push('negative_token_present');
+    criticalConflicts.push('negative_token_present');
+  }
+  if (missingRequiredTokens.length > 0 && requiredTokens.length > 0) {
+    reasonCodes.push('missing_required_tokens');
+  }
+  if (hardIdMismatches.length > 0) {
+    reasonCodes.push('hard_id_mismatch');
+  }
+
+  const hasHardIdMatch = idMatches.length > 0;
+  const hasHardIdMismatch = hardIdMismatches.length > 0;
+  const hasCriticalConflicts = criticalConflicts.length > 0;
+  const match = score >= matchThreshold && !hasCriticalConflicts;
+
+  let decision = scoreDecisionBand(score);
+  if (hasHardIdMismatch || matchedNegativeTokens.length > 0) {
+    decision = 'REJECTED';
+  } else if (hasHardIdMatch) {
+    decision = 'CONFIRMED';
+  } else if (hasCriticalConflicts) {
+    decision = 'REJECTED';
+  } else if (match) {
+    decision = 'CONFIRMED';
+  }
+
+  let confidence = score;
+  if (hasHardIdMatch && !hasHardIdMismatch) {
+    confidence = 1;
+  }
+  if (decision === 'REJECTED') {
+    confidence = Math.min(confidence, 0.39);
+  }
+  confidence = Math.max(0, Math.min(1, confidence));
 
   return {
     match,
     score,
+    confidence,
+    decision,
     matchThreshold,
-    reasons,
-    criticalConflicts
+    reasons: unique(reasons),
+    reasonCodes: unique(reasonCodes),
+    criticalConflicts: unique(criticalConflicts),
+    matchedHardIds: hardIdMatches,
+    matchedRequiredTokens: unique(matchedRequiredTokens),
+    missingRequiredTokens: unique(missingRequiredTokens),
+    matchedNegativeTokens: unique(matchedNegativeTokens)
   };
 }
 
@@ -357,6 +517,19 @@ export function evaluateIdentityGate(sourceResults) {
   const noMajorAnchorConflicts = majorAnchors.length === 0;
 
   const validated = hasManufacturer && hasAdditional && noContradictions && noMajorAnchorConflicts;
+  const reasonCodes = [];
+  if (!hasManufacturer) {
+    reasonCodes.push('missing_manufacturer_confirmation');
+  }
+  if (!hasAdditional) {
+    reasonCodes.push('missing_additional_credible_sources');
+  }
+  if (!noContradictions) {
+    reasonCodes.push('identity_conflict');
+  }
+  if (!noMajorAnchorConflicts) {
+    reasonCodes.push('major_anchor_conflict');
+  }
 
   let certainty = 0.4;
   if (hasManufacturer) certainty += 0.25;
@@ -371,15 +544,35 @@ export function evaluateIdentityGate(sourceResults) {
     certainty = Math.max(certainty, 0.99);
   }
 
+  let status = 'CONFIRMED';
+  if (!validated) {
+    if (!noContradictions || !noMajorAnchorConflicts) {
+      status = 'IDENTITY_CONFLICT';
+    } else if (accepted.length === 0) {
+      status = 'IDENTITY_FAILED';
+    } else {
+      status = 'LOW_CONFIDENCE';
+    }
+  }
+
   let reason = 'OK';
   if (!validated) {
     reason = 'MODEL_AMBIGUITY_ALERT';
+    reasonCodes.push('model_ambiguity_alert');
+  }
+
+  const needsReview = status !== 'CONFIRMED';
+  if (certainty < 0.99) {
+    reasonCodes.push('certainty_below_publish_threshold');
   }
 
   return {
     validated,
     reason,
+    status,
+    needsReview,
     certainty,
+    reasonCodes: unique(reasonCodes),
     requirements: {
       hasManufacturer,
       hasTrustedHelper,
@@ -389,6 +582,61 @@ export function evaluateIdentityGate(sourceResults) {
     },
     contradictions,
     majorAnchors,
-    manufacturerSource: manufacturer?.url || null
+    manufacturerSource: manufacturer?.url || null,
+    acceptedSourceCount: accepted.length
+  };
+}
+
+export function buildIdentityReport({
+  productId,
+  runId,
+  sourceResults = [],
+  identityGate = null
+}) {
+  const reconciliation = identityGate || evaluateIdentityGate(sourceResults);
+  const pages = (sourceResults || [])
+    .filter((source) => !source.discoveryOnly)
+    .map((source, index) => {
+      const identity = source.identity || {};
+      const decision = gateStatusFromIdentityResult(identity);
+      const reasonCodes = unique([
+        ...(identity.reasonCodes || []),
+        ...(identity.reasons || []),
+        ...(identity.criticalConflicts || []),
+        ...(source.anchorCheck?.majorConflicts || []).map(() => 'major_anchor_conflict')
+      ]);
+      const confidence = Number.parseFloat(String(identity.confidence ?? identity.score ?? 0)) || 0;
+
+      return {
+        source_id: canonicalSourceId(source, index),
+        url: source.finalUrl || source.url || '',
+        decision,
+        confidence: Number.parseFloat(confidence.toFixed(6)),
+        matched_hard_ids: identity.matchedHardIds || {},
+        matched_required_tokens: identity.matchedRequiredTokens || [],
+        matched_negative_tokens: identity.matchedNegativeTokens || [],
+        reason_codes: reasonCodes
+      };
+    });
+
+  const decisionCounts = pages.reduce((acc, page) => {
+    acc[page.decision] = (acc[page.decision] || 0) + 1;
+    return acc;
+  }, {});
+
+  return {
+    product_id: String(productId || ''),
+    run_id: String(runId || ''),
+    pages,
+    status: reconciliation.status || 'IDENTITY_FAILED',
+    needs_review: Boolean(reconciliation.needsReview),
+    reason_codes: reconciliation.reasonCodes || [],
+    summary: {
+      page_count: pages.length,
+      confirmed_count: decisionCounts.CONFIRMED || 0,
+      warning_count: decisionCounts.WARNING || 0,
+      quarantine_count: decisionCounts.QUARANTINE || 0,
+      rejected_count: decisionCounts.REJECTED || 0
+    }
   };
 }

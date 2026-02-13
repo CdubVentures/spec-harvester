@@ -16,6 +16,24 @@ function toArray(value) {
   return value;
 }
 
+function parseDateMs(value) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return null;
+  }
+  const ms = Date.parse(text);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function retryBackoffSeconds(retryCount, {
+  baseSeconds = 60,
+  maxSeconds = 3600
+} = {}) {
+  const retry = Math.max(1, Number.parseInt(String(retryCount || 1), 10) || 1);
+  const value = baseSeconds * (2 ** (retry - 1));
+  return Math.min(maxSeconds, value);
+}
+
 function makeSummarySnapshot(summary = {}) {
   return {
     validated: Boolean(summary.validated),
@@ -38,13 +56,19 @@ function rowDefaults(productId, s3key = '') {
     productId,
     s3key,
     status: 'pending',
+    priority: 3,
     attempts_total: 0,
+    retry_count: 0,
+    max_attempts: 3,
+    next_retry_at: '',
     last_run_id: '',
     last_summary: null,
     cost_usd_total_for_product: 0,
     rounds_completed: 0,
     next_action_hint: 'fast_pass',
     last_urls_attempted: [],
+    last_error: '',
+    last_failed_at: '',
     last_started_at: '',
     last_completed_at: '',
     updated_at: nowIso()
@@ -58,10 +82,16 @@ function normalizeProductRow(productId, current = {}) {
     ...current,
     productId,
     status: String(current.status || base.status),
+    priority: Math.max(1, Math.min(5, toInt(current.priority, base.priority))),
     attempts_total: toInt(current.attempts_total, 0),
+    retry_count: toInt(current.retry_count, 0),
+    max_attempts: Math.max(1, toInt(current.max_attempts, 3)),
+    next_retry_at: String(current.next_retry_at || '').trim(),
     cost_usd_total_for_product: round(current.cost_usd_total_for_product || 0, 8),
     rounds_completed: toInt(current.rounds_completed, 0),
     last_urls_attempted: toArray(current.last_urls_attempted).slice(0, 300),
+    last_error: String(current.last_error || '').trim(),
+    last_failed_at: String(current.last_failed_at || '').trim(),
     updated_at: current.updated_at || nowIso()
   };
 }
@@ -194,7 +224,22 @@ export async function syncQueueFromInputs({
 
 function scoreQueueRow(row) {
   const status = String(row.status || 'pending');
-  if (status === 'complete' || status === 'exhausted' || status === 'blocked') {
+  if (
+    status === 'complete' ||
+    status === 'blocked' ||
+    status === 'paused' ||
+    status === 'skipped' ||
+    status === 'in_progress' ||
+    status === 'needs_manual' ||
+    status === 'exhausted' ||
+    status === 'failed'
+  ) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  const nowMs = Date.now();
+  const nextRetryMs = parseDateMs(row.next_retry_at);
+  if (nextRetryMs !== null && nextRetryMs > nowMs) {
     return Number.NEGATIVE_INFINITY;
   }
 
@@ -206,8 +251,10 @@ function scoreQueueRow(row) {
 
   let score = 0;
   score += status === 'pending' ? 90 : 0;
+  score += status === 'stale' ? 35 : 0;
   score += status === 'running' ? 40 : 0;
   score += status === 'needs_manual' ? 10 : 0;
+  score += (6 - Math.max(1, Math.min(5, toInt(row.priority, 3)))) * 12;
   score += missingRequired * 10;
   score += criticalMissing * 16;
   score += contradictions * 6;
@@ -313,6 +360,141 @@ export async function recordQueueRunResult({
   return {
     key: saved.key,
     product: next
+  };
+}
+
+export async function recordQueueFailure({
+  storage,
+  category,
+  productId,
+  s3key = '',
+  error,
+  baseRetrySeconds = 60,
+  maxRetrySeconds = 3600
+}) {
+  const loaded = await loadQueueState({ storage, category });
+  const current = normalizeProductRow(productId, loaded.state.products[productId] || { s3key });
+  const retryCount = current.retry_count + 1;
+  const nextDelaySeconds = retryBackoffSeconds(retryCount, {
+    baseSeconds: baseRetrySeconds,
+    maxSeconds: maxRetrySeconds
+  });
+  const nextRetryAt = new Date(Date.now() + nextDelaySeconds * 1000).toISOString();
+  const failedHard = retryCount >= current.max_attempts;
+
+  const next = normalizeProductRow(productId, {
+    ...current,
+    s3key: current.s3key || s3key,
+    status: failedHard ? 'failed' : 'pending',
+    attempts_total: current.attempts_total + 1,
+    retry_count: retryCount,
+    next_retry_at: failedHard ? '' : nextRetryAt,
+    last_error: String(error?.message || error || '').slice(0, 2000),
+    last_failed_at: nowIso(),
+    next_action_hint: failedHard ? 'manual_or_retry' : 'retry_backoff',
+    updated_at: nowIso()
+  });
+
+  loaded.state.products[productId] = next;
+  const saved = await saveQueueState({ storage, category, state: loaded.state });
+  return {
+    key: saved.key,
+    product: next
+  };
+}
+
+export async function markStaleQueueProducts({
+  storage,
+  category,
+  staleAfterDays = 30,
+  nowIso: nowIsoOverride = null
+}) {
+  const loaded = await loadQueueState({ storage, category });
+  const nowMs = parseDateMs(nowIsoOverride || nowIso()) || Date.now();
+  const staleThresholdMs = Math.max(1, Number(staleAfterDays || 30)) * 24 * 60 * 60 * 1000;
+  const marked = [];
+
+  for (const [productId, row] of Object.entries(loaded.state.products || {})) {
+    const status = String(row.status || '').trim().toLowerCase();
+    if (status !== 'complete') {
+      continue;
+    }
+    const completedMs = parseDateMs(row.last_completed_at);
+    if (completedMs === null) {
+      continue;
+    }
+    if ((nowMs - completedMs) < staleThresholdMs) {
+      continue;
+    }
+    loaded.state.products[productId] = normalizeProductRow(productId, {
+      ...row,
+      status: 'stale',
+      next_action_hint: 'recrawl_stale',
+      updated_at: nowIso()
+    });
+    marked.push(productId);
+  }
+
+  if (marked.length > 0) {
+    await saveQueueState({ storage, category, state: loaded.state });
+  }
+  return {
+    stale_marked: marked.length,
+    products: marked
+  };
+}
+
+export async function listQueueProducts({
+  storage,
+  category,
+  status = '',
+  limit = 200
+}) {
+  const loaded = await loadQueueState({ storage, category });
+  const wantedStatus = String(status || '').trim().toLowerCase();
+  const rows = Object.values(loaded.state.products || {})
+    .filter((row) => !wantedStatus || String(row.status || '').trim().toLowerCase() === wantedStatus)
+    .sort((a, b) => {
+      const aPriority = toInt(a.priority, 3);
+      const bPriority = toInt(b.priority, 3);
+      if (aPriority !== bPriority) {
+        return aPriority - bPriority;
+      }
+      const aUpdated = parseDateMs(a.updated_at) || 0;
+      const bUpdated = parseDateMs(b.updated_at) || 0;
+      if (bUpdated !== aUpdated) {
+        return bUpdated - aUpdated;
+      }
+      return String(a.productId || '').localeCompare(String(b.productId || ''));
+    })
+    .slice(0, Math.max(1, Number(limit || 200)));
+  return rows;
+}
+
+export async function clearQueueByStatus({
+  storage,
+  category,
+  status
+}) {
+  const wantedStatus = String(status || '').trim().toLowerCase();
+  if (!wantedStatus) {
+    throw new Error('clearQueueByStatus requires status');
+  }
+  const loaded = await loadQueueState({ storage, category });
+  const removed = [];
+  for (const [productId, row] of Object.entries(loaded.state.products || {})) {
+    if (String(row.status || '').trim().toLowerCase() !== wantedStatus) {
+      continue;
+    }
+    delete loaded.state.products[productId];
+    removed.push(productId);
+  }
+  if (removed.length > 0) {
+    await saveQueueState({ storage, category, state: loaded.state });
+  }
+  return {
+    removed_count: removed.length,
+    removed_product_ids: removed
   };
 }
 

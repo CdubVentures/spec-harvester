@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildContractEffortPlan,
   buildRoundConfig,
   buildRoundRequirements,
   evaluateRequiredSearchExhaustion,
@@ -384,4 +385,101 @@ test('buildRoundConfig preserves explicit LLM disablement in fast round 0', () =
 
   assert.equal(roundConfig.runProfile, 'fast');
   assert.equal(roundConfig.llmEnabled, false);
+});
+
+test('buildContractEffortPlan derives weighted effort from field rule contracts', () => {
+  const plan = buildContractEffortPlan({
+    missingRequiredFields: ['weight', 'dpi', 'connection'],
+    missingCriticalFields: ['weight'],
+    categoryConfig: {
+      fieldRules: {
+        fields: {
+          weight: { required_level: 'critical', availability: 'expected', difficulty: 'easy', effort: 2 },
+          dpi: { required_level: 'required', availability: 'expected', difficulty: 'medium', effort: 5 },
+          connection: { required_level: 'required', availability: 'sometimes', difficulty: 'hard', effort: 8 }
+        }
+      }
+    }
+  });
+
+  assert.equal(plan.total_effort, 15);
+  assert.equal(plan.critical_missing_count, 1);
+  assert.equal(plan.hard_missing_count, 1);
+  assert.equal(plan.expected_required_count, 2);
+});
+
+test('buildRoundConfig raises deep-search budgets for high contract effort plans', () => {
+  const low = buildRoundConfig(
+    {
+      runProfile: 'standard',
+      discoveryEnabled: true,
+      fetchCandidateSources: true,
+      searchProvider: 'searxng',
+      searxngBaseUrl: 'http://127.0.0.1:8080',
+      maxUrlsPerProduct: 80,
+      maxCandidateUrls: 120,
+      maxPagesPerDomain: 3,
+      llmMaxCallsPerRound: 4,
+      llmMaxCallsPerProductFast: 2,
+      endpointSignalLimit: 30,
+      endpointSuggestionLimit: 12,
+      endpointNetworkScanLimit: 600,
+      hypothesisAutoFollowupRounds: 0,
+      hypothesisFollowupUrlsPerRound: 12,
+      postLoadWaitMs: 0,
+      autoScrollEnabled: false,
+      autoScrollPasses: 0,
+      manufacturerBroadDiscovery: false
+    },
+    {
+      round: 2,
+      mode: 'balanced',
+      missingRequiredCount: 2,
+      contractEffort: {
+        total_effort: 4,
+        hard_missing_count: 0,
+        critical_missing_count: 0,
+        expected_required_count: 2
+      }
+    }
+  );
+
+  const high = buildRoundConfig(
+    {
+      runProfile: 'standard',
+      discoveryEnabled: true,
+      fetchCandidateSources: true,
+      searchProvider: 'searxng',
+      searxngBaseUrl: 'http://127.0.0.1:8080',
+      maxUrlsPerProduct: 80,
+      maxCandidateUrls: 120,
+      maxPagesPerDomain: 3,
+      llmMaxCallsPerRound: 4,
+      llmMaxCallsPerProductFast: 2,
+      endpointSignalLimit: 30,
+      endpointSuggestionLimit: 12,
+      endpointNetworkScanLimit: 600,
+      hypothesisAutoFollowupRounds: 0,
+      hypothesisFollowupUrlsPerRound: 12,
+      postLoadWaitMs: 0,
+      autoScrollEnabled: false,
+      autoScrollPasses: 0,
+      manufacturerBroadDiscovery: false
+    },
+    {
+      round: 2,
+      mode: 'balanced',
+      missingRequiredCount: 2,
+      contractEffort: {
+        total_effort: 26,
+        hard_missing_count: 2,
+        critical_missing_count: 2,
+        expected_required_count: 2
+      }
+    }
+  );
+
+  assert.equal(high.maxUrlsPerProduct >= low.maxUrlsPerProduct, true);
+  assert.equal(high.maxCandidateUrls >= low.maxCandidateUrls, true);
+  assert.equal(high.discoveryMaxQueries >= low.discoveryMaxQueries, true);
 });

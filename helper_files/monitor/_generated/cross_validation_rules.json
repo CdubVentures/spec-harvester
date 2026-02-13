@@ -1,0 +1,21 @@
+{
+  "category": "monitor",
+  "generated_at": "2026-02-13T06:42:18.218Z",
+  "rules": [
+    {
+      "check": {
+        "minimum_present": 3,
+        "on_fail": "flag_for_review",
+        "type": "group_completeness"
+      },
+      "description": "Dimensions should be captured as a complete triplet",
+      "related_fields": [
+        "width",
+        "height"
+      ],
+      "rule_id": "dimensions_consistency",
+      "trigger_field": "length"
+    }
+  ],
+  "version": 1
+}

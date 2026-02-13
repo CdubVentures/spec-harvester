@@ -71,6 +71,8 @@ function runSnapshot(summary = {}, runId = '') {
     contradiction_count: toInt(summary.constraint_analysis?.contradiction_count, 0),
     missing_required_fields: summary.missing_required_fields || [],
     critical_fields_below_pass_target: summary.critical_fields_below_pass_target || [],
+    publishable: resolvePublishable(summary, true),
+    publish_blockers: Array.isArray(summary.publish_blockers) ? summary.publish_blockers : [],
     llm_cost_usd_run: toNumber(summary.llm?.cost_usd_run, 0),
     duration_ms: toInt(summary.duration_ms, 0)
   };
@@ -88,8 +90,21 @@ function compactSummary(summary = {}) {
     critical_fields_below_pass_target: summary.critical_fields_below_pass_target || [],
     contradiction_count: toInt(summary.constraint_analysis?.contradiction_count, 0),
     identity_gate_validated: Boolean(summary.identity_gate_validated),
+    publishable: resolvePublishable(summary, true),
+    publish_blockers: Array.isArray(summary.publish_blockers) ? summary.publish_blockers : [],
+    identity_report: summary.identity_report || null,
     generated_at: summary.generated_at || nowIso()
   };
+}
+
+function resolvePublishable(summary = {}, fallback = true) {
+  if (typeof summary.publishable === 'boolean') {
+    return summary.publishable;
+  }
+  if (Array.isArray(summary.publish_blockers) && summary.publish_blockers.length > 0) {
+    return false;
+  }
+  return fallback;
 }
 
 function finalSummaryScore(summary = {}) {
@@ -102,7 +117,15 @@ function finalSummaryScore(summary = {}) {
 }
 
 function shouldPromoteFinal(existingSummary, candidateSummary) {
+  const candidatePublishable = resolvePublishable(candidateSummary, true);
+  if (!candidatePublishable) {
+    return false;
+  }
   if (!existingSummary) {
+    return true;
+  }
+  const existingPublishable = resolvePublishable(existingSummary, true);
+  if (!existingPublishable && candidatePublishable) {
     return true;
   }
   const existing = finalSummaryScore(existingSummary);
@@ -134,6 +157,22 @@ function shouldPromoteFinal(existingSummary, candidateSummary) {
 
 function sourceRowsForHistory(sourceResults = [], runId = '') {
   return (sourceResults || []).map((row) => ({
+    ...(function sourceHashMeta() {
+      const pack = row?.llmEvidencePack;
+      const sources = pack && typeof pack.sources === 'object' ? Object.values(pack.sources) : [];
+      const first = sources[0] || {};
+      const meta = pack?.meta || {};
+      const sourceId = String(first.id || meta.source_id || '').trim();
+      const pageContentHash = String(first.page_content_hash || meta.page_content_hash || '').trim();
+      const textHash = String(first.text_hash || meta.text_hash || '').trim();
+      const fingerprint = String(row?.fingerprint?.id || meta.fingerprint || '').trim();
+      return {
+        source_id: sourceId || '',
+        fingerprint: fingerprint || '',
+        page_content_hash: pageContentHash || '',
+        text_hash: textHash || ''
+      };
+    }()),
     ts: nowIso(),
     runId,
     url: row.finalUrl || row.url || '',
@@ -298,6 +337,8 @@ function buildMeta({
     category,
     runId,
     canonical_identity: normalized.identity || {},
+    publishable: resolvePublishable(summary, true),
+    publish_blockers: Array.isArray(summary.publish_blockers) ? summary.publish_blockers : [],
     lastUpdatedAt: nowIso(),
     final_path: finalPath,
     bestUrls

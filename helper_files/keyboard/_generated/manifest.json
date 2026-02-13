@@ -1,0 +1,49 @@
+{
+  "algorithm": "sha256",
+  "artifact_count": 8,
+  "artifacts": [
+    {
+      "bytes": 472,
+      "path": "cross_validation_rules.json",
+      "sha256": "9049043d487ebbe9b74cd0c9388a565c0ffbf115832e5b4eb844c56e9db1b8f9"
+    },
+    {
+      "bytes": 1872,
+      "path": "field_groups.json",
+      "sha256": "946c25c588446bec3e581d066a2ced08b10d1cf0b38de6e0240438d32893b832"
+    },
+    {
+      "bytes": 94886,
+      "path": "field_rules.json",
+      "sha256": "65fdc2dd33e8105f23f613e0be0204474bc37154d060fbdc859bd1afa051446d"
+    },
+    {
+      "bytes": 94886,
+      "path": "field_rules.runtime.json",
+      "sha256": "65fdc2dd33e8105f23f613e0be0204474bc37154d060fbdc859bd1afa051446d"
+    },
+    {
+      "bytes": 201,
+      "path": "key_migrations.json",
+      "sha256": "f586186d31cee70ccb52f334fc38e4b83e4768abed23aab8b1e711cd73aeecf5"
+    },
+    {
+      "bytes": 107,
+      "path": "known_values.json",
+      "sha256": "2115c4ad905f97833206b692824d54c6f7933eaa0de90524c7c277c65f4190f7"
+    },
+    {
+      "bytes": 7973,
+      "path": "parse_templates.json",
+      "sha256": "0b5090e6576aef4f45e3301ffe716ed6244f00f9ce0ee95ffb26ef9b032531e1"
+    },
+    {
+      "bytes": 27916,
+      "path": "ui_field_catalog.json",
+      "sha256": "5e0e4bec13677b1e2f3274d59009c9bbb14e03bfce21928b4da71f671a70c229"
+    }
+  ],
+  "category": "keyboard",
+  "generated_at": "2026-02-13T06:42:18.206Z",
+  "version": 1
+}

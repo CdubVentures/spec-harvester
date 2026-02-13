@@ -1,8 +1,8 @@
 {
   "artifacts": {
     "control_plane_version": {
-      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_control_plane\\_versions\\20260213T024158Z",
-      "version_id": "20260213T024158Z"
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_control_plane\\_versions\\20260213T064220Z",
+      "version_id": "20260213T064220Z"
     },
     "draft": {
       "hash": "bd52d0cc4fa42215fc4e22509140c3155ccc4bdc4ba68e6707988b14115916ef",
@@ -145,7 +145,7 @@
       "removed_count": 0,
       "removed_keys": []
     },
-    "previous_hash": "82b166153243c0eb7ea58cfe368be3705f12db0c1030912c8538379ce56a430d"
+    "previous_hash": "3370461a807b96dce0e96832ab8f5b63835d126eb455fcbad07289c89d78686f"
   },
   "errors": [],
   "generated_at": "2026-02-13T02:18:36.677Z",
