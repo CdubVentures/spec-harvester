@@ -1,10 +1,10 @@
 import { normalizeWhitespace } from '../utils/common.js';
 import { normalizeFieldList } from '../utils/fieldKeys.js';
-import { callOpenAI } from './openaiClient.js';
 import { appendLlmVerificationReport } from './verificationReport.js';
 import { buildFieldBatches, resolveBatchModel } from './fieldBatching.js';
 import { LLMCache } from './llmCache.js';
 import { verifyCandidateEvidence } from './evidenceVerifier.js';
+import { callLlmWithRouting, hasAnyLlmApiKey } from './routing.js';
 
 const IDENTITY_KEYS = ['brand', 'model', 'sku', 'mpn', 'gtin', 'variant'];
 
@@ -376,15 +376,16 @@ function sanitizeExtractionResult({
   };
 }
 
-function countRequiredFilled(fieldCandidates = [], requiredFieldSet = new Set()) {
+function collectRequiredFilled(fieldCandidates = [], requiredFieldSet = new Set()) {
   const filled = new Set();
   for (const row of fieldCandidates || []) {
-    if (!requiredFieldSet.has(row.field) || !hasKnownValue(row.value)) {
+    const field = String(row?.field || '').trim();
+    if (!field || !requiredFieldSet.has(field) || !hasKnownValue(row?.value)) {
       continue;
     }
-    filled.add(row.field);
+    filled.add(field);
   }
-  return filled.size;
+  return filled;
 }
 
 function shouldRunVerifyExtraction(llmContext = {}) {
@@ -454,7 +455,7 @@ export async function extractCandidatesLLM({
   logger,
   llmContext = {}
 }) {
-  if (!config.llmEnabled || !config.llmApiKey) {
+  if (!config.llmEnabled || !hasAnyLlmApiKey(config)) {
     return {
       identityCandidates: {},
       fieldCandidates: [],
@@ -509,18 +510,22 @@ export async function extractCandidatesLLM({
     : null;
   let cacheHits = 0;
 
-  const invokeModel = async ({
-    model,
-    reasoningMode,
-    reason,
-    usageTracker,
-    userPayload,
-    fieldSet,
-    validRefs,
-    scopedEvidencePack
-  }) => {
-    const result = await callOpenAI({
+    const invokeModel = async ({
       model,
+      routeRole = 'extract',
+      reasoningMode,
+      reason,
+      usageTracker,
+      userPayload,
+      fieldSet,
+      validRefs,
+      scopedEvidencePack
+    }) => {
+    const result = await callLlmWithRouting({
+      config,
+      reason,
+      role: routeRole,
+      modelOverride: model,
       system: [
         'You extract structured hardware spec candidates from evidence snippets.',
         'Rules:',
@@ -532,9 +537,6 @@ export async function extractCandidatesLLM({
       ].join('\n'),
       user: JSON.stringify(userPayload),
       jsonSchema: llmSchema(),
-      apiKey: config.llmApiKey,
-      baseUrl: config.llmBaseUrl,
-      provider: config.llmProvider,
       usageContext: {
         category: job.category || categoryConfig.category || '',
         productId: job.productId || '',
@@ -657,6 +659,7 @@ export async function extractCandidatesLLM({
       if (!sanitized) {
         sanitized = await invokeModel({
           model,
+          routeRole: modelRoute.routeRole || 'extract',
           reasoningMode: Boolean(modelRoute.reasoningMode),
           reason: modelRoute.reason,
           usageTracker: null,
@@ -695,91 +698,131 @@ export async function extractCandidatesLLM({
 
     if (shouldRunVerifyExtraction(llmContext) && usableBatches.length > 0) {
       llmContext.verification.done = true;
-      const verifyBatch = usableBatches[0];
-      const verifyFields = normalizeFieldList(verifyBatch.fields || [], {
-        fieldOrder: effectiveFieldOrder
-      });
-      const verifyScoped = buildBatchEvidence(evidencePack, verifyFields);
-      const verifyRefs = new Set((verifyScoped.references || []).map((item) => String(item.id || '').trim()).filter(Boolean));
-      const verifyFieldSet = new Set(verifyFields);
-      const verifyPayload = {
-        product: {
-          productId: job.productId,
-          brand: job.identityLock?.brand || '',
-          model: job.identityLock?.model || '',
-          variant: job.identityLock?.variant || '',
-          category: job.category || 'mouse'
-        },
-        schemaFields: categoryConfig.fieldOrder || [],
-        targetFields: verifyFields,
-        ...buildPromptFieldContracts(categoryConfig, verifyFields),
-        anchors: job.anchors || {},
-        golden_examples: (goldenExamples || []).slice(0, 5),
-        references: verifyScoped.references || [],
-        snippets: verifyScoped.snippets || []
-      };
-
+      const aggressiveVerifyMode =
+        String(llmContext?.mode || '').toLowerCase() === 'aggressive' &&
+        String(llmContext?.verification?.trigger || '').toLowerCase() === 'aggressive_always';
+      const verifyBatchLimit = aggressiveVerifyMode
+        ? Math.max(1, Number.parseInt(String(config.llmVerifyAggressiveBatchCount || 3), 10) || 3)
+        : 1;
+      const verifyBatches = usableBatches.slice(0, verifyBatchLimit);
       const usageFast = { prompt_tokens: 0, completion_tokens: 0, cost_usd: 0 };
       const usageReason = { prompt_tokens: 0, completion_tokens: 0, cost_usd: 0 };
       const fastModel = String(config.llmModelFast || config.llmModelPlan || '').trim();
       const reasonModel = String(config.llmModelExtract || '').trim();
+      const requiredSet = new Set(normalizeFieldList(categoryConfig.requiredFields || [], {
+        fieldOrder: categoryConfig.fieldOrder || []
+      }));
+      const fastRequiredFields = new Set();
+      const reasonRequiredFields = new Set();
+      const verifyBatchStats = [];
+      let fastConflictCount = 0;
+      let reasonConflictCount = 0;
+      let fastCandidateCount = 0;
+      let reasonCandidateCount = 0;
 
       try {
-        let fastResult = null;
-        let reasonResult = null;
+        for (const verifyBatch of verifyBatches) {
+          const verifyFields = normalizeFieldList(verifyBatch.fields || [], {
+            fieldOrder: effectiveFieldOrder
+          });
+          if (!verifyFields.length) {
+            continue;
+          }
+          const verifyScoped = buildBatchEvidence(evidencePack, verifyFields);
+          const verifyRefs = new Set((verifyScoped.references || []).map((item) => String(item.id || '').trim()).filter(Boolean));
+          const verifyFieldSet = new Set(verifyFields);
+          const verifyPayload = {
+            product: {
+              productId: job.productId,
+              brand: job.identityLock?.brand || '',
+              model: job.identityLock?.model || '',
+              variant: job.identityLock?.variant || '',
+              category: job.category || 'mouse'
+            },
+            schemaFields: categoryConfig.fieldOrder || [],
+            targetFields: verifyFields,
+            ...buildPromptFieldContracts(categoryConfig, verifyFields),
+            anchors: job.anchors || {},
+            golden_examples: (goldenExamples || []).slice(0, 5),
+            references: verifyScoped.references || [],
+            snippets: verifyScoped.snippets || []
+          };
 
-        if (fastModel) {
-          const canFastCall = budgetGuard?.canCall({
-            reason: 'verify_extract_fast',
-            essential: false
-          }) || { allowed: true };
-          if (canFastCall.allowed) {
-            fastResult = await invokeModel({
-              model: fastModel,
-              reasoningMode: false,
+          let fastResult = null;
+          let reasonResult = null;
+
+          if (fastModel) {
+            const canFastCall = budgetGuard?.canCall({
               reason: 'verify_extract_fast',
-              usageTracker: usageFast,
-              userPayload: verifyPayload,
-              fieldSet: verifyFieldSet,
-              validRefs: verifyRefs,
-              scopedEvidencePack: {
-                ...evidencePack,
-                references: verifyScoped.references,
-                snippets: verifyScoped.snippets
-              }
-            });
+              essential: false
+            }) || { allowed: true };
+            if (canFastCall.allowed) {
+              fastResult = await invokeModel({
+                model: fastModel,
+                routeRole: 'plan',
+                reasoningMode: false,
+                reason: 'verify_extract_fast',
+                usageTracker: usageFast,
+                userPayload: verifyPayload,
+                fieldSet: verifyFieldSet,
+                validRefs: verifyRefs,
+                scopedEvidencePack: {
+                  ...evidencePack,
+                  references: verifyScoped.references,
+                  snippets: verifyScoped.snippets
+                }
+              });
+            }
           }
-        }
 
-        if (reasonModel) {
-          const canReasonCall = budgetGuard?.canCall({
-            reason: 'verify_extract_reason',
-            essential: false
-          }) || { allowed: true };
-          if (canReasonCall.allowed) {
-            reasonResult = await invokeModel({
-              model: reasonModel,
-              reasoningMode: true,
+          if (reasonModel) {
+            const canReasonCall = budgetGuard?.canCall({
               reason: 'verify_extract_reason',
-              usageTracker: usageReason,
-              userPayload: verifyPayload,
-              fieldSet: verifyFieldSet,
-              validRefs: verifyRefs,
-              scopedEvidencePack: {
-                ...evidencePack,
-                references: verifyScoped.references,
-                snippets: verifyScoped.snippets
-              }
-            });
+              essential: false
+            }) || { allowed: true };
+            if (canReasonCall.allowed) {
+              reasonResult = await invokeModel({
+                model: reasonModel,
+                routeRole: 'extract',
+                reasoningMode: true,
+                reason: 'verify_extract_reason',
+                usageTracker: usageReason,
+                userPayload: verifyPayload,
+                fieldSet: verifyFieldSet,
+                validRefs: verifyRefs,
+                scopedEvidencePack: {
+                  ...evidencePack,
+                  references: verifyScoped.references,
+                  snippets: verifyScoped.snippets
+                }
+              });
+            }
           }
+
+          const fastSet = collectRequiredFilled(fastResult?.fieldCandidates || [], requiredSet);
+          for (const field of fastSet) {
+            fastRequiredFields.add(field);
+          }
+          const reasonSet = collectRequiredFilled(reasonResult?.fieldCandidates || [], requiredSet);
+          for (const field of reasonSet) {
+            reasonRequiredFields.add(field);
+          }
+          fastConflictCount += (fastResult?.conflicts || []).length;
+          reasonConflictCount += (reasonResult?.conflicts || []).length;
+          fastCandidateCount += (fastResult?.fieldCandidates || []).length;
+          reasonCandidateCount += (reasonResult?.fieldCandidates || []).length;
+
+          verifyBatchStats.push({
+            batch_id: String(verifyBatch.id || ''),
+            field_count: verifyFields.length,
+            fast_required_filled_count: fastSet.size,
+            reason_required_filled_count: reasonSet.size
+          });
         }
 
-        if (fastResult || reasonResult) {
-          const requiredSet = new Set(normalizeFieldList(categoryConfig.requiredFields || [], {
-            fieldOrder: categoryConfig.fieldOrder || []
-          }));
-          const fastRequired = countRequiredFilled(fastResult?.fieldCandidates || [], requiredSet);
-          const reasonRequired = countRequiredFilled(reasonResult?.fieldCandidates || [], requiredSet);
+        if (verifyBatchStats.length > 0) {
+          const fastRequired = fastRequiredFields.size;
+          const reasonRequired = reasonRequiredFields.size;
           const reportKey = await appendLlmVerificationReport({
             storage: llmContext.storage,
             category: job.category || categoryConfig.category || '',
@@ -793,12 +836,14 @@ export async function extractCandidatesLLM({
               trigger: llmContext.verification.trigger || 'sampling',
               fast_model: fastModel || null,
               reason_model: reasonModel || null,
+              verify_batch_count: verifyBatchStats.length,
+              verify_batches: verifyBatchStats,
               fast_required_filled_count: fastRequired,
               reason_required_filled_count: reasonRequired,
-              fast_conflict_count: (fastResult?.conflicts || []).length,
-              reason_conflict_count: (reasonResult?.conflicts || []).length,
-              fast_candidate_count: (fastResult?.fieldCandidates || []).length,
-              reason_candidate_count: (reasonResult?.fieldCandidates || []).length,
+              fast_conflict_count: fastConflictCount,
+              reason_conflict_count: reasonConflictCount,
+              fast_candidate_count: fastCandidateCount,
+              reason_candidate_count: reasonCandidateCount,
               fast_cost_usd: Number(usageFast.cost_usd || 0),
               reason_cost_usd: Number(usageReason.cost_usd || 0),
               better_model: reasonRequired > fastRequired
@@ -815,6 +860,7 @@ export async function extractCandidatesLLM({
             report_key: reportKey,
             fast_model: fastModel,
             reason_model: reasonModel,
+            verify_batch_count: verifyBatchStats.length,
             fast_required_filled_count: fastRequired,
             reason_required_filled_count: reasonRequired
           });

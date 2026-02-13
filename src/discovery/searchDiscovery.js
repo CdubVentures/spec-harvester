@@ -47,8 +47,16 @@ const BRAND_HOST_HINTS = {
   logitech: ['logitech', 'logitechg', 'logi'],
   razer: ['razer'],
   steelseries: ['steelseries'],
+  alienware: ['alienware', 'dell'],
+  dell: ['dell', 'alienware'],
+  asus: ['asus', 'rog'],
   zowie: ['zowie', 'benq'],
   benq: ['benq', 'zowie'],
+  hp: ['hp', 'hyperx'],
+  hyperx: ['hyperx', 'hp'],
+  lenovo: ['lenovo', 'legion'],
+  msi: ['msi'],
+  acer: ['acer', 'predator'],
   finalmouse: ['finalmouse'],
   lamzu: ['lamzu'],
   pulsar: ['pulsar'],
@@ -428,11 +436,10 @@ export async function discoverCandidateSources({
     providerState.provider !== 'none' && Boolean(providerState.internet_ready);
 
   if (canSearchInternet && !(internalFirst && internalSatisfied)) {
-    const dualFallbackSearxngOnly =
+    const dualFallbackNoKeyProviders =
       providerState.provider === 'dual' &&
       !providerState.bing_ready &&
-      !providerState.google_ready &&
-      providerState.searxng_ready;
+      !providerState.google_ready;
     for (const query of queries.slice(0, queryLimit)) {
       logger?.info?.('discovery_query_started', {
         query,
@@ -444,12 +451,27 @@ export async function discoverCandidateSources({
         limit: resultsPerQuery,
         logger
       });
+      const resultProviders = new Set(
+        providerResults
+          .map((row) => String(row?.provider || '').trim().toLowerCase())
+          .filter(Boolean)
+      );
+      let reasonCode = 'internet_search';
+      if (dualFallbackNoKeyProviders && resultProviders.size > 0) {
+        if (resultProviders.size === 1 && resultProviders.has('searxng')) {
+          reasonCode = 'dual_fallback_searxng_only';
+        } else if (resultProviders.size === 1 && resultProviders.has('duckduckgo')) {
+          reasonCode = 'dual_fallback_duckduckgo_only';
+        } else {
+          reasonCode = 'dual_fallback_mixed';
+        }
+      }
       rawResults.push(...providerResults.map((row) => ({ ...row, query })));
       searchAttempts.push({
         query,
         provider: config.searchProvider,
         result_count: providerResults.length,
-        reason_code: dualFallbackSearxngOnly ? 'dual_fallback_searxng_only' : 'internet_search'
+        reason_code: reasonCode
       });
       logger?.info?.('discovery_query_completed', {
         query,

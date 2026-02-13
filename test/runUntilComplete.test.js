@@ -5,6 +5,7 @@ import {
   buildRoundConfig,
   buildRoundRequirements,
   evaluateRequiredSearchExhaustion,
+  resolveMissingRequiredForPlanning,
   selectRoundSearchProvider,
   shouldForceExpectedFieldRetry
 } from '../src/runner/runUntilComplete.js';
@@ -113,6 +114,40 @@ test('buildRoundRequirements unions previous missing required fields without dro
   );
 });
 
+test('buildRoundRequirements falls back to planning required fields when previous summary has no missing_required_fields', () => {
+  const job = {
+    requirements: {
+      requiredFields: ['identity.brand']
+    }
+  };
+  const out = buildRoundRequirements(job, ['weight'], {
+    validated: false,
+    missing_required_fields: []
+  }, ['fields.connection', 'fields.dpi']);
+
+  assert.deepEqual(
+    out.requirements.requiredFields,
+    ['identity.brand', 'fields.connection', 'fields.dpi']
+  );
+});
+
+test('resolveMissingRequiredForPlanning restores category required fields for unresolved aggressive rounds', () => {
+  const missing = resolveMissingRequiredForPlanning({
+    previousSummary: {
+      validated: false,
+      missing_required_fields: [],
+      critical_fields_below_pass_target: ['polling_rate']
+    },
+    categoryConfig: {
+      fieldOrder: ['connection', 'dpi', 'polling_rate'],
+      requiredFields: ['connection', 'dpi']
+    },
+    mode: 'aggressive'
+  });
+
+  assert.deepEqual(missing, ['connection', 'dpi']);
+});
+
 test('evaluateRequiredSearchExhaustion stops after required-field loop has no new urls/fields', () => {
   const stop = evaluateRequiredSearchExhaustion({
     round: 2,
@@ -172,6 +207,19 @@ test('selectRoundSearchProvider falls back to searxng when configured providers 
   assert.equal(provider, 'searxng');
 });
 
+test('selectRoundSearchProvider falls back to duckduckgo when no keyed providers are configured', () => {
+  const provider = selectRoundSearchProvider({
+    baseConfig: {
+      searchProvider: 'none',
+      searxngBaseUrl: '',
+      duckduckgoEnabled: true
+    },
+    discoveryEnabled: true,
+    missingRequiredCount: 1
+  });
+  assert.equal(provider, 'duckduckgo');
+});
+
 test('selectRoundSearchProvider returns none when discovery is disabled', () => {
   const provider = selectRoundSearchProvider({
     baseConfig: {
@@ -222,6 +270,49 @@ test('buildRoundConfig keeps discovery disabled when required fields are already
   assert.equal(roundConfig.maxUrlsPerProduct <= 48, true);
   assert.equal(roundConfig.maxCandidateUrls <= 48, true);
   assert.equal(roundConfig.maxManufacturerUrlsPerProduct <= 24, true);
+});
+
+test('buildRoundConfig keeps aggressive discovery enabled when critical gaps remain and product not validated', () => {
+  const roundConfig = buildRoundConfig(
+    {
+      runProfile: 'standard',
+      discoveryEnabled: true,
+      fetchCandidateSources: true,
+      searchProvider: 'searxng',
+      searxngBaseUrl: 'http://127.0.0.1:8080',
+      maxUrlsPerProduct: 80,
+      maxCandidateUrls: 120,
+      maxPagesPerDomain: 3,
+      llmMaxCallsPerRound: 4,
+      llmMaxCallsPerProductFast: 2,
+      llmMaxCallsPerProductTotal: 12,
+      aggressiveLlmMaxCallsPerRound: 18,
+      aggressiveLlmMaxCallsPerProductTotal: 64,
+      endpointSignalLimit: 30,
+      endpointSuggestionLimit: 12,
+      endpointNetworkScanLimit: 600,
+      hypothesisAutoFollowupRounds: 0,
+      hypothesisFollowupUrlsPerRound: 12,
+      postLoadWaitMs: 0,
+      autoScrollEnabled: false,
+      autoScrollPasses: 0,
+      manufacturerBroadDiscovery: false
+    },
+    {
+      round: 1,
+      mode: 'aggressive',
+      missingRequiredCount: 0,
+      missingExpectedCount: 0,
+      missingCriticalCount: 1,
+      previousValidated: false
+    }
+  );
+
+  assert.equal(roundConfig.discoveryEnabled, true);
+  assert.equal(roundConfig.fetchCandidateSources, true);
+  assert.equal(roundConfig.searchProvider, 'searxng');
+  assert.equal(roundConfig.llmMaxCallsPerRound >= 18, true);
+  assert.equal(roundConfig.llmMaxCallsPerProductTotal >= 64, true);
 });
 
 test('buildRoundConfig enables discovery + searxng fallback when required fields are missing', () => {
@@ -385,6 +476,56 @@ test('buildRoundConfig preserves explicit LLM disablement in fast round 0', () =
 
   assert.equal(roundConfig.runProfile, 'fast');
   assert.equal(roundConfig.llmEnabled, false);
+});
+
+test('buildRoundConfig keeps aggressive round 1 in standard profile by default', () => {
+  const roundConfig = buildRoundConfig(
+    {
+      runProfile: 'standard',
+      aggressiveThoroughFromRound: 2,
+      maxUrlsPerProduct: 140,
+      maxCandidateUrls: 180,
+      llmMaxCallsPerRound: 5,
+      llmMaxCallsPerProductFast: 2,
+      discoveryEnabled: true,
+      fetchCandidateSources: true,
+      searchProvider: 'searxng',
+      searxngBaseUrl: 'http://127.0.0.1:8080'
+    },
+    {
+      round: 1,
+      mode: 'aggressive',
+      missingRequiredCount: 3
+    }
+  );
+
+  assert.equal(roundConfig.runProfile, 'standard');
+  assert.equal(roundConfig.maxUrlsPerProduct <= 90, true);
+  assert.equal(roundConfig.maxCandidateUrls <= 120, true);
+});
+
+test('buildRoundConfig allows aggressive thorough profile from configured round', () => {
+  const roundConfig = buildRoundConfig(
+    {
+      runProfile: 'standard',
+      aggressiveThoroughFromRound: 1,
+      maxUrlsPerProduct: 90,
+      maxCandidateUrls: 120,
+      llmMaxCallsPerRound: 5,
+      llmMaxCallsPerProductFast: 2,
+      discoveryEnabled: true,
+      fetchCandidateSources: true,
+      searchProvider: 'searxng',
+      searxngBaseUrl: 'http://127.0.0.1:8080'
+    },
+    {
+      round: 1,
+      mode: 'aggressive',
+      missingRequiredCount: 3
+    }
+  );
+
+  assert.equal(roundConfig.runProfile, 'thorough');
 });
 
 test('buildContractEffortPlan derives weighted effort from field rule contracts', () => {

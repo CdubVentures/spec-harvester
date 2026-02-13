@@ -273,6 +273,9 @@ export function loadConfig(overrides = {}) {
     bingSearchEndpoint: process.env.BING_SEARCH_ENDPOINT || '',
     googleCseKey: process.env.GOOGLE_CSE_KEY || '',
     googleCseCx: process.env.GOOGLE_CSE_CX || '',
+    duckduckgoEnabled: parseBoolEnv('DUCKDUCKGO_ENABLED', true),
+    duckduckgoBaseUrl: process.env.DUCKDUCKGO_BASE_URL || 'https://html.duckduckgo.com/html/',
+    duckduckgoTimeoutMs: parseIntEnv('DUCKDUCKGO_TIMEOUT_MS', 8_000),
     eloSupabaseAnonKey: process.env.ELO_SUPABASE_ANON_KEY || '',
     eloSupabaseEndpoint: process.env.ELO_SUPABASE_ENDPOINT || '',
     llmEnabled: parseBoolEnv('LLM_ENABLED', false),
@@ -285,7 +288,6 @@ export function loadConfig(overrides = {}) {
     llmModelPlan: process.env.LLM_MODEL_PLAN || process.env.LLM_MODEL_EXTRACT || defaultModel,
     llmModelFast:
       process.env.LLM_MODEL_FAST ||
-      process.env.LLM_MODEL_PLAN ||
       process.env.LLM_MODEL_EXTRACT ||
       defaultModel,
     llmModelReasoning:
@@ -297,6 +299,40 @@ export function loadConfig(overrides = {}) {
       process.env.LLM_MODEL_PLAN ||
       process.env.LLM_MODEL_EXTRACT ||
       defaultModel,
+    llmModelWrite:
+      process.env.LLM_MODEL_WRITE ||
+      process.env.LLM_MODEL_VALIDATE ||
+      process.env.LLM_MODEL_PLAN ||
+      process.env.LLM_MODEL_EXTRACT ||
+      defaultModel,
+    llmPlanProvider: (process.env.LLM_PLAN_PROVIDER || '').trim().toLowerCase(),
+    llmPlanBaseUrl: process.env.LLM_PLAN_BASE_URL || '',
+    llmPlanApiKey: process.env.LLM_PLAN_API_KEY || '',
+    llmPlanFallbackModel: process.env.LLM_PLAN_FALLBACK_MODEL || '',
+    llmPlanFallbackProvider: (process.env.LLM_PLAN_FALLBACK_PROVIDER || '').trim().toLowerCase(),
+    llmPlanFallbackBaseUrl: process.env.LLM_PLAN_FALLBACK_BASE_URL || '',
+    llmPlanFallbackApiKey: process.env.LLM_PLAN_FALLBACK_API_KEY || '',
+    llmExtractProvider: (process.env.LLM_EXTRACT_PROVIDER || '').trim().toLowerCase(),
+    llmExtractBaseUrl: process.env.LLM_EXTRACT_BASE_URL || '',
+    llmExtractApiKey: process.env.LLM_EXTRACT_API_KEY || '',
+    llmExtractFallbackModel: process.env.LLM_EXTRACT_FALLBACK_MODEL || '',
+    llmExtractFallbackProvider: (process.env.LLM_EXTRACT_FALLBACK_PROVIDER || '').trim().toLowerCase(),
+    llmExtractFallbackBaseUrl: process.env.LLM_EXTRACT_FALLBACK_BASE_URL || '',
+    llmExtractFallbackApiKey: process.env.LLM_EXTRACT_FALLBACK_API_KEY || '',
+    llmValidateProvider: (process.env.LLM_VALIDATE_PROVIDER || '').trim().toLowerCase(),
+    llmValidateBaseUrl: process.env.LLM_VALIDATE_BASE_URL || '',
+    llmValidateApiKey: process.env.LLM_VALIDATE_API_KEY || '',
+    llmValidateFallbackModel: process.env.LLM_VALIDATE_FALLBACK_MODEL || '',
+    llmValidateFallbackProvider: (process.env.LLM_VALIDATE_FALLBACK_PROVIDER || '').trim().toLowerCase(),
+    llmValidateFallbackBaseUrl: process.env.LLM_VALIDATE_FALLBACK_BASE_URL || '',
+    llmValidateFallbackApiKey: process.env.LLM_VALIDATE_FALLBACK_API_KEY || '',
+    llmWriteProvider: (process.env.LLM_WRITE_PROVIDER || '').trim().toLowerCase(),
+    llmWriteBaseUrl: process.env.LLM_WRITE_BASE_URL || '',
+    llmWriteApiKey: process.env.LLM_WRITE_API_KEY || '',
+    llmWriteFallbackModel: process.env.LLM_WRITE_FALLBACK_MODEL || '',
+    llmWriteFallbackProvider: (process.env.LLM_WRITE_FALLBACK_PROVIDER || '').trim().toLowerCase(),
+    llmWriteFallbackBaseUrl: process.env.LLM_WRITE_FALLBACK_BASE_URL || '',
+    llmWriteFallbackApiKey: process.env.LLM_WRITE_FALLBACK_API_KEY || '',
     cortexEnabled: parseBoolEnv('CORTEX_ENABLED', false),
     chatmockDir: process.env.CHATMOCK_DIR || defaultChatmockDir(),
     chatmockComposeFile: process.env.CHATMOCK_COMPOSE_FILE
@@ -322,6 +358,14 @@ export function loadConfig(overrides = {}) {
     aggressiveEvidenceAuditEnabled: parseBoolEnv('AGGRESSIVE_EVIDENCE_AUDIT_ENABLED', true),
     aggressiveEvidenceAuditBatchSize: parseIntEnv('AGGRESSIVE_EVIDENCE_AUDIT_BATCH_SIZE', 60),
     aggressiveMaxTimePerProductMs: parseIntEnv('AGGRESSIVE_MAX_TIME_PER_PRODUCT_MS', 600_000),
+    aggressiveThoroughFromRound: parseIntEnv('AGGRESSIVE_THOROUGH_FROM_ROUND', 2),
+    aggressiveRound1MaxUrls: parseIntEnv('AGGRESSIVE_ROUND1_MAX_URLS', 90),
+    aggressiveRound1MaxCandidateUrls: parseIntEnv('AGGRESSIVE_ROUND1_MAX_CANDIDATE_URLS', 120),
+    aggressiveLlmMaxCallsPerRound: parseIntEnv('AGGRESSIVE_LLM_MAX_CALLS_PER_ROUND', 16),
+    aggressiveLlmMaxCallsPerProductTotal: parseIntEnv('AGGRESSIVE_LLM_MAX_CALLS_PER_PRODUCT_TOTAL', 48),
+    aggressiveLlmTargetMaxFields: parseIntEnv('AGGRESSIVE_LLM_TARGET_MAX_FIELDS', 75),
+    aggressiveLlmDiscoveryPasses: parseIntEnv('AGGRESSIVE_LLM_DISCOVERY_PASSES', 3),
+    aggressiveLlmDiscoveryQueryCap: parseIntEnv('AGGRESSIVE_LLM_DISCOVERY_QUERY_CAP', 24),
     cortexSyncTimeoutMs: parseIntEnv('CORTEX_SYNC_TIMEOUT_MS', 60_000),
     cortexAsyncPollIntervalMs: parseIntEnv('CORTEX_ASYNC_POLL_INTERVAL_MS', 5_000),
     cortexAsyncMaxWaitMs: parseIntEnv('CORTEX_ASYNC_MAX_WAIT_MS', 900_000),
@@ -357,6 +401,8 @@ export function loadConfig(overrides = {}) {
     llmReasoningBudget: parseIntEnv('LLM_REASONING_BUDGET', 2048),
     llmVerifyMode: parseBoolEnv('LLM_VERIFY_MODE', false),
     llmVerifySampleRate: parseIntEnv('LLM_VERIFY_SAMPLE_RATE', 10),
+    llmVerifyAggressiveAlways: parseBoolEnv('LLM_VERIFY_AGGRESSIVE_ALWAYS', false),
+    llmVerifyAggressiveBatchCount: parseIntEnv('LLM_VERIFY_AGGRESSIVE_BATCH_COUNT', 3),
     llmMaxOutputTokens: parseIntEnv('LLM_MAX_OUTPUT_TOKENS', 1200),
     llmCostInputPer1M: parseFloatEnv('LLM_COST_INPUT_PER_1M', 0.28),
     llmCostOutputPer1M: parseFloatEnv('LLM_COST_OUTPUT_PER_1M', 0.42),
@@ -369,6 +415,7 @@ export function loadConfig(overrides = {}) {
     llmCostCachedInputPer1MDeepseekReasoner: parseFloatEnv('LLM_COST_CACHED_INPUT_PER_1M_DEEPSEEK_REASONER', -1),
     llmMonthlyBudgetUsd: parseFloatEnv('LLM_MONTHLY_BUDGET_USD', 200),
     llmPerProductBudgetUsd: parseFloatEnv('LLM_PER_PRODUCT_BUDGET_USD', 0.1),
+    llmDisableBudgetGuards: parseBoolEnv('LLM_DISABLE_BUDGET_GUARDS', false),
     llmMaxBatchesPerProduct: parseIntEnv('LLM_MAX_BATCHES_PER_PRODUCT', 7),
     llmExtractionCacheEnabled: parseBoolEnv('LLM_EXTRACTION_CACHE_ENABLED', true),
     llmExtractionCacheDir: process.env.LLM_EXTRACTION_CACHE_DIR || '.specfactory_tmp/llm_cache',
@@ -416,6 +463,7 @@ export function loadConfig(overrides = {}) {
     endpointSuggestionLimit: parseIntEnv('ENDPOINT_SUGGESTION_LIMIT', 12),
     endpointNetworkScanLimit: parseIntEnv('ENDPOINT_NETWORK_SCAN_LIMIT', 600),
     manufacturerBroadDiscovery: parseBoolEnv('MANUFACTURER_BROAD_DISCOVERY', false),
+    manufacturerSeedSearchUrls: parseBoolEnv('MANUFACTURER_SEED_SEARCH_URLS', false),
     allowBelowPassTargetFill: parseBoolEnv('ALLOW_BELOW_PASS_TARGET_FILL', false),
     selfImproveEnabled: parseBoolEnv('SELF_IMPROVE_ENABLED', true),
     maxHypothesisItems: parseIntEnv('MAX_HYPOTHESIS_ITEMS', 50),
@@ -453,15 +501,28 @@ export function loadConfig(overrides = {}) {
   merged.llmBaseUrl = merged.llmBaseUrl || merged.openaiBaseUrl;
   merged.llmModelExtract = merged.llmModelExtract || merged.openaiModelExtract;
   merged.llmModelPlan = merged.llmModelPlan || merged.openaiModelPlan;
-  merged.llmModelFast = merged.llmModelFast || merged.llmModelPlan || merged.llmModelExtract;
+  merged.llmModelFast = merged.llmModelFast || merged.llmModelExtract || merged.llmModelPlan;
   merged.llmModelReasoning = merged.llmModelReasoning || merged.llmModelExtract;
   merged.llmModelValidate = merged.llmModelValidate || merged.openaiModelWrite;
+  merged.llmModelWrite = merged.llmModelWrite || merged.llmModelValidate;
+  merged.llmPlanProvider = merged.llmPlanProvider || merged.llmProvider;
+  merged.llmPlanBaseUrl = merged.llmPlanBaseUrl || merged.llmBaseUrl;
+  merged.llmPlanApiKey = merged.llmPlanApiKey || merged.llmApiKey;
+  merged.llmExtractProvider = merged.llmExtractProvider || merged.llmProvider;
+  merged.llmExtractBaseUrl = merged.llmExtractBaseUrl || merged.llmBaseUrl;
+  merged.llmExtractApiKey = merged.llmExtractApiKey || merged.llmApiKey;
+  merged.llmValidateProvider = merged.llmValidateProvider || merged.llmProvider;
+  merged.llmValidateBaseUrl = merged.llmValidateBaseUrl || merged.llmBaseUrl;
+  merged.llmValidateApiKey = merged.llmValidateApiKey || merged.llmApiKey;
+  merged.llmWriteProvider = merged.llmWriteProvider || merged.llmProvider;
+  merged.llmWriteBaseUrl = merged.llmWriteBaseUrl || merged.llmBaseUrl;
+  merged.llmWriteApiKey = merged.llmWriteApiKey || merged.llmApiKey;
   merged.llmTimeoutMs = merged.llmTimeoutMs || merged.openaiTimeoutMs;
   merged.openaiApiKey = merged.llmApiKey;
   merged.openaiBaseUrl = merged.llmBaseUrl;
   merged.openaiModelExtract = merged.llmModelExtract;
   merged.openaiModelPlan = merged.llmModelPlan;
-  merged.openaiModelWrite = merged.llmModelValidate;
+  merged.openaiModelWrite = merged.llmModelWrite;
   merged.openaiTimeoutMs = merged.llmTimeoutMs;
 
   return applyRunProfile(

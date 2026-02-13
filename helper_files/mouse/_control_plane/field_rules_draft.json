@@ -37,12 +37,21 @@
         "type": "integer",
         "unit": "g",
         "unknown_reason_required": true,
-        "unknown_token": "unk"
+        "unknown_token": "unk",
+        "range": {},
+        "list_rules": {
+          "dedupe": true,
+          "sort": "none",
+          "min_items": 0,
+          "max_items": 100
+        },
+        "object_schema": {},
+        "item_union": []
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
-          "strategy": "alias"
+          "strategy": "alias",
+          "fuzzy_threshold": 0.92
         },
         "new_value_policy": {
           "accept_if_evidence": true,
@@ -86,15 +95,21 @@
         "unit": "g",
         "unit_accepts": [
           "g"
-        ]
+        ],
+        "unit_conversions": {},
+        "delimiters": [],
+        "range_separators": [],
+        "token_map": {},
+        "accepted_formats": [],
+        "mode_aliases": {}
       },
       "priority": {
+        "required_level": "expected",
         "availability": "expected",
-        "block_publish_when_unk": false,
         "difficulty": "easy",
         "effort": 3,
         "publish_gate": false,
-        "required_level": "expected"
+        "block_publish_when_unk": false
       },
       "search_hints": {
         "domain_hints": [
@@ -133,7 +148,7 @@
         "display_mode": "all",
         "examples": [],
         "group": "Sensor & Performance",
-        "guidance_md": null,
+        "guidance_md": "",
         "input_control": "number",
         "label": "Max Acceleration",
         "order": 57,
@@ -143,9 +158,60 @@
         "suffix": "g",
         "tooltip_key": "acceleration",
         "tooltip_md": "Define 'Max Acceleration' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
-        "tooltip_source": "hbs_tooltipsMouse.js"
+        "tooltip_source": "hbs_tooltipsMouse.js",
+        "array_handling": "none"
       },
-      "value_form": "scalar"
+      "value_form": "single",
+      "deprecated_keys": [],
+      "required_level": "expected",
+      "availability": "expected",
+      "difficulty": "easy",
+      "effort": 3,
+      "type": "integer",
+      "shape": "scalar",
+      "unit": "g",
+      "parse_template": "number_with_unit",
+      "enum_policy": "open",
+      "enum_source": null,
+      "strict_unit_required": false,
+      "round": "int",
+      "array_handling": "none",
+      "min_evidence_refs": 1,
+      "evidence_required": true,
+      "publish_gate": false,
+      "block_publish_when_unk": false,
+      "selection_policy": null,
+      "_edited": true,
+      "new_value_policy": {
+        "accept_if_evidence": true,
+        "mark_needs_curation": true,
+        "suggestion_target": "_suggestions/enums.json"
+      },
+      "enum_match_strategy": "alias",
+      "enum_fuzzy_threshold": 0.92,
+      "list_rules": {
+        "dedupe": true,
+        "sort": "none",
+        "min_items": 0,
+        "max_items": 100
+      },
+      "object_schema": {},
+      "item_union": [],
+      "parse_rules": {
+        "unit": "g",
+        "unit_accepts": [
+          "g"
+        ],
+        "unit_conversions": {},
+        "delimiters": [],
+        "separators": [],
+        "token_map": {},
+        "accepted_formats": [],
+        "allow_unitless": true,
+        "allow_ranges": false,
+        "mode_aliases": {},
+        "accept_bare_numbers_as_mode": false
+      }
     },
     "adjustable_scroll_wheel": {
       "aliases": [],

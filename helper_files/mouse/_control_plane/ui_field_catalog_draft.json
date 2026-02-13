@@ -1480,16 +1480,7 @@
       "canonical_key": "acceleration",
       "display_decimals": 0,
       "display_mode": "all",
-      "examples": [
-        "40",
-        "50",
-        "50",
-        "50",
-        "50",
-        "10",
-        "40",
-        "50"
-      ],
+      "examples": [],
       "group": "Sensor & Performance",
       "guidance_md": null,
       "input_control": "number",
@@ -1502,7 +1493,14 @@
       "suffix": "g",
       "tooltip_key": "acceleration",
       "tooltip_md": "Define 'Max Acceleration' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
-      "tooltip_source": "hbs_tooltipsMouse.js"
+      "tooltip_source": "hbs_tooltipsMouse.js",
+      "required_level": "expected",
+      "availability": "expected",
+      "difficulty": "easy",
+      "effort": 3,
+      "type": "integer",
+      "shape": "scalar",
+      "unit": "g"
     },
     {
       "aliases": [

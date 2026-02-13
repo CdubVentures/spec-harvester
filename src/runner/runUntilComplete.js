@@ -60,6 +60,38 @@ function makeRoundHint(round) {
   return 'conflict_resolution_pass';
 }
 
+function normalizeFieldForSearchQuery(value) {
+  const token = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^fields\./, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!token) {
+    return '';
+  }
+
+  const blocked = new Set([
+    'id',
+    'brand',
+    'model',
+    'base model',
+    'category',
+    'variant',
+    'active',
+    'status',
+    'flags'
+  ]);
+  if (blocked.has(token)) {
+    return '';
+  }
+
+  if (token === 'lngth') return 'length';
+  if (token === 'cpi') return 'dpi';
+  return token;
+}
+
 function buildAvailabilityQueries({
   job,
   expectedFields = [],
@@ -70,20 +102,43 @@ function buildAvailabilityQueries({
   const model = String(job?.identityLock?.model || '').trim();
   const variant = String(job?.identityLock?.variant || '').trim();
   const product = [brand, model, variant].filter(Boolean).join(' ').trim();
+  if (!product) {
+    return [];
+  }
   const fields = [...new Set([
     ...(expectedFields || []),
     ...(criticalFields || [])
   ])];
   const queries = [];
+
+  const baseline = [
+    `${product} specifications`,
+    `${product} specs`,
+    `${product} technical specifications`,
+    `${product} datasheet`,
+    `${product} manual pdf`,
+    `${product} official specs`,
+    `${product} review`
+  ];
+  queries.push(...baseline);
+
   for (const field of fields.slice(0, 8)) {
-    queries.push(`${product} ${field} specification`);
-    queries.push(`${product} ${field} support`);
-    queries.push(`${product} ${field} manual pdf`);
+    const normalizedField = normalizeFieldForSearchQuery(field);
+    if (!normalizedField) {
+      continue;
+    }
+    queries.push(`${product} ${normalizedField} specification`);
+    queries.push(`${product} ${normalizedField} support`);
+    queries.push(`${product} ${normalizedField} manual pdf`);
   }
   for (const field of (sometimesFields || []).slice(0, 4)) {
-    queries.push(`${product} ${field} specs`);
+    const normalizedField = normalizeFieldForSearchQuery(field);
+    if (!normalizedField) {
+      continue;
+    }
+    queries.push(`${product} ${normalizedField} specs`);
   }
-  return [...new Set(queries.map((query) => query.trim()).filter(Boolean))].slice(0, 24);
+  return [...new Set(queries.map((query) => query.trim()).filter(Boolean))].slice(0, 30);
 }
 
 function normalizeFieldContractToken(value) {
@@ -194,21 +249,28 @@ export function selectRoundSearchProvider({
   const bingReady = Boolean(baseConfig.bingSearchEndpoint && baseConfig.bingSearchKey);
   const googleReady = Boolean(baseConfig.googleCseKey && baseConfig.googleCseCx);
   const searxngReady = Boolean(baseConfig.searxngBaseUrl);
+  const duckduckgoReady = baseConfig.duckduckgoEnabled !== false;
 
   if (configured === 'bing') {
-    return bingReady ? 'bing' : (searxngReady ? 'searxng' : 'none');
+    return bingReady ? 'bing' : (searxngReady ? 'searxng' : (duckduckgoReady ? 'duckduckgo' : 'none'));
   }
   if (configured === 'google') {
-    return googleReady ? 'google' : (searxngReady ? 'searxng' : 'none');
+    return googleReady ? 'google' : (searxngReady ? 'searxng' : (duckduckgoReady ? 'duckduckgo' : 'none'));
   }
   if (configured === 'dual') {
     if (bingReady || googleReady) {
       return 'dual';
     }
-    return searxngReady ? 'searxng' : 'none';
+    if (searxngReady) {
+      return 'searxng';
+    }
+    return duckduckgoReady ? 'duckduckgo' : 'none';
   }
   if (configured === 'searxng') {
-    return searxngReady ? 'searxng' : 'none';
+    return searxngReady ? 'searxng' : (duckduckgoReady ? 'duckduckgo' : 'none');
+  }
+  if (configured === 'duckduckgo' || configured === 'ddg') {
+    return duckduckgoReady ? 'duckduckgo' : 'none';
   }
 
   if (missingRequiredCount > 0) {
@@ -227,8 +289,11 @@ export function selectRoundSearchProvider({
     if (searxngReady) {
       return 'searxng';
     }
-  } else if (searxngReady) {
-    return 'searxng';
+    if (duckduckgoReady) {
+      return 'duckduckgo';
+    }
+  } else if (searxngReady || duckduckgoReady) {
+    return searxngReady ? 'searxng' : 'duckduckgo';
   }
   return 'none';
 }
@@ -323,6 +388,8 @@ export function buildRoundConfig(baseConfig, {
   contractEffort = {},
   missingRequiredCount,
   missingExpectedCount,
+  missingCriticalCount,
+  previousValidated,
   requiredSearchIteration
 } = {}) {
   const expectedCount = toInt(availabilityEffort.expected_count, 0);
@@ -330,15 +397,21 @@ export function buildRoundConfig(baseConfig, {
   const rareCount = toInt(availabilityEffort.rare_count, 0);
   const resolvedMissingRequired = toInt(missingRequiredCount, toInt(availabilityEffort.required_count, 0));
   const resolvedMissingExpected = toInt(missingExpectedCount, expectedCount);
+  const resolvedMissingCritical = toInt(missingCriticalCount, 0);
+  const resolvedPreviousValidated = previousValidated === undefined ? null : Boolean(previousValidated);
   const requiredIteration = toInt(requiredSearchIteration, 0);
   const hasExplicitMissingCounts =
     missingRequiredCount !== undefined ||
     missingExpectedCount !== undefined;
+  const aggressiveThoroughFromRound = Math.max(1, toInt(baseConfig.aggressiveThoroughFromRound, 2));
   const profile = round === 0
     ? 'fast'
-    : round >= 2 || mode === 'aggressive'
-      ? 'thorough'
-      : 'standard';
+    : mode === 'aggressive'
+      ? (round >= aggressiveThoroughFromRound ? 'thorough' : 'standard')
+      : (round >= 2 ? 'thorough' : 'standard');
+  const aggressiveRound1UrlCap = Math.max(24, toInt(baseConfig.aggressiveRound1MaxUrls, 90));
+  const aggressiveRound1CandidateCap = Math.max(32, toInt(baseConfig.aggressiveRound1MaxCandidateUrls, 120));
+  const aggressiveRound1 = mode === 'aggressive' && round === 1;
   const next = applyRunProfile(
     {
       ...baseConfig,
@@ -354,11 +427,23 @@ export function buildRoundConfig(baseConfig, {
       maxUrlsPerProduct:
         round === 0
           ? Math.min(baseConfig.maxUrlsPerProduct || 20, 24)
-          : (round >= 2 ? Math.max(baseConfig.maxUrlsPerProduct || 20, 160) : Math.max(baseConfig.maxUrlsPerProduct || 20, 60)),
+          : (
+            round >= 2
+              ? Math.max(baseConfig.maxUrlsPerProduct || 20, 160)
+              : (aggressiveRound1
+                ? Math.min(Math.max(baseConfig.maxUrlsPerProduct || 20, 60), aggressiveRound1UrlCap)
+                : Math.max(baseConfig.maxUrlsPerProduct || 20, 60))
+          ),
       maxCandidateUrls:
         round === 0
           ? Math.min(baseConfig.maxCandidateUrls || 50, 40)
-          : (round >= 2 ? Math.max(baseConfig.maxCandidateUrls || 50, 220) : Math.max(baseConfig.maxCandidateUrls || 50, 90))
+          : (
+            round >= 2
+              ? Math.max(baseConfig.maxCandidateUrls || 50, 220)
+              : (aggressiveRound1
+                ? Math.min(Math.max(baseConfig.maxCandidateUrls || 50, 90), aggressiveRound1CandidateCap)
+                : Math.max(baseConfig.maxCandidateUrls || 50, 90))
+          )
     },
     profile
   );
@@ -397,7 +482,13 @@ export function buildRoundConfig(baseConfig, {
     let fetchCandidateSources = Boolean(next.fetchCandidateSources);
 
     if (hasExplicitMissingCounts) {
-      if (resolvedMissingRequired === 0 && resolvedMissingExpected === 0) {
+      const aggressiveShouldContinue =
+        mode === 'aggressive' &&
+        (
+          resolvedMissingCritical > 0 ||
+          resolvedPreviousValidated === false
+        );
+      if (resolvedMissingRequired === 0 && resolvedMissingExpected === 0 && !aggressiveShouldContinue) {
         discoveryEnabled = false;
         fetchCandidateSources = false;
       } else if (
@@ -426,13 +517,31 @@ export function buildRoundConfig(baseConfig, {
     }
   }
 
-  if (hasExplicitMissingCounts && round > 0 && resolvedMissingRequired === 0 && resolvedMissingExpected === 0) {
+  const aggressiveKeepRoundOpen =
+    mode === 'aggressive' &&
+    (
+      resolvedMissingCritical > 0 ||
+      resolvedPreviousValidated === false
+    );
+  if (hasExplicitMissingCounts && round > 0 && resolvedMissingRequired === 0 && resolvedMissingExpected === 0 && !aggressiveKeepRoundOpen) {
     next.maxUrlsPerProduct = Math.min(next.maxUrlsPerProduct || 60, 48);
     next.maxCandidateUrls = Math.min(next.maxCandidateUrls || 90, 48);
     next.maxManufacturerUrlsPerProduct = Math.min(next.maxManufacturerUrlsPerProduct || 24, 24);
     next.manufacturerBroadDiscovery = false;
   } else if (next.maxManufacturerUrlsPerProduct === undefined) {
     next.maxManufacturerUrlsPerProduct = Math.max(12, Math.min(next.maxUrlsPerProduct || 24, 24));
+  }
+
+  if (mode === 'aggressive') {
+    const aggressiveRoundCallFloor = Math.max(1, toInt(baseConfig.aggressiveLlmMaxCallsPerRound, 16));
+    const aggressiveTotalCallFloor = Math.max(
+      aggressiveRoundCallFloor,
+      toInt(baseConfig.aggressiveLlmMaxCallsPerProductTotal, 48)
+    );
+    if (round > 0) {
+      next.llmMaxCallsPerRound = Math.max(next.llmMaxCallsPerRound || 0, aggressiveRoundCallFloor);
+    }
+    next.llmMaxCallsPerProductTotal = Math.max(next.llmMaxCallsPerProductTotal || 0, aggressiveTotalCallFloor);
   }
 
   if (Boolean(baseConfig.llmExplicitlySet)) {
@@ -447,42 +556,158 @@ function llmBlocked(summary = {}) {
   return String(summary.llm?.budget?.blocked_reason || '').trim();
 }
 
-function makeLlmTargetFields({ previousSummary, categoryConfig }) {
+function isIdentityOrEditorialField(field, categoryConfig = {}) {
+  const token = String(field || '').trim().toLowerCase();
+  if (!token) {
+    return true;
+  }
+  if (['id', 'brand', 'model', 'base_model', 'category', 'sku', 'mpn', 'gtin', 'variant'].includes(token)) {
+    return true;
+  }
+  const editorial = new Set(
+    normalizeFieldList(toArray(categoryConfig?.schema?.editorial_fields || []), {
+      fieldOrder: categoryConfig?.fieldOrder || []
+    })
+  );
+  return editorial.has(token);
+}
+
+function makeLlmTargetFields({
+  previousSummary,
+  categoryConfig,
+  mode = 'balanced',
+  fallbackRequiredFields = [],
+  config = {}
+}) {
+  const requiredFallback = normalizeFieldList(
+    toArray(fallbackRequiredFields).length > 0
+      ? toArray(fallbackRequiredFields)
+      : toArray(categoryConfig.requiredFields),
+    { fieldOrder: categoryConfig.fieldOrder || [] }
+  );
+  const criticalBase = normalizeFieldList(
+    toArray(categoryConfig.schema?.critical_fields),
+    { fieldOrder: categoryConfig.fieldOrder || [] }
+  );
+  const aggressiveMode = mode === 'aggressive';
+  const aggressiveTargetCap = Math.max(
+    requiredFallback.length || 1,
+    Math.min(
+      Math.max(1, toInt(config.aggressiveLlmTargetMaxFields, 75)),
+      Math.max(1, toArray(categoryConfig.fieldOrder).length || 75)
+    )
+  );
+  const aggressiveAllFields = normalizeFieldList(toArray(categoryConfig.fieldOrder), {
+    fieldOrder: categoryConfig.fieldOrder || []
+  }).filter((field) => !isIdentityOrEditorialField(field, categoryConfig));
+
   if (!previousSummary) {
-    return [
+    const base = [
       ...new Set([
-        ...(categoryConfig.requiredFields || []),
-        ...(categoryConfig.schema?.critical_fields || [])
+        ...requiredFallback,
+        ...criticalBase
       ])
     ];
+    if (!aggressiveMode) {
+      return base;
+    }
+    return [...new Set([...base, ...aggressiveAllFields])].slice(0, aggressiveTargetCap);
   }
 
-  const missing = toArray(previousSummary.missing_required_fields);
-  const critical = toArray(previousSummary.critical_fields_below_pass_target);
+  const missing = normalizeFieldList(
+    toArray(previousSummary.missing_required_fields),
+    { fieldOrder: categoryConfig.fieldOrder || [] }
+  );
+  const critical = normalizeFieldList(
+    toArray(previousSummary.critical_fields_below_pass_target),
+    { fieldOrder: categoryConfig.fieldOrder || [] }
+  );
+  const belowPassTarget = normalizeFieldList(
+    toArray(previousSummary.fields_below_pass_target),
+    { fieldOrder: categoryConfig.fieldOrder || [] }
+  );
   const contradictions = toArray(previousSummary.constraint_analysis?.top_uncertain_fields || [])
     .map((item) => item.field)
     .filter(Boolean);
-  const combined = [...new Set([...missing, ...critical, ...contradictions])];
-  if (combined.length) {
-    return combined;
+  const combined = normalizeFieldList(
+    [...new Set([...missing, ...critical, ...contradictions])],
+    { fieldOrder: categoryConfig.fieldOrder || [] }
+  );
+  if (combined.length > 0) {
+    if (!aggressiveMode) {
+      return combined;
+    }
+    return [...new Set([
+      ...combined,
+      ...requiredFallback,
+      ...belowPassTarget,
+      ...aggressiveAllFields
+    ])].slice(0, aggressiveTargetCap);
+  }
+  if (aggressiveMode) {
+    return [...new Set([
+      ...requiredFallback,
+      ...criticalBase,
+      ...belowPassTarget,
+      ...aggressiveAllFields
+    ])].slice(0, aggressiveTargetCap);
   }
   return [
     ...new Set([
-      ...(categoryConfig.requiredFields || []),
-      ...(categoryConfig.schema?.critical_fields || [])
+      ...requiredFallback,
+      ...criticalBase
     ])
   ];
 }
 
-export function buildRoundRequirements(job, llmTargetFields, previousSummary) {
+export function resolveMissingRequiredForPlanning({
+  previousSummary = null,
+  categoryConfig = {},
+  mode = 'balanced'
+} = {}) {
+  const previousMissing = normalizeFieldList(
+    toArray(previousSummary?.missing_required_fields),
+    { fieldOrder: categoryConfig.fieldOrder || [] }
+  );
+  if (previousMissing.length > 0) {
+    return previousMissing;
+  }
+  const requiredDefaults = normalizeFieldList(
+    toArray(categoryConfig.requiredFields),
+    { fieldOrder: categoryConfig.fieldOrder || [] }
+  );
+  if (!previousSummary) {
+    return requiredDefaults;
+  }
+  if (Boolean(previousSummary.validated)) {
+    return previousMissing;
+  }
+  if (mode === 'aggressive') {
+    return requiredDefaults;
+  }
+  const criticalMissing = normalizeFieldList(
+    toArray(previousSummary.critical_fields_below_pass_target),
+    { fieldOrder: categoryConfig.fieldOrder || [] }
+  );
+  if (criticalMissing.length > 0) {
+    return requiredDefaults;
+  }
+  return previousMissing;
+}
+
+export function buildRoundRequirements(job, llmTargetFields, previousSummary, fallbackRequiredFields = []) {
   const requirements = {
     ...(job.requirements || {})
   };
   requirements.llmTargetFields = llmTargetFields;
+  const previousMissing = toArray(previousSummary?.missing_required_fields);
+  const requiredSeed = previousMissing.length > 0
+    ? previousMissing
+    : toArray(fallbackRequiredFields);
   requirements.requiredFields = [
     ...new Set([
       ...toArray(job.requirements?.requiredFields),
-      ...toArray(previousSummary?.missing_required_fields)
+      ...requiredSeed
     ])
   ];
   return {
@@ -597,10 +822,11 @@ export async function runUntilComplete({
       next_action_hint: roundHint
     });
 
-    const missingRequiredForPlanning = normalizeFieldList(
-      previousSummary?.missing_required_fields || categoryConfig.requiredFields || [],
-      { fieldOrder: categoryConfig.fieldOrder || [] }
-    );
+    const missingRequiredForPlanning = resolveMissingRequiredForPlanning({
+      previousSummary,
+      categoryConfig,
+      mode: normalizedModeValue
+    });
     const missingCriticalForPlanning = normalizeFieldList(
       previousSummary?.critical_fields_below_pass_target || categoryConfig.schema?.critical_fields || [],
       { fieldOrder: categoryConfig.fieldOrder || [] }
@@ -639,17 +865,22 @@ export async function runUntilComplete({
       contractEffort,
       missingRequiredCount,
       missingExpectedCount,
+      missingCriticalCount: missingCriticalForPlanning.length,
+      previousValidated: previousSummary?.validated,
       requiredSearchIteration
     });
     let llmTargetFields = makeLlmTargetFields({
       previousSummary,
-      categoryConfig
+      categoryConfig,
+      mode: normalizedModeValue,
+      fallbackRequiredFields: missingRequiredForPlanning,
+      config
     });
     if (forcedExpectedRetryFields.length > 0) {
       llmTargetFields = [...new Set([...llmTargetFields, ...forcedExpectedRetryFields])];
       forcedExpectedRetryFields = [];
     }
-    const jobOverride = buildRoundRequirements(job, llmTargetFields, previousSummary);
+    const jobOverride = buildRoundRequirements(job, llmTargetFields, previousSummary, missingRequiredForPlanning);
 
     const roundResult = await runProduct({
       storage,

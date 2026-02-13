@@ -1,4 +1,4 @@
-import { callOpenAI } from './openaiClient.js';
+import { callLlmWithRouting, hasLlmRouteApiKey } from './routing.js';
 import { normalizeFieldList } from '../utils/fieldKeys.js';
 
 function hasKnownValue(value) {
@@ -128,7 +128,7 @@ export async function validateCandidatesLLM({
   logger,
   llmContext = {}
 }) {
-  const enabled = Boolean(config.llmEnabled && config.llmApiKey);
+  const enabled = Boolean(config.llmEnabled && hasLlmRouteApiKey(config, { role: 'validate' }));
   if (!enabled) {
     return {
       enabled: false,
@@ -201,8 +201,10 @@ export async function validateCandidatesLLM({
   };
 
   try {
-    const result = await callOpenAI({
-      model: config.llmModelValidate,
+    const result = await callLlmWithRouting({
+      config,
+      reason: 'validate',
+      role: 'validate',
       system: [
         'You validate uncertain hardware fields against evidence and constraints.',
         'Return JSON only.',
@@ -210,9 +212,6 @@ export async function validateCandidatesLLM({
       ].join('\n'),
       user: JSON.stringify(payload),
       jsonSchema: validatorSchema(),
-      apiKey: config.llmApiKey,
-      baseUrl: config.llmBaseUrl,
-      provider: config.llmProvider,
       usageContext: {
         category: job.category || categoryConfig.category || '',
         productId: job.productId || '',

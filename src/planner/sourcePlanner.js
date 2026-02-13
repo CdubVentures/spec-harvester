@@ -58,6 +58,13 @@ const BRAND_HOST_HINTS = {
   endgame: ['endgamegear', 'endgame-gear']
 };
 
+const BRAND_DOMAIN_OVERRIDES = {
+  alienware: ['alienware.com', 'dell.com'],
+  logitech: ['logitechg.com', 'logitech.com'],
+  steelseries: ['steelseries.com'],
+  razer: ['razer.com']
+};
+
 function manufacturerHostHintsForBrand(brand) {
   const hints = new Set(tokenize(brand));
   const brandSlug = slug(brand);
@@ -69,6 +76,34 @@ function manufacturerHostHintsForBrand(brand) {
     }
   }
   return [...hints];
+}
+
+function manufacturerSeedHostsForBrand(brand = '', hints = []) {
+  const seeds = new Set();
+  const brandSlug = slug(brand);
+  for (const [token, domains] of Object.entries(BRAND_DOMAIN_OVERRIDES)) {
+    if (brandSlug.includes(token)) {
+      for (const domain of domains || []) {
+        const normalized = normalizeHost(domain);
+        if (normalized) {
+          seeds.add(normalized);
+        }
+      }
+    }
+  }
+
+  for (const hint of hints || []) {
+    const token = String(hint || '').trim().toLowerCase();
+    if (!token || token.length < 3 || !/^[a-z0-9-]+$/.test(token)) {
+      continue;
+    }
+    if (['logi', 'mice', 'mouse', 'gaming', 'wireless', 'wired'].includes(token)) {
+      continue;
+    }
+    seeds.add(`${token}.com`);
+  }
+
+  return [...seeds];
 }
 
 function slug(value) {
@@ -175,6 +210,7 @@ export class SourcePlanner {
     this.maxCandidateUrls = config.maxCandidateUrls;
     this.maxPagesPerDomain = config.maxPagesPerDomain;
     this.manufacturerDeepResearchEnabled = config.manufacturerDeepResearchEnabled !== false;
+    this.manufacturerSeedSearchUrls = Boolean(config.manufacturerSeedSearchUrls);
     this.maxManufacturerUrls = Math.max(
       1,
       Math.min(this.maxUrls, Number(config.maxManufacturerUrlsPerProduct || this.maxUrls))
@@ -314,7 +350,7 @@ export class SourcePlanner {
       .sort((a, b) => b.score - a.score || a.host.localeCompare(b.host));
 
     if (!scored.length) {
-      return new Set(candidates);
+      return new Set();
     }
 
     const topScore = scored[0].score;
@@ -346,9 +382,17 @@ export class SourcePlanner {
     const encodedQuery = encodeURIComponent(queryText);
     const modelSlug = slug(this.job.identityLock?.model || this.job.productId || '');
 
-    const manufacturerHosts = new Set(this.brandManufacturerHostSet.size
-      ? [...this.brandManufacturerHostSet]
-      : [...this.manufacturerHostsFromConfig()]);
+    const fallbackBrandSeeds = manufacturerSeedHostsForBrand(
+      this.job.identityLock?.brand || '',
+      this.brandHostHints
+    );
+    const manufacturerHosts = new Set(
+      this.brandManufacturerHostSet.size
+        ? [...this.brandManufacturerHostSet]
+        : (this.brandHostHints.length > 0
+          ? fallbackBrandSeeds
+          : [...this.manufacturerHostsFromConfig()])
+    );
     for (const seedUrl of this.job.seedUrls || []) {
       const host = getHost(seedUrl);
       if (host && resolveTierNameForHost(host, this.categoryConfig) === 'manufacturer') {
@@ -364,13 +408,9 @@ export class SourcePlanner {
       }
 
       const seeds = [
-        `https://${host}/search?q=${encodedQuery}`,
-        `https://${host}/search?query=${encodedQuery}`,
-        `https://${host}/shop/search?q=${encodedQuery}`,
         `https://${host}/products/${modelSlug}`,
         `https://${host}/product/${modelSlug}`,
         `https://${host}/gaming-mice/${modelSlug}`,
-        `https://${host}/support/search?query=${encodedQuery}`,
         `https://${host}/support/${modelSlug}`,
         `https://${host}/downloads/${modelSlug}`,
         `https://${host}/manual/${modelSlug}`,
@@ -380,6 +420,14 @@ export class SourcePlanner {
         `https://${host}/sitemap_index.xml`,
         `https://${host}/sitemaps.xml`
       ];
+      if (this.manufacturerSeedSearchUrls) {
+        seeds.unshift(
+          `https://${host}/support/search?query=${encodedQuery}`,
+          `https://${host}/shop/search?q=${encodedQuery}`,
+          `https://${host}/search?query=${encodedQuery}`,
+          `https://${host}/search?q=${encodedQuery}`
+        );
+      }
 
       for (const url of seeds) {
         this.enqueue(url, 'manufacturer_deep_seed', { forceApproved: true });

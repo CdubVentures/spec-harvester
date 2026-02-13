@@ -52,7 +52,15 @@ test('loadConfig reads Phase 12 aggressive extraction environment settings', () 
     AGGRESSIVE_MAX_SEARCH_QUERIES: '7',
     AGGRESSIVE_EVIDENCE_AUDIT_ENABLED: 'true',
     AGGRESSIVE_EVIDENCE_AUDIT_BATCH_SIZE: '88',
-    AGGRESSIVE_MAX_TIME_PER_PRODUCT_MS: '120000'
+    AGGRESSIVE_MAX_TIME_PER_PRODUCT_MS: '120000',
+    AGGRESSIVE_LLM_MAX_CALLS_PER_ROUND: '18',
+    AGGRESSIVE_LLM_MAX_CALLS_PER_PRODUCT_TOTAL: '64',
+    AGGRESSIVE_LLM_TARGET_MAX_FIELDS: '75',
+    AGGRESSIVE_LLM_DISCOVERY_PASSES: '4',
+    AGGRESSIVE_LLM_DISCOVERY_QUERY_CAP: '36',
+    LLM_VERIFY_AGGRESSIVE_ALWAYS: 'true',
+    LLM_VERIFY_AGGRESSIVE_BATCH_COUNT: '5',
+    LLM_DISABLE_BUDGET_GUARDS: 'true'
   }, () => {
     const config = loadConfig();
     assert.equal(config.aggressiveModeEnabled, true);
@@ -61,5 +69,43 @@ test('loadConfig reads Phase 12 aggressive extraction environment settings', () 
     assert.equal(config.aggressiveEvidenceAuditEnabled, true);
     assert.equal(config.aggressiveEvidenceAuditBatchSize, 88);
     assert.equal(config.aggressiveMaxTimePerProductMs, 120000);
+    assert.equal(config.aggressiveLlmMaxCallsPerRound, 18);
+    assert.equal(config.aggressiveLlmMaxCallsPerProductTotal, 64);
+    assert.equal(config.aggressiveLlmTargetMaxFields, 75);
+    assert.equal(config.aggressiveLlmDiscoveryPasses, 4);
+    assert.equal(config.aggressiveLlmDiscoveryQueryCap, 36);
+    assert.equal(config.llmVerifyAggressiveAlways, true);
+    assert.equal(config.llmVerifyAggressiveBatchCount, 5);
+    assert.equal(config.llmDisableBudgetGuards, true);
+  });
+});
+
+test('loadConfig reads role-based LLM routing settings and safe fast-model default', () => {
+  withEnv({
+    LLM_PROVIDER: 'deepseek',
+    LLM_BASE_URL: 'https://api.deepseek.com',
+    LLM_API_KEY: 'k-main',
+    LLM_MODEL_EXTRACT: 'deepseek-reasoner',
+    LLM_MODEL_PLAN: 'gemini-2.5-flash-lite',
+    LLM_MODEL_FAST: null,
+    LLM_MODEL_WRITE: 'gpt-5-low',
+    LLM_PLAN_PROVIDER: 'openai',
+    LLM_PLAN_BASE_URL: 'http://localhost:8000/v1',
+    LLM_PLAN_API_KEY: 'key-plan',
+    LLM_PLAN_FALLBACK_MODEL: 'deepseek-chat',
+    LLM_PLAN_FALLBACK_PROVIDER: 'deepseek',
+    LLM_PLAN_FALLBACK_BASE_URL: 'https://api.deepseek.com',
+    LLM_PLAN_FALLBACK_API_KEY: 'k-fallback'
+  }, () => {
+    const config = loadConfig();
+    assert.equal(config.llmModelFast, 'deepseek-reasoner');
+    assert.equal(config.llmModelWrite, 'gpt-5-low');
+    assert.equal(config.llmPlanProvider, 'openai');
+    assert.equal(config.llmPlanBaseUrl, 'http://localhost:8000/v1');
+    assert.equal(config.llmPlanApiKey, 'key-plan');
+    assert.equal(config.llmPlanFallbackModel, 'deepseek-chat');
+    assert.equal(config.llmPlanFallbackProvider, 'deepseek');
+    assert.equal(config.llmPlanFallbackBaseUrl, 'https://api.deepseek.com');
+    assert.equal(config.llmPlanFallbackApiKey, 'k-fallback');
   });
 });

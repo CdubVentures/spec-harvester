@@ -1,0 +1,43 @@
+{
+  "category": "mouse",
+  "productId": "mouse-alienware-aw610m",
+  "runId": "20260213104905-a3ccae",
+  "generated_at": "2026-02-13T10:50:06.378Z",
+  "candidate_count": 2,
+  "candidates": [
+    {
+      "url": "https://duckduckgo.com/",
+      "host": "duckduckgo.com",
+      "rootDomain": "duckduckgo.com",
+      "title": "here",
+      "snippet": "",
+      "query": "Alienware AW610M embedded state specification",
+      "provider": "duckduckgo",
+      "approvedDomain": false,
+      "tier": 4,
+      "tierName": "candidate",
+      "role": "other",
+      "path": "/",
+      "tier_name": "candidate",
+      "approved_domain": false,
+      "score": 4
+    },
+    {
+      "url": "https://duckduckgo.com/html/",
+      "host": "duckduckgo.com",
+      "rootDomain": "duckduckgo.com",
+      "title": "DuckDuckGo",
+      "snippet": "",
+      "query": "Alienware AW610M embedded state specification",
+      "provider": "duckduckgo",
+      "approvedDomain": false,
+      "tier": 4,
+      "tierName": "candidate",
+      "role": "other",
+      "path": "/html/",
+      "tier_name": "candidate",
+      "approved_domain": false,
+      "score": 4
+    }
+  ]
+}

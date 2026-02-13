@@ -1,4 +1,4 @@
-import { callOpenAI } from './openaiClient.js';
+import { callLlmWithRouting, hasLlmRouteApiKey } from './routing.js';
 
 function summarySchema() {
   return {
@@ -35,13 +35,13 @@ export async function writeSummaryMarkdownLLM({
   logger,
   llmContext = {}
 }) {
-  if (!config.llmEnabled || !config.llmWriteSummary || !config.llmApiKey) {
+  if (!config.llmEnabled || !config.llmWriteSummary || !hasLlmRouteApiKey(config, { role: 'write' })) {
     return null;
   }
 
   const budgetGuard = llmContext?.budgetGuard;
   const budgetDecision = budgetGuard?.canCall({
-    reason: 'validate',
+    reason: 'write',
     essential: false
   }) || { allowed: true };
   if (!budgetDecision.allowed) {
@@ -78,20 +78,19 @@ export async function writeSummaryMarkdownLLM({
   ].join('\n');
 
   try {
-    const result = await callOpenAI({
-      model: config.llmModelValidate,
+    const result = await callLlmWithRouting({
+      config,
+      reason: 'write',
+      role: 'write',
       system,
       user: JSON.stringify(payload),
       jsonSchema: summarySchema(),
-      apiKey: config.llmApiKey,
-      baseUrl: config.llmBaseUrl,
-      provider: config.llmProvider,
       usageContext: {
         category: summary.category || '',
         productId: normalized.productId || '',
         runId: normalized.runId || '',
         round: llmContext.round || 0,
-        reason: 'validate',
+        reason: 'write',
         host: '',
         url_count: 0,
         evidence_chars: JSON.stringify(payload).length

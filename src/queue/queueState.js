@@ -130,13 +130,33 @@ export function queueStateKey({ storage, category }) {
   return modernQueueStateKey(token);
 }
 
+async function readQueueJsonSafe(storage, key) {
+  try {
+    return {
+      data: await storage.readJsonOrNull(key),
+      corrupt: false
+    };
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      return {
+        data: null,
+        corrupt: true
+      };
+    }
+    throw error;
+  }
+}
+
 export async function loadQueueState({ storage, category }) {
   const key = queueStateKey({ storage, category });
   const legacyKey = legacyQueueStateKey(storage, category);
-  const existing = (await storage.readJsonOrNull(key)) || (await storage.readJsonOrNull(legacyKey));
+  const modern = await readQueueJsonSafe(storage, key);
+  const legacy = await readQueueJsonSafe(storage, legacyKey);
+  const existing = modern.data || legacy.data;
   return {
     key,
-    state: normalizeState(category, existing || {})
+    state: normalizeState(category, existing || {}),
+    recovered_from_corrupt_state: Boolean((modern.corrupt || legacy.corrupt) && !existing)
   };
 }
 

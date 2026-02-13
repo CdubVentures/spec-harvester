@@ -131,3 +131,33 @@ test('markStaleQueueProducts marks old complete rows as stale', async () => {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
+
+test('loadQueueState recovers from corrupt queue state json and allows rewrite on upsert', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-queue-corrupt-'));
+  const storage = makeStorage(tempRoot);
+  const category = 'mouse';
+  const modernKey = `_queue/${category}/state.json`;
+  const legacyKey = storage.resolveOutputKey('_queue', category, 'state.json');
+
+  try {
+    await storage.writeObject(modernKey, Buffer.from('{"category":"mouse","products":{}}}', 'utf8'));
+    await storage.writeObject(legacyKey, Buffer.from('{"category":"mouse","products":{}}}', 'utf8'));
+
+    const loaded = await loadQueueState({ storage, category });
+    assert.equal(loaded.recovered_from_corrupt_state, true);
+    assert.deepEqual(loaded.state.products, {});
+
+    await upsertQueueProduct({
+      storage,
+      category,
+      productId: 'mouse-recovery-check',
+      s3key: 'specs/inputs/mouse/products/mouse-recovery-check.json',
+      patch: { status: 'pending' }
+    });
+
+    const after = await loadQueueState({ storage, category });
+    assert.equal(Boolean(after.state.products['mouse-recovery-check']), true);
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});

@@ -290,6 +290,22 @@ function dedupeCandidates(candidates) {
   return out;
 }
 
+function markSatisfiedLlmFields(fieldSet, fields = [], anchors = {}) {
+  if (!(fieldSet instanceof Set)) {
+    return;
+  }
+  for (const field of fields || []) {
+    const token = String(field || '').trim();
+    if (!token) {
+      continue;
+    }
+    if (isIdentityLockedField(token) || isAnchorLocked(token, anchors)) {
+      continue;
+    }
+    fieldSet.add(token);
+  }
+}
+
 function refreshFieldsBelowPassTarget({
   fieldOrder = [],
   provenance = {},
@@ -1023,6 +1039,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
   let fetcherStartFallbackReason = '';
 
   const sourceResults = [];
+  const llmSatisfiedFields = new Set();
   const helperSupportiveSyntheticSources = config.helperSupportiveEnabled
     ? buildSupportiveSyntheticSources({
       helperContext,
@@ -1084,17 +1101,26 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
   const llmVerifySampleRate = Math.max(1, Number.parseInt(String(config.llmVerifySampleRate || 10), 10) || 10);
   const llmVerifySampled = (stableHash(`${productId}:${runId}`) % llmVerifySampleRate) === 0;
   const llmVerifyForced = Boolean(roundContext?.force_verify_llm);
-  const llmVerifyEnabled = Boolean(config.llmVerifyMode && (llmVerifySampled || llmVerifyForced));
+  const llmVerifyAggressiveAlways =
+    Boolean(config.llmVerifyAggressiveAlways) &&
+    String(roundContext?.mode || '').toLowerCase() === 'aggressive';
+  const llmVerifyEnabled = Boolean(
+    llmVerifyAggressiveAlways ||
+    (config.llmVerifyMode && (llmVerifySampled || llmVerifyForced))
+  );
   const llmContext = {
     storage,
     category,
     productId,
     runId,
     round: Number.parseInt(String(roundContext?.round ?? 0), 10) || 0,
+    mode: String(roundContext?.mode || config.accuracyMode || 'balanced').trim().toLowerCase(),
     verification: {
       enabled: llmVerifyEnabled,
       done: false,
-      trigger: llmVerifyForced ? 'missing_required_fields' : (llmVerifySampled ? 'sampling' : 'disabled')
+      trigger: llmVerifyAggressiveAlways
+        ? 'aggressive_always'
+        : (llmVerifyForced ? 'missing_required_fields' : (llmVerifySampled ? 'sampling' : 'disabled'))
     },
     budgetGuard: llmBudgetGuard,
     costRates: llmCostRates,
@@ -1341,6 +1367,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       );
       const llmTargetFieldsForSource = llmTargetFields.filter((field) => (
         !deterministicFilledFieldSet.has(field) &&
+        !llmSatisfiedFields.has(field) &&
         !isIdentityLockedField(field) &&
         !isAnchorLocked(field, anchors)
       ));
@@ -1495,6 +1522,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
           })
           .map((candidate) => candidate.field);
         planner.markFieldsFilled(newlyFilledFields);
+        markSatisfiedLlmFields(llmSatisfiedFields, newlyFilledFields, anchors);
       }
 
       const artifactHostKey = `${source.host}__${String(artifactSequence).padStart(4, '0')}`;

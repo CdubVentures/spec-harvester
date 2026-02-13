@@ -18,6 +18,7 @@ export function createBudgetGuard({
   productSpentUsd = 0,
   productCallsTotal = 0
 }) {
+  const budgetsDisabled = Boolean(config.llmDisableBudgetGuards);
   const state = {
     monthlySpentUsd: toNumber(monthlySpentUsd, 0),
     productSpentUsd: toNumber(productSpentUsd, 0),
@@ -27,10 +28,10 @@ export function createBudgetGuard({
   };
 
   const limits = {
-    monthlyBudgetUsd: toNumber(config.llmMonthlyBudgetUsd, 0),
-    productBudgetUsd: toNumber(config.llmPerProductBudgetUsd, 0),
-    maxCallsPerProductTotal: toInt(config.llmMaxCallsPerProductTotal, 0),
-    maxCallsPerRound: toInt(config.llmMaxCallsPerRound, 0)
+    monthlyBudgetUsd: budgetsDisabled ? 0 : toNumber(config.llmMonthlyBudgetUsd, 0),
+    productBudgetUsd: budgetsDisabled ? 0 : toNumber(config.llmPerProductBudgetUsd, 0),
+    maxCallsPerProductTotal: budgetsDisabled ? 0 : toInt(config.llmMaxCallsPerProductTotal, 0),
+    maxCallsPerRound: budgetsDisabled ? 0 : toInt(config.llmMaxCallsPerRound, 0)
   };
 
   function canCall(options = {}) {

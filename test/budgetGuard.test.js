@@ -60,3 +60,25 @@ test('budget guard enforces per-round and per-product limits', () => {
   assert.equal(overProductLimit.allowed, false);
   assert.equal(overProductLimit.reason, 'budget_max_calls_per_product_reached');
 });
+
+test('budget guard disables limits when llmDisableBudgetGuards is enabled', () => {
+  const guard = createBudgetGuard({
+    config: {
+      llmDisableBudgetGuards: true,
+      llmMonthlyBudgetUsd: 0.01,
+      llmPerProductBudgetUsd: 0.01,
+      llmMaxCallsPerProductTotal: 1,
+      llmMaxCallsPerRound: 1
+    },
+    monthlySpentUsd: 999,
+    productSpentUsd: 999,
+    productCallsTotal: 999
+  });
+
+  const first = guard.canCall({ reason: 'extract' });
+  assert.equal(first.allowed, true);
+  guard.recordCall({ costUsd: 0.5 });
+
+  const second = guard.canCall({ reason: 'plan' });
+  assert.equal(second.allowed, true);
+});
