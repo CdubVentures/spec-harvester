@@ -1,29 +1,29 @@
 {
   "artifacts": {
     "control_plane_version": {
-      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_control_plane\\_versions\\20260213T064220Z",
-      "version_id": "20260213T064220Z"
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_control_plane\\_versions\\20260213T084853Z",
+      "version_id": "20260213T084853Z"
     },
     "draft": {
-      "hash": "bd52d0cc4fa42215fc4e22509140c3155ccc4bdc4ba68e6707988b14115916ef",
+      "hash": "2dd80287c28a8d314ca59d02e9447808462545d3086effb4329fbc3a7f129b33",
       "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_control_plane\\draft.json"
     },
     "field_rules": {
-      "changed": true,
-      "hash": "9fe40686ec51e767247f1452f627eb09dc394d5ee893c81d31a9386b1f22f122",
+      "changed": false,
+      "hash": "3370461a807b96dce0e96832ab8f5b63835d126eb455fcbad07289c89d78686f",
       "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_generated\\field_rules.json"
     },
     "field_rules_draft": {
-      "hash": "f88a1374461f78c23172124bd0a076880fcde70e5d0611db3da54dc0beebabf5",
+      "hash": "88b3442ab752e8126ac167b119b6c1f8a4a8517e0d17fc15e4482ecf3df0115a",
       "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_control_plane\\field_rules_draft.json"
     },
     "field_rules_full": {
-      "hash": "8e07956f24b77f51e4437ae9180c2511a9cae9a60ca7a45ebd0b3236c93d3835",
+      "hash": "1bcd8d6e0b44e3903e90034ffa80ab17ecd2a09a92a119395336bc96740bf0c7",
       "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_control_plane\\field_rules.full.json"
     },
     "field_rules_runtime": {
-      "bytes": 248041,
-      "hash": "9fe40686ec51e767247f1452f627eb09dc394d5ee893c81d31a9386b1f22f122",
+      "bytes": 248153,
+      "hash": "3370461a807b96dce0e96832ab8f5b63835d126eb455fcbad07289c89d78686f",
       "identical_to_field_rules": true,
       "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_generated\\field_rules.runtime.json"
     },
@@ -59,8 +59,8 @@
     "required": 13
   },
   "diff": {
-    "changed": true,
-    "current_hash": "9fe40686ec51e767247f1452f627eb09dc394d5ee893c81d31a9386b1f22f122",
+    "changed": false,
+    "current_hash": "3370461a807b96dce0e96832ab8f5b63835d126eb455fcbad07289c89d78686f",
     "fields": {
       "added_count": 0,
       "added_keys": [],

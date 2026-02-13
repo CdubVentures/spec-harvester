@@ -6,6 +6,7 @@ import path from 'node:path';
 import { createStorage } from '../src/s3/storage.js';
 import {
   buildReviewLayout,
+  buildProductReviewPayload,
   buildReviewQueue,
   writeCategoryReviewArtifacts,
   writeProductReviewArtifacts
@@ -268,6 +269,33 @@ test('writeProductReviewArtifacts writes review candidates and per-field review 
     assert.equal(product.identity.brand, 'Razer');
     assert.equal(product.fields.weight.selected.value, 59);
     assert.equal(Array.isArray(product.fields.weight.candidates), true);
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('buildProductReviewPayload can omit candidate payloads for lightweight grid rendering', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-review-product-lite-'));
+  const storage = makeStorage(tempRoot);
+  const config = { helperFilesRoot: path.join(tempRoot, 'helper_files') };
+  const category = 'mouse';
+  const productId = 'mouse-razer-viper-v3-pro-wireless-lite';
+  try {
+    await seedCategoryArtifacts(config.helperFilesRoot, category);
+    await seedLatestArtifacts(storage, category, productId);
+    const payload = await buildProductReviewPayload({
+      storage,
+      config,
+      category,
+      productId,
+      includeCandidates: false
+    });
+
+    assert.equal(payload.product_id, productId);
+    assert.equal(payload.fields.weight.selected.value, 59);
+    assert.equal(payload.fields.weight.candidate_count >= 1, true);
+    assert.deepEqual(payload.fields.weight.candidates, []);
+    assert.equal(payload.fields.dpi.needs_review, true);
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }

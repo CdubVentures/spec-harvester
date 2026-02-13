@@ -9,6 +9,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import streamlit as st
+try:
+    import pandas as pd
+except Exception:  # pragma: no cover - runtime optional dependency
+    pd = None
 
 try:
     from openpyxl import load_workbook
@@ -3723,7 +3727,7 @@ def load_supportive(category: str):
     return {"files": {}, "records": []}
 
 
-@st.cache_data(ttl=10, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def list_final_rows(category: str):
     rows = []
     root = FINAL_ROOT / category
@@ -3745,10 +3749,12 @@ def list_final_rows(category: str):
                 identity = (meta or {}).get("canonical_identity", {})
                 rows.append(
                     {
+                        "product_id": str(meta.get("productId", "")).strip(),
                         "brand": norm(identity.get("brand")) or brand_dir.name,
                         "model": norm(identity.get("model")) or model_dir.name,
                         "variant": clean_variant(identity.get("variant")) or (path.name if path != model_dir else ""),
                         "path": path,
+                        "last_updated_at": str(meta.get("lastUpdatedAt", "")).strip(),
                         "summary": summary,
                     }
                 )
@@ -3780,17 +3786,6 @@ def parse_excel_row_from_cell(cell_value):
         return int(match.group(1))
     except Exception:
         return None
-
-
-def review_cell_marker(color: str) -> str:
-    token_color = token(color)
-    if token_color == "green":
-        return "G"
-    if token_color == "yellow":
-        return "Y"
-    if token_color == "red":
-        return "R"
-    return "-"
 
 
 def highlight_quote_span(snippet_text, quote_span):
@@ -3903,6 +3898,25 @@ def load_review_product_payload(category: str, local_mode: bool, product_id_valu
     return payload or {"fields": {}, "identity": {}, "metrics": {}}
 
 
+@st.cache_data(ttl=20, show_spinner=False)
+def load_review_product_payload_light(category: str, local_mode: bool, product_id_value: str):
+    payload, error = run_spec_cli_json(
+        [
+            "review",
+            "product",
+            "--category",
+            category,
+            "--product-id",
+            product_id_value,
+            "--without-candidates",
+            *review_cli_base_args(local_mode),
+        ]
+    )
+    if error:
+        return {"error": error, "fields": {}, "identity": {}, "metrics": {}}
+    return payload or {"fields": {}, "identity": {}, "metrics": {}}
+
+
 def row_sort_tuple(row):
     excel_row = row.get("excel_row")
     if isinstance(excel_row, int):
@@ -3944,42 +3958,161 @@ def review_layout_rows(layout_payload: dict):
     return normalized
 
 
-def build_review_grid_rows(layout_rows, product_payloads: dict):
-    grid_rows = []
+def product_header_meta(product_id_value: str, payload: dict):
+    identity = payload.get("identity", {}) if isinstance(payload, dict) else {}
+    metrics = payload.get("metrics", {}) if isinstance(payload, dict) else {}
+    return {
+        "brand": norm(identity.get("brand")) or "Unknown Brand",
+        "model": norm(identity.get("model")) or product_id_value,
+        "confidence": float(metrics.get("confidence", 0) or 0),
+        "coverage": float(metrics.get("coverage", 0) or 0),
+        "flags": int(metrics.get("flags", 0) or 0),
+    }
+
+
+def review_cell_color_token(field_state: dict) -> str:
+    selected = field_state.get("selected", {}) if isinstance(field_state, dict) else {}
+    value = selected.get("value", "unk") if isinstance(selected, dict) else "unk"
+    confidence = float(selected.get("confidence", 0) or 0)
+    explicit = token(selected.get("color", ""))
+    if explicit in {"green", "yellow", "red", "gray"}:
+        return explicit
+    if not known(value):
+        return "gray"
+    if bool(field_state.get("needs_review")):
+        return "red"
+    if confidence >= 0.85:
+        return "green"
+    if confidence >= 0.6:
+        return "yellow"
+    return "red"
+
+
+def review_color_css(color_token: str):
+    palette = {
+        "green": ("#dcfce7", "#14532d"),
+        "yellow": ("#fef3c7", "#713f12"),
+        "red": ("#fee2e2", "#7f1d1d"),
+        "gray": ("#f3f4f6", "#374151"),
+    }
+    return palette.get(color_token, palette["gray"])
+
+
+def build_review_grid_dataframe(layout_rows, product_payloads: dict):
+    if pd is None:
+        return None, {}, [], {}
+
+    used_names = set()
+    display_to_product = {}
+    product_columns = []
+    for product_id_value, payload in product_payloads.items():
+        meta = product_header_meta(product_id_value, payload)
+        base_name = f"{meta['brand']}\n{meta['model']}"
+        col_name = base_name
+        if col_name in used_names:
+            col_name = f"{base_name}\n{product_id_value}"
+        used_names.add(col_name)
+        display_to_product[col_name] = product_id_value
+        product_columns.append(col_name)
+
+    data_rows = []
+    color_map = {}
     for row in layout_rows:
-        out = {
-            "group": row.get("group", ""),
-            "field": row.get("key", ""),
-            "label": row.get("label", ""),
-        }
         field_key = row.get("key", "")
-        for product_id_value, payload in product_payloads.items():
+        out = {
+            "Group": row.get("group", ""),
+            "Field": field_key,
+        }
+        for col_name in product_columns:
+            product_id_value = display_to_product[col_name]
+            payload = product_payloads.get(product_id_value, {})
             fields_block = payload.get("fields", {}) if isinstance(payload, dict) else {}
             state = fields_block.get(field_key, {}) if isinstance(fields_block, dict) else {}
             selected = state.get("selected", {}) if isinstance(state, dict) else {}
             value = selected.get("value", "unk") if isinstance(selected, dict) else "unk"
-            confidence = float(selected.get("confidence", 0) or 0)
-            color = str(selected.get("color", "gray") or "gray")
-            marker = review_cell_marker(color)
-            needs_review = bool(state.get("needs_review")) if isinstance(state, dict) else False
-            suffix = " *" if needs_review else ""
-            out[product_id_value] = f"{marker} {value} [{confidence:.2f}]{suffix}"
-        grid_rows.append(out)
-    return grid_rows
+            out[col_name] = str(value)
+            color_map[(len(data_rows), col_name)] = review_cell_color_token(state)
+        data_rows.append(out)
+    dataframe = pd.DataFrame(data_rows)
+    return dataframe, display_to_product, product_columns, color_map
 
 
-def product_header_label(product_id_value: str, payload: dict):
-    identity = payload.get("identity", {}) if isinstance(payload, dict) else {}
-    metrics = payload.get("metrics", {}) if isinstance(payload, dict) else {}
-    brand = norm(identity.get("brand")) or "Unknown Brand"
-    model = norm(identity.get("model")) or product_id_value
-    confidence = float(metrics.get("confidence", 0) or 0)
-    coverage = float(metrics.get("coverage", 0) or 0)
-    flags = int(metrics.get("flags", 0) or 0)
+def style_review_grid_dataframe(df, product_columns, color_map):
+    if pd is None:
+        return df
+    style_frame = pd.DataFrame("", index=df.index, columns=df.columns)
+    style_frame["Group"] = "background-color:#f8fafc; color:#0f172a; font-weight:600;"
+    style_frame["Field"] = "background-color:#f8fafc; color:#0f172a; font-weight:600;"
+    for row_idx in df.index:
+        for col_name in product_columns:
+            color_token = color_map.get((int(row_idx), col_name), "gray")
+            bg, fg = review_color_css(color_token)
+            style_frame.at[row_idx, col_name] = f"background-color:{bg}; color:{fg}; font-weight:600;"
     return (
-        f"{brand} | {model}\n"
-        f"conf:{confidence:.2f} cov:{coverage:.2f} flags:{flags}"
+        df.style
+        .apply(lambda _: style_frame, axis=None)
+        .set_table_styles(
+            [
+                {"selector": "th", "props": [("font-size", "12px"), ("text-align", "left")]},
+                {"selector": "td", "props": [("font-size", "12px")]},
+            ]
+        )
     )
+
+
+def dataframe_selected_cell(event_state):
+    if not event_state:
+        return None
+    selection = event_state.get("selection", {}) if isinstance(event_state, dict) else getattr(event_state, "selection", {})
+    cells = selection.get("cells", []) if isinstance(selection, dict) else getattr(selection, "cells", [])
+    if not cells:
+        return None
+    cell = cells[0]
+    if not isinstance(cell, (list, tuple)) or len(cell) != 2:
+        return None
+    try:
+        row_idx = int(cell[0])
+    except Exception:
+        return None
+    col_name = str(cell[1])
+    return row_idx, col_name
+
+
+def render_review_grid_matrix(layout_rows, product_payloads: dict, grid_height_px: int, grid_key: str):
+    if not layout_rows or not product_payloads:
+        st.info("Review grid is empty. Build review artifacts and select at least one product.")
+        return None
+    if pd is None:
+        st.error("`pandas` is required for the interactive review grid.")
+        return None
+
+    df, display_to_product, product_columns, color_map = build_review_grid_dataframe(layout_rows, product_payloads)
+    if df is None:
+        return None
+    styled = style_review_grid_dataframe(df, product_columns, color_map)
+    event = st.dataframe(
+        styled,
+        use_container_width=True,
+        height=max(260, int(grid_height_px)),
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-cell",
+        key=grid_key,
+    )
+    selected = dataframe_selected_cell(event)
+    if not selected:
+        return None
+    row_idx, col_name = selected
+    if row_idx < 0 or row_idx >= len(layout_rows):
+        return None
+    if col_name not in display_to_product:
+        return None
+    return {
+        "row_index": row_idx,
+        "field": str(layout_rows[row_idx].get("key", "")),
+        "product_id": display_to_product[col_name],
+        "column_name": col_name,
+    }
 
 
 def product_id(category: str, brand: str, model: str, variant: str):
@@ -4685,156 +4818,29 @@ with tab5:
     render_field_rules_studio(category, local)
 
 with tab6:
-    st.subheader("Review Workstation (Excel-Order Grid)")
-    st.caption("Rows mirror workbook field order; columns are queued products with selected values and review flags.")
-    with st.expander("Review Shortcuts (Current UI)", expanded=False):
-        st.markdown(
-            "- `Tab` / `Shift+Tab`: move between inputs in the candidate drawer and forms.\n"
-            "- `Enter`: submit active input or selected form action.\n"
-            "- `Quick Action` input: type `ctrl+a`, `ctrl+s`, `ctrl+p`, or `ctrl+f` then press Enter.\n"
-            "- `Approve Greens (Selected Product)`: bulk candidate-approve all green fields.\n"
-            "- `Finalize Selected Product Overrides`: run runtime validation and write finalize report."
-        )
+    st.subheader("Review Workstation (Single Product)")
+    st.caption("Select one product from the catalog, load full evidence once, then review/override field-by-field.")
 
-    r1, r2, r3, r4 = st.columns([1.2, 1.2, 1, 1])
-    review_status_filter = r1.selectbox(
-        "Queue Status Filter",
-        ["needs_review", "exhausted", "needs_manual", "complete", "queued", "running", "failed"],
-        index=0,
-        help="Review queue status mode from `spec review queue`."
-    )
-    review_limit = int(
-        r2.number_input(
-            "Queue Limit",
-            min_value=10,
-            max_value=500,
-            value=120,
-            step=10,
-            help="Maximum products loaded into queue snapshot."
-        )
-    )
-    review_columns = int(
-        r3.number_input(
-            "Grid Product Columns",
-            min_value=1,
-            max_value=8,
-            value=3,
-            step=1,
-            help="How many product columns to display at once."
-        )
-    )
-    dense_mode = r4.checkbox(
+    u1, u2, u3 = st.columns([1, 1, 2])
+    dense_mode = u1.checkbox(
         "Dense Mode",
         value=True,
-        help="Compact grid height for quicker scans."
+        help="Compact row height for faster scanning."
     )
-
-    l1, l2 = st.columns([1.4, 1])
-    review_live_refresh = l1.checkbox(
-        "Live Queue Updates (Polling Fallback)",
-        value=True,
-        help="Auto-refresh review queue snapshot at a fixed interval."
-    )
-    review_live_seconds = int(
-        l2.number_input(
-            "Live Refresh Seconds",
-            min_value=2,
-            max_value=120,
-            value=15,
-            step=1,
-            help="Polling interval for queue/product snapshot refresh."
+    review_grid_height = int(
+        u2.number_input(
+            "Grid Height (px)",
+            min_value=260,
+            max_value=1600,
+            value=560 if dense_mode else 780,
+            step=20,
         )
     )
-    st.caption(
-        "Native push channel is available at `/ws/queue` via "
-        "`node src/cli/spec.js review ws-queue --category mouse --local`; "
-        "this workstation keeps polling as a built-in fallback."
-    )
-
-    q1, q2, q3, q4 = st.columns([1, 1, 1.2, 1.2])
-    if q1.button("Build Review Queue", use_container_width=True):
-        start_cli(["review", "build", "--category", category, "--status", review_status_filter, *(["--local"] if local else [])])
-    if q2.button("Build Selected Product Review Artifacts", use_container_width=True):
-        start_cli(["review", "build", "--category", category, "--product-id", pid, "--status", review_status_filter, *(["--local"] if local else [])])
-    if q3.button("Refresh Review Data", use_container_width=True):
+    if u3.button("Refresh Product Catalog", use_container_width=True):
         st.cache_data.clear()
+        st.session_state.pop(f"review_loaded_product_id_{category}", None)
+        st.session_state.pop(f"review_loaded_payload_{category}", None)
         st.rerun()
-    if q4.button("Approve Greens (Selected Product)", use_container_width=True):
-        start_cli(
-            [
-                "review",
-                "approve-greens",
-                "--category",
-                category,
-                "--product-id",
-                pid,
-                "--reviewer",
-                "reviewer_gui",
-                "--reason",
-                "bulk_green_approve",
-                *(["--local"] if local else []),
-            ]
-        )
-
-    qa1, qa2 = st.columns([2.4, 1])
-    with qa1.form(f"review_quick_action_form_{category}"):
-        quick_action = st.text_input(
-            "Quick Action",
-            value="",
-            placeholder="ctrl+a | ctrl+s | ctrl+p | ctrl+f",
-            help="Keyboard-friendly command launcher for common review actions."
-        )
-        quick_submit = st.form_submit_button("Run Quick Action")
-    if quick_submit:
-        action = str(quick_action or "").strip().lower()
-        if action in ("ctrl+a", "approve", "approve-greens"):
-            start_cli([
-                "review",
-                "approve-greens",
-                "--category",
-                category,
-                "--product-id",
-                pid,
-                "--reviewer",
-                "reviewer_gui",
-                "--reason",
-                "bulk_green_approve",
-                *(["--local"] if local else []),
-            ])
-        elif action in ("ctrl+s", "save", "finalize"):
-            start_cli([
-                "review",
-                "finalize",
-                "--category",
-                category,
-                "--product-id",
-                pid,
-                "--apply",
-                "--reviewer",
-                "reviewer_gui",
-                *(["--local"] if local else []),
-            ])
-        elif action in ("ctrl+p", "publish"):
-            start_cli([
-                "publish",
-                "--category",
-                category,
-                "--product-id",
-                pid,
-                *(["--local"] if local else []),
-            ])
-        elif action in ("ctrl+f", "recrawl", "flag"):
-            start_cli([
-                "queue",
-                "retry",
-                "--category",
-                category,
-                "--product-id",
-                pid,
-                *(["--local"] if local else []),
-            ])
-        else:
-            st.warning("Unknown quick action. Use ctrl+a, ctrl+s, ctrl+p, or ctrl+f.")
 
     layout_payload = load_review_layout(category, bool(local))
     if layout_payload.get("error"):
@@ -4849,344 +4855,391 @@ with tab6:
             f"{excel_meta.get('key_range', 'B9:B83')}"
         )
 
-    queue_snapshot = load_review_queue_snapshot(
-        category=category,
-        local_mode=bool(local),
-        status=review_status_filter,
-        limit=review_limit,
-    )
-    metrics_snapshot = load_review_metrics_snapshot(
-        category=category,
-        local_mode=bool(local),
-        window_hours=24
-    )
-    if queue_snapshot.get("error"):
-        st.error(f"Queue load failed: {queue_snapshot.get('error')}")
-    queue_items = queue_snapshot.get("items", []) if isinstance(queue_snapshot, dict) else []
-    if metrics_snapshot.get("error"):
-        st.warning(f"Review metrics unavailable: {metrics_snapshot.get('error')}")
-    else:
-        t1, t2, t3, t4 = st.columns(4)
-        t1.metric("Reviewed / 24h", int(metrics_snapshot.get("reviewed_products", 0) or 0))
-        t2.metric("Products / Hour", f"{float(metrics_snapshot.get('products_per_hour', 0) or 0):.2f}")
-        t3.metric("Overrides / Product", f"{float(metrics_snapshot.get('overrides_per_product', 0) or 0):.2f}")
-        t4.metric("Avg Review Time (s)", f"{float(metrics_snapshot.get('average_review_time_seconds', 0) or 0):.0f}")
-    queue_rows = []
-    for row in queue_items:
+    catalog_source = list_final_rows(category)
+    catalog_rows = []
+    for row in catalog_source:
         if not isinstance(row, dict):
             continue
-        queue_rows.append(
+        summary = row.get("summary", {}) if isinstance(row.get("summary"), dict) else {}
+        product_id_value = str(row.get("product_id", "")).strip()
+        brand_value = str(row.get("brand", "")).strip()
+        model_value = str(row.get("model", "")).strip()
+        variant_value = str(row.get("variant", "")).strip()
+        if not product_id_value:
+            product_id_value = product_id(category, brand_value, model_value, variant_value)
+        catalog_rows.append(
             {
-                "product_id": row.get("product_id", ""),
-                "brand": row.get("brand", ""),
-                "model": row.get("model", ""),
-                "variant": row.get("variant", ""),
-                "confidence": float(row.get("confidence", 0) or 0),
-                "coverage": float(row.get("coverage", 0) or 0),
-                "flags": int(row.get("flags", 0) or 0),
-                "status": row.get("status", ""),
-                "updated_at": row.get("updated_at", ""),
+                "product_id": product_id_value,
+                "brand": brand_value,
+                "model": model_value,
+                "variant": variant_value,
+                "confidence": float(summary.get("confidence", 0) or 0),
+                "coverage": float(summary.get("coverage_overall", 0) or 0),
+                "updated_at": str(row.get("last_updated_at", "") or summary.get("generated_at", "")),
             }
         )
 
-    if queue_rows:
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Queue Rows", len(queue_rows))
-        m2.metric("Flagged Fields", sum(int(row.get("flags", 0) or 0) for row in queue_rows))
-        m3.metric(
-            "Avg Confidence",
-            f"{(sum(float(row.get('confidence', 0) or 0) for row in queue_rows) / max(1, len(queue_rows))):.3f}",
-        )
-        m4.metric(
-            "Avg Coverage",
-            f"{(sum(float(row.get('coverage', 0) or 0) for row in queue_rows) / max(1, len(queue_rows))):.3f}",
-        )
-        st.dataframe(queue_rows, use_container_width=True, height=220 if dense_mode else 320)
+    if not catalog_rows:
+        st.info("No finalized products found yet for this category.")
     else:
-        st.info("No queue rows found for the selected status. Build the review queue first.")
+        catalog_rows.sort(key=lambda r: (str(r.get("brand", "")).lower(), str(r.get("model", "")).lower(), str(r.get("variant", "")).lower()))
+        catalog_search = st.text_input("Catalog Search", value="", placeholder="brand, model, variant, or product id")
 
-    candidate_product_ids = [str(row.get("product_id", "")) for row in queue_rows if str(row.get("product_id", "")).strip()]
-    if pid not in candidate_product_ids:
-        candidate_product_ids.insert(0, pid)
-    default_ids = candidate_product_ids[: max(1, review_columns)]
-    selected_product_ids = st.multiselect(
-        "Products In Grid",
-        candidate_product_ids,
-        default=default_ids,
-        help="Columns shown in the grid. Keep this to 2-4 for fast review.",
-    )
-
-    if not selected_product_ids:
-        st.warning("Select at least one product to render the review grid.")
-    else:
-        product_payloads = {}
-        payload_errors = []
-        for product_id_value in selected_product_ids[: max(1, review_columns)]:
-            payload = load_review_product_payload(category, bool(local), product_id_value)
-            if payload.get("error"):
-                payload_errors.append(f"{product_id_value}: {payload.get('error')}")
-                continue
-            product_payloads[product_id_value] = payload
-
-        if payload_errors:
-            st.warning("Some product payloads failed to load:\n- " + "\n- ".join(payload_errors[:6]))
-        if not product_payloads:
-            st.info("No review product payloads could be loaded.")
+        query = token(catalog_search)
+        filtered_rows = []
+        if query:
+            for row in catalog_rows:
+                hay = " ".join([
+                    str(row.get("product_id", "")),
+                    str(row.get("brand", "")),
+                    str(row.get("model", "")),
+                    str(row.get("variant", "")),
+                ]).lower()
+                if query in hay:
+                    filtered_rows.append(row)
         else:
-            grid_rows = build_review_grid_rows(layout_rows, product_payloads)
-            rendered_rows = []
-            for row in grid_rows:
-                transformed = {
-                    "group": row.get("group", ""),
-                    "field": row.get("field", ""),
-                    "label": row.get("label", ""),
-                }
-                for product_id_value in product_payloads.keys():
-                    transformed[product_header_label(product_id_value, product_payloads[product_id_value])] = row.get(product_id_value, "-")
-                rendered_rows.append(transformed)
+            filtered_rows = catalog_rows
 
-            st.dataframe(rendered_rows, use_container_width=True, height=420 if dense_mode else 620)
+        st.caption(f"Catalog rows: {len(filtered_rows)} (total: {len(catalog_rows)})")
 
-            drawer_fields = [row.get("key", "") for row in layout_rows if row.get("key", "")]
-            if not drawer_fields:
-                st.info("No layout rows found yet. Compile field rules first, then rebuild review artifacts.")
+        selected_catalog_pid = ""
+        catalog_state_key = f"review_catalog_selected_pid_{category}"
+        if pd is not None:
+            catalog_df = pd.DataFrame(filtered_rows)
+            catalog_event = st.dataframe(
+                catalog_df,
+                use_container_width=True,
+                height=260,
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                key=f"review_catalog_table_{category}",
+            )
+            selection = catalog_event.get("selection", {}) if isinstance(catalog_event, dict) else getattr(catalog_event, "selection", {})
+            row_selection = selection.get("rows", []) if isinstance(selection, dict) else getattr(selection, "rows", [])
+            if row_selection:
+                try:
+                    idx = int(row_selection[0])
+                    if 0 <= idx < len(filtered_rows):
+                        selected_catalog_pid = str(filtered_rows[idx].get("product_id", "")).strip()
+                        st.session_state[catalog_state_key] = selected_catalog_pid
+                except Exception:
+                    pass
+
+        fallback_default = str(st.session_state.get(catalog_state_key, "")).strip()
+        fallback_options = [str(row.get("product_id", "")).strip() for row in filtered_rows if str(row.get("product_id", "")).strip()]
+        if fallback_default not in fallback_options and fallback_options:
+            fallback_default = fallback_options[0]
+        selected_catalog_pid = selected_catalog_pid or fallback_default
+
+        select_col_a, select_col_b = st.columns([2.2, 1])
+        selected_catalog_pid = select_col_a.selectbox(
+            "Selected Product",
+            fallback_options,
+            index=(fallback_options.index(selected_catalog_pid) if selected_catalog_pid in fallback_options else 0),
+            key=f"review_catalog_selectbox_{category}",
+        ) if fallback_options else ""
+
+        loaded_pid_key = f"review_loaded_product_id_{category}"
+        loaded_payload_key = f"review_loaded_payload_{category}"
+        if select_col_b.button("Load Selected Product", use_container_width=True, disabled=not bool(selected_catalog_pid)):
+            st.session_state[loaded_pid_key] = selected_catalog_pid
+            st.session_state[loaded_payload_key] = load_review_product_payload(category, bool(local), selected_catalog_pid)
+
+        loaded_product_id = str(st.session_state.get(loaded_pid_key, "")).strip()
+
+        if not loaded_product_id:
+            st.info("Select a product and click Load Selected Product.")
+        else:
+            payload = st.session_state.get(loaded_payload_key, {})
+            if not isinstance(payload, dict) or payload.get("product_id") != loaded_product_id:
+                payload = load_review_product_payload(category, bool(local), loaded_product_id)
+                st.session_state[loaded_payload_key] = payload
+            if payload.get("error"):
+                st.error(f"Failed to load product payload: {payload.get('error')}")
             else:
-                st.markdown("#### Candidate Drawer")
-                drawer_product_id = st.selectbox(
-                    "Product",
-                    list(product_payloads.keys()),
-                    index=0,
-                    key=f"review_drawer_product_{category}",
-                )
-                default_field_index = drawer_fields.index("release_date") if "release_date" in drawer_fields else 0
-                drawer_field = st.selectbox(
-                    "Field",
-                    drawer_fields,
-                    index=default_field_index,
-                    key=f"review_drawer_field_{category}",
-                )
+                reload_col_a, reload_col_b = st.columns([1.1, 3.9])
+                if reload_col_a.button("Reload Loaded Product", use_container_width=True):
+                    payload = load_review_product_payload(category, bool(local), loaded_product_id)
+                    st.session_state[loaded_payload_key] = payload
+                    st.rerun()
+                reload_col_b.caption("Loaded payload is cached in-session. Reload only after overrides or new pipeline output.")
+                pmeta = product_header_meta(loaded_product_id, payload)
+                hdr_l, hdr_r = st.columns([2, 3])
+                hdr_l.markdown(f"**Brand:** {pmeta['brand']}")
+                hdr_l.markdown(f"**Model:** {pmeta['model']}")
+                hm1, hm2, hm3 = hdr_r.columns(3)
+                hm1.metric("Confidence", f"{pmeta['confidence']:.3f}")
+                hm2.metric("Coverage", f"{pmeta['coverage']:.3f}")
+                hm3.metric("Flags", int(pmeta["flags"]))
 
-                payload = product_payloads.get(drawer_product_id, {})
-                field_state = (payload.get("fields", {}) or {}).get(drawer_field, {})
-                selected_state = field_state.get("selected", {}) if isinstance(field_state, dict) else {}
-                reason_codes = field_state.get("reason_codes", []) if isinstance(field_state, dict) else []
-                candidates = field_state.get("candidates", []) if isinstance(field_state, dict) else []
-
-                s1, s2, s3, s4 = st.columns(4)
-                s1.metric("Selected Value", str(selected_state.get("value", "unk")))
-                s2.metric("Confidence", f"{float(selected_state.get('confidence', 0) or 0):.3f}")
-                s3.metric("Color", str(selected_state.get("color", "gray")).upper())
-                s4.metric("Needs Review", "yes" if bool(field_state.get("needs_review")) else "no")
-                if reason_codes:
-                    st.caption("Reason codes: " + ", ".join([str(v) for v in reason_codes]))
-
-                candidate_rows = []
-                for idx, cand in enumerate(candidates):
-                    if not isinstance(cand, dict):
-                        continue
-                    evidence = cand.get("evidence", {}) if isinstance(cand.get("evidence"), dict) else {}
-                    candidate_rows.append(
+                grid_rows = []
+                for row in layout_rows:
+                    field_key = row.get("key", "")
+                    field_state = ((payload.get("fields", {}) or {}).get(field_key, {})) if isinstance(payload, dict) else {}
+                    selected = field_state.get("selected", {}) if isinstance(field_state, dict) else {}
+                    color_token = review_cell_color_token(field_state)
+                    color_marker = {"green": "🟩", "yellow": "🟨", "red": "🟥", "gray": "⬜"}
+                    grid_rows.append(
                         {
-                            "idx": idx + 1,
-                            "candidate_id": cand.get("candidate_id", ""),
-                            "value": cand.get("value", "unk"),
-                            "score": float(cand.get("score", 0) or 0),
-                            "source_id": cand.get("source_id", ""),
-                            "tier": cand.get("tier", ""),
-                            "url": evidence.get("url", ""),
-                            "quote": evidence.get("quote", ""),
+                            "group": row.get("group", ""),
+                            "field": field_key,
+                            "value": str(selected.get("value", "unk")),
+                            "confidence": float(selected.get("confidence", 0) or 0),
+                            "accuracy": color_marker.get(color_token, "-"),
+                            "needs_review": bool(field_state.get("needs_review", False)),
+                            "candidate_count": int(field_state.get("candidate_count", len(field_state.get("candidates", []))) or 0),
                         }
                     )
-                st.dataframe(candidate_rows, use_container_width=True, height=180 if dense_mode else 260)
 
-                if candidate_rows:
-                    selected_candidate_row = st.selectbox(
-                        "Candidate Selection",
-                        candidate_rows,
-                        format_func=lambda row: f"#{row['idx']} | {row['value']} | {row['score']:.3f} | {row['source_id']}",
-                        key=f"review_candidate_select_{category}",
+                st.caption("Loaded product view. Rows are in mapping order; select a row to inspect all candidates/evidence.")
+                selected_row_idx = None
+                if pd is not None:
+                    review_grid_df = pd.DataFrame(grid_rows)
+                    grid_event = st.dataframe(
+                        review_grid_df,
+                        use_container_width=True,
+                        height=review_grid_height,
+                        hide_index=True,
+                        on_select="rerun",
+                        selection_mode="single-row",
+                        key=f"review_single_grid_{category}_{loaded_product_id}",
                     )
-                    with st.form(f"review_candidate_hotkey_form_{category}_{drawer_product_id}_{drawer_field}"):
-                        hotkey_col1, hotkey_col2, hotkey_col3 = st.columns([1, 1.2, 1])
-                        candidate_hotkey_idx = int(
-                            hotkey_col1.number_input(
-                                "Candidate # (1-9)",
-                                min_value=1,
-                                max_value=min(9, max(1, len(candidate_rows))),
-                                value=int(selected_candidate_row.get("idx", 1) or 1),
-                                step=1,
-                                help="Keyboard-friendly quick pick. Enter a number and press Apply."
-                            )
+                    gsel = grid_event.get("selection", {}) if isinstance(grid_event, dict) else getattr(grid_event, "selection", {})
+                    grow = gsel.get("rows", []) if isinstance(gsel, dict) else getattr(gsel, "rows", [])
+                    if grow:
+                        try:
+                            selected_row_idx = int(grow[0])
+                        except Exception:
+                            selected_row_idx = None
+                else:
+                    st.dataframe(grid_rows, use_container_width=True, height=review_grid_height)
+
+                drawer_fields = [row.get("key", "") for row in layout_rows if row.get("key", "")]
+                if not drawer_fields:
+                    st.info("No layout rows available yet.")
+                else:
+                    drawer_field_key = f"review_drawer_field_{category}"
+                    if selected_row_idx is not None and 0 <= selected_row_idx < len(grid_rows):
+                        selected_field_key = str(grid_rows[selected_row_idx].get("field", "")).strip()
+                        if selected_field_key in drawer_fields:
+                            st.session_state[drawer_field_key] = selected_field_key
+                    if drawer_field_key not in st.session_state or str(st.session_state.get(drawer_field_key, "")).strip() not in drawer_fields:
+                        flagged = [row.get("field", "") for row in grid_rows if bool(row.get("needs_review"))]
+                        st.session_state[drawer_field_key] = flagged[0] if flagged else drawer_fields[0]
+
+                    st.markdown("#### Candidate Detail")
+                    drawer_field = st.selectbox("Field", drawer_fields, key=drawer_field_key)
+                    default_field_index = drawer_fields.index(drawer_field) if drawer_field in drawer_fields else 0
+                    field_state = ((payload.get("fields", {}) or {}).get(drawer_field, {})) if isinstance(payload, dict) else {}
+                    selected_state = field_state.get("selected", {}) if isinstance(field_state, dict) else {}
+                    reason_codes = field_state.get("reason_codes", []) if isinstance(field_state, dict) else []
+                    candidates = field_state.get("candidates", []) if isinstance(field_state, dict) else []
+
+                    s1, s2, s3, s4 = st.columns(4)
+                    s1.metric("Selected Value", str(selected_state.get("value", "unk")))
+                    s2.metric("Confidence", f"{float(selected_state.get('confidence', 0) or 0):.3f}")
+                    s3.metric("Color", str(selected_state.get("color", "gray")).upper())
+                    s4.metric("Needs Review", "yes" if bool(field_state.get("needs_review", False)) else "no")
+                    if reason_codes:
+                        st.caption("Reason codes: " + ", ".join([str(v) for v in reason_codes]))
+
+                    candidate_rows = []
+                    for idx, cand in enumerate(candidates):
+                        if not isinstance(cand, dict):
+                            continue
+                        evidence = cand.get("evidence", {}) if isinstance(cand.get("evidence"), dict) else {}
+                        candidate_rows.append(
+                            {
+                                "idx": idx + 1,
+                                "candidate_id": cand.get("candidate_id", ""),
+                                "value": cand.get("value", "unk"),
+                                "score": float(cand.get("score", 0) or 0),
+                                "source_id": cand.get("source_id", ""),
+                                "tier": cand.get("tier", ""),
+                                "method": cand.get("method", ""),
+                                "url": evidence.get("url", ""),
+                                "quote": evidence.get("quote", ""),
+                                "snippet": highlight_quote_span(evidence.get("snippet_text", ""), evidence.get("quote_span", None)),
+                            }
                         )
-                        hotkey_reviewer = hotkey_col2.text_input("Reviewer", value="reviewer_gui")
-                        hotkey_apply = hotkey_col3.form_submit_button("Apply #")
-                    if hotkey_apply:
-                        candidate_idx = max(1, min(len(candidate_rows), candidate_hotkey_idx))
-                        hotkey_candidate = candidates[candidate_idx - 1] if candidate_idx - 1 < len(candidates) else {}
+                    st.dataframe(candidate_rows, use_container_width=True, height=260 if dense_mode else 360)
+
+                    if candidate_rows:
+                        selected_candidate_row = st.selectbox(
+                            "Candidate Selection",
+                            candidate_rows,
+                            format_func=lambda row: f"#{row['idx']} | {row['value']} | {row['score']:.3f} | {row['source_id']}",
+                            key=f"review_candidate_select_{category}",
+                        )
+                        with st.form(f"review_candidate_hotkey_form_{category}_{loaded_product_id}_{drawer_field}"):
+                            hotkey_col1, hotkey_col2, hotkey_col3 = st.columns([1, 1.2, 1])
+                            candidate_hotkey_idx = int(
+                                hotkey_col1.number_input(
+                                    "Candidate # (1-9)",
+                                    min_value=1,
+                                    max_value=min(9, max(1, len(candidate_rows))),
+                                    value=int(selected_candidate_row.get("idx", 1) or 1),
+                                    step=1,
+                                )
+                            )
+                            hotkey_reviewer = hotkey_col2.text_input("Reviewer", value="reviewer_gui")
+                            hotkey_apply = hotkey_col3.form_submit_button("Apply #")
+                        if hotkey_apply:
+                            candidate_idx = max(1, min(len(candidate_rows), candidate_hotkey_idx))
+                            hotkey_candidate = candidates[candidate_idx - 1] if candidate_idx - 1 < len(candidates) else {}
+                            command = [
+                                "review",
+                                "override",
+                                "--category",
+                                category,
+                                "--product-id",
+                                loaded_product_id,
+                                "--field",
+                                drawer_field,
+                                "--candidate-id",
+                                str(hotkey_candidate.get("candidate_id", "")),
+                            ]
+                            if hotkey_reviewer.strip():
+                                command += ["--reviewer", hotkey_reviewer.strip()]
+                            if local:
+                                command.append("--local")
+                            start_cli(command)
+
+                        selected_candidate = candidates[int(selected_candidate_row.get("idx", 1)) - 1]
+                        selected_evidence = selected_candidate.get("evidence", {}) if isinstance(selected_candidate, dict) else {}
+                        ev_url = str(selected_evidence.get("url", "")).strip()
+                        ev_quote = str(selected_evidence.get("quote", "")).strip()
+                        if ev_url:
+                            st.markdown(f"Evidence URL: [{ev_url}]({ev_url})")
+                        if ev_quote:
+                            st.caption(f"Quote: {ev_quote}")
+
+                        o1, o2, o3 = st.columns([1.2, 1.2, 1])
+                        reviewer_name = o1.text_input("Reviewer", value="reviewer_gui", key=f"review_override_reviewer_{category}")
+                        override_reason = o2.text_input("Override reason", value="", key=f"review_override_reason_{category}")
+                        if o3.button("Apply Candidate Override", use_container_width=True):
+                            command = [
+                                "review",
+                                "override",
+                                "--category",
+                                category,
+                                "--product-id",
+                                loaded_product_id,
+                                "--field",
+                                drawer_field,
+                                "--candidate-id",
+                                str(selected_candidate.get("candidate_id", "")),
+                            ]
+                            if override_reason.strip():
+                                command += ["--reason", override_reason.strip()]
+                            if reviewer_name.strip():
+                                command += ["--reviewer", reviewer_name.strip()]
+                            if local:
+                                command.append("--local")
+                            start_cli(command)
+                    else:
+                        st.info("No candidate rows available for this field.")
+
+                    with st.expander("Manual Override (Evidence Required)", expanded=False):
+                        with st.form(f"manual_override_form_{category}"):
+                            manual_value = st.text_input("Manual value", value="")
+                            manual_url = st.text_input("Evidence URL", value="")
+                            manual_quote = st.text_area("Evidence Quote", value="", height=100)
+                            manual_reason = st.text_input("Reason", value="")
+                            manual_reviewer = st.text_input("Reviewer", value="reviewer_gui")
+                            manual_submit = st.form_submit_button("Save Manual Override")
+                        if manual_submit:
+                            command = [
+                                "review",
+                                "manual-override",
+                                "--category",
+                                category,
+                                "--product-id",
+                                loaded_product_id,
+                                "--field",
+                                drawer_field,
+                                "--value",
+                                manual_value,
+                                "--evidence-url",
+                                manual_url,
+                                "--evidence-quote",
+                                manual_quote,
+                            ]
+                            if manual_reason.strip():
+                                command += ["--reason", manual_reason.strip()]
+                            if manual_reviewer.strip():
+                                command += ["--reviewer", manual_reviewer.strip()]
+                            if local:
+                                command.append("--local")
+                            start_cli(command)
+
+                    with st.expander("Suggestion Feedback", expanded=False):
+                        with st.form(f"review_suggestion_form_{category}"):
+                            suggestion_type = st.selectbox("Type", ["enum", "component", "alias"])
+                            suggestion_field = st.selectbox("Field", drawer_fields, index=default_field_index)
+                            suggestion_value = st.text_input("Value", value="")
+                            suggestion_canonical = st.text_input("Canonical (optional)", value="")
+                            suggestion_url = st.text_input("Evidence URL", value="")
+                            suggestion_quote = st.text_area("Evidence Quote", value="", height=90)
+                            suggestion_reason = st.text_input("Reason", value="")
+                            suggestion_reviewer = st.text_input("Reviewer", value="reviewer_gui")
+                            suggestion_submit = st.form_submit_button("Submit Suggestion")
+                        if suggestion_submit:
+                            command = [
+                                "review",
+                                "suggest",
+                                "--category",
+                                category,
+                                "--type",
+                                suggestion_type,
+                                "--field",
+                                suggestion_field,
+                                "--value",
+                                suggestion_value,
+                                "--evidence-url",
+                                suggestion_url,
+                                "--evidence-quote",
+                                suggestion_quote,
+                                "--product-id",
+                                loaded_product_id,
+                            ]
+                            if suggestion_canonical.strip():
+                                command += ["--canonical", suggestion_canonical.strip()]
+                            if suggestion_reason.strip():
+                                command += ["--reason", suggestion_reason.strip()]
+                            if suggestion_reviewer.strip():
+                                command += ["--reviewer", suggestion_reviewer.strip()]
+                            if local:
+                                command.append("--local")
+                            start_cli(command)
+
+                    a1, a2, a3, a4 = st.columns([1.1, 1.1, 1.4, 1.6])
+                    finalize_apply = a1.checkbox("Apply Overrides", value=True, help="Apply validated overrides to latest outputs.")
+                    finalize_draft = a2.checkbox("Allow Draft Save", value=False, help="If validation fails, persist draft-only finalize result.")
+                    finalize_reviewer = a3.text_input("Finalize reviewer", value="reviewer_gui", key=f"review_finalize_reviewer_{category}")
+                    if a4.button("Finalize Selected Product Overrides", use_container_width=True):
                         command = [
                             "review",
-                            "override",
+                            "finalize",
                             "--category",
                             category,
                             "--product-id",
-                            drawer_product_id,
-                            "--field",
-                            drawer_field,
-                            "--candidate-id",
-                            str(hotkey_candidate.get("candidate_id", "")),
+                            loaded_product_id,
                         ]
-                        if hotkey_reviewer.strip():
-                            command += ["--reviewer", hotkey_reviewer.strip()]
+                        if finalize_reviewer.strip():
+                            command += ["--reviewer", finalize_reviewer.strip()]
+                        if finalize_apply:
+                            command.append("--apply")
+                        if finalize_draft:
+                            command.append("--draft")
                         if local:
                             command.append("--local")
                         start_cli(command)
-                    selected_candidate = candidates[int(selected_candidate_row.get("idx", 1)) - 1]
-                    selected_evidence = selected_candidate.get("evidence", {}) if isinstance(selected_candidate, dict) else {}
-                    ev_url = str(selected_evidence.get("url", "")).strip()
-                    ev_quote = str(selected_evidence.get("quote", "")).strip()
-                    if ev_url:
-                        st.markdown(f"Evidence URL: [{ev_url}]({ev_url})")
-                    if ev_quote:
-                        st.caption(f"Quote: {ev_quote}")
-                    snippet_text = selected_evidence.get("snippet_text", "")
-                    quote_span = selected_evidence.get("quote_span", None)
-                    if snippet_text:
-                        st.code(highlight_quote_span(snippet_text, quote_span), language="text")
-
-                    o1, o2, o3 = st.columns([1.2, 1.2, 1])
-                    reviewer_name = o1.text_input("Reviewer", value="reviewer_gui", key=f"review_override_reviewer_{category}")
-                    override_reason = o2.text_input("Override reason", value="", key=f"review_override_reason_{category}")
-                    if o3.button("Apply Candidate Override", use_container_width=True):
-                        command = [
-                            "review",
-                            "override",
-                            "--category",
-                            category,
-                            "--product-id",
-                            drawer_product_id,
-                            "--field",
-                            drawer_field,
-                            "--candidate-id",
-                            str(selected_candidate.get("candidate_id", "")),
-                        ]
-                        if override_reason.strip():
-                            command += ["--reason", override_reason.strip()]
-                        if reviewer_name.strip():
-                            command += ["--reviewer", reviewer_name.strip()]
-                        if local:
-                            command.append("--local")
-                        start_cli(command)
-
-                with st.expander("Manual Override (Evidence Required)", expanded=False):
-                    with st.form(f"manual_override_form_{category}"):
-                        manual_value = st.text_input("Manual value", value="")
-                        manual_url = st.text_input("Evidence URL", value="")
-                        manual_quote = st.text_area("Evidence Quote", value="", height=100)
-                        manual_reason = st.text_input("Reason", value="")
-                        manual_reviewer = st.text_input("Reviewer", value="reviewer_gui")
-                        manual_submit = st.form_submit_button("Save Manual Override")
-                    if manual_submit:
-                        command = [
-                            "review",
-                            "manual-override",
-                            "--category",
-                            category,
-                            "--product-id",
-                            drawer_product_id,
-                            "--field",
-                            drawer_field,
-                            "--value",
-                            manual_value,
-                            "--evidence-url",
-                            manual_url,
-                            "--evidence-quote",
-                            manual_quote,
-                        ]
-                        if manual_reason.strip():
-                            command += ["--reason", manual_reason.strip()]
-                        if manual_reviewer.strip():
-                            command += ["--reviewer", manual_reviewer.strip()]
-                        if local:
-                            command.append("--local")
-                        start_cli(command)
-
-                with st.expander("Suggestion Feedback", expanded=False):
-                    with st.form(f"review_suggestion_form_{category}"):
-                        suggestion_type = st.selectbox("Type", ["enum", "component", "alias"])
-                        suggestion_field = st.selectbox("Field", drawer_fields, index=default_field_index)
-                        suggestion_value = st.text_input("Value", value="")
-                        suggestion_canonical = st.text_input("Canonical (optional)", value="")
-                        suggestion_url = st.text_input("Evidence URL", value="")
-                        suggestion_quote = st.text_area("Evidence Quote", value="", height=90)
-                        suggestion_reason = st.text_input("Reason", value="")
-                        suggestion_reviewer = st.text_input("Reviewer", value="reviewer_gui")
-                        suggestion_submit = st.form_submit_button("Submit Suggestion")
-                    if suggestion_submit:
-                        command = [
-                            "review",
-                            "suggest",
-                            "--category",
-                            category,
-                            "--type",
-                            suggestion_type,
-                            "--field",
-                            suggestion_field,
-                            "--value",
-                            suggestion_value,
-                            "--evidence-url",
-                            suggestion_url,
-                            "--evidence-quote",
-                            suggestion_quote,
-                            "--product-id",
-                            drawer_product_id,
-                        ]
-                        if suggestion_canonical.strip():
-                            command += ["--canonical", suggestion_canonical.strip()]
-                        if suggestion_reason.strip():
-                            command += ["--reason", suggestion_reason.strip()]
-                        if suggestion_reviewer.strip():
-                            command += ["--reviewer", suggestion_reviewer.strip()]
-                        if local:
-                            command.append("--local")
-                        start_cli(command)
-
-                f1, f2, f3, f4 = st.columns([1.1, 1.1, 1.4, 1.6])
-                finalize_apply = f1.checkbox("Apply Overrides", value=True, help="Apply validated overrides to latest outputs.")
-                finalize_draft = f2.checkbox("Allow Draft Save", value=False, help="If validation fails, persist draft-only finalize result.")
-                finalize_reviewer = f3.text_input("Finalize reviewer", value="reviewer_gui", key=f"review_finalize_reviewer_{category}")
-                if f4.button("Finalize Selected Product Overrides", use_container_width=True):
-                    command = [
-                        "review",
-                        "finalize",
-                        "--category",
-                        category,
-                        "--product-id",
-                        drawer_product_id,
-                    ]
-                    if finalize_reviewer.strip():
-                        command += ["--reviewer", finalize_reviewer.strip()]
-                    if finalize_apply:
-                        command.append("--apply")
-                    if finalize_draft:
-                        command.append("--draft")
-                    if local:
-                        command.append("--local")
-                    start_cli(command)
-
-    if review_live_refresh:
-        refresh_state_key = f"review_live_refresh_last_ts_{category}"
-        if refresh_state_key not in st.session_state:
-            st.session_state[refresh_state_key] = time.time()
-        elapsed = time.time() - float(st.session_state.get(refresh_state_key, time.time()))
-        remaining = max(0, int(review_live_seconds - elapsed))
-        st.caption(f"Live queue polling active. Next refresh in ~{remaining}s.")
-        if elapsed >= max(2, review_live_seconds):
-            st.session_state[refresh_state_key] = time.time()
-            st.cache_data.clear()
-            st.rerun()
-
 st.caption("Use dropdowns from helper targets, run a product, and monitor events/fields/costs in real time.")
 if st.session_state.auto_refresh and st.session_state.proc and st.session_state.proc.poll() is None:
     time.sleep(1.5)
     st.rerun()
+
+
 

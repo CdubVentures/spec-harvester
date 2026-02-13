@@ -299,7 +299,8 @@ function buildFieldState({
   candidates,
   normalized,
   provenance,
-  summary
+  summary,
+  includeCandidates = true
 }) {
   const fieldKey = normalizeField(field);
   const normalizedFields = isObject(normalized.fields) ? normalized.fields : {};
@@ -320,31 +321,34 @@ function buildFieldState({
     hasConflict
   });
 
-  const normalizedCandidates = candidateRows.map((candidate, index) => {
-    const evidence = candidateEvidenceFromRows(candidate, provenanceRow);
-    return {
-      candidate_id: String(candidate.candidate_id || `cand_${fieldKey}_${index + 1}`),
-      value: candidate.value ?? 'unk',
-      score: candidateScore(candidate, provenanceRow),
-      source_id: String(candidate.source_id || evidence.source_id || candidate.host || '').trim(),
-      source: String(candidate.host || '').trim(),
-      tier: toInt(candidate.tier, 0) || null,
-      method: String(candidate.method || '').trim() || null,
-      evidence
-    };
-  });
-
-  if (normalizedCandidates.length === 0 && hasKnownValue(selectedValue)) {
-    normalizedCandidates.push({
-      candidate_id: `cand_${fieldKey}_selected`,
-      value: selectedValue,
-      score: Math.max(0, Math.min(1, selectedConfidence || 0.5)),
-      source_id: '',
-      source: '',
-      tier: null,
-      method: 'selected_value',
-      evidence: candidateEvidenceFromRows({}, provenanceRow)
+  let normalizedCandidates = [];
+  if (includeCandidates) {
+    normalizedCandidates = candidateRows.map((candidate, index) => {
+      const evidence = candidateEvidenceFromRows(candidate, provenanceRow);
+      return {
+        candidate_id: String(candidate.candidate_id || `cand_${fieldKey}_${index + 1}`),
+        value: candidate.value ?? 'unk',
+        score: candidateScore(candidate, provenanceRow),
+        source_id: String(candidate.source_id || evidence.source_id || candidate.host || '').trim(),
+        source: String(candidate.host || '').trim(),
+        tier: toInt(candidate.tier, 0) || null,
+        method: String(candidate.method || '').trim() || null,
+        evidence
+      };
     });
+
+    if (normalizedCandidates.length === 0 && hasKnownValue(selectedValue)) {
+      normalizedCandidates.push({
+        candidate_id: `cand_${fieldKey}_selected`,
+        value: selectedValue,
+        score: Math.max(0, Math.min(1, selectedConfidence || 0.5)),
+        source_id: '',
+        source: '',
+        tier: null,
+        method: 'selected_value',
+        evidence: candidateEvidenceFromRows({}, provenanceRow)
+      });
+    }
   }
 
   let color = 'gray';
@@ -370,6 +374,7 @@ function buildFieldState({
     },
     needs_review: reasonCodes.length > 0,
     reason_codes: reasonCodes,
+    candidate_count: candidateRows.length,
     candidates: normalizedCandidates
   };
 }
@@ -379,7 +384,8 @@ export async function buildProductReviewPayload({
   config = {},
   category,
   productId,
-  layout = null
+  layout = null,
+  includeCandidates = true
 }) {
   const resolvedLayout = layout || await buildReviewLayout({ storage, config, category });
   const latest = await readLatestArtifacts(storage, category, productId);
@@ -393,7 +399,8 @@ export async function buildProductReviewPayload({
       candidates: latest.candidates,
       normalized: latest.normalized,
       provenance: latest.provenance,
-      summary: latest.summary
+      summary: latest.summary,
+      includeCandidates
     });
     if (rows[field].needs_review) {
       reviewFieldCount += 1;

@@ -41,6 +41,7 @@
       },
       "enum": {
         "match": {
+          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
@@ -77,6 +78,8 @@
       },
       "key": "acceleration",
       "parse": {
+        "accept_bare_numbers_as_mode": false,
+        "allow_ranges": false,
         "allow_unitless": true,
         "strict_unit_required": false,
         "template": "number_with_unit",

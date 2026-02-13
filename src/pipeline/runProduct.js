@@ -86,6 +86,7 @@ import {
   writeProductReviewArtifacts
 } from '../review/reviewGridData.js';
 import { CortexClient } from '../llm/cortex_client.js';
+import { AggressiveOrchestrator } from '../extract/aggressiveOrchestrator.js';
 import {
   availabilityClassForField,
   undisclosedThresholdForField
@@ -170,6 +171,8 @@ function hasKnownFieldValue(value) {
   const token = String(value || '').trim().toLowerCase();
   return token !== '' && token !== 'unk' && token !== 'null' && token !== 'undefined' && token !== 'n/a';
 }
+
+const PASS_TARGET_EXEMPT_FIELDS = new Set(['id', 'brand', 'model', 'base_model', 'category', 'sku']);
 
 function stableHash(value) {
   let hash = 0;
@@ -285,6 +288,71 @@ function dedupeCandidates(candidates) {
     out.push(candidate);
   }
   return out;
+}
+
+function refreshFieldsBelowPassTarget({
+  fieldOrder = [],
+  provenance = {},
+  criticalFieldSet = new Set()
+}) {
+  const fieldsBelowPassTarget = [];
+  const criticalFieldsBelowPassTarget = [];
+  for (const field of fieldOrder || []) {
+    if (PASS_TARGET_EXEMPT_FIELDS.has(field)) {
+      continue;
+    }
+    const bucket = provenance?.[field] || {};
+    const passTarget = Number.parseInt(String(bucket?.pass_target ?? 1), 10);
+    const meetsPassTarget = Boolean(bucket?.meets_pass_target);
+    if (passTarget <= 0) {
+      continue;
+    }
+    if (!meetsPassTarget) {
+      fieldsBelowPassTarget.push(field);
+      if (criticalFieldSet.has(field)) {
+        criticalFieldsBelowPassTarget.push(field);
+      }
+    }
+  }
+  return {
+    fieldsBelowPassTarget,
+    criticalFieldsBelowPassTarget
+  };
+}
+
+function selectAggressiveEvidencePack(sourceResults = []) {
+  const ranked = (sourceResults || [])
+    .filter((row) => row?.llmEvidencePack)
+    .sort((a, b) => {
+      const aIdentity = a.identity?.match ? 1 : 0;
+      const bIdentity = b.identity?.match ? 1 : 0;
+      if (bIdentity !== aIdentity) {
+        return bIdentity - aIdentity;
+      }
+      const aAnchor = (a.anchorCheck?.majorConflicts || []).length;
+      const bAnchor = (b.anchorCheck?.majorConflicts || []).length;
+      if (aAnchor !== bAnchor) {
+        return aAnchor - bAnchor;
+      }
+      const aSnippets = Number(a.llmEvidencePack?.meta?.snippet_count || 0);
+      const bSnippets = Number(b.llmEvidencePack?.meta?.snippet_count || 0);
+      if (bSnippets !== aSnippets) {
+        return bSnippets - aSnippets;
+      }
+      return Number(a.tier || 99) - Number(b.tier || 99);
+    });
+  return ranked[0]?.llmEvidencePack || null;
+}
+
+function selectAggressiveDomHtml(artifactsByHost = {}) {
+  let best = '';
+  for (const row of Object.values(artifactsByHost || {})) {
+    const html = String(row?.html || '');
+    if (html.length > best.length) {
+      best = html;
+    }
+  }
+  return best;
 }
 
 function normalizedSnippetRows(evidencePack) {
@@ -1656,7 +1724,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
 
     provenance = createEmptyProvenance(fieldOrder, normalized.fields);
     candidates = {};
-    fieldsBelowPassTarget = fieldOrder.filter((field) => !['id', 'brand', 'model', 'base_model', 'category', 'sku'].includes(field));
+    fieldsBelowPassTarget = fieldOrder.filter((field) => !PASS_TARGET_EXEMPT_FIELDS.has(field));
     criticalFieldsBelowPassTarget = [...categoryConfig.criticalFieldSet].filter((field) => fieldsBelowPassTarget.includes(field));
     newValuesProposed = [];
   } else {
@@ -1861,6 +1929,74 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     }
     fieldsBelowPassTarget = [...belowSet];
     criticalFieldsBelowPassTarget = [...criticalSet];
+  }
+
+  let aggressiveExtraction = {
+    enabled: false,
+    stage: 'disabled'
+  };
+  if (config.aggressiveModeEnabled || String(roundContext?.mode || '').toLowerCase() === 'aggressive') {
+    try {
+      const bestEvidencePack = selectAggressiveEvidencePack(sourceResults);
+      const aggressiveDomHtml = selectAggressiveDomHtml(artifactsByHost);
+      const aggressiveEvidencePack = bestEvidencePack
+        ? {
+          ...bestEvidencePack,
+          meta: {
+            ...(bestEvidencePack.meta || {}),
+            raw_html: aggressiveDomHtml || bestEvidencePack?.meta?.raw_html || ''
+          }
+        }
+        : {
+          meta: {
+            raw_html: aggressiveDomHtml || '',
+            host: 'dom'
+          },
+          references: [],
+          snippets: []
+        };
+      const aggressiveOrchestrator = new AggressiveOrchestrator({
+        storage,
+        config,
+        logger
+      });
+      aggressiveExtraction = await aggressiveOrchestrator.run({
+        category,
+        productId,
+        identity,
+        normalized,
+        provenance,
+        evidencePack: aggressiveEvidencePack,
+        fieldOrder,
+        criticalFieldSet: categoryConfig.criticalFieldSet,
+        fieldsBelowPassTarget,
+        criticalFieldsBelowPassTarget,
+        discoveryResult,
+        sourceResults,
+        roundContext
+      });
+      if (aggressiveExtraction?.enabled) {
+        const refreshed = refreshFieldsBelowPassTarget({
+          fieldOrder,
+          provenance,
+          criticalFieldSet: categoryConfig.criticalFieldSet
+        });
+        fieldsBelowPassTarget = refreshed.fieldsBelowPassTarget;
+        criticalFieldsBelowPassTarget = refreshed.criticalFieldsBelowPassTarget;
+      }
+    } catch (error) {
+      logger.warn('aggressive_extraction_failed', {
+        category,
+        productId,
+        runId,
+        message: error.message
+      });
+      aggressiveExtraction = {
+        enabled: true,
+        stage: 'failed',
+        error: error.message
+      };
+    }
   }
 
   const runtimeGateResult = applyRuntimeFieldRules({
@@ -2254,6 +2390,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       }
     },
     cortex_sidecar: cortexSidecar,
+    aggressive_extraction: aggressiveExtraction,
     source_registry: {
       override_key: categoryConfig.sources_override_key || null
     },
@@ -2328,6 +2465,8 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     hypothesis_queue_count: summary.hypothesis_queue.length,
     hypothesis_followup_rounds: hypothesisFollowupRoundsExecuted,
     hypothesis_followup_seeded_urls: hypothesisFollowupSeededUrls,
+    aggressive_enabled: Boolean(aggressiveExtraction?.enabled),
+    aggressive_stage: aggressiveExtraction?.stage || 'disabled',
     contradiction_count: summary.constraint_analysis.contradiction_count,
     duration_ms: durationMs
   });

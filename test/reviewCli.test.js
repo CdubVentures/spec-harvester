@@ -200,6 +200,18 @@ test('review CLI builds artifacts, lists review queue, and writes suggestion fil
     assert.equal(queue.count >= 1, true);
     assert.equal(queue.items[0].product_id, productId);
 
+    const productLite = await runCli([
+      'review', 'product',
+      '--category', 'mouse',
+      '--product-id', productId,
+      '--without-candidates',
+      ...localArgs({ inputRoot, outputRoot, importsRoot })
+    ], { env });
+    assert.equal(productLite.command, 'review');
+    assert.equal(productLite.action, 'product');
+    assert.deepEqual(productLite.fields.weight.candidates, []);
+    assert.equal(productLite.fields.weight.candidate_count >= 1, true);
+
     const approveGreens = await runCli([
       'review', 'approve-greens',
       '--category', 'mouse',

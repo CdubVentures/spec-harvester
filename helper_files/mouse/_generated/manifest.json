@@ -33,14 +33,14 @@
       "sha256": "b1da5656dd7d0706e407aaae1bae21323feade6bdb8cae846f577da1b0e61945"
     },
     {
-      "bytes": 276040,
+      "bytes": 276152,
       "path": "field_rules.json",
-      "sha256": "51d82d2fdba0cf30e96fec2bf3f5ecb04c850aeb05feeca0078579cadc0ab1fa"
+      "sha256": "c2a59d01a5fbf6948c79fe7918de214ff385f3744966644278f94030da7e52b7"
     },
     {
-      "bytes": 276040,
+      "bytes": 276152,
       "path": "field_rules.runtime.json",
-      "sha256": "51d82d2fdba0cf30e96fec2bf3f5ecb04c850aeb05feeca0078579cadc0ab1fa"
+      "sha256": "c2a59d01a5fbf6948c79fe7918de214ff385f3744966644278f94030da7e52b7"
     },
     {
       "bytes": 710,
@@ -64,6 +64,6 @@
     }
   ],
   "category": "mouse",
-  "generated_at": "2026-02-13T06:42:20.656Z",
+  "generated_at": "2026-02-13T08:48:53.728Z",
   "version": 1
 }

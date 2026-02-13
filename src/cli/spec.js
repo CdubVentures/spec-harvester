@@ -144,7 +144,7 @@ function usage() {
     '  queue clear --category <category> --status <status> [--local]',
     '  review layout --category <category> [--local]',
     '  review queue --category <category> [--status needs_review|queued|...] [--limit <n>] [--local]',
-    '  review product --category <category> --product-id <id> [--local]',
+    '  review product --category <category> --product-id <id> [--without-candidates] [--local]',
     '  review build --category <category> [--product-id <id>] [--status <status>] [--local]',
     '  review ws-queue --category <category> [--status <status>] [--limit <n>] [--host <host>] [--port <port>] [--poll-seconds <n>] [--duration-seconds <n>] [--local]',
     '  review override --category <category> --product-id <id> --field <field> --candidate-id <id> [--reason <text>] [--reviewer <id>] [--local]',
@@ -1449,11 +1449,13 @@ async function commandReview(config, storage, args) {
     if (!productId) {
       throw new Error('review product requires --product-id <id>');
     }
+    const includeCandidates = !asBool(args['without-candidates'], false) && !asBool(args['selected-only'], false);
     const payload = await buildProductReviewPayload({
       storage,
       config,
       category,
-      productId
+      productId,
+      includeCandidates
     });
     return {
       command: 'review',
