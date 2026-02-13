@@ -217,3 +217,88 @@ test('consensus instrumented fields require true instrumented domains, not gener
   assert.equal(result.fields.sensor_latency, 'unk');
   assert.equal(result.provenance.sensor_latency.instrumented_confirmations, 1);
 });
+
+test('consensus preserves snippet citation metadata from evidence refs', () => {
+  const categoryConfig = {
+    criticalFieldSet: new Set([])
+  };
+  const fieldOrder = ['id', 'brand', 'model', 'base_model', 'category', 'sku', 'dpi'];
+
+  const result = runConsensusEngine({
+    sourceResults: [
+      {
+        host: 'razer.com',
+        rootDomain: 'razer.com',
+        tier: 1,
+        tierName: 'manufacturer',
+        role: 'manufacturer',
+        approvedDomain: true,
+        identity: { match: true },
+        anchorCheck: { majorConflicts: [] },
+        llmEvidencePack: {
+          references: [
+            { id: 't01', url: 'https://razer.com/specs', content: 'DPI: 32000', type: 'table' }
+          ],
+          snippets: [
+            {
+              id: 't01',
+              source_id: 'razer_com',
+              normalized_text: 'DPI: 32000',
+              snippet_hash: 'sha256:abc123',
+              retrieved_at: '2026-02-13T00:00:00.000Z',
+              extraction_method: 'spec_table_match'
+            }
+          ]
+        },
+        fieldCandidates: [
+          {
+            field: 'dpi',
+            value: '32000',
+            method: 'llm_extract',
+            keyPath: 'llm.extract',
+            evidenceRefs: ['t01']
+          }
+        ]
+      },
+      {
+        host: 'lab-a.com',
+        rootDomain: 'lab-a.com',
+        tier: 2,
+        tierName: 'lab',
+        role: 'review',
+        approvedDomain: true,
+        identity: { match: true },
+        anchorCheck: { majorConflicts: [] },
+        fieldCandidates: [
+          { field: 'dpi', value: '32000', method: 'network_json', keyPath: 'payload.dpi' }
+        ]
+      },
+      {
+        host: 'lab-b.com',
+        rootDomain: 'lab-b.com',
+        tier: 2,
+        tierName: 'lab',
+        role: 'review',
+        approvedDomain: true,
+        identity: { match: true },
+        anchorCheck: { majorConflicts: [] },
+        fieldCandidates: [
+          { field: 'dpi', value: '32000', method: 'network_json', keyPath: 'payload.dpi' }
+        ]
+      }
+    ],
+    categoryConfig,
+    fieldOrder,
+    anchors: {},
+    identityLock: { brand: 'Razer', model: 'Viper V3 Pro' },
+    productId: 'mouse-a',
+    category: 'mouse'
+  });
+
+  assert.equal(result.fields.dpi, '32000');
+  const citation = (result.provenance?.dpi?.evidence || []).find((row) => row.snippet_id === 't01');
+  assert.equal(Boolean(citation), true);
+  assert.equal(citation.snippet_hash, 'sha256:abc123');
+  assert.equal(citation.source_id, 'razer_com');
+  assert.equal(citation.extraction_method, 'spec_table_match');
+});

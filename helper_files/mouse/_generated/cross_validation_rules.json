@@ -1,0 +1,79 @@
+{
+  "category": "mouse",
+  "generated_at": "2026-02-13T02:18:36.677Z",
+  "rules": [
+    {
+      "check": {
+        "max": 500,
+        "min": 1,
+        "on_fail": "reject_candidate",
+        "type": "range"
+      },
+      "description": "weight must stay within configured plausible range",
+      "rule_id": "weight_plausibility",
+      "trigger_field": "weight"
+    },
+    {
+      "check": {
+        "max": 10000,
+        "min": 10,
+        "on_fail": "reject_candidate",
+        "type": "range"
+      },
+      "description": "polling_rate must stay within configured plausible range",
+      "rule_id": "polling_rate_plausibility",
+      "trigger_field": "polling_rate"
+    },
+    {
+      "check": {
+        "max": 100000,
+        "min": 50,
+        "on_fail": "reject_candidate",
+        "type": "range"
+      },
+      "description": "dpi must stay within configured plausible range",
+      "rule_id": "dpi_plausibility",
+      "trigger_field": "dpi"
+    },
+    {
+      "condition": "connection IN ['wireless','hybrid','bluetooth']",
+      "description": "Wireless products should provide battery_hours",
+      "on_fail": "set_unknown_with_reason",
+      "requires_field": "battery_hours",
+      "rule_id": "wireless_battery_required",
+      "trigger_field": "connection",
+      "unknown_reason": "not_found_after_search"
+    },
+    {
+      "check": {
+        "compare": "dpi <= sensors[sensor].properties.max_dpi",
+        "db": "sensors",
+        "lookup_field": "sensor",
+        "on_fail": "flag_for_review",
+        "tolerance_percent": 5,
+        "type": "component_db_lookup"
+      },
+      "depends_on": [
+        "sensor"
+      ],
+      "description": "Claimed DPI should be consistent with sensor capabilities",
+      "rule_id": "sensor_dpi_consistency",
+      "trigger_field": "dpi"
+    },
+    {
+      "check": {
+        "minimum_present": 3,
+        "on_fail": "flag_for_review",
+        "type": "group_completeness"
+      },
+      "description": "Dimensions should be captured as a complete triplet",
+      "related_fields": [
+        "width",
+        "height"
+      ],
+      "rule_id": "dimensions_consistency",
+      "trigger_field": "lngth"
+    }
+  ],
+  "version": 1
+}

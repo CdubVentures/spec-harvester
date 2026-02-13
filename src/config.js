@@ -348,6 +348,8 @@ export function loadConfig(overrides = {}) {
     autoScrollEnabled: parseBoolEnv('AUTO_SCROLL_ENABLED', false),
     autoScrollPasses: parseIntEnv('AUTO_SCROLL_PASSES', 0),
     autoScrollDelayMs: parseIntEnv('AUTO_SCROLL_DELAY_MS', 900),
+    robotsTxtCompliant: parseBoolEnv('ROBOTS_TXT_COMPLIANT', true),
+    robotsTxtTimeoutMs: parseIntEnv('ROBOTS_TXT_TIMEOUT_MS', 6000),
     endpointSignalLimit: parseIntEnv('ENDPOINT_SIGNAL_LIMIT', 30),
     endpointSuggestionLimit: parseIntEnv('ENDPOINT_SUGGESTION_LIMIT', 12),
     endpointNetworkScanLimit: parseIntEnv('ENDPOINT_NETWORK_SCAN_LIMIT', 600),

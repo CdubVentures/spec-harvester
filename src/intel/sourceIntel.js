@@ -1,4 +1,5 @@
 import { toPosixKey } from '../s3/storage.js';
+import { persistSourceCorpus } from './sourceCorpus.js';
 
 function round(value, digits = 4) {
   return Number.parseFloat(Number(value || 0).toFixed(digits));
@@ -880,6 +881,8 @@ export async function persistSourceIntel({
   category,
   productId,
   brand,
+  model,
+  variant,
   sourceResults,
   provenance,
   categoryConfig,
@@ -1117,11 +1120,29 @@ export async function persistSourceIntel({
     categoryConfig
   });
 
+  let sourceCorpus = null;
+  try {
+    sourceCorpus = await persistSourceCorpus({
+      storage,
+      config,
+      category,
+      sourceResults,
+      identity: {
+        brand,
+        model,
+        variant
+      }
+    });
+  } catch {
+    sourceCorpus = null;
+  }
+
   return {
     domainStatsKey: loaded.key,
     promotionSuggestionsKey: suggestionKey,
     expansionPlanKey: expansionResult.expansionPlanKey,
     brandExpansionPlanCount: expansionResult.planCount,
+    sourceCorpusKey: sourceCorpus?.key || null,
     intel: payload
   };
 }

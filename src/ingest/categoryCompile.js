@@ -21,6 +21,16 @@ const DEFAULT_REQUIRED_FIELDS = new Set([
   'side_buttons',
   'middle_buttons'
 ]);
+const DEFAULT_IDENTITY_FIELDS = new Set([
+  'brand',
+  'model',
+  'variant',
+  'base_model',
+  'sku',
+  'mpn',
+  'gtin',
+  'category'
+]);
 const INSTRUMENTED_HARD_FIELDS = new Set([
   'click_latency',
   'click_latency_list',
@@ -2403,6 +2413,7 @@ function inferRequiredLevel(key, expectations) {
   if (expectations.expected_easy_fields.includes(token)) return 'expected';
   if (expectations.expected_sometimes_fields.includes(token)) return 'expected';
   if (expectations.deep_fields.includes(token)) return 'rare';
+  if (DEFAULT_IDENTITY_FIELDS.has(token)) return 'identity';
   if (DEFAULT_REQUIRED_FIELDS.has(token)) return 'required';
   if (INSTRUMENTED_HARD_FIELDS.has(token)) return 'optional';
   return 'expected';
@@ -2412,9 +2423,60 @@ function inferAvailability(key, expectations) {
   const token = normalizeFieldKey(key);
   if (expectations.expected_easy_fields.includes(token)) return 'expected';
   if (expectations.deep_fields.includes(token)) return 'rare';
+  if (DEFAULT_IDENTITY_FIELDS.has(token)) return 'expected';
   if (DEFAULT_REQUIRED_FIELDS.has(token)) return 'expected';
   if (INSTRUMENTED_HARD_FIELDS.has(token)) return 'sometimes';
   return 'sometimes';
+}
+
+function enforceExpectationPriority({ key, rule, expectations }) {
+  if (!isObject(rule)) {
+    return rule;
+  }
+
+  // Keep high-severity expectation buckets deterministic even when stale overrides exist.
+  const fieldKey = normalizeFieldKey(key);
+  const expectedLevel = inferRequiredLevel(fieldKey, expectations);
+  const forceLevel = expectedLevel === 'identity' || expectedLevel === 'required' || expectedLevel === 'critical';
+  const priority = isObject(rule.priority) ? { ...rule.priority } : {};
+  const currentLevel = normalizeToken(rule.required_level || priority.required_level || '');
+  const finalLevel = forceLevel ? expectedLevel : (currentLevel || expectedLevel || 'expected');
+
+  rule.required_level = finalLevel;
+  priority.required_level = finalLevel;
+
+  const expectedAvailability = inferAvailability(fieldKey, expectations);
+  const currentAvailability = normalizeToken(rule.availability || priority.availability || '');
+  const finalAvailability = (
+    forceLevel
+      ? (expectedAvailability || currentAvailability || 'expected')
+      : (currentAvailability || expectedAvailability || 'sometimes')
+  );
+  rule.availability = finalAvailability;
+  priority.availability = finalAvailability;
+
+  const instrumented = INSTRUMENTED_HARD_FIELDS.has(fieldKey);
+  const publishGate = (finalLevel === 'identity' || finalLevel === 'required') && !instrumented;
+  rule.publish_gate = publishGate;
+  priority.publish_gate = publishGate;
+  rule.block_publish_when_unk = publishGate;
+  priority.block_publish_when_unk = publishGate;
+  rule.publish_gate_reason = finalLevel === 'identity'
+    ? 'missing_identity'
+    : (finalLevel === 'required' ? 'missing_required' : '');
+
+  const evidence = isObject(rule.evidence) ? { ...rule.evidence } : {};
+  if (typeof evidence.required !== 'boolean') {
+    evidence.required = true;
+  }
+  const defaultMinEvidence = (finalLevel === 'identity' || finalLevel === 'required') ? 2 : 1;
+  evidence.min_evidence_refs = asInt(evidence.min_evidence_refs, defaultMinEvidence);
+  rule.evidence = evidence;
+  rule.evidence_required = evidence.required !== false;
+  rule.min_evidence_refs = asInt(rule.min_evidence_refs, evidence.min_evidence_refs);
+
+  rule.priority = priority;
+  return rule;
 }
 
 function normalizeValueForm(value, shape = 'scalar') {
@@ -4249,7 +4311,21 @@ export async function compileCategoryWorkbook({
   }
   const map = mergedValidation.normalized;
   const mapWarnings = [...mapValidation.warnings, ...mergedValidation.warnings];
-  const compileTimestamp = nowIso();
+  const mapHash = hashJson(map);
+  const previousCompileReport = await readJsonIfExists(path.join(generatedRoot, '_compile_report.json'));
+  const previousGeneratedFieldRules = await readJsonIfExists(path.join(generatedRoot, 'field_rules.json'));
+  const previousTimestamp = normalizeText(
+    previousGeneratedFieldRules?.generated_at
+    || previousCompileReport?.compiled_at
+    || previousCompileReport?.generated_at
+    || ''
+  );
+  const canReuseTimestamp = Boolean(
+    previousTimestamp
+    && previousCompileReport?.workbook_hash === workbook.workbook_hash
+    && previousCompileReport?.workbook_map_hash === mapHash
+  );
+  const compileTimestamp = canReuseTimestamp ? previousTimestamp : nowIso();
   const baselineCandidates = [
     path.join(categoryRoot, 'field_rules.json'),
     path.join(categoryRoot, 'field_rules_sample.json')
@@ -4329,7 +4405,7 @@ export async function compileCategoryWorkbook({
       workbook_path: resolvedWorkbook,
       workbook_hash: workbook.workbook_hash,
       map_path: controlMap.file_path,
-      map_hash: hashJson(map),
+      map_hash: mapHash,
       errors: [selectedKeySet.size > 0 ? 'selected_keys_filtered_all_extracted_keys' : 'no_keys_extracted_from_key_list'],
       warnings: mapValidation.warnings
     };
@@ -4435,6 +4511,11 @@ export async function compileCategoryWorkbook({
       if (passthroughCanonical && passthroughCanonical !== outputField) {
         keyMigrations[outputField] = passthroughCanonical;
       }
+      enforceExpectationPriority({
+        key: outputField,
+        rule: passthrough,
+        expectations
+      });
       fieldsRuntime[outputField] = passthrough;
       fieldsStudio[outputField] = passthrough;
       const passUi = isObject(passthrough.ui) ? passthrough.ui : {};
@@ -4669,6 +4750,12 @@ export async function compileCategoryWorkbook({
       }
     }
 
+    enforceExpectationPriority({
+      key: outputField,
+      rule: merged,
+      expectations
+    });
+
     fieldsRuntime[outputField] = merged;
     fieldsStudio[outputField] = buildStudioFieldRule({
       category,
@@ -4716,7 +4803,7 @@ export async function compileCategoryWorkbook({
     version: 1,
     category,
     generated_at: compileTimestamp,
-    workbook_map_hash: hashJson(map),
+    workbook_map_hash: mapHash,
     selected_keys: stableSortStrings(keyRows.map((row) => row.key)),
     expectations: {
       required_fields: stableSortStrings(toArray(map.expectations?.required_fields)),
@@ -4760,7 +4847,7 @@ export async function compileCategoryWorkbook({
     version: 1,
     category,
     generated_at: compileTimestamp,
-    workbook_map_hash: hashJson(map),
+    workbook_map_hash: mapHash,
     selected_keys: stableSortStrings(keyRows.map((row) => normalizeFieldKey(row.key))),
     fields: fieldsStudio,
     ui_field_catalog: toArray(uiFieldCatalogDraft.fields)
@@ -4893,7 +4980,7 @@ export async function compileCategoryWorkbook({
       path: resolvedWorkbook,
       hash: workbook.workbook_hash
     },
-    workbook_map_hash: hashJson(map),
+    workbook_map_hash: mapHash,
     key_source: {
       sheet: normalizeText(map?.key_list?.sheet || ''),
       range: keySourceRange
@@ -4948,12 +5035,13 @@ export async function compileCategoryWorkbook({
     }
   }
 
-  const previousReport = await readJsonIfExists(path.join(generatedRoot, '_compile_report.json'));
-  const previousFieldRulesArtifact = await readJsonIfExists(path.join(generatedRoot, 'field_rules.json'));
-  const previousHash = previousReport?.artifacts?.field_rules?.hash || null;
+  const previousHash = previousCompileReport?.artifacts?.field_rules?.hash || null;
   const currentHash = hashBuffer(Buffer.from(JSON.stringify(fieldRulesCanonical, null, 2), 'utf8'));
   const changed = Boolean(previousHash && previousHash !== currentHash);
-  const fieldDiff = diffFieldRuleSets(previousFieldRulesArtifact, fieldRulesCanonical);
+  const fieldDiff = diffFieldRuleSets(previousGeneratedFieldRules, fieldRulesCanonical);
+  const componentSourceCount = toArray(map.component_sources).length > 0
+    ? toArray(map.component_sources).length
+    : toArray(map.component_sheets).length;
 
   const compileReport = {
     version: 1,
@@ -4964,7 +5052,7 @@ export async function compileCategoryWorkbook({
     workbook_path: resolvedWorkbook,
     workbook_hash: workbook.workbook_hash,
     workbook_map_path: controlMap.file_path || null,
-    workbook_map_hash: hashJson(map),
+    workbook_map_hash: mapHash,
     counts: {
       fields: Object.keys(fieldsRuntime).length,
       identity: identityKeys.length,
@@ -4983,7 +5071,8 @@ export async function compileCategoryWorkbook({
       sampled_product_columns: toArray(samples.columns).length,
       sampled_values: Object.values(samples.byField || {}).reduce((sum, list) => sum + toArray(list).length, 0),
       enum_lists: toArray(map.enum_lists).length,
-      component_sources: toArray(map.component_sources).length > 0 ? toArray(map.component_sources).length : toArray(map.component_sheets).length
+      component_sources: componentSourceCount,
+      component_sheets: componentSourceCount
     },
     diff: {
       changed,
@@ -5061,7 +5150,7 @@ export async function compileCategoryWorkbook({
       workbook_path: resolvedWorkbook,
       workbook_hash: workbook.workbook_hash,
       map_path: controlMap.file_path,
-      map_hash: hashJson(map),
+      map_hash: mapHash,
       selected_key_count: keyRows.length,
       errors: compileReport.errors,
       warnings: compileReport.warnings,
@@ -5085,7 +5174,7 @@ export async function compileCategoryWorkbook({
       workbook_path: resolvedWorkbook,
       workbook_hash: workbook.workbook_hash,
       map_path: controlMap.file_path,
-      map_hash: hashJson(map),
+      map_hash: mapHash,
       selected_key_count: keyRows.length,
       errors: compileReport.errors,
       warnings: compileReport.warnings,
@@ -5153,7 +5242,7 @@ export async function compileCategoryWorkbook({
     workbook_path: resolvedWorkbook,
     workbook_hash: workbook.workbook_hash,
     map_path: controlMap.file_path,
-    map_hash: hashJson(map),
+    map_hash: mapHash,
     generated_root: generatedRoot,
     field_count: Object.keys(fieldsRuntime).length,
     selected_key_count: keyRows.length,

@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createStorage } from '../src/s3/storage.js';
 import { writeFinalOutputs } from '../src/exporter/finalExporter.js';
+import { FieldRulesEngine } from '../src/engine/fieldRulesEngine.js';
 
 function makeStorage(tempRoot) {
   return createStorage({
@@ -29,6 +30,78 @@ function baseNormalized() {
       sensor: 'PAW3395',
       dpi: '32000'
     }
+  };
+}
+
+async function writeJson(filePath, value) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+}
+
+async function createEngineFixtureRoot() {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'final-export-engine-'));
+  const helperRoot = path.join(root, 'helper_files');
+  const generatedRoot = path.join(helperRoot, 'mouse', '_generated');
+
+  await writeJson(path.join(generatedRoot, 'field_rules.json'), {
+    category: 'mouse',
+    fields: {
+      connection: {
+        required_level: 'required',
+        difficulty: 'easy',
+        availability: 'always',
+        enum_policy: 'closed',
+        contract: {
+          type: 'string',
+          shape: 'scalar'
+        }
+      }
+    }
+  });
+  await writeJson(path.join(generatedRoot, 'known_values.json'), {
+    category: 'mouse',
+    enums: {
+      connection: {
+        policy: 'closed',
+        values: [
+          { canonical: 'wired', aliases: ['usb wired'] },
+          { canonical: 'wireless', aliases: ['2.4ghz'] }
+        ]
+      }
+    }
+  });
+  await writeJson(path.join(generatedRoot, 'parse_templates.json'), {
+    category: 'mouse',
+    templates: {}
+  });
+  await writeJson(path.join(generatedRoot, 'cross_validation_rules.json'), {
+    category: 'mouse',
+    rules: []
+  });
+  await writeJson(path.join(generatedRoot, 'key_migrations.json'), {
+    version: '1.0.0',
+    previous_version: '1.0.0',
+    bump: 'patch',
+    summary: { added_count: 0, removed_count: 0, changed_count: 0 },
+    key_map: {
+      mouse_side_connector: 'connection'
+    },
+    migrations: [
+      {
+        type: 'rename',
+        from: 'mouse_side_connector',
+        to: 'connection'
+      }
+    ]
+  });
+  await writeJson(path.join(generatedRoot, 'ui_field_catalog.json'), {
+    category: 'mouse',
+    fields: [{ key: 'connection', group: 'connectivity' }]
+  });
+
+  return {
+    root,
+    helperRoot
   };
 }
 
@@ -130,5 +203,56 @@ test('writeFinalOutputs promotes only when summary improves and always appends h
     assert.equal(history.split(/\r?\n/).filter(Boolean).length, 3);
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('writeFinalOutputs applies runtime engine migrations and enum normalization before publish', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-final-export-runtime-'));
+  const storage = makeStorage(tempRoot);
+  const fixture = await createEngineFixtureRoot();
+
+  try {
+    const runtimeEngine = await FieldRulesEngine.create('mouse', {
+      config: {
+        helperFilesRoot: fixture.helperRoot
+      }
+    });
+    const result = await writeFinalOutputs({
+      storage,
+      category: 'mouse',
+      productId: 'mouse-logitech-g-pro-x-superlight-2',
+      runId: 'run-runtime',
+      normalized: {
+        identity: {
+          brand: 'Logitech',
+          model: 'G Pro X Superlight 2',
+          variant: ''
+        },
+        fields: {
+          mouse_side_connector: 'usb wired'
+        }
+      },
+      provenance: {},
+      trafficLight: {},
+      summary: {
+        validated: true,
+        confidence: 0.9,
+        completeness_required: 0.9,
+        coverage_overall: 0.9,
+        constraint_analysis: { contradiction_count: 0 },
+        missing_required_fields: []
+      },
+      sourceResults: [],
+      runtimeEngine,
+      runtimeFieldOrder: ['connection']
+    });
+
+    assert.equal(result.runtime_gate.applied, true);
+    const finalSpec = await storage.readJson('final/mouse/logitech/g-pro-x-superlight-2/spec.json');
+    assert.equal(finalSpec.connection, 'wired');
+    assert.equal(Object.prototype.hasOwnProperty.call(finalSpec, 'mouse_side_connector'), false);
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+    await fs.rm(fixture.root, { recursive: true, force: true });
   }
 });

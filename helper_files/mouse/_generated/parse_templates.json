@@ -1,0 +1,553 @@
+{
+  "category": "mouse",
+  "generated_at": "2026-02-13T02:18:36.677Z",
+  "template_library": {
+    "boolean_yes_no_unk": {
+      "description": "Parse yes/no/true/false/1/0 tokens. Output boolean or 'unk'.",
+      "tests": [
+        {
+          "expected": true,
+          "raw": "Yes"
+        },
+        {
+          "expected": false,
+          "raw": "no"
+        },
+        {
+          "expected": "unk",
+          "raw": "unk"
+        }
+      ]
+    },
+    "component_reference": {
+      "description": "Match a component entity name/alias against a component_db type; output canonical component name.",
+      "tests": [
+        {
+          "expected": "PAW3395",
+          "raw": "PAW 3395"
+        },
+        {
+          "expected": "Kailh GM 8.0",
+          "raw": "Kailh GM 8.0"
+        }
+      ]
+    },
+    "date_field": {
+      "description": "Parse date strings to ISO-8601 (YYYY-MM-DD) when possible.",
+      "tests": [
+        {
+          "expected": "2024-10-01",
+          "raw": "2024-10-01"
+        },
+        {
+          "expected": "2024-10-01",
+          "raw": "Oct 2024"
+        }
+      ]
+    },
+    "list_numbers_or_ranges_with_unit": {
+      "description": "Parse mixed lists containing numbers and ranges (e.g. '1-3, 4'). Canonical output is list of intervals {min,max}.",
+      "tests": [
+        {
+          "expected": [
+            {
+              "max": 4,
+              "min": 4
+            }
+          ],
+          "raw": "4"
+        },
+        {
+          "expected": [
+            {
+              "max": 3,
+              "min": 1
+            }
+          ],
+          "raw": "1-3"
+        },
+        {
+          "expected": [
+            {
+              "max": 3,
+              "min": 1
+            },
+            {
+              "max": 4,
+              "min": 4
+            }
+          ],
+          "raw": "1-3, 4"
+        }
+      ]
+    },
+    "list_of_numbers_with_unit": {
+      "description": "Parse list of numbers with optional unit into list<number> (or list<int>) in target unit.",
+      "tests": [
+        {
+          "expected": [
+            125,
+            500,
+            1000
+          ],
+          "raw": "125, 500, 1000 Hz"
+        },
+        {
+          "expected": [
+            1000
+          ],
+          "raw": "1000"
+        },
+        {
+          "expected": [
+            1000,
+            2000
+          ],
+          "raw": "1k, 2k"
+        }
+      ]
+    },
+    "list_of_tokens_delimited": {
+      "description": "Parse delimited tokens into list<string> with optional token_map normalization.",
+      "tests": [
+        {
+          "expected": [
+            "white",
+            "black"
+          ],
+          "raw": "white, black"
+        },
+        {
+          "expected": [
+            "gray",
+            "black"
+          ],
+          "raw": "gray+black"
+        },
+        {
+          "expected": [
+            "red",
+            "blue"
+          ],
+          "raw": "  Red / Blue  "
+        }
+      ]
+    },
+    "number_with_unit": {
+      "description": "Parse a single number with optional unit. Convert to target unit when allowed.",
+      "tests": [
+        {
+          "expected_mm": 120,
+          "raw": "120 mm"
+        },
+        {
+          "expected_mm": 120,
+          "raw": "12 cm"
+        },
+        {
+          "expected_mm": 114.3,
+          "raw": "4.5 in"
+        }
+      ]
+    },
+    "url_field": {
+      "description": "Parse and validate URL. Normalize by trimming and ensuring scheme.",
+      "tests": [
+        {
+          "expected": "https://example.com/spec",
+          "raw": "https://example.com/spec"
+        },
+        {
+          "expected": "https://example.com/spec",
+          "raw": "example.com/spec"
+        }
+      ]
+    }
+  },
+  "templates": {
+    "acceleration": {
+      "context_keywords": [
+        "acceleration",
+        "g",
+        "max acceleration"
+      ],
+      "patterns": [],
+      "template": "number_with_unit",
+      "unit": "g"
+    },
+    "adjustable_scroll_wheel": {
+      "patterns": [],
+      "template": "boolean_yes_no_unk"
+    },
+    "adjustable_weight": {
+      "patterns": [],
+      "template": "boolean_yes_no_unk"
+    },
+    "battery_hours": {
+      "context_keywords": [
+        "battery life",
+        "battery life (hours)",
+        "battery runtime",
+        "battery_hours"
+      ],
+      "patterns": [],
+      "template": "number_with_unit",
+      "unit": "h"
+    },
+    "bluetooth": {
+      "patterns": [],
+      "template": "boolean_yes_no_unk"
+    },
+    "cable_type": {
+      "patterns": [],
+      "template": "text_field"
+    },
+    "click_force": {
+      "patterns": [],
+      "template": "number_with_unit",
+      "unit": "gf"
+    },
+    "click_latency": {
+      "patterns": [],
+      "template": "number_with_unit",
+      "unit": "ms"
+    },
+    "click_latency_list": {
+      "patterns": [],
+      "template": "latency_list_modes_ms",
+      "unit": "ms"
+    },
+    "coating": {
+      "patterns": [],
+      "template": "list_of_tokens_delimited"
+    },
+    "colors": {
+      "patterns": [],
+      "template": "list_of_tokens_delimited"
+    },
+    "computer_side_connector": {
+      "patterns": [],
+      "template": "text_field"
+    },
+    "connection": {
+      "patterns": [],
+      "template": "text_field"
+    },
+    "connectivity": {
+      "patterns": [],
+      "template": "list_of_tokens_delimited"
+    },
+    "debounce": {
+      "patterns": [],
+      "template": "number_with_unit",
+      "unit": "ms"
+    },
+    "design": {
+      "patterns": [],
+      "template": "list_of_tokens_delimited"
+    },
+    "discontinued": {
+      "patterns": [],
+      "template": "boolean_yes_no_unk"
+    },
+    "dpi": {
+      "context_keywords": [
+        "cpi",
+        "dpi",
+        "max dpi",
+        "maximum dpi"
+      ],
+      "patterns": [],
+      "template": "number_with_unit",
+      "unit": "dpi"
+    },
+    "encoder": {
+      "patterns": [],
+      "template": "component_reference"
+    },
+    "encoder_brand": {
+      "patterns": [],
+      "template": "text_field"
+    },
+    "encoder_link": {
+      "patterns": [],
+      "template": "url_field"
+    },
+    "feet_material": {
+      "patterns": [],
+      "template": "text_field"
+    },
+    "flawless_sensor": {
+      "patterns": [],
+      "template": "boolean_yes_no_unk"
+    },
+    "form_factor": {
+      "patterns": [],
+      "template": "text_field"
+    },
+    "front_flare": {
+      "patterns": [],
+      "template": "text_field"
+    },
+    "grip": {
+      "patterns": [],
+      "template": "list_of_tokens_delimited"
+    },
+    "hand_size": {
+      "patterns": [],
+      "template": "list_of_tokens_delimited"
+    },
+    "hardware_acceleration": {
+      "patterns": [],
+      "template": "boolean_yes_no_unk"
+    },
+    "height": {
+      "context_keywords": [
+        "height",
+        "height_mm",
+        "overall height"
+      ],
+      "patterns": [],
+      "template": "number_with_unit",
+      "unit": "mm"
+    },
+    "honeycomb_frame": {
+      "patterns": [],
+      "template": "boolean_yes_no_unk"
+    },
+    "hot_swappable": {
+      "patterns": [],
+      "template": "boolean_yes_no_unk"
+    },
+    "hump": {
+      "patterns": [],
+      "template": "text_field"
+    },
+    "ips": {
+      "context_keywords": [
+        "inches per second",
+        "ips",
+        "max ips"
+      ],
+      "patterns": [],
+      "template": "number_with_unit",
+      "unit": "ips"
+    },
+    "lift": {
+      "context_keywords": [
+        "lift",
+        "lift off distance",
+        "lift-off distance",
+        "lod"
+      ],
+      "patterns": [],
+      "template": "list_numbers_or_ranges_with_unit",
+      "unit": "mm"
+    },
+    "lift_settings": {
+      "patterns": [],
+      "template": "list_of_tokens_delimited"
+    },
+    "lighting": {
+      "patterns": [],
+      "template": "list_of_tokens_delimited"
+    },
+    "lngth": {
+      "context_keywords": [
+        "length",
+        "length_mm",
+        "lngth",
+        "overall length"
+      ],
+      "patterns": [],
+      "template": "number_with_unit",
+      "unit": "mm"
+    },
+    "material": {
+      "patterns": [],
+      "template": "component_reference"
+    },
+    "mcu": {
+      "patterns": [],
+      "template": "text_field"
+    },
+    "mcu_link": {
+      "patterns": [],
+      "template": "url_field"
+    },
+    "middle_buttons": {
+      "patterns": [],
+      "template": "number_with_unit",
+      "unit": "none"
+    },
+    "motion_sync": {
+      "patterns": [],
+      "template": "boolean_yes_no_unk"
+    },
+    "mouse_side_connector": {
+      "patterns": [],
+      "template": "text_field"
+    },
+    "nvidia_reflex": {
+      "patterns": [],
+      "template": "boolean_yes_no_unk"
+    },
+    "onboard_memory": {
+      "patterns": [],
+      "template": "boolean_yes_no_unk"
+    },
+    "onboard_memory_value": {
+      "patterns": [],
+      "template": "number_with_unit",
+      "unit": "none"
+    },
+    "paracord": {
+      "patterns": [],
+      "template": "boolean_yes_no_unk"
+    },
+    "polling_rate": {
+      "context_keywords": [
+        "hz",
+        "polling",
+        "polling rate",
+        "polling_rate",
+        "report rate"
+      ],
+      "patterns": [],
+      "template": "list_of_numbers_with_unit",
+      "unit": "Hz"
+    },
+    "price_range": {
+      "patterns": [],
+      "template": "text_field"
+    },
+    "profile_switching": {
+      "patterns": [],
+      "template": "boolean_yes_no_unk"
+    },
+    "programmable_buttons": {
+      "patterns": [],
+      "template": "number_with_unit",
+      "unit": "none"
+    },
+    "release_date": {
+      "patterns": [],
+      "template": "date_field"
+    },
+    "rgb": {
+      "patterns": [],
+      "template": "boolean_yes_no_unk"
+    },
+    "sensor": {
+      "patterns": [],
+      "template": "component_reference"
+    },
+    "sensor_brand": {
+      "patterns": [],
+      "template": "text_field"
+    },
+    "sensor_date": {
+      "patterns": [],
+      "template": "date_field"
+    },
+    "sensor_latency": {
+      "patterns": [],
+      "template": "number_with_unit",
+      "unit": "ms"
+    },
+    "sensor_latency_list": {
+      "patterns": [],
+      "template": "latency_list_modes_ms",
+      "unit": "ms"
+    },
+    "sensor_link": {
+      "patterns": [],
+      "template": "url_field"
+    },
+    "sensor_type": {
+      "patterns": [],
+      "template": "text_field"
+    },
+    "shape": {
+      "patterns": [],
+      "template": "text_field"
+    },
+    "shift_latency": {
+      "patterns": [],
+      "template": "number_with_unit",
+      "unit": "ms"
+    },
+    "side_buttons": {
+      "patterns": [],
+      "template": "number_with_unit",
+      "unit": "none"
+    },
+    "silent_clicks": {
+      "patterns": [],
+      "template": "boolean_yes_no_unk"
+    },
+    "sku": {
+      "patterns": [],
+      "template": "text_field"
+    },
+    "smoothing": {
+      "patterns": [],
+      "template": "boolean_yes_no_unk"
+    },
+    "switch": {
+      "patterns": [],
+      "template": "component_reference"
+    },
+    "switch_brand": {
+      "patterns": [],
+      "template": "text_field"
+    },
+    "switch_type": {
+      "patterns": [],
+      "template": "text_field"
+    },
+    "switches_link": {
+      "context_keywords": [
+        "Switch Link",
+        "switch_link",
+        "switches_link"
+      ],
+      "patterns": [],
+      "template": "text_field"
+    },
+    "thumb_rest": {
+      "patterns": [],
+      "template": "text_field"
+    },
+    "tilt_scroll_wheel": {
+      "patterns": [],
+      "template": "boolean_yes_no_unk"
+    },
+    "weight": {
+      "context_keywords": [
+        "grams",
+        "mass",
+        "weight",
+        "weight_g"
+      ],
+      "patterns": [],
+      "template": "number_with_unit",
+      "unit": "g"
+    },
+    "width": {
+      "context_keywords": [
+        "overall width",
+        "width",
+        "width_mm"
+      ],
+      "patterns": [],
+      "template": "number_with_unit",
+      "unit": "mm"
+    },
+    "wireless_charging": {
+      "patterns": [],
+      "template": "boolean_yes_no_unk"
+    }
+  },
+  "version": 1
+}

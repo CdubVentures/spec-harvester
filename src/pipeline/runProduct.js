@@ -1,4 +1,4 @@
-import { buildRunId } from '../utils/common.js';
+import { buildRunId, normalizeWhitespace } from '../utils/common.js';
 import { loadCategoryConfig } from '../categories/loader.js';
 import { SourcePlanner, buildSourceSummary } from '../planner/sourcePlanner.js';
 import { PlaywrightFetcher, DryRunFetcher, HttpFetcher } from '../fetcher/playwrightFetcher.js';
@@ -25,6 +25,7 @@ import {
   persistLearningProfile
 } from '../learning/selfImproveLoop.js';
 import {
+  buildEvidenceCandidateFingerprint,
   buildEvidencePack
 } from '../llm/evidencePack.js';
 import {
@@ -71,6 +72,9 @@ import {
 import { runDeterministicCritic } from '../validator/critic.js';
 import { buildTrafficLight } from '../validator/trafficLight.js';
 import { normalizeFieldList, toRawFieldKey } from '../utils/fieldKeys.js';
+import { createFieldRulesEngine } from '../engine/fieldRulesEngine.js';
+import { applyRuntimeFieldRules } from '../engine/runtimeGate.js';
+import { appendEnumCurationSuggestions } from '../engine/curationSuggestions.js';
 import {
   availabilityClassForField,
   undisclosedThresholdForField
@@ -264,6 +268,78 @@ function dedupeCandidates(candidates) {
     out.push(candidate);
   }
   return out;
+}
+
+function normalizedSnippetRows(evidencePack) {
+  if (!evidencePack) {
+    return [];
+  }
+  if (Array.isArray(evidencePack.snippets)) {
+    return evidencePack.snippets
+      .map((row) => ({
+        id: String(row?.id || '').trim(),
+        text: normalizeWhitespace(String(row?.normalized_text || row?.text || '')).toLowerCase()
+      }))
+      .filter((row) => row.id && row.text);
+  }
+  if (evidencePack.snippets && typeof evidencePack.snippets === 'object') {
+    return Object.entries(evidencePack.snippets)
+      .map(([id, row]) => ({
+        id: String(id || '').trim(),
+        text: normalizeWhitespace(String(row?.normalized_text || row?.text || '')).toLowerCase()
+      }))
+      .filter((row) => row.id && row.text);
+  }
+  return [];
+}
+
+function enrichFieldCandidatesWithEvidenceRefs(fieldCandidates = [], evidencePack = null) {
+  const deterministicBindings = evidencePack?.candidate_bindings && typeof evidencePack.candidate_bindings === 'object'
+    ? evidencePack.candidate_bindings
+    : {};
+  const snippetRows = normalizedSnippetRows(evidencePack);
+  if (!snippetRows.length && !Object.keys(deterministicBindings).length) {
+    return fieldCandidates;
+  }
+
+  return (fieldCandidates || []).map((candidate) => {
+    const existingRefs = Array.isArray(candidate?.evidenceRefs)
+      ? candidate.evidenceRefs.map((id) => String(id || '').trim()).filter(Boolean)
+      : [];
+    if (existingRefs.length > 0) {
+      return candidate;
+    }
+
+    const deterministicFingerprint = buildEvidenceCandidateFingerprint(candidate);
+    const deterministicSnippetId = deterministicBindings[deterministicFingerprint];
+    if (deterministicSnippetId) {
+      return {
+        ...candidate,
+        evidenceRefs: [deterministicSnippetId],
+        evidenceRefOrigin: 'deterministic_binding'
+      };
+    }
+
+    const value = normalizeWhitespace(String(candidate?.value || '')).toLowerCase();
+    if (!value || value === 'unk') {
+      return candidate;
+    }
+    const fieldToken = String(candidate?.field || '').replace(/_/g, ' ').toLowerCase().trim();
+
+    let match = snippetRows.find((row) => row.text.includes(value) && (!fieldToken || row.text.includes(fieldToken)));
+    if (!match) {
+      match = snippetRows.find((row) => row.text.includes(value));
+    }
+    if (!match) {
+      return candidate;
+    }
+
+    return {
+      ...candidate,
+      evidenceRefs: [match.id],
+      evidenceRefOrigin: 'heuristic_snippet_match'
+    };
+  });
 }
 
 function isAnchorLocked(field, anchors) {
@@ -744,6 +820,18 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     productId
   });
   const categoryConfig = await loadCategoryConfig(category, { storage, config });
+  let runtimeFieldRulesEngine = null;
+  try {
+    runtimeFieldRulesEngine = await createFieldRulesEngine(category, {
+      config
+    });
+  } catch (error) {
+    logger.warn('field_rules_engine_init_failed', {
+      category,
+      productId,
+      message: error.message
+    });
+  }
   const billingMonth = new Date().toISOString().slice(0, 7);
 
   const fieldOrder = categoryConfig.fieldOrder;
@@ -1101,6 +1189,10 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       for (const url of adapterExtra.additionalUrls || []) {
         planner.enqueue(url, `adapter:${source.url}`);
       }
+      const deterministicFieldCandidates = dedupeCandidates([
+        ...(extraction.fieldCandidates || []),
+        ...(adapterExtra.fieldCandidates || [])
+      ]);
 
       let llmExtraction = {
         identityCandidates: {},
@@ -1110,19 +1202,34 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       };
       let evidencePack = null;
       const sourceStatusCode = Number.parseInt(String(pageData.status || 0), 10) || 0;
-      const llmEligibleSource =
-        config.llmEnabled &&
+      const evidenceEligibleSource =
         !discoveryOnlySource &&
         sourceStatusCode > 0 &&
-        sourceStatusCode < 400;
-      if (llmEligibleSource) {
+        sourceStatusCode < 500;
+      if (evidenceEligibleSource) {
         evidencePack = buildEvidencePack({
-          source,
+          source: {
+            ...source,
+            status: sourceStatusCode,
+            finalUrl: pageData.finalUrl || source.url,
+            fetchedAt: new Date().toISOString(),
+            fetchMethod: fetcherMode,
+            productId,
+            category
+          },
           pageData,
           adapterExtra,
           config,
-          targetFields: llmTargetFields
+          targetFields: llmTargetFields,
+          deterministicCandidates: deterministicFieldCandidates
         });
+      }
+
+      const llmEligibleSource =
+        config.llmEnabled &&
+        Boolean(evidencePack) &&
+        sourceStatusCode < 400;
+      if (llmEligibleSource) {
         llmExtraction = await extractCandidatesLLM({
           job,
           categoryConfig,
@@ -1139,7 +1246,9 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
           status: sourceStatusCode || null,
           reason: discoveryOnlySource
             ? 'discovery_only_source'
-            : sourceStatusCode >= 400
+            : sourceStatusCode >= 500
+              ? 'http_status_source_unavailable'
+              : sourceStatusCode >= 400
               ? 'http_status_not_extractable'
               : 'source_not_extractable'
         });
@@ -1156,14 +1265,17 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       });
 
       const mergedFieldCandidates = dedupeCandidates([
-        ...(extraction.fieldCandidates || []),
-        ...(adapterExtra.fieldCandidates || []),
+        ...deterministicFieldCandidates,
         ...llmFieldCandidates
       ]);
+      const mergedFieldCandidatesWithEvidence = enrichFieldCandidatesWithEvidenceRefs(
+        mergedFieldCandidates,
+        evidencePack
+      );
       const temporalSignals = extractTemporalSignals({
         source,
         pageData,
-        fieldCandidates: mergedFieldCandidates
+        fieldCandidates: mergedFieldCandidatesWithEvidence
       });
 
       const mergedIdentityCandidates = {
@@ -1179,7 +1291,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         }
       }
 
-      const candidateFieldMap = buildCandidateFieldMap(mergedFieldCandidates);
+      const candidateFieldMap = buildCandidateFieldMap(mergedFieldCandidatesWithEvidence);
       const anchorCheck = evaluateAnchorConflicts(anchors, candidateFieldMap);
       const identity = evaluateSourceIdentity(
         {
@@ -1205,7 +1317,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         !(identity.reasons || []).includes('brand_match');
       const parserHealth = computeParserHealth({
         source,
-        mergedFieldCandidates,
+        mergedFieldCandidates: mergedFieldCandidatesWithEvidence,
         identity,
         anchorCheck,
         criticalFieldSet: categoryConfig.criticalFieldSet,
@@ -1221,7 +1333,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         title: pageData.title,
         identity,
         identityCandidates: mergedIdentityCandidates,
-        fieldCandidates: mergedFieldCandidates,
+        fieldCandidates: mergedFieldCandidatesWithEvidence,
         anchorCheck,
         anchorStatus,
         endpointSignals: endpointIntel.endpointSignals,
@@ -1253,7 +1365,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         identity.match &&
         (anchorCheck.majorConflicts || []).length === 0
       ) {
-        const newlyFilledFields = mergedFieldCandidates
+        const newlyFilledFields = mergedFieldCandidatesWithEvidence
           .filter((candidate) => {
             const value = String(candidate.value || '').trim().toLowerCase();
             return value && value !== 'unk';
@@ -1270,7 +1382,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         embeddedState: pageData.embeddedState,
         networkResponses: pageData.networkResponses,
         pdfDocs: adapterExtra.pdfDocs || [],
-        extractedCandidates: mergedFieldCandidates
+        extractedCandidates: mergedFieldCandidatesWithEvidence
       };
 
       adapterArtifacts.push(...(adapterExtra.adapterArtifacts || []));
@@ -1298,7 +1410,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         identity_match: identity.match,
         identity_score: identity.score,
         anchor_status: anchorStatus,
-        candidate_count: mergedFieldCandidates.length,
+        candidate_count: mergedFieldCandidatesWithEvidence.length,
         candidate_source: source.candidateSource,
         llm_candidate_count: llmFieldCandidates.length
       });
@@ -1690,6 +1802,77 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     criticalFieldsBelowPassTarget = [...criticalSet];
   }
 
+  const runtimeGateResult = applyRuntimeFieldRules({
+    engine: runtimeFieldRulesEngine,
+    fields: normalized.fields,
+    provenance,
+    fieldOrder,
+    enforceEvidence: Boolean(config.fieldRulesEngineEnforceEvidence),
+    strictEvidence: Boolean(config.fieldRulesEngineEnforceEvidence),
+    evidencePack: null
+  });
+  normalized.fields = runtimeGateResult.fields;
+  if ((runtimeGateResult.failures || []).length > 0) {
+    const belowSet = new Set(fieldsBelowPassTarget || []);
+    const criticalSet = new Set(criticalFieldsBelowPassTarget || []);
+    for (const failure of runtimeGateResult.failures) {
+      if (!failure?.field) {
+        continue;
+      }
+      belowSet.add(failure.field);
+      if (categoryConfig.criticalFieldSet.has(failure.field)) {
+        criticalSet.add(failure.field);
+      }
+
+      const bucket = ensureProvenanceField(provenance, failure.field, 'unk');
+      bucket.value = 'unk';
+      bucket.meets_pass_target = false;
+      bucket.confidence = Math.min(Number(bucket.confidence || 0), 0.2);
+      bucket.evidence = [
+        ...(Array.isArray(bucket.evidence) ? bucket.evidence : []),
+        {
+          url: 'engine://field-rules',
+          host: 'engine.local',
+          rootDomain: 'engine.local',
+          tier: 1,
+          tierName: 'manufacturer',
+          method: 'field_rules_engine',
+          keyPath: `engine.${failure.field}`,
+          approvedDomain: true,
+          reason: failure.reason_code || 'normalize_failed'
+        }
+      ];
+    }
+    fieldsBelowPassTarget = [...belowSet];
+    criticalFieldsBelowPassTarget = [...criticalSet];
+  }
+  let curationSuggestionResult = null;
+  if ((runtimeGateResult.curation_suggestions || []).length > 0) {
+    try {
+      curationSuggestionResult = await appendEnumCurationSuggestions({
+        config,
+        category,
+        productId,
+        runId,
+        suggestions: runtimeGateResult.curation_suggestions || []
+      });
+      logger.info('runtime_curation_suggestions_persisted', {
+        category,
+        productId,
+        runId,
+        appended_count: curationSuggestionResult.appended_count,
+        total_count: curationSuggestionResult.total_count
+      });
+    } catch (error) {
+      logger.warn('runtime_curation_suggestions_failed', {
+        category,
+        productId,
+        runId,
+        message: error.message
+      });
+    }
+  }
+
   const completenessStats = computeCompletenessRequired(normalized, requiredFields);
   const coverageStats = computeCoverageOverall({
     fields: normalized.fields,
@@ -1869,6 +2052,19 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         unknown_count: (llmValidatorDecisions.unknown || []).length,
         decisions: llmValidatorDecisions
       }
+    },
+    runtime_engine: {
+      enabled: Boolean(runtimeFieldRulesEngine),
+      enforce_evidence: Boolean(config.fieldRulesEngineEnforceEvidence),
+      failure_count: (runtimeGateResult.failures || []).length,
+      warning_count: (runtimeGateResult.warnings || []).length,
+      change_count: (runtimeGateResult.changes || []).length,
+      curation_suggestions_count: (runtimeGateResult.curation_suggestions || []).length,
+      curation_suggestions_appended_count: curationSuggestionResult?.appended_count || 0,
+      curation_suggestions_total_count: curationSuggestionResult?.total_count || 0,
+      curation_suggestions_path: curationSuggestionResult?.path || null,
+      failures: runtimeGateResult.failures || [],
+      warnings: runtimeGateResult.warnings || []
     },
     llm: {
       enabled: Boolean(config.llmEnabled && config.llmApiKey),
@@ -2091,7 +2287,10 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     summary,
     provenance,
     trafficLight,
-    sourceResults
+    sourceResults,
+    runtimeEngine: runtimeFieldRulesEngine,
+    runtimeFieldOrder: fieldOrder,
+    runtimeEnforceEvidence: Boolean(config.fieldRulesEngineEnforceEvidence)
   });
   summary.final_export = finalExport;
   emitFieldDecisionEvents({

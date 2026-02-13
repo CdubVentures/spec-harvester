@@ -6,6 +6,8 @@ You are a senior data-pipeline engineer specializing in web scraping at scale. P
 
 This is the "data acquisition" layer. It does NOT extract field values (that's Phase 5). It collects raw evidence: HTML pages, spec tables, API responses, and packages them with metadata. The philosophy is **crawl once, extract many** — evidence is cached and reusable.
 
+**Accuracy note:** evidence must be *stable and verifiable*. Every snippet should carry a hash and (optionally) a screenshot crop so downstream phases can prove “this value came from exactly this text on exactly this page version.”
+
 **Dependencies:** Phase 3 (FieldRulesEngine) must be complete. The engine tells this phase which fields to prioritize, which sources to prefer, and how much effort to spend.
 
 ---
@@ -471,7 +473,16 @@ function extractJsonLd(html) {
   });
   return jsonLd;
 }
+
+// IMPORTANT (accuracy + provenance):
+// Convert each JSON-LD Product object into a first-class snippet so downstream phases can cite it
+// just like spec-table rows and test results.
+//   snippet.type = "json_ld_product"
+//   snippet.text = JSON.stringify(product)
+//   snippet.normalized_text = whitespaceCollapse(snippet.text)
+//   snippet.snippet_hash = sha256(snippet.normalized_text)
 ```
+
 
 ---
 
@@ -483,6 +494,9 @@ function extractJsonLd(html) {
   "category": "mouse",
   "created_at": "2026-02-12T10:30:00Z",
   "updated_at": "2026-02-12T10:35:00Z",
+  "evidence_pack_version": "1.1.0",
+  "schema_version": "2026-02-13",
+  "content_language": "en",
   "rounds_completed": 3,
   "sources_crawled": 5,
   "total_snippets": 47,
@@ -499,8 +513,12 @@ function extractJsonLd(html) {
       "fetched_at": "2026-02-12T10:30:15Z",
       "status": 200,
       "method": "playwright",
+      "normalized_url": "https://www.razer.com/gaming-mice/razer-viper-v3-pro/specifications",
+      "page_content_hash": "sha256:…",
+      "text_hash": "sha256:…",
       "raw_html_path": "evidence/mouse-razer-viper-v3-pro/razer_com.html",
       "cleaned_text_path": "evidence/mouse-razer-viper-v3-pro/razer_com.txt",
+      "screenshot_path": "evidence/mouse-razer-viper-v3-pro/razer_com.png",
       "snippets": ["snp_001", "snp_002", "snp_003", "..."]
     },
     "rtings_com": {
@@ -509,6 +527,9 @@ function extractJsonLd(html) {
       "fetched_at": "2026-02-12T10:31:02Z",
       "status": 200,
       "method": "playwright",
+      "normalized_url": "https://www.rtings.com/mouse/reviews/razer/viper-v3-pro",
+      "page_content_hash": "sha256:…",
+      "text_hash": "sha256:…",
       "snippets": ["snp_010", "snp_011", "..."]
     }
     // ... more sources
@@ -518,10 +539,17 @@ function extractJsonLd(html) {
       "source": "razer_com",
       "type": "spec_table_row",
       "field_hints": ["weight"],
+      "key": "Weight",
+      "value": "54 g (without cable)",
+      "cells": ["Weight", "54 g (without cable)"],
       "text": "Weight: 54 g (without cable)",
+      "normalized_text": "Weight: 54 g (without cable)",
+      "snippet_hash": "sha256:…",
       "html": "<tr><td>Weight</td><td>54 g (without cable)</td></tr>",
       "location": {
         "selector": ".specs-table tr:nth-child(3)",
+        "bounding_box": { "x": 0, "y": 0, "w": 0, "h": 0 },
+        "screenshot_crop_path": "evidence/mouse-razer-viper-v3-pro/crops/snp_001.png",
         "char_offset": 1234,
         "surrounding_context": "...Dimensions: 127.1 x 63.9 x 39.8mm | Weight: 54 g (without cable) | Cable Type: Speedflex..."
       }
@@ -531,6 +559,8 @@ function extractJsonLd(html) {
       "type": "test_result",
       "field_hints": ["click_latency"],
       "text": "Click Latency: 0.2 ms",
+      "normalized_text": "Click Latency: 0.2 ms",
+      "snippet_hash": "sha256:…",
       "html": "<td class='score'>0.2 ms</td>",
       "location": { "selector": ".test-results tr.click-latency td.score" }
     }
@@ -571,8 +601,11 @@ RAW HTML → PROCESSING PIPELINE:
 5. SNIPPET INDEXER
    - Input: all extracted content
    - Output: snippet index with unique IDs
+   - Stores BOTH raw text (`text`) and canonical whitespace-collapsed text (`normalized_text`)
+   - Computes `snippet_hash = sha256(normalized_text)` for drift detection and evidence verification
    - Assigns field_hints based on keyword matching (from parse_context_keywords)
    - Computes relevance scores per snippet per field
+   - (Playwright) optionally stores a per-snippet screenshot crop + bounding box to support pixel-perfect review highlighting
 ```
 
 ---

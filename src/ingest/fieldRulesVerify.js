@@ -10,6 +10,46 @@ function sha256(buffer) {
   return createHash('sha256').update(buffer).digest('hex');
 }
 
+function sortDeep(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => sortDeep(item));
+  }
+  if (!isObject(value)) {
+    return value;
+  }
+  const out = {};
+  for (const key of Object.keys(value).sort((a, b) => a.localeCompare(b))) {
+    out[key] = sortDeep(value[key]);
+  }
+  return out;
+}
+
+function stableStringify(value) {
+  return JSON.stringify(sortDeep(value), null, 2);
+}
+
+function stripVolatileKeys(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripVolatileKeys(item));
+  }
+  if (!isObject(value)) {
+    return value;
+  }
+  const out = {};
+  for (const [key, nested] of Object.entries(value)) {
+    if (
+      key === 'generated_at'
+      || key === 'compiled_at'
+      || key === 'created_at'
+      || key === 'version_id'
+    ) {
+      continue;
+    }
+    out[key] = stripVolatileKeys(nested);
+  }
+  return out;
+}
+
 async function readFileOrThrow(filePath, label) {
   try {
     return await fs.readFile(filePath);
@@ -52,14 +92,16 @@ function summarizeDiff(goldenJson, generatedJson) {
     missing_fields: missingFields.slice(0, 25),
     extra_fields: extraFields.slice(0, 25),
     missing_fields_count: missingFields.length,
-    extra_fields_count: extraFields.length
+    extra_fields_count: extraFields.length,
+    semantic_equal: stableStringify(stripVolatileKeys(goldenJson)) === stableStringify(stripVolatileKeys(generatedJson))
   };
 }
 
 export async function verifyGeneratedFieldRules({
   category,
   config = {},
-  fixturePath = ''
+  fixturePath = '',
+  strictBytes = false
 }) {
   const normalizedCategory = String(category || '').trim();
   if (!normalizedCategory) {
@@ -78,14 +120,26 @@ export async function verifyGeneratedFieldRules({
 
   const generatedSha = sha256(generatedBuffer);
   const fixtureSha = sha256(fixtureBuffer);
-  const verified = generatedSha === fixtureSha;
+  const byteEqual = generatedSha === fixtureSha;
+  const fixtureJson = safeParse(fixtureBuffer);
+  const generatedJson = safeParse(generatedBuffer);
+  const parseable = isObject(fixtureJson) && isObject(generatedJson);
+  const semanticEqual = parseable
+    ? stableStringify(stripVolatileKeys(fixtureJson)) === stableStringify(stripVolatileKeys(generatedJson))
+    : null;
+  const verified = strictBytes
+    ? byteEqual
+    : (parseable ? semanticEqual : byteEqual);
   const diff = verified
     ? null
-    : summarizeDiff(safeParse(fixtureBuffer), safeParse(generatedBuffer));
+    : summarizeDiff(fixtureJson, generatedJson);
 
   return {
     category: normalizedCategory,
     verified,
+    verify_mode: strictBytes ? 'bytes' : (parseable ? 'semantic' : 'bytes'),
+    byte_equal: byteEqual,
+    semantic_equal: semanticEqual,
     generated_path: generatedPath,
     fixture_path: resolvedFixturePath,
     generated_sha256: generatedSha,

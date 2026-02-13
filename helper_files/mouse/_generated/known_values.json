@@ -114,8 +114,12 @@
       "TTC Optical Microswitch",
       "unk",
       "unspecified"
+    ],
+    "yes_no": [
+      "yes",
+      "no"
     ]
   },
-  "generated_at": "2026-02-13T00:11:11.523Z",
+  "generated_at": "2026-02-13T02:18:36.677Z",
   "version": 1
 }

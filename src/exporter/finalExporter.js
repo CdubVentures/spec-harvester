@@ -1,4 +1,5 @@
 import { nowIso } from '../utils/common.js';
+import { applyRuntimeFieldRules } from '../engine/runtimeGate.js';
 
 function slug(value) {
   return String(value || '')
@@ -344,9 +345,41 @@ export async function writeFinalOutputs({
   summary,
   provenance,
   trafficLight,
-  sourceResults = []
+  sourceResults = [],
+  runtimeEngine = null,
+  runtimeFieldOrder = [],
+  runtimeEnforceEvidence = false,
+  runtimeEvidencePack = null
 }) {
-  const finalParts = finalPathParts(category, normalized.identity || {});
+  let runtimeApplied = {
+    applied: false,
+    fields: normalized.fields || {},
+    failures: [],
+    warnings: [],
+    changes: []
+  };
+  let exportNormalized = normalized || { identity: {}, fields: {} };
+
+  if (runtimeEngine) {
+    const migratedInput = runtimeEngine.applyKeyMigrations(normalized.fields || {});
+    runtimeApplied = applyRuntimeFieldRules({
+      engine: runtimeEngine,
+      fields: migratedInput,
+      provenance: provenance || {},
+      fieldOrder: Array.isArray(runtimeFieldOrder) && runtimeFieldOrder.length > 0
+        ? runtimeFieldOrder
+        : Object.keys(migratedInput),
+      enforceEvidence: Boolean(runtimeEnforceEvidence),
+      strictEvidence: Boolean(runtimeEnforceEvidence),
+      evidencePack: runtimeEvidencePack
+    });
+    exportNormalized = {
+      ...(normalized || {}),
+      fields: runtimeApplied.fields || {}
+    };
+  }
+
+  const finalParts = finalPathParts(category, exportNormalized.identity || {});
   const finalBase = finalParts.join('/');
 
   const compact = compactSummary(summary);
@@ -363,7 +396,7 @@ export async function writeFinalOutputs({
     productId,
     category,
     runId,
-    normalized,
+    normalized: exportNormalized,
     summary,
     finalPath: finalBase,
     sourceResults
@@ -371,7 +404,7 @@ export async function writeFinalOutputs({
 
   if (promote) {
     await Promise.all([
-      writeJson(storage, `${finalBase}/spec.json`, normalized.fields || {}),
+      writeJson(storage, `${finalBase}/spec.json`, exportNormalized.fields || {}),
       writeJson(storage, `${finalBase}/summary.json`, compact),
       writeJson(storage, `${finalBase}/provenance.json`, {
         productId,
@@ -401,7 +434,7 @@ export async function writeFinalOutputs({
     category,
     productId,
     runId,
-    normalized,
+    normalized: exportNormalized,
     summary,
     provenance,
     trafficLight,
@@ -414,6 +447,12 @@ export async function writeFinalOutputs({
     promoted: promote,
     debug_base: debugBase,
     history_key: `${finalBase}/history/runs.jsonl`,
-    sources_history_key: `${finalBase}/evidence/sources.jsonl`
+    sources_history_key: `${finalBase}/evidence/sources.jsonl`,
+    runtime_gate: {
+      applied: Boolean(runtimeApplied.applied),
+      failure_count: (runtimeApplied.failures || []).length,
+      warning_count: (runtimeApplied.warnings || []).length,
+      change_count: (runtimeApplied.changes || []).length
+    }
   };
 }

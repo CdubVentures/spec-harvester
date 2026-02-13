@@ -116,8 +116,15 @@ When identity is ambiguous:
 ```
 VERIFICATION PIPELINE (runs for EVERY crawled page):
 
-Step 1: HARD ID CHECK
-  - Search page text for SKU, MPN, GTIN, UPC, ASIN
+Step 0: STRUCTURED PRODUCT SIGNALS (highest precision)
+  - Extract JSON-LD Product nodes + meta tags (og:title, sku, gtin, mpn)
+  - If ANY structured hard ID matches target → CONFIRMED (confidence 1.0)
+  - If a structured hard ID is present but DOESN'T match target → REJECTED (wrong product)
+  - If structured signals are missing → continue
+
+Step 1: HARD ID CHECK (visible text)
+  - Search main content + spec tables for SKU, MPN, GTIN, UPC, ASIN
+  - Ignore nav/header/footer to avoid false positives (cross-sells often contain other SKUs)
   - If ANY hard ID matches → CONFIRMED (confidence 1.0)
   - If hard ID found but DOESN'T match → REJECTED (wrong product)
 
@@ -135,7 +142,7 @@ Step 3: URL PATTERN CHECK
 
 Step 4: PAGE STRUCTURE CHECK
   - Is this a single-product page or multi-product comparison?
-  - If comparison → extract ONLY sections about target product
+  - If comparison → segment the page and extract ONLY sections about target product
   - If product family page → identify correct variant section
   - If search results page → REJECT (need to navigate to product page)
 
@@ -143,6 +150,10 @@ Step 5: LLM CONFIRMATION (if confidence < 0.85)
   - Send page title + first 500 chars to Gemini Flash
   - Ask: "Is this page about {brand} {model} {variant}? Yes/No/Partial"
   - If Partial → ask which sections contain target product data
+
+Step 6: RECORD IDENTITY SNAPSHOT (auditability)
+  - Store page identity signals in EvidencePack.sources[source_id].identity:
+      { confidence, matched_hard_ids[], matched_required_tokens[], matched_negative_tokens[], decision, reason_codes[] }
 
 DECISION:
   confidence ≥ 0.85 → PROCEED with extraction
@@ -216,6 +227,38 @@ class IdentityReconciler {
   }
 }
 ```
+
+
+---
+
+## IDENTITY REPORT ARTIFACT (ACCURACY INSURANCE)
+
+Write a per-run artifact so you can answer: *“Why did we accept this page as the right product?”*
+
+**File:** `data/runs/<run_id>/identity_report.json`
+
+```jsonc
+{
+  "product_id": "mouse-razer-viper-v3-pro-wireless",
+  "run_id": "run_20260212_001",
+  "pages": [
+    {
+      "source_id": "razer_com",
+      "url": "https://www.razer.com/gaming-mice/razer-viper-v3-pro/specifications",
+      "decision": "CONFIRMED",
+      "confidence": 1.0,
+      "matched_hard_ids": { "mpn": "RZ01-04630100" },
+      "matched_required_tokens": ["razer","viper","v3","pro"],
+      "matched_negative_tokens": [],
+      "reason_codes": ["hard_id_match"]
+    }
+  ],
+  "status": "CONFIRMED",
+  "needs_review": false
+}
+```
+
+This report is also what the Review Grid shows when a product is flagged for identity issues.
 
 ### Disambiguation with DeepSeek
 

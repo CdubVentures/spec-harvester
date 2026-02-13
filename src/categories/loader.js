@@ -19,13 +19,68 @@ function hostMatches(host, candidate) {
 
 function flattenApprovedHosts(sources) {
   const byTier = sources?.approved || {};
-  const hosts = [];
+  const hostMap = new Map();
+
+  function upsertHost(host, patch = {}) {
+    const normalized = normalizeHost(host);
+    if (!normalized) {
+      return;
+    }
+    const existing = hostMap.get(normalized) || {
+      host: normalized,
+      tierName: 'candidate'
+    };
+
+    const next = {
+      ...existing,
+      ...patch,
+      host: normalized
+    };
+
+    const existingTier = tierToNumeric(existing.tierName || 'candidate');
+    const nextTier = tierToNumeric(next.tierName || 'candidate');
+    if (existing.tierName && patch.tierName && nextTier > existingTier) {
+      next.tierName = existing.tierName;
+    }
+
+    hostMap.set(normalized, next);
+  }
+
   for (const [tierName, tierHosts] of Object.entries(byTier)) {
     for (const host of tierHosts || []) {
-      hosts.push({ host: normalizeHost(host), tierName });
+      upsertHost(host, { tierName });
     }
   }
-  return hosts;
+
+  const sourceRegistry = isObject(sources?.sources) ? sources.sources : {};
+  for (const [sourceId, sourceRow] of Object.entries(sourceRegistry)) {
+    if (!isObject(sourceRow)) {
+      continue;
+    }
+    const host = resolveRegistryHost(sourceRow);
+    if (!host) {
+      continue;
+    }
+    const tierName = tierNameFromSourceToken(sourceRow.tier);
+    const crawlConfig = isObject(sourceRow.crawl_config)
+      ? sourceRow.crawl_config
+      : (isObject(sourceRow.crawlConfig) ? sourceRow.crawlConfig : null);
+
+    upsertHost(host, {
+      sourceId,
+      displayName: String(sourceRow.display_name || sourceRow.displayName || '').trim(),
+      tierName,
+      crawlConfig,
+      fieldCoverage: isObject(sourceRow.field_coverage) ? sourceRow.field_coverage : null,
+      health: isObject(sourceRow.health) ? sourceRow.health : null,
+      robotsTxtCompliant: crawlConfig?.robots_txt_compliant !== undefined
+        ? Boolean(crawlConfig.robots_txt_compliant)
+        : null,
+      baseUrl: String(sourceRow.base_url || sourceRow.baseUrl || '').trim()
+    });
+  }
+
+  return [...hostMap.values()];
 }
 
 function tierToNumeric(tierName) {
@@ -39,6 +94,65 @@ function tierToNumeric(tierName) {
     return 3;
   }
   return 4;
+}
+
+function tierNameFromSourceToken(value) {
+  const token = String(value || '').trim().toLowerCase();
+  if (!token) {
+    return 'database';
+  }
+  if (token === 'manufacturer' || token.includes('manufacturer') || token === 'tier1') {
+    return 'manufacturer';
+  }
+  if (token === 'lab' || token.includes('lab') || token === 'tier2') {
+    return 'lab';
+  }
+  if (token === 'retailer' || token.includes('retailer') || token === 'tier3') {
+    return 'retailer';
+  }
+  if (
+    token === 'database' ||
+    token.includes('database') ||
+    token.includes('community') ||
+    token.includes('aggregator') ||
+    token === 'tier4' ||
+    token === 'tier5'
+  ) {
+    return 'database';
+  }
+  return 'database';
+}
+
+function resolveRegistryHost(sourceRow = {}) {
+  const directHost = normalizeHost(sourceRow.host);
+  if (directHost) {
+    return directHost;
+  }
+
+  const baseUrl = String(sourceRow.base_url || sourceRow.baseUrl || '').trim();
+  if (baseUrl) {
+    try {
+      return normalizeHost(new URL(baseUrl).hostname);
+    } catch {
+      // ignore invalid URL
+    }
+  }
+
+  const templates = Array.isArray(sourceRow.url_templates)
+    ? sourceRow.url_templates
+    : (Array.isArray(sourceRow.urlTemplates) ? sourceRow.urlTemplates : []);
+  for (const template of templates) {
+    const raw = String(template || '').trim();
+    if (!raw) {
+      continue;
+    }
+    try {
+      return normalizeHost(new URL(raw).hostname);
+    } catch {
+      // ignore invalid URL template
+    }
+  }
+  return '';
 }
 
 export function resolveTierNameForHost(host, categoryConfig) {
@@ -124,7 +238,8 @@ function defaultSources() {
       database: [],
       retailer: []
     },
-    denylist: []
+    denylist: [],
+    sources: {}
   };
 }
 
@@ -246,7 +361,11 @@ function mergeSources(baseSources, overrideSources) {
 
   return {
     approved: mergedApproved,
-    denylist: mergeUnique([...(baseSources?.denylist || []), ...(overrideSources?.denylist || [])])
+    denylist: mergeUnique([...(baseSources?.denylist || []), ...(overrideSources?.denylist || [])]),
+    sources: {
+      ...(isObject(baseSources?.sources) ? baseSources.sources : {}),
+      ...(isObject(overrideSources?.sources) ? overrideSources.sources : {})
+    }
   };
 }
 
@@ -347,6 +466,11 @@ function buildCategoryConfig({
 }) {
   const sourceHosts = flattenApprovedHosts(sources);
   const denylist = (sources.denylist || []).map(normalizeHost);
+  const sourceHostMap = new Map(
+    sourceHosts
+      .filter((row) => row?.host)
+      .map((row) => [row.host, row])
+  );
 
   return {
     category,
@@ -356,6 +480,8 @@ function buildCategoryConfig({
     anchorFields: anchors,
     searchTemplates,
     sourceHosts,
+    sourceHostMap,
+    sourceRegistry: isObject(sources?.sources) ? sources.sources : {},
     denylist,
     requiredFieldSet: new Set(requiredFields),
     criticalFieldSet: new Set(schema.critical_fields || []),

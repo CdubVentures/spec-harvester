@@ -214,6 +214,171 @@ def load_studio_payload(category: str):
     return payload
 
 
+def phase1_generated_paths(paths: dict):
+    generated = paths.get("generated")
+    if not isinstance(generated, Path):
+        return {}
+    return {
+        "parse_templates": generated / "parse_templates.json",
+        "cross_validation_rules": generated / "cross_validation_rules.json",
+        "field_groups": generated / "field_groups.json",
+        "key_migrations": generated / "key_migrations.json",
+        "component_db": generated / "component_db",
+    }
+
+
+def rule_required_level(rule: dict):
+    if not isinstance(rule, dict):
+        return ""
+    priority = rule.get("priority", {}) if isinstance(rule.get("priority"), dict) else {}
+    return token(rule.get("required_level") or priority.get("required_level") or "")
+
+
+def component_entry_count(payload: dict):
+    if not isinstance(payload, dict):
+        return 0
+    entries = payload.get("entries")
+    if isinstance(entries, dict):
+        return len(entries)
+    items = payload.get("items")
+    if isinstance(items, list):
+        return len(items)
+    return 0
+
+
+def build_phase1_guardrails(compile_report: dict, paths: dict):
+    # Fast local guardrails so editors can see Phase 1 publish-readiness without leaving the Studio.
+    generated_paths = phase1_generated_paths(paths)
+    field_rules = read_json(paths.get("field_rules"), {}) if isinstance(paths.get("field_rules"), Path) else {}
+    parse_templates = read_json(generated_paths.get("parse_templates"), {}) if isinstance(generated_paths.get("parse_templates"), Path) else {}
+    fields = field_rules.get("fields", {}) if isinstance(field_rules.get("fields"), dict) else {}
+    templates = parse_templates.get("templates", {}) if isinstance(parse_templates.get("templates"), dict) else {}
+
+    compile_errors = compile_report.get("errors", []) if isinstance(compile_report.get("errors"), list) else []
+    compile_warnings = compile_report.get("warnings", []) if isinstance(compile_report.get("warnings"), list) else []
+    compile_counts = compile_report.get("counts", {}) if isinstance(compile_report.get("counts"), dict) else {}
+
+    required_artifacts = [
+        paths.get("field_rules"),
+        paths.get("field_rules_runtime"),
+        paths.get("ui_field_catalog"),
+        paths.get("known_values"),
+        generated_paths.get("parse_templates"),
+        generated_paths.get("cross_validation_rules"),
+        generated_paths.get("field_groups"),
+        generated_paths.get("key_migrations"),
+    ]
+    artifacts_missing = [
+        str(path) for path in required_artifacts
+        if isinstance(path, Path) and not path.exists()
+    ]
+
+    component_root = generated_paths.get("component_db")
+    component_files = sorted(
+        [path for path in component_root.glob("*.json")] if isinstance(component_root, Path) and component_root.exists() else []
+    )
+    component_counts = {}
+    for comp_path in component_files:
+        payload = read_json(comp_path, {})
+        component_counts[comp_path.stem] = component_entry_count(payload)
+
+    required_contract_fields = []
+    for field_key, rule in fields.items():
+        level = rule_required_level(rule)
+        if level in {"identity", "required", "critical"}:
+            required_contract_fields.append(field_key)
+    required_contract_fields = sorted(set(required_contract_fields))
+    missing_templates = sorted(
+        [
+            field_key for field_key in required_contract_fields
+            if not isinstance(templates.get(field_key), dict)
+        ]
+    )
+    parse_coverage_pct = (
+        (len(required_contract_fields) - len(missing_templates)) / max(1, len(required_contract_fields))
+    ) * 100.0
+
+    metadata_missing = []
+    for field_key, rule in fields.items():
+        if not isinstance(rule, dict):
+            metadata_missing.append(field_key)
+            continue
+        if not isinstance(rule.get("evidence_required"), bool):
+            metadata_missing.append(field_key)
+            continue
+        if not norm(rule.get("unknown_reason_default")):
+            metadata_missing.append(field_key)
+
+    identity_count = int(compile_counts.get("identity", 0) or 0)
+    critical_count = int(compile_counts.get("critical", 0) or 0)
+    if identity_count == 0:
+        identity_count = sum(
+            1 for rule in fields.values()
+            if rule_required_level(rule) == "identity"
+        )
+    if critical_count == 0:
+        critical_count = sum(
+            1 for rule in fields.values()
+            if rule_required_level(rule) == "critical"
+        )
+
+    checks = [
+        {
+            "guardrail": "Compile completed without blocking errors",
+            "status": "PASS" if not compile_errors else "FAIL",
+            "detail": f"errors={len(compile_errors)} warnings={len(compile_warnings)}",
+            "blocking": True,
+        },
+        {
+            "guardrail": "Required generated artifacts are present",
+            "status": "PASS" if not artifacts_missing else "FAIL",
+            "detail": "all present" if not artifacts_missing else f"missing={len(artifacts_missing)}",
+            "blocking": True,
+        },
+        {
+            "guardrail": "Identity and critical buckets are populated",
+            "status": "PASS" if identity_count > 0 and critical_count > 0 else "FAIL",
+            "detail": f"identity={identity_count} critical={critical_count}",
+            "blocking": True,
+        },
+        {
+            "guardrail": "Required/critical fields have parse templates",
+            "status": "PASS" if not missing_templates else "FAIL",
+            "detail": f"coverage={parse_coverage_pct:.0f}% missing={len(missing_templates)}",
+            "blocking": True,
+        },
+        {
+            "guardrail": "Per-field evidence + unknown defaults are present",
+            "status": "PASS" if not metadata_missing else "FAIL",
+            "detail": f"missing_fields={len(metadata_missing)}",
+            "blocking": True,
+        },
+        {
+            "guardrail": "Component DB files have entries",
+            "status": "PASS" if component_counts and min(component_counts.values()) > 0 else "FAIL",
+            "detail": (
+                ", ".join([f"{name}:{count}" for name, count in sorted(component_counts.items())])
+                if component_counts else "no component_db files"
+            ),
+            "blocking": False,
+        },
+    ]
+
+    blocking_failures = [row for row in checks if row["blocking"] and row["status"] == "FAIL"]
+    return {
+        "ready": len(blocking_failures) == 0,
+        "checks": checks,
+        "blocking_failures": blocking_failures,
+        "identity_count": identity_count,
+        "critical_count": critical_count,
+        "required_contract_field_count": len(required_contract_fields),
+        "parse_coverage_pct": parse_coverage_pct,
+        "metadata_missing_count": len(metadata_missing),
+        "missing_templates": missing_templates[:15],
+        "artifacts_missing": artifacts_missing,
+    }
+
+
 def component_db_snapshot(category: str, component_type: str):
     base = token(component_type)
     if not base:
@@ -3247,6 +3412,32 @@ def render_field_rules_studio(category: str, local_mode: bool):
                 st.info("No enum bucket suggestions for this key.")
 
     with tab_reports:
+        guardrails = build_phase1_guardrails(compile_report, paths)
+        r1, r2, r3, r4 = st.columns(4)
+        r1.metric("Phase 1 Gate", "READY" if guardrails["ready"] else "BLOCKED")
+        r2.metric("Identity Fields", int(guardrails["identity_count"]))
+        r3.metric("Critical Fields", int(guardrails["critical_count"]))
+        r4.metric("Req/Crit Parse Coverage", f"{guardrails['parse_coverage_pct']:.0f}%")
+
+        v1, v2 = st.columns([1.2, 2.8])
+        if v1.button("Run Validate-Rules", use_container_width=True, help="Runs `validate-rules` for schema + metadata checks."):
+            args = ["validate-rules", "--category", category]
+            if local_mode:
+                args.append("--local")
+            start_cli(args)
+            st.info("Validation started. Review process output below.")
+        v2.caption("Guardrails below indicate whether generated artifacts are publish-safe for Phase 1.")
+
+        if guardrails["ready"]:
+            st.success("Publish guardrails passed for current generated artifacts.")
+        else:
+            st.error("Publish guardrails blocked. Resolve failing checks before moving to next phase.")
+        st.dataframe(guardrails["checks"], use_container_width=True, height=250)
+        if guardrails["missing_templates"]:
+            st.warning("Missing parse templates for required/critical fields: " + ", ".join(guardrails["missing_templates"]))
+        if guardrails["artifacts_missing"]:
+            st.warning("Missing artifacts: " + ", ".join(guardrails["artifacts_missing"]))
+
         if compile_errors:
             st.error("Compile has blocking errors.")
             st.dataframe([{"error": row} for row in compile_errors], use_container_width=True, height=260)

@@ -3,7 +3,7 @@ function normalizeProvider(value) {
   if (token === 'google_cse') {
     return 'google';
   }
-  if (token === 'google' || token === 'bing' || token === 'dual' || token === 'none') {
+  if (token === 'google' || token === 'bing' || token === 'dual' || token === 'searxng' || token === 'none') {
     return token;
   }
   return 'none';
@@ -93,6 +93,57 @@ function dedupeResults(rows = []) {
   return out;
 }
 
+function searxngBaseUrl(config = {}) {
+  const token = String(config.searxngBaseUrl || '').trim();
+  if (!token) {
+    return '';
+  }
+  try {
+    const parsed = new URL(token);
+    return parsed.toString().replace(/\/+$/, '');
+  } catch {
+    return '';
+  }
+}
+
+export async function searchSearxng({
+  baseUrl,
+  query,
+  limit = 10,
+  timeoutMs = 8_000
+}) {
+  if (!baseUrl || !query) {
+    return [];
+  }
+  const url = new URL('/search', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`);
+  url.searchParams.set('q', query);
+  url.searchParams.set('format', 'json');
+  url.searchParams.set('language', 'en');
+  url.searchParams.set('safesearch', '0');
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.max(100, Number(timeoutMs || 8_000)));
+
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      return [];
+    }
+    const payload = await response.json();
+    return (payload.results || []).slice(0, Math.max(1, Number(limit || 10))).map((item) => ({
+      url: item.url,
+      title: item.title || '',
+      snippet: item.content || item.snippet || '',
+      provider: 'searxng',
+      query
+    }));
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function runSearchProviders({
   config,
   query,
@@ -104,41 +155,83 @@ export async function runSearchProviders({
     return [];
   }
 
+  if (provider === 'searxng') {
+    try {
+      const rows = await searchSearxng({
+        baseUrl: searxngBaseUrl(config),
+        query,
+        limit,
+        timeoutMs: config.searxngTimeoutMs
+      });
+      return dedupeResults(rows);
+    } catch (error) {
+      logger?.warn?.('search_provider_failed', {
+        provider: 'searxng',
+        query,
+        message: error.message
+      });
+      return [];
+    }
+  }
+
   const tasks = [];
   if (provider === 'bing' || provider === 'dual') {
-    tasks.push(
-      searchBing({
-        endpoint: config.bingSearchEndpoint,
-        key: config.bingSearchKey,
-        query,
-        limit
-      }).catch((error) => {
-        logger?.warn?.('search_provider_failed', {
-          provider: 'bing',
+    if (config.bingSearchEndpoint && config.bingSearchKey) {
+      tasks.push(
+        searchBing({
+          endpoint: config.bingSearchEndpoint,
+          key: config.bingSearchKey,
           query,
-          message: error.message
-        });
-        return [];
-      })
-    );
+          limit
+        }).catch((error) => {
+          logger?.warn?.('search_provider_failed', {
+            provider: 'bing',
+            query,
+            message: error.message
+          });
+          return [];
+        })
+      );
+    }
   }
 
   if (provider === 'google' || provider === 'dual') {
-    tasks.push(
-      searchGoogleCse({
-        key: config.googleCseKey,
-        cx: config.googleCseCx,
-        query,
-        limit
-      }).catch((error) => {
-        logger?.warn?.('search_provider_failed', {
-          provider: 'google',
+    if (config.googleCseKey && config.googleCseCx) {
+      tasks.push(
+        searchGoogleCse({
+          key: config.googleCseKey,
+          cx: config.googleCseCx,
           query,
-          message: error.message
-        });
-        return [];
-      })
-    );
+          limit
+        }).catch((error) => {
+          logger?.warn?.('search_provider_failed', {
+            provider: 'google',
+            query,
+            message: error.message
+          });
+          return [];
+        })
+      );
+    }
+  }
+
+  if (!tasks.length && provider === 'dual' && searxngBaseUrl(config)) {
+    try {
+      const rows = await searchSearxng({
+        baseUrl: searxngBaseUrl(config),
+        query,
+        limit,
+        timeoutMs: config.searxngTimeoutMs
+      });
+      return dedupeResults(rows);
+    } catch (error) {
+      logger?.warn?.('search_provider_failed', {
+        provider: 'searxng',
+        query,
+        message: error.message
+      });
+      return [];
+    }
   }
 
   if (!tasks.length) {
@@ -149,9 +242,19 @@ export async function runSearchProviders({
 }
 
 export function searchProviderAvailability(config) {
+  const provider = normalizeProvider(config.searchProvider);
+  const bingReady = Boolean(config.bingSearchEndpoint && config.bingSearchKey);
+  const googleReady = Boolean(config.googleCseKey && config.googleCseCx);
+  const searxngReady = Boolean(searxngBaseUrl(config));
   return {
-    provider: normalizeProvider(config.searchProvider),
-    bing_ready: Boolean(config.bingSearchEndpoint && config.bingSearchKey),
-    google_ready: Boolean(config.googleCseKey && config.googleCseCx)
+    provider,
+    bing_ready: bingReady,
+    google_ready: googleReady,
+    searxng_ready: searxngReady,
+    internet_ready:
+      (provider === 'bing' && bingReady) ||
+      (provider === 'google' && googleReady) ||
+      (provider === 'searxng' && searxngReady) ||
+      (provider === 'dual' && (bingReady || googleReady || searxngReady))
   };
 }

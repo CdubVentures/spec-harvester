@@ -86,10 +86,158 @@ function buildAvailabilityQueries({
   return [...new Set(queries.map((query) => query.trim()).filter(Boolean))].slice(0, 24);
 }
 
-function buildRoundConfig(baseConfig, { round, mode, availabilityEffort = {} }) {
+export function selectRoundSearchProvider({
+  baseConfig = {},
+  discoveryEnabled = true,
+  missingRequiredCount = 0
+}) {
+  if (!discoveryEnabled) {
+    return 'none';
+  }
+
+  const configured = String(baseConfig.searchProvider || 'none').trim().toLowerCase();
+  const bingReady = Boolean(baseConfig.bingSearchEndpoint && baseConfig.bingSearchKey);
+  const googleReady = Boolean(baseConfig.googleCseKey && baseConfig.googleCseCx);
+  const searxngReady = Boolean(baseConfig.searxngBaseUrl);
+
+  if (configured === 'bing') {
+    return bingReady ? 'bing' : (searxngReady ? 'searxng' : 'none');
+  }
+  if (configured === 'google') {
+    return googleReady ? 'google' : (searxngReady ? 'searxng' : 'none');
+  }
+  if (configured === 'dual') {
+    if (bingReady || googleReady) {
+      return 'dual';
+    }
+    return searxngReady ? 'searxng' : 'none';
+  }
+  if (configured === 'searxng') {
+    return searxngReady ? 'searxng' : 'none';
+  }
+
+  if (missingRequiredCount > 0) {
+    if ((bingReady || googleReady) && searxngReady) {
+      return 'dual';
+    }
+    if (bingReady && googleReady) {
+      return 'dual';
+    }
+    if (bingReady) {
+      return 'bing';
+    }
+    if (googleReady) {
+      return 'google';
+    }
+    if (searxngReady) {
+      return 'searxng';
+    }
+  } else if (searxngReady) {
+    return 'searxng';
+  }
+  return 'none';
+}
+
+export function evaluateRequiredSearchExhaustion({
+  round = 0,
+  missingRequiredCount = 0,
+  noNewUrlsRounds = 0,
+  noNewFieldsRounds = 0,
+  threshold = 2
+} = {}) {
+  if (missingRequiredCount <= 0) {
+    return { stop: false, reason: 'continue' };
+  }
+  const cap = Math.max(1, Number(threshold || 2));
+  if (round >= cap && noNewUrlsRounds >= cap && noNewFieldsRounds >= cap) {
+    return {
+      stop: true,
+      reason: 'required_search_exhausted_no_new_urls_or_fields'
+    };
+  }
+  return { stop: false, reason: 'continue' };
+}
+
+export function shouldForceExpectedFieldRetry({
+  summary = {},
+  categoryConfig = {},
+  fieldAvailabilityArtifact = {},
+  overrideCount = 0
+} = {}) {
+  if (overrideCount > 0) {
+    return {
+      force: false,
+      fields: [],
+      reason: 'already_forced_once'
+    };
+  }
+
+  for (const row of Object.values(summary.field_reasoning || {})) {
+    const reason = String(row?.unknown_reason || '').trim().toLowerCase();
+    if (!reason) {
+      continue;
+    }
+    if (reason.includes('budget') || reason.includes('identity') || reason.includes('blocked')) {
+      return {
+        force: false,
+        fields: [],
+        reason: 'blocked_or_budget_or_identity'
+      };
+    }
+  }
+
+  const missingRequired = normalizeFieldList(
+    toArray(summary.missing_required_fields),
+    { fieldOrder: categoryConfig.fieldOrder || [] }
+  );
+  if (!missingRequired.length) {
+    return {
+      force: false,
+      fields: [],
+      reason: 'no_missing_required'
+    };
+  }
+
+  const expectedFields = [];
+  for (const field of missingRequired) {
+    const unknownReason = String(summary.field_reasoning?.[field]?.unknown_reason || '').trim().toLowerCase();
+    const classification = String(fieldAvailabilityArtifact?.fields?.[field]?.classification || '').trim().toLowerCase();
+    if (unknownReason === 'not_found_after_search' && classification === 'expected') {
+      expectedFields.push(field);
+    }
+  }
+  if (!expectedFields.length) {
+    return {
+      force: false,
+      fields: [],
+      reason: 'no_expected_required_not_found'
+    };
+  }
+
+  return {
+    force: true,
+    fields: expectedFields,
+    reason: 'expected_required_not_found'
+  };
+}
+
+export function buildRoundConfig(baseConfig, {
+  round,
+  mode,
+  availabilityEffort = {},
+  missingRequiredCount,
+  missingExpectedCount,
+  requiredSearchIteration
+} = {}) {
   const expectedCount = toInt(availabilityEffort.expected_count, 0);
   const sometimesCount = toInt(availabilityEffort.sometimes_count, 0);
   const rareCount = toInt(availabilityEffort.rare_count, 0);
+  const resolvedMissingRequired = toInt(missingRequiredCount, toInt(availabilityEffort.required_count, 0));
+  const resolvedMissingExpected = toInt(missingExpectedCount, expectedCount);
+  const requiredIteration = toInt(requiredSearchIteration, 0);
+  const hasExplicitMissingCounts =
+    missingRequiredCount !== undefined ||
+    missingExpectedCount !== undefined;
   const profile = round === 0
     ? 'fast'
     : round >= 2 || mode === 'aggressive'
@@ -99,13 +247,10 @@ function buildRoundConfig(baseConfig, { round, mode, availabilityEffort = {} }) 
     {
       ...baseConfig,
       runProfile: profile,
-      discoveryEnabled: true,
+      discoveryEnabled: round > 0,
       fetchCandidateSources: round > 0,
       manufacturerBroadDiscovery: round >= 2 || Boolean(baseConfig.manufacturerBroadDiscovery),
-      searchProvider:
-        round === 0
-          ? (baseConfig.searchProvider === 'none' ? 'none' : baseConfig.searchProvider)
-          : (baseConfig.searchProvider === 'none' ? 'dual' : baseConfig.searchProvider),
+      searchProvider: round === 0 ? 'none' : baseConfig.searchProvider,
       llmMaxCallsPerRound:
         round === 0
           ? Math.max(1, Math.min(baseConfig.llmMaxCallsPerProductFast || 2, baseConfig.llmMaxCallsPerRound || 4))
@@ -131,6 +276,58 @@ function buildRoundConfig(baseConfig, { round, mode, availabilityEffort = {} }) 
     next.discoveryMaxQueries = Math.min(next.discoveryMaxQueries || 8, 6);
     next.maxUrlsPerProduct = Math.min(next.maxUrlsPerProduct || 60, 70);
     next.maxCandidateUrls = Math.min(next.maxCandidateUrls || 90, 90);
+  }
+
+  if (round === 0) {
+    next.discoveryEnabled = false;
+    next.fetchCandidateSources = false;
+    next.searchProvider = 'none';
+  } else {
+    let discoveryEnabled = Boolean(next.discoveryEnabled);
+    let fetchCandidateSources = Boolean(next.fetchCandidateSources);
+
+    if (hasExplicitMissingCounts) {
+      if (resolvedMissingRequired === 0 && resolvedMissingExpected === 0) {
+        discoveryEnabled = false;
+        fetchCandidateSources = false;
+      } else if (
+        resolvedMissingRequired > 0 &&
+        Boolean(baseConfig.discoveryInternalFirst) &&
+        requiredIteration > 0 &&
+        requiredIteration <= 1
+      ) {
+        discoveryEnabled = false;
+        fetchCandidateSources = false;
+      } else {
+        discoveryEnabled = true;
+        fetchCandidateSources = true;
+      }
+    }
+
+    next.discoveryEnabled = discoveryEnabled;
+    next.fetchCandidateSources = fetchCandidateSources;
+    next.searchProvider = selectRoundSearchProvider({
+      baseConfig,
+      discoveryEnabled,
+      missingRequiredCount: resolvedMissingRequired
+    });
+    if (!discoveryEnabled) {
+      next.searchProvider = 'none';
+    }
+  }
+
+  if (hasExplicitMissingCounts && round > 0 && resolvedMissingRequired === 0 && resolvedMissingExpected === 0) {
+    next.maxUrlsPerProduct = Math.min(next.maxUrlsPerProduct || 60, 48);
+    next.maxCandidateUrls = Math.min(next.maxCandidateUrls || 90, 48);
+    next.maxManufacturerUrlsPerProduct = Math.min(next.maxManufacturerUrlsPerProduct || 24, 24);
+    next.manufacturerBroadDiscovery = false;
+  } else if (next.maxManufacturerUrlsPerProduct === undefined) {
+    next.maxManufacturerUrlsPerProduct = Math.max(12, Math.min(next.maxUrlsPerProduct || 24, 24));
+  }
+
+  if (Boolean(baseConfig.llmExplicitlySet)) {
+    const explicitEnabled = baseConfig.llmExplicitlyEnabled;
+    next.llmEnabled = explicitEnabled === undefined ? Boolean(baseConfig.llmEnabled) : Boolean(explicitEnabled);
   }
 
   return next;
@@ -167,19 +364,17 @@ function makeLlmTargetFields({ previousSummary, categoryConfig }) {
   ];
 }
 
-function withRoundRequirements(job, llmTargetFields, previousSummary) {
+export function buildRoundRequirements(job, llmTargetFields, previousSummary) {
   const requirements = {
     ...(job.requirements || {})
   };
   requirements.llmTargetFields = llmTargetFields;
-  if (previousSummary) {
-    requirements.requiredFields = [
-      ...new Set([
-        ...toArray(previousSummary.missing_required_fields),
-        ...toArray(job.requirements?.requiredFields)
-      ])
-    ];
-  }
+  requirements.requiredFields = [
+    ...new Set([
+      ...toArray(job.requirements?.requiredFields),
+      ...toArray(previousSummary?.missing_required_fields)
+    ])
+  ];
   return {
     ...job,
     requirements
@@ -318,7 +513,7 @@ export async function runUntilComplete({
       previousSummary,
       categoryConfig
     });
-    const jobOverride = withRoundRequirements(job, llmTargetFields, previousSummary);
+    const jobOverride = buildRoundRequirements(job, llmTargetFields, previousSummary);
 
     const roundResult = await runProduct({
       storage,

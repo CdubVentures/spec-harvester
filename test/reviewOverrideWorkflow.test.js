@@ -21,7 +21,56 @@ function makeStorage(tempRoot) {
   });
 }
 
-async function seedReviewCandidates(storage, category, productId) {
+async function writeJson(filePath, value) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+}
+
+async function seedFieldRulesArtifacts(helperRoot, category) {
+  const generatedRoot = path.join(helperRoot, category, '_generated');
+  await writeJson(path.join(generatedRoot, 'field_rules.json'), {
+    category,
+    fields: {
+      weight: {
+        required_level: 'required',
+        difficulty: 'easy',
+        availability: 'always',
+        contract: {
+          type: 'number',
+          shape: 'scalar',
+          unit: 'g',
+          range: { min: 30, max: 200 }
+        }
+      }
+    }
+  });
+  await writeJson(path.join(generatedRoot, 'known_values.json'), {
+    category,
+    enums: {}
+  });
+  await writeJson(path.join(generatedRoot, 'parse_templates.json'), {
+    category,
+    templates: {}
+  });
+  await writeJson(path.join(generatedRoot, 'cross_validation_rules.json'), {
+    category,
+    rules: []
+  });
+  await writeJson(path.join(generatedRoot, 'key_migrations.json'), {
+    version: '1.0.0',
+    previous_version: '1.0.0',
+    bump: 'patch',
+    summary: { added_count: 0, removed_count: 0, changed_count: 0 },
+    key_map: {},
+    migrations: []
+  });
+  await writeJson(path.join(generatedRoot, 'ui_field_catalog.json'), {
+    category,
+    fields: [{ key: 'weight', group: 'physical' }]
+  });
+}
+
+async function seedReviewCandidates(storage, category, productId, value = '59') {
   const reviewBase = storage.resolveOutputKey(category, productId, 'review');
   await storage.writeObject(
     `${reviewBase}/candidates.json`,
@@ -35,7 +84,7 @@ async function seedReviewCandidates(storage, category, productId) {
         {
           candidate_id: 'cand_1',
           field: 'weight',
-          value: '59',
+          value,
           host: 'manufacturer.example',
           method: 'dom',
           tier: 1,
@@ -113,6 +162,7 @@ test('setOverrideFromCandidate writes helper override file and finalize applies 
   const category = 'mouse';
   const productId = 'mouse-review-override';
   try {
+    await seedFieldRulesArtifacts(config.helperFilesRoot, category);
     await seedReviewCandidates(storage, category, productId);
     await seedLatestArtifacts(storage, category, productId);
 
@@ -153,9 +203,54 @@ test('setOverrideFromCandidate writes helper override file and finalize applies 
     const normalized = await storage.readJson(`${latestBase}/normalized.json`);
     const summary = await storage.readJson(`${latestBase}/summary.json`);
     const provenance = await storage.readJson(`${latestBase}/provenance.json`);
-    assert.equal(normalized.fields.weight, '59');
+    assert.equal(normalized.fields.weight, 59);
     assert.equal(summary.field_reasoning.weight.unknown_reason, null);
     assert.equal(provenance.weight.override.candidate_id, 'cand_1');
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('finalizeOverrides demotes invalid override values through runtime engine gate', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-review-override-invalid-'));
+  const storage = makeStorage(tempRoot);
+  const config = {
+    helperFilesRoot: path.join(tempRoot, 'helper_files')
+  };
+  const category = 'mouse';
+  const productId = 'mouse-review-override-invalid';
+
+  try {
+    await seedFieldRulesArtifacts(config.helperFilesRoot, category);
+    await seedReviewCandidates(storage, category, productId, '10');
+    await seedLatestArtifacts(storage, category, productId);
+
+    await setOverrideFromCandidate({
+      storage,
+      config,
+      category,
+      productId,
+      field: 'weight',
+      candidateId: 'cand_1'
+    });
+    const finalizeResult = await finalizeOverrides({
+      storage,
+      config,
+      category,
+      productId,
+      applyOverrides: true
+    });
+    assert.equal(finalizeResult.applied, true);
+    assert.equal(finalizeResult.runtime_gate.failure_count > 0, true);
+
+    const latestBase = storage.resolveOutputKey(category, productId, 'latest');
+    const normalized = await storage.readJson(`${latestBase}/normalized.json`);
+    const summary = await storage.readJson(`${latestBase}/summary.json`);
+    assert.equal(normalized.fields.weight, 'unk');
+    assert.equal(
+      summary.field_reasoning.weight.unknown_reason,
+      'out_of_range'
+    );
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }

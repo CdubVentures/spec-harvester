@@ -104,6 +104,7 @@ QUEUE STATES:
   in_progress     → Currently being processed
   round_N         → In specific round of pipeline
   awaiting_review → Needs human input (from Identity Gate or confidence too low)
+  quarantined    → Evidence audit failed / identity conflict / drift detected (never auto-publish)
   complete        → Successfully processed and output written
   failed          → Failed after max retries
   stale           → Data older than staleness threshold, needs re-crawl
@@ -167,7 +168,8 @@ while (running) {
   7. FINALIZE
      - Run conflict resolution (Phase 5 merger)
      - Run full cross-validation (Phase 3 engine)
-     - Compute per-field confidence scores
+     - Run Phase 3 **Evidence Audit** on every non-unk field (snippet_hash + quote_span verification)
+     - Compute per-field confidence scores (calibrated)
      - Build unknowns with reason codes for unfilled fields
      - Build final ProductRecord
      - Write to output directory
@@ -265,7 +267,12 @@ const perProductCrawlQueue = new PQueue({
       "confidence": 0.98,
       "provenance": {
         "url": "https://www.razer.com/gaming-mice/razer-viper-v3-pro/specifications",
+        "source_id": "razer_com",
+        "retrieved_at": "2026-02-12T10:30:15Z",
+        "page_content_hash": "sha256:…",
         "snippet_id": "snp_001",
+        "snippet_hash": "sha256:…",
+        "quote_span": [0, 27],
         "quote": "Weight: 54 g (without cable)",
         "tier": "tier1_manufacturer",
         "extraction_method": "spec_table_match"
@@ -279,7 +286,12 @@ const perProductCrawlQueue = new PQueue({
       "confidence": 0.85,
       "provenance": {
         "url": "https://www.rtings.com/mouse/reviews/razer/viper-v3-pro",
+        "source_id": "rtings_com",
+        "retrieved_at": "2026-02-12T10:31:02Z",
+        "page_content_hash": "sha256:…",
         "snippet_id": "snp_010",
+        "snippet_hash": "sha256:…",
+        "quote_span": [0, 20],
         "quote": "Click Latency: 0.2 ms",
         "tier": "tier2_lab",
         "extraction_method": "llm_extract"

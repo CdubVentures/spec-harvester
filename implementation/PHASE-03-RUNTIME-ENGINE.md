@@ -105,11 +105,16 @@ Step 2: UNIT NORMALIZATION
   - Example: "3.5 oz" → 99.2g (if unit=g)
 
 Step 3: SHAPE ENFORCEMENT
-  - If output_shape=scalar and value is array → take first / reject
-  - If output_shape=list and value is scalar → wrap in array
-  - If output_shape=list, parse by list_separator
-  - Sort list values if specified
-  - Deduplicate list values
+  - If output_shape=scalar and value is array → take first / reject (field-specific; default=reject)
+  - If output_shape=list:
+      - Canonical normalized type is an Array (never a flattened string in runtime records)
+      - If value is scalar → wrap in array
+      - If value is string → split by list_separator and/or template separators
+      - Coerce each element to the field's data_type (e.g., number list)
+      - Sort list values if specified
+      - Deduplicate list values (after normalization)
+
+  NOTE: Flattening list values to strings is ONLY allowed at publish/export time (Phase 9), never inside the engine.
 
 Step 4: ROUNDING
   - Apply rounding rule (integer, 1dp, 2dp, 3dp)
@@ -147,28 +152,47 @@ RESULT:
 
 ### 2. Evidence Audit (HARD INVARIANT)
 
+To improve accuracy and auditability, **all accepted values must be traceable to an exact character span in a stored snippet** (not a paraphrase). This lets the engine verify evidence deterministically and lets the Review Grid highlight the exact text that justified a value.
+
 ```
 EVIDENCE INVARIANT — NO EXCEPTIONS:
 
 For EVERY field where value ≠ "unk":
   ✓ provenance.url MUST be a valid URL string
+  ✓ provenance.source_id MUST exist in EvidencePack.sources
   ✓ provenance.snippet_id MUST be a non-empty string
-  ✓ provenance.quote MUST be a non-empty string
-  ✓ snippet_id MUST exist in the run's EvidencePack
-  ✓ quote MUST be a substring (or fuzzy match >80%) of the snippet text
+  ✓ provenance.snippet_hash MUST match EvidencePack.snippets[snippet_id].snippet_hash
+  ✓ EvidencePack.snippets[snippet_id] MUST exist and include snippet.normalized_text
+  ✓ Evidence must be VERIFIABLE, not paraphrased:
+      - If provenance.quote_span is present:
+          ✓ quote_span = [start, end] offsets into snippet.normalized_text
+          ✓ snippet.normalized_text.slice(start, end) MUST equal provenance.quote (after whitespace canonicalization)
+      - Else (no quote_span):
+          ✓ provenance.quote MUST be an exact substring of snippet.normalized_text
+  ✓ provenance.retrieved_at MUST be present (ISO-8601 timestamp)
+  ✓ provenance.extraction_method MUST be one of:
+      spec_table_match | parse_template | json_ld | llm_extract | api_fetch | component_db_inference
 
-If ANY check fails → field becomes "unk" with unknown_reason="evidence_missing"
+If ANY check fails:
+  → field becomes "unk" with unknown_reason="evidence_missing"
+  → If snippet_hash mismatch (evidence drift) use unknown_reason="evidence_stale" and flag product for re-crawl
 
 EVIDENCE PROVENANCE SCHEMA:
 {
   "url": "https://...",
+  "source_id": "razer_com",
   "source_host": "razer.com",
   "tier": "tier1_manufacturer",
+  "retrieved_at": "2026-02-12T10:30:00Z",
+
   "snippet_id": "snp_abc123",
-  "quote": "The Viper V3 Pro weighs 54 grams",
-  "extraction_method": "llm_extract|parse_template|html_table|api_fetch",
+  "snippet_hash": "sha256:…",
+  "quote_span": [18, 32],
+  "quote": "Weight: 54 g",
+
+  "extraction_method": "spec_table_match|parse_template|json_ld|llm_extract|api_fetch",
   "confidence": 0.95,
-  "timestamp": "2026-02-12T10:30:00Z"
+  "notes": null
 }
 ```
 
@@ -281,6 +305,35 @@ Every `unk` value must be standardized:
   }
 }
 ```
+
+
+---
+
+## CONFIDENCE SEMANTICS & CALIBRATION (ACCURACY LEVER)
+
+Confidence must be treated as a **calibrated probability of correctness**, not just a heuristic score.
+
+Add the following runtime rules:
+
+1. **Calibration source of truth**
+   - Use golden-file benchmarks and human overrides as labels.
+   - Track calibration by field group and extraction method (parse_template vs llm_extract).
+
+2. **Calibration metrics**
+   - Compute Brier score + reliability curves per bucket (0.5–0.6, 0.6–0.7, …).
+   - A confidence of 0.90 should be correct ~90% of the time in golden fixtures.
+
+3. **Action thresholds**
+   - confidence ≥ 0.85: auto-approve eligible (unless identity_confidence low)
+   - 0.60–0.84: review recommended
+   - < 0.60: review required / quarantined
+
+4. **Hard downgrades (accuracy protection)**
+   - If evidence audit required an auto-repair (quote mismatch correction), cap confidence at 0.75.
+   - If source tier is below the field’s `evidence_tier_preference[0]`, cap confidence at 0.80.
+   - If the Identity Gate classified the page as WARNING, cap confidence at 0.70.
+
+These calibration rules make confidence actionable and prevent “high-confidence wrong” fields from slipping through.
 
 ---
 

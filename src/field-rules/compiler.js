@@ -1,9 +1,13 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import Ajv2020 from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
+import ExcelJS from 'exceljs';
+import semver from 'semver';
 import { compileCategoryWorkbook, saveWorkbookMap } from '../ingest/categoryCompile.js';
+import { buildMigrationPlan } from './migrations.js';
 
 const REQUIRED_ARTIFACTS = [
   'field_rules.json',
@@ -12,7 +16,8 @@ const REQUIRED_ARTIFACTS = [
   'parse_templates.json',
   'cross_validation_rules.json',
   'field_groups.json',
-  'key_migrations.json'
+  'key_migrations.json',
+  'manifest.json'
 ];
 
 const SHARED_SCHEMA_FILES = {
@@ -90,6 +95,29 @@ async function writeJsonStable(filePath, payload) {
   await fs.writeFile(filePath, `${stableStringify(payload)}\n`, 'utf8');
 }
 
+function sha256Buffer(buffer) {
+  return createHash('sha256').update(buffer).digest('hex');
+}
+
+async function hashFileWithMeta(filePath) {
+  const buffer = await fs.readFile(filePath);
+  const text = buffer.toString('utf8');
+  try {
+    const parsed = JSON.parse(text);
+    const semantic = stableStringify(stripVolatileKeys(parsed));
+    return {
+      sha256: sha256Buffer(Buffer.from(semantic, 'utf8')),
+      bytes: buffer.length
+    };
+  } catch {
+    // Non-JSON files are hashed byte-for-byte.
+  }
+  return {
+    sha256: sha256Buffer(buffer),
+    bytes: buffer.length
+  };
+}
+
 async function readJsonIfExists(filePath) {
   try {
     const raw = await fs.readFile(filePath, 'utf8');
@@ -145,6 +173,10 @@ function schemaErrorToText(row = {}) {
   const pathToken = String(row.instancePath || row.schemaPath || '/').trim() || '/';
   const message = String(row.message || 'validation error').trim();
   return `${pathToken}: ${message}`;
+}
+
+function nonEmptyString(value) {
+  return String(value || '').trim().length > 0;
 }
 
 function asNumber(value) {
@@ -434,6 +466,30 @@ async function listJsonFilesRecursive(rootDir) {
   return out;
 }
 
+async function copyDirectoryRecursive(sourceDir, targetDir) {
+  let entries = [];
+  try {
+    entries = await fs.readdir(sourceDir, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
+  await fs.mkdir(targetDir, { recursive: true });
+  for (const entry of entries) {
+    const sourcePath = path.join(sourceDir, entry.name);
+    const targetPath = path.join(targetDir, entry.name);
+    if (entry.isDirectory()) {
+      await copyDirectoryRecursive(sourcePath, targetPath);
+      continue;
+    }
+    if (entry.isFile()) {
+      await fs.copyFile(sourcePath, targetPath);
+    }
+  }
+}
+
 function stripVolatileKeys(value) {
   // Ignore timestamp/version snapshot churn so dry-run reports semantic diffs only.
   if (Array.isArray(value)) {
@@ -507,6 +563,220 @@ async function compareGeneratedArtifacts({ existingRoot, candidateRoot }) {
     would_change: changes.length > 0,
     changes
   };
+}
+
+async function verifyGeneratedManifest({
+  generatedRoot,
+  manifest = {}
+}) {
+  if (!isObject(manifest) || !Array.isArray(manifest.artifacts)) {
+    return {
+      valid: false,
+      errors: ['manifest.json missing artifacts array']
+    };
+  }
+  const errors = [];
+  for (const row of manifest.artifacts) {
+    const relativePath = String(row?.path || '').trim();
+    const expectedHash = String(row?.sha256 || '').trim().toLowerCase();
+    if (!relativePath || !expectedHash) {
+      errors.push(`manifest row missing path/hash: ${stableStringify(row)}`);
+      continue;
+    }
+    const filePath = path.join(generatedRoot, relativePath);
+    if (!(await fileExists(filePath))) {
+      errors.push(`manifest references missing file: ${relativePath}`);
+      continue;
+    }
+    const actual = await hashFileWithMeta(filePath);
+    if (actual.sha256 !== expectedHash) {
+      errors.push(`manifest hash mismatch: ${relativePath}`);
+    }
+  }
+  return {
+    valid: errors.length === 0,
+    errors
+  };
+}
+
+function validateKeyMigrationsMetadata(keyMigrations = {}) {
+  const errors = [];
+  const warnings = [];
+  if (!isObject(keyMigrations)) {
+    errors.push('key_migrations.json is not a JSON object');
+    return { valid: false, errors, warnings };
+  }
+
+  const hasDocShape = Array.isArray(keyMigrations.migrations);
+  if (!hasDocShape) {
+    warnings.push('key_migrations.json is in legacy key-map shape (migrations array missing)');
+    return { valid: true, errors, warnings };
+  }
+
+  const version = String(keyMigrations.version || '').trim();
+  const previousVersion = String(keyMigrations.previous_version || '').trim();
+  if (!semver.valid(semver.coerce(version))) {
+    errors.push(`invalid key_migrations version: '${version || '(empty)'}'`);
+  }
+  if (!semver.valid(semver.coerce(previousVersion))) {
+    errors.push(`invalid key_migrations previous_version: '${previousVersion || '(empty)'}'`);
+  }
+  if (!isObject(keyMigrations.key_map)) {
+    warnings.push('key_migrations key_map missing or invalid');
+  }
+
+  for (const row of keyMigrations.migrations) {
+    const type = String(row?.type || '').trim().toLowerCase();
+    if (!type) {
+      errors.push('key_migrations migration row missing type');
+      continue;
+    }
+    if (type === 'rename') {
+      const from = normalizeFieldKey(row?.from);
+      const to = normalizeFieldKey(row?.to);
+      if (!from || !to || from === to) {
+        errors.push(`key_migrations rename invalid: from='${row?.from || ''}' to='${row?.to || ''}'`);
+      }
+    }
+    if (type === 'merge') {
+      const to = normalizeFieldKey(row?.to);
+      const fromList = toArray(row?.from).map((value) => normalizeFieldKey(value)).filter(Boolean);
+      if (!to || fromList.length < 2) {
+        warnings.push(`key_migrations merge should include >=2 sources: to='${row?.to || ''}'`);
+      }
+    }
+    if (type === 'split') {
+      const from = normalizeFieldKey(row?.from);
+      const toList = toArray(row?.to).map((value) => normalizeFieldKey(value)).filter(Boolean);
+      if (!from || toList.length < 2) {
+        warnings.push(`key_migrations split should include >=2 targets: from='${row?.from || ''}'`);
+      }
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings
+  };
+}
+
+function toPhase1Group(value) {
+  const token = normalizeFieldKey(value || '');
+  return token || 'general';
+}
+
+export function normalizeFieldRulesForPhase1(fieldRules = {}) {
+  if (!isObject(fieldRules) || !isObject(fieldRules.fields)) {
+    return fieldRules;
+  }
+  const out = {
+    ...fieldRules,
+    field_count: Object.keys(fieldRules.fields).length,
+    fields: {}
+  };
+  for (const [fieldKeyRaw, ruleRaw] of Object.entries(fieldRules.fields)) {
+    const fieldKey = normalizeFieldKey(fieldKeyRaw);
+    if (!fieldKey || !isObject(ruleRaw)) {
+      continue;
+    }
+    const rule = { ...ruleRaw };
+    const priority = isObject(rule.priority) ? rule.priority : {};
+    const contract = isObject(rule.contract) ? rule.contract : {};
+    const evidence = isObject(rule.evidence) ? rule.evidence : {};
+    const ui = isObject(rule.ui) ? rule.ui : {};
+    const parse = isObject(rule.parse) ? rule.parse : {};
+    const dataType = String(rule.data_type || contract.type || rule.type || 'string').trim().toLowerCase() || 'string';
+    const outputShape = String(rule.output_shape || contract.shape || rule.shape || 'scalar').trim().toLowerCase() || 'scalar';
+    const requiredLevel = String(rule.required_level || priority.required_level || 'optional').trim().toLowerCase() || 'optional';
+    const availability = String(rule.availability || priority.availability || 'sometimes').trim().toLowerCase() || 'sometimes';
+    const difficulty = String(rule.difficulty || priority.difficulty || 'medium').trim().toLowerCase() || 'medium';
+    const effortValue = Number.parseInt(String(rule.effort ?? priority.effort ?? ''), 10);
+    const normalizedEffort = Number.isFinite(effortValue) ? effortValue : 5;
+    const evidenceRequired = typeof rule.evidence_required === 'boolean'
+      ? rule.evidence_required
+      : (typeof evidence.required === 'boolean' ? evidence.required : true);
+
+    rule.field_key = String(rule.field_key || fieldKey);
+    rule.display_name = String(rule.display_name || ui.label || titleCase(fieldKey));
+    rule.group = String(rule.group || toPhase1Group(ui.group));
+    rule.data_type = dataType;
+    rule.output_shape = outputShape;
+    rule.required_level = requiredLevel;
+    rule.availability = availability;
+    rule.difficulty = difficulty;
+    rule.effort = normalizedEffort;
+    rule.evidence_required = evidenceRequired;
+    rule.priority = {
+      ...priority,
+      required_level: requiredLevel,
+      availability,
+      difficulty,
+      effort: normalizedEffort
+    };
+    rule.contract = {
+      ...contract,
+      type: String(contract.type || dataType || 'string'),
+      shape: String(contract.shape || outputShape || 'scalar')
+    };
+    rule.parse = { ...parse };
+    rule.evidence = {
+      ...evidence,
+      required: evidenceRequired
+    };
+    if (!nonEmptyString(rule.unknown_reason_default)) {
+      rule.unknown_reason_default = 'not_found_after_search';
+    }
+    out.fields[fieldKey] = rule;
+  }
+  return out;
+}
+
+function auditFieldMetadata(fieldRules = {}) {
+  const results = {
+    errors: [],
+    warnings: [],
+    complete_count: 0,
+    incomplete_count: 0
+  };
+  const fields = isObject(fieldRules?.fields) ? fieldRules.fields : {};
+  for (const [fieldKeyRaw, rule] of Object.entries(fields)) {
+    const fieldKey = normalizeFieldKey(fieldKeyRaw);
+    if (!fieldKey || !isObject(rule)) {
+      continue;
+    }
+    const missing = [];
+    const requiredLevel = String(rule.required_level || rule.priority?.required_level || '').trim();
+    const availability = String(rule.availability || rule.priority?.availability || '').trim();
+    const difficulty = String(rule.difficulty || rule.priority?.difficulty || '').trim();
+    const effortValue = Number.parseInt(String(rule.effort ?? rule.priority?.effort ?? ''), 10);
+    const dataType = String(rule.data_type || rule.contract?.type || rule.type || '').trim();
+    const outputShape = String(rule.output_shape || rule.contract?.shape || rule.shape || '').trim();
+    const evidenceRequired = rule.evidence_required;
+    const unknownReasonDefault = String(rule.unknown_reason_default || '').trim();
+
+    if (!requiredLevel) missing.push('required_level');
+    if (!availability) missing.push('availability');
+    if (!difficulty) missing.push('difficulty');
+    if (!Number.isFinite(effortValue)) missing.push('effort');
+    if (!dataType) missing.push('data_type');
+    if (!outputShape) missing.push('output_shape');
+    if (typeof evidenceRequired !== 'boolean') missing.push('evidence_required');
+    if (!unknownReasonDefault) missing.push('unknown_reason_default');
+
+    if (missing.length > 0) {
+      results.errors.push(`field '${fieldKey}' missing metadata: ${missing.join(', ')}`);
+      results.incomplete_count += 1;
+      continue;
+    }
+    if (effortValue < 1 || effortValue > 10) {
+      results.errors.push(`field '${fieldKey}' has invalid effort ${effortValue}; expected 1..10`);
+      results.incomplete_count += 1;
+      continue;
+    }
+    results.complete_count += 1;
+  }
+  return results;
 }
 
 async function validateArtifactsWithSchemas({
@@ -595,6 +865,7 @@ async function validateArtifactsWithSchemas({
 
 async function ensurePhase1Artifacts({ category, generatedRoot }) {
   const fieldRulesPath = path.join(generatedRoot, 'field_rules.json');
+  const fieldRulesRuntimePath = path.join(generatedRoot, 'field_rules.runtime.json');
   const uiCatalogPath = path.join(generatedRoot, 'ui_field_catalog.json');
   const knownValuesPath = path.join(generatedRoot, 'known_values.json');
   const parseTemplatesPath = path.join(generatedRoot, 'parse_templates.json');
@@ -612,24 +883,60 @@ async function ensurePhase1Artifacts({ category, generatedRoot }) {
   if (!isObject(fieldRules) || !isObject(fieldRules.fields)) {
     throw new Error(`missing_or_invalid:${fieldRulesPath}`);
   }
+  const normalizedFieldRules = normalizeFieldRulesForPhase1(fieldRules);
+  await writeJsonStable(fieldRulesPath, normalizedFieldRules);
+  if (await fileExists(fieldRulesRuntimePath)) {
+    await writeJsonStable(fieldRulesRuntimePath, normalizedFieldRules);
+  }
 
-  await writeJsonStable(parseTemplatesPath, buildParseTemplates(fieldRules));
-  await writeJsonStable(crossValidationPath, buildCrossValidationRules(fieldRules));
+  await writeJsonStable(parseTemplatesPath, buildParseTemplates(normalizedFieldRules));
+  await writeJsonStable(crossValidationPath, buildCrossValidationRules(normalizedFieldRules));
   await writeJsonStable(
     fieldGroupsPath,
     buildFieldGroups({
       category,
-      generatedAt: pickGeneratedAt(fieldRules),
+      generatedAt: pickGeneratedAt(normalizedFieldRules),
       uiFieldCatalog: isObject(uiFieldCatalog) ? uiFieldCatalog : {},
-      fieldRules
+      fieldRules: normalizedFieldRules
     })
   );
-  if (!(await fileExists(keyMigrationsPath))) {
-    await writeJsonStable(keyMigrationsPath, {});
-  }
+  const existingMigrations = await readJsonIfExists(keyMigrationsPath);
+  const migrationPlan = buildMigrationPlan({
+    previousRules: normalizedFieldRules,
+    nextRules: normalizedFieldRules,
+    keyMigrations: isObject(existingMigrations) ? existingMigrations : {},
+    previousVersion: String(existingMigrations?.previous_version || existingMigrations?.version || '1.0.0'),
+    nextVersion: String(existingMigrations?.version || '1.0.0')
+  });
+  await writeJsonStable(keyMigrationsPath, migrationPlan);
   if (!(await fileExists(componentRoot))) {
     await fs.mkdir(componentRoot, { recursive: true });
   }
+
+  const manifestPath = path.join(generatedRoot, 'manifest.json');
+  const artifactFiles = (await listJsonFilesRecursive(generatedRoot))
+    .filter((filePath) => {
+      const base = path.basename(filePath);
+      return base !== 'manifest.json' && base !== '_compile_report.json';
+    });
+  const artifacts = [];
+  for (const filePath of artifactFiles) {
+    const meta = await hashFileWithMeta(filePath);
+    artifacts.push({
+      path: path.relative(generatedRoot, filePath).replace(/\\/g, '/'),
+      sha256: meta.sha256,
+      bytes: meta.bytes
+    });
+  }
+  artifacts.sort((a, b) => a.path.localeCompare(b.path));
+  await writeJsonStable(manifestPath, {
+    version: 1,
+    category,
+    generated_at: new Date().toISOString(),
+    algorithm: 'sha256',
+    artifact_count: artifacts.length,
+    artifacts
+  });
 
   return {
     fieldRules: fieldRulesPath,
@@ -639,8 +946,9 @@ async function ensurePhase1Artifacts({ category, generatedRoot }) {
     crossValidation: crossValidationPath,
     fieldGroups: fieldGroupsPath,
     keyMigrations: keyMigrationsPath,
+    manifest: manifestPath,
     componentDbDir: componentRoot,
-    field_count: Object.keys(fieldRules.fields || {}).length,
+    field_count: Object.keys(normalizedFieldRules.fields || {}).length,
     known_value_buckets: Object.keys(knownValues?.enums || knownValues?.fields || {}).length
   };
 }
@@ -811,6 +1119,7 @@ function mapArtifactsToList(generatedRoot) {
     path.join(generatedRoot, 'cross_validation_rules.json'),
     path.join(generatedRoot, 'field_groups.json'),
     path.join(generatedRoot, 'key_migrations.json'),
+    path.join(generatedRoot, 'manifest.json'),
     path.join(generatedRoot, 'component_db')
   ];
 }
@@ -835,12 +1144,31 @@ export async function compileRules({
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'phase1-dry-run-'));
     const tempHelperRoot = path.join(tempRoot, 'helper_files');
     try {
+      let dryRunWorkbookPath = workbookPath;
+      let dryRunWorkbookMap = workbookMap;
+      if (!dryRunWorkbookMap) {
+        const existingMapPath = String(mapPath || '').trim()
+          ? path.resolve(String(mapPath))
+          : path.join(helperRoot, normalizedCategory, '_control_plane', 'workbook_map.json');
+        const existingMap = await readJsonIfExists(existingMapPath);
+        if (isObject(existingMap)) {
+          dryRunWorkbookMap = existingMap;
+          if (!String(dryRunWorkbookPath || '').trim() && nonEmptyString(existingMap.workbook_path)) {
+            dryRunWorkbookPath = String(existingMap.workbook_path);
+          }
+        }
+      }
+      // Mirror current category context so dry-run diff matches real compile behavior.
+      await copyDirectoryRecursive(
+        path.join(helperRoot, normalizedCategory),
+        path.join(tempHelperRoot, normalizedCategory)
+      );
       const staged = await compileIntoRoot({
         category: normalizedCategory,
-        workbookPath,
-        workbookMap,
+        workbookPath: dryRunWorkbookPath,
+        workbookMap: dryRunWorkbookMap,
         config,
-        mapPath,
+        mapPath: null,
         helperFilesRoot: tempHelperRoot
       });
       if (!staged.compileResult?.compiled) {
@@ -949,14 +1277,15 @@ export async function validateRules({
     warnings.push('component_db has no JSON files');
   }
 
-  const [fieldRules, knownValues, parseTemplates, crossValidation, fieldGroups, uiFieldCatalog, keyMigrations] = await Promise.all([
+  const [fieldRules, knownValues, parseTemplates, crossValidation, fieldGroups, uiFieldCatalog, keyMigrations, manifest] = await Promise.all([
     readJsonIfExists(path.join(generatedRoot, 'field_rules.json')),
     readJsonIfExists(path.join(generatedRoot, 'known_values.json')),
     readJsonIfExists(path.join(generatedRoot, 'parse_templates.json')),
     readJsonIfExists(path.join(generatedRoot, 'cross_validation_rules.json')),
     readJsonIfExists(path.join(generatedRoot, 'field_groups.json')),
     readJsonIfExists(path.join(generatedRoot, 'ui_field_catalog.json')),
-    readJsonIfExists(path.join(generatedRoot, 'key_migrations.json'))
+    readJsonIfExists(path.join(generatedRoot, 'key_migrations.json')),
+    readJsonIfExists(path.join(generatedRoot, 'manifest.json'))
   ]);
 
   if (!isObject(fieldRules) || !isObject(fieldRules.fields)) {
@@ -974,10 +1303,27 @@ export async function validateRules({
   if (!isObject(fieldGroups) || !Array.isArray(fieldGroups.groups)) {
     errors.push('field_groups.json is missing groups array');
   }
+  if (!isObject(manifest) || !Array.isArray(manifest.artifacts)) {
+    errors.push('manifest.json is missing artifacts array');
+  }
+  const migrationMeta = validateKeyMigrationsMetadata(keyMigrations);
+  for (const row of migrationMeta.errors) {
+    errors.push(`key_migrations validation failed: ${row}`);
+  }
+  for (const row of migrationMeta.warnings) {
+    warnings.push(`key_migrations warning: ${row}`);
+  }
 
   const fieldCount = isObject(fieldRules?.fields) ? Object.keys(fieldRules.fields).length : 0;
   if (fieldCount === 0) {
     errors.push('field_rules.json has zero fields');
+  }
+  const metadataAudit = auditFieldMetadata(fieldRules);
+  for (const row of metadataAudit.errors) {
+    errors.push(`metadata validation failed: ${row}`);
+  }
+  for (const row of metadataAudit.warnings) {
+    warnings.push(`metadata warning: ${row}`);
   }
 
   const enumCount = Object.keys(knownValues?.enums || knownValues?.fields || {}).length;
@@ -1013,6 +1359,18 @@ export async function validateRules({
     errors.push(`missing shared schema file: ${missingFile}`);
   }
 
+  if (isObject(manifest) && Array.isArray(manifest.artifacts)) {
+    const manifestCheck = await verifyGeneratedManifest({
+      generatedRoot,
+      manifest
+    });
+    if (!manifestCheck.valid) {
+      for (const row of manifestCheck.errors) {
+        errors.push(`manifest validation failed: ${row}`);
+      }
+    }
+  }
+
   return {
     category: normalizedCategory,
     valid: errors.length === 0,
@@ -1026,7 +1384,11 @@ export async function validateRules({
       cross_validation_rule_count: crossValidationCount,
       field_group_count: fieldGroupCount,
       component_db_files: componentFiles.length,
-      schema_artifacts_validated: toArray(schema.artifacts).length
+      manifest_artifact_count: Array.isArray(manifest?.artifacts) ? manifest.artifacts.length : 0,
+      key_migration_count: Array.isArray(keyMigrations?.migrations) ? keyMigrations.migrations.length : 0,
+      schema_artifacts_validated: toArray(schema.artifacts).length,
+      fields_with_complete_metadata: metadataAudit.complete_count,
+      fields_with_incomplete_metadata: metadataAudit.incomplete_count
     },
     schema
   };
@@ -1087,6 +1449,139 @@ function defaultSourceSeed(category, templateName) {
   };
 }
 
+function starterFieldDefinition({ group, fieldKey }) {
+  const normalizedGroup = normalizeFieldKey(group);
+  const key = normalizeFieldKey(fieldKey);
+  const isList = ['pros', 'cons', 'images', 'gallery_images', 'affiliate_links'].includes(key);
+  const isUrl = key.includes('url');
+  const isScore = key === 'overall_score';
+  const dataType = isScore ? 'number' : (isUrl ? 'url' : 'string');
+  const outputShape = isList ? 'list' : 'scalar';
+  let requiredLevel = 'expected';
+  let availability = 'expected';
+  if (normalizedGroup === 'editorial') {
+    requiredLevel = 'editorial';
+    availability = 'editorial_only';
+  } else if (normalizedGroup === 'commerce') {
+    requiredLevel = 'commerce';
+    availability = 'sometimes';
+  } else if (normalizedGroup === 'media') {
+    requiredLevel = 'optional';
+    availability = 'sometimes';
+  } else if (normalizedGroup === 'identity') {
+    requiredLevel = ['brand', 'model', 'category'].includes(key) ? 'required' : 'expected';
+    availability = 'expected';
+  }
+  return {
+    group: normalizedGroup,
+    field_key: key,
+    display_name: titleCase(key),
+    data_type: dataType,
+    output_shape: outputShape,
+    required_level: requiredLevel,
+    availability,
+    difficulty: 'easy',
+    effort: isScore ? 4 : 3,
+    evidence_required: true,
+    unknown_reason_default: normalizedGroup === 'editorial'
+      ? 'editorial_not_generated'
+      : 'not_found_after_search',
+    description: `Starter ${normalizedGroup} field`
+  };
+}
+
+function starterFieldRows({ category, templateName }) {
+  const preset = TEMPLATE_PRESETS[templateName] || TEMPLATE_PRESETS.electronics;
+  const groups = {
+    identity: preset.common_identity || [],
+    physical: preset.common_physical || [],
+    connectivity: preset.common_connectivity || [],
+    performance: [],
+    features: [],
+    editorial: preset.common_editorial || [],
+    commerce: preset.common_commerce || [],
+    media: preset.common_media || []
+  };
+  const rows = [];
+  for (const [group, fields] of Object.entries(groups)) {
+    for (const fieldKey of fields) {
+      rows.push(starterFieldDefinition({ group, fieldKey }));
+    }
+  }
+  rows.push({
+    group: 'performance',
+    field_key: '',
+    display_name: '',
+    data_type: '',
+    output_shape: '',
+    required_level: '',
+    availability: '',
+    difficulty: '',
+    effort: '',
+    evidence_required: '',
+    unknown_reason_default: '',
+    description: `Add category-specific performance fields for '${category}'`
+  });
+  rows.push({
+    group: 'features',
+    field_key: '',
+    display_name: '',
+    data_type: '',
+    output_shape: '',
+    required_level: '',
+    availability: '',
+    difficulty: '',
+    effort: '',
+    evidence_required: '',
+    unknown_reason_default: '',
+    description: `Add category-specific feature fields for '${category}'`
+  });
+  return rows;
+}
+
+async function writeStarterFieldCatalogWorkbook({
+  workbookPath,
+  category,
+  templateName
+}) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Spec Factory';
+  workbook.created = new Date();
+
+  const ws = workbook.addWorksheet('field_catalog');
+  ws.columns = [
+    { header: 'group', key: 'group', width: 18 },
+    { header: 'field_key', key: 'field_key', width: 28 },
+    { header: 'display_name', key: 'display_name', width: 28 },
+    { header: 'data_type', key: 'data_type', width: 14 },
+    { header: 'output_shape', key: 'output_shape', width: 14 },
+    { header: 'required_level', key: 'required_level', width: 16 },
+    { header: 'availability', key: 'availability', width: 16 },
+    { header: 'difficulty', key: 'difficulty', width: 12 },
+    { header: 'effort', key: 'effort', width: 10 },
+    { header: 'evidence_required', key: 'evidence_required', width: 18 },
+    { header: 'unknown_reason_default', key: 'unknown_reason_default', width: 28 },
+    { header: 'description', key: 'description', width: 40 }
+  ];
+  ws.getRow(1).font = { bold: true };
+  ws.views = [{ state: 'frozen', ySplit: 1 }];
+  ws.autoFilter = 'A1:L1';
+  for (const row of starterFieldRows({ category, templateName })) {
+    ws.addRow(row);
+  }
+
+  const guide = workbook.addWorksheet('instructions');
+  guide.addRow(['Spec Factory Field Catalog Starter']);
+  guide.addRow([`Category: ${category}`]);
+  guide.addRow([`Template: ${templateName}`]);
+  guide.addRow(['Edit rows in "field_catalog". Do not rename header columns.']);
+  guide.addRow(['Leave evidence_required=true for strict evidence-first operation.']);
+  guide.getRow(1).font = { bold: true };
+
+  await fs.mkdir(path.dirname(workbookPath), { recursive: true });
+  await workbook.xlsx.writeFile(workbookPath);
+}
+
 async function writeIfMissing(filePath, payload) {
   if (await fileExists(filePath)) {
     return false;
@@ -1138,6 +1633,15 @@ export async function initCategory({
     if (await writeIfMissing(filePath, payload)) {
       createdFiles.push(filePath);
     }
+  }
+  const starterWorkbookPath = path.join(sourceRoot, 'field_catalog.xlsx');
+  if (!(await fileExists(starterWorkbookPath))) {
+    await writeStarterFieldCatalogWorkbook({
+      workbookPath: starterWorkbookPath,
+      category: normalizedCategory,
+      templateName
+    });
+    createdFiles.push(starterWorkbookPath);
   }
 
   return {
@@ -1290,4 +1794,388 @@ export async function fieldReport({
     format: 'md',
     report: `${lines.join('\n')}\n`
   };
+}
+
+function toSafeInt(value, fallback = 0) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function normalizeCategoryList(values = []) {
+  return [...new Set(toArray(values)
+    .map((value) => normalizeFieldKey(value))
+    .filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+}
+
+export async function discoverCompileCategories({
+  config = {}
+} = {}) {
+  const helperRoot = path.resolve(config.helperFilesRoot || 'helper_files');
+  let entries = [];
+  try {
+    entries = await fs.readdir(helperRoot, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return {
+        helper_root: helperRoot,
+        categories: []
+      };
+    }
+    throw error;
+  }
+
+  const categories = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const category = normalizeFieldKey(entry.name);
+    if (!category) {
+      continue;
+    }
+    const categoryRoot = path.join(helperRoot, category);
+    const hasWorkbookMap = await fileExists(path.join(categoryRoot, '_control_plane', 'workbook_map.json'));
+    const hasGeneratedRules = await fileExists(path.join(categoryRoot, '_generated', 'field_rules.json'));
+    const hasWorkbook = await fileExists(path.join(categoryRoot, `${category}Data.xlsm`))
+      || await fileExists(path.join(categoryRoot, `${category}Data.xlsx`));
+    if (hasWorkbookMap || hasGeneratedRules || hasWorkbook) {
+      categories.push(category);
+    }
+  }
+
+  categories.sort((a, b) => a.localeCompare(b));
+  return {
+    helper_root: helperRoot,
+    categories
+  };
+}
+
+export async function compileRulesAll({
+  categories = [],
+  config = {},
+  dryRun = false,
+  workbookPathByCategory = {},
+  workbookMapByCategory = {},
+  mapPathByCategory = {}
+} = {}) {
+  const discovered = await discoverCompileCategories({ config });
+  const selectedCategories = normalizeCategoryList(
+    categories.length > 0 ? categories : discovered.categories
+  );
+  if (selectedCategories.length === 0) {
+    return {
+      compiled: true,
+      dry_run: dryRun,
+      categories: [],
+      count: 0,
+      error_count: 0,
+      warning_count: 0
+    };
+  }
+
+  const results = [];
+  for (const category of selectedCategories) {
+    const startedAt = Date.now();
+    const result = await compileRules({
+      category,
+      workbookPath: String(workbookPathByCategory?.[category] || '').trim(),
+      workbookMap: workbookMapByCategory?.[category] || null,
+      dryRun,
+      config,
+      mapPath: String(mapPathByCategory?.[category] || '').trim() || null
+    });
+    results.push({
+      ...result,
+      duration_ms: Math.max(0, Date.now() - startedAt)
+    });
+  }
+
+  const compileFailures = results.filter((row) => row.compiled !== true);
+  const warningCount = results.reduce((sum, row) => sum + toArray(row.warnings).length, 0);
+  const changedCategories = results
+    .filter((row) => row.dry_run === true && row.would_change === true)
+    .map((row) => row.category);
+
+  return {
+    compiled: compileFailures.length === 0,
+    dry_run: dryRun,
+    helper_root: discovered.helper_root,
+    categories: selectedCategories,
+    count: selectedCategories.length,
+    error_count: compileFailures.length,
+    warning_count: warningCount,
+    changed_categories: changedCategories,
+    results
+  };
+}
+
+function classifyRulesDiffFromReport(compileReport = {}) {
+  const fieldDiff = isObject(compileReport?.diff?.fields) ? compileReport.diff.fields : {};
+  const removedCount = toSafeInt(fieldDiff.removed_count, 0);
+  const changedCount = toSafeInt(fieldDiff.changed_count, 0);
+  const addedCount = toSafeInt(fieldDiff.added_count, 0);
+  const severity = removedCount > 0
+    ? 'breaking'
+    : (changedCount > 0 ? 'potentially_breaking' : 'safe');
+  const breaking = removedCount > 0;
+  return {
+    severity,
+    breaking,
+    summary: {
+      added_fields: addedCount,
+      changed_fields: changedCount,
+      removed_fields: removedCount
+    }
+  };
+}
+
+export async function readCompileReport({
+  category,
+  config = {}
+}) {
+  const normalizedCategory = normalizeFieldKey(category);
+  if (!normalizedCategory) {
+    throw new Error('category_required');
+  }
+  const helperRoot = path.resolve(config.helperFilesRoot || 'helper_files');
+  const reportPath = path.join(helperRoot, normalizedCategory, '_generated', '_compile_report.json');
+  const report = await readJsonIfExists(reportPath);
+  return {
+    category: normalizedCategory,
+    report_path: reportPath,
+    exists: Boolean(report),
+    report: isObject(report) ? report : {}
+  };
+}
+
+export async function rulesDiff({
+  category,
+  config = {}
+}) {
+  const normalizedCategory = normalizeFieldKey(category);
+  if (!normalizedCategory) {
+    throw new Error('category_required');
+  }
+  const [dryRun, currentReport] = await Promise.all([
+    compileRules({
+      category: normalizedCategory,
+      dryRun: true,
+      config
+    }),
+    readCompileReport({
+      category: normalizedCategory,
+      config
+    })
+  ]);
+  const classification = classifyRulesDiffFromReport(currentReport.report || {});
+  return {
+    category: normalizedCategory,
+    would_change: dryRun.would_change === true,
+    changes: toArray(dryRun.changes),
+    dry_run: dryRun,
+    current_compile_report: currentReport,
+    classification
+  };
+}
+
+export async function watchCompileRules({
+  category,
+  config = {},
+  workbookPath = '',
+  workbookMap = null,
+  mapPath = null,
+  debounceMs = 500,
+  watchSeconds = 0,
+  maxEvents = 0,
+  onEvent = null
+}) {
+  const normalizedCategory = normalizeFieldKey(category);
+  if (!normalizedCategory) {
+    throw new Error('category_required');
+  }
+  const chokidar = (await import('chokidar')).default;
+  const helperRoot = path.resolve(config.helperFilesRoot || 'helper_files');
+  const categoryRoot = path.join(helperRoot, normalizedCategory);
+  const sourceRoot = path.join(categoryRoot, '_source');
+  const controlRoot = path.join(categoryRoot, '_control_plane');
+  const workbookCandidates = [
+    path.join(categoryRoot, `${normalizedCategory}Data.xlsm`),
+    path.join(categoryRoot, `${normalizedCategory}Data.xlsx`)
+  ];
+  const watchTargets = [];
+  if (await fileExists(sourceRoot)) {
+    watchTargets.push(sourceRoot);
+  }
+  if (await fileExists(controlRoot)) {
+    watchTargets.push(controlRoot);
+  }
+  for (const candidate of workbookCandidates) {
+    if (await fileExists(candidate)) {
+      watchTargets.push(candidate);
+    }
+  }
+  if (watchTargets.length === 0) {
+    watchTargets.push(categoryRoot);
+  }
+
+  const effectiveDebounce = Math.max(50, toSafeInt(debounceMs, 500));
+  const effectiveMaxEvents = Math.max(0, toSafeInt(maxEvents, 0));
+  const effectiveWatchSeconds = Math.max(0, toSafeInt(watchSeconds, 0));
+
+  const events = [];
+  let compileCount = 0;
+  let closed = false;
+  let compileInFlight = false;
+  let suppressUntil = 0;
+  let pendingReason = '';
+  let pendingTimer = null;
+  let doneResolve = null;
+  let doneReject = null;
+
+  const donePromise = new Promise((resolve, reject) => {
+    doneResolve = resolve;
+    doneReject = reject;
+  });
+
+  const cleanupHandlers = [];
+  async function emitEvent(row) {
+    events.push(row);
+    if (typeof onEvent === 'function') {
+      await onEvent(row);
+    }
+  }
+
+  async function shutdown(reason = 'stopped') {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    if (pendingTimer) {
+      clearTimeout(pendingTimer);
+      pendingTimer = null;
+    }
+    for (const [signal, handler] of cleanupHandlers) {
+      process.off(signal, handler);
+    }
+    await watcher.close();
+    doneResolve({
+      category: normalizedCategory,
+      watch_targets: watchTargets,
+      reason,
+      compile_count: compileCount,
+      events
+    });
+  }
+
+  async function runCompile(trigger = 'change') {
+    if (closed || compileInFlight) {
+      return;
+    }
+    compileInFlight = true;
+    const startedAt = Date.now();
+    try {
+      const result = await compileRules({
+        category: normalizedCategory,
+        workbookPath,
+        workbookMap,
+        config,
+        mapPath
+      });
+      compileCount += 1;
+      suppressUntil = Date.now() + Math.max(300, effectiveDebounce);
+      await emitEvent({
+        trigger,
+        category: normalizedCategory,
+        compile_index: compileCount,
+        started_at: new Date(startedAt).toISOString(),
+        finished_at: new Date().toISOString(),
+        duration_ms: Math.max(0, Date.now() - startedAt),
+        compiled: result.compiled === true,
+        warnings: toArray(result.warnings),
+        errors: toArray(result.errors)
+      });
+      if (effectiveMaxEvents > 0 && compileCount >= effectiveMaxEvents) {
+        await shutdown('max_events_reached');
+      }
+    } catch (error) {
+      await emitEvent({
+        trigger,
+        category: normalizedCategory,
+        compile_index: compileCount + 1,
+        started_at: new Date(startedAt).toISOString(),
+        finished_at: new Date().toISOString(),
+        duration_ms: Math.max(0, Date.now() - startedAt),
+        compiled: false,
+        errors: [String(error?.message || error)]
+      });
+      await shutdown('compile_failed');
+      doneReject(error);
+      return;
+    } finally {
+      compileInFlight = false;
+    }
+  }
+
+  function scheduleCompile(reason = '') {
+    pendingReason = String(reason || 'change');
+    if (pendingTimer) {
+      clearTimeout(pendingTimer);
+    }
+    pendingTimer = setTimeout(() => {
+      pendingTimer = null;
+      runCompile(pendingReason).catch((error) => {
+        doneReject(error);
+      });
+    }, effectiveDebounce);
+  }
+
+  const watcher = chokidar.watch(watchTargets, {
+    ignoreInitial: true,
+    awaitWriteFinish: {
+      stabilityThreshold: 200,
+      pollInterval: 50
+    },
+    ignored: [
+      /[\\/]_generated[\\/]/,
+      /[\\/]_control_plane[\\/]_versions[\\/]/
+    ]
+  });
+
+  watcher.on('all', (eventName, changedPath) => {
+    if (closed) {
+      return;
+    }
+    const now = Date.now();
+    if (now < suppressUntil) {
+      return;
+    }
+    scheduleCompile(`${eventName}:${changedPath}`);
+  });
+  watcher.on('error', (error) => {
+    if (closed) {
+      return;
+    }
+    doneReject(error);
+    shutdown('watcher_error').catch(() => {});
+  });
+
+  const sigIntHandler = () => {
+    shutdown('signal_sigint').catch(() => {});
+  };
+  const sigTermHandler = () => {
+    shutdown('signal_sigterm').catch(() => {});
+  };
+  process.on('SIGINT', sigIntHandler);
+  process.on('SIGTERM', sigTermHandler);
+  cleanupHandlers.push(['SIGINT', sigIntHandler], ['SIGTERM', sigTermHandler]);
+
+  await runCompile('initial');
+  if (!closed && effectiveWatchSeconds > 0) {
+    setTimeout(() => {
+      shutdown('watch_timeout').catch(() => {});
+    }, effectiveWatchSeconds * 1000);
+  }
+
+  return donePromise;
 }

@@ -12,6 +12,7 @@ import { runSearchProviders, searchProviderAvailability } from '../search/search
 import { rerankSearchResults } from '../search/resultReranker.js';
 import { buildTargetedQueries } from '../search/queryBuilder.js';
 import { normalizeFieldList } from '../utils/fieldKeys.js';
+import { searchSourceCorpus } from '../intel/sourceCorpus.js';
 
 function fillTemplate(template, variables) {
   return String(template || '')
@@ -376,16 +377,62 @@ export async function discoverCandidateSources({
   const providerState = searchProviderAvailability(config);
   const rawResults = [];
   const searchAttempts = [];
+  const requiredOnlySearch = Boolean(planningHints.requiredOnlySearch);
+  const internalFirst = Boolean(config.discoveryInternalFirst);
+  const internalMinResults = Math.max(1, Number(config.discoveryInternalMinResults || 1));
+  const missingRequiredFields = normalizeFieldList(
+    toArray(planningHints.missingRequiredFields),
+    { fieldOrder: categoryConfig.fieldOrder || [] }
+  );
+  let internalSatisfied = false;
+  let externalSearchReason = null;
+
+  if (internalFirst) {
+    for (const query of queries.slice(0, queryLimit)) {
+      const internalRows = await searchSourceCorpus({
+        storage,
+        config,
+        category: categoryConfig.category,
+        query,
+        limit: resultsPerQuery,
+        missingFields,
+        fieldOrder: categoryConfig.fieldOrder || [],
+        logger
+      });
+      rawResults.push(...internalRows.map((row) => ({ ...row, query })));
+      searchAttempts.push({
+        query,
+        provider: 'internal',
+        result_count: internalRows.length,
+        reason_code: 'internal_corpus_lookup'
+      });
+    }
+
+    const internalUrlCount = new Set(
+      rawResults
+        .filter((row) => String(row.provider || '').toLowerCase() === 'internal')
+        .map((row) => String(row.url || '').trim())
+        .filter(Boolean)
+    ).size;
+    const requiresRequiredCoverage = requiredOnlySearch || missingRequiredFields.length > 0;
+    internalSatisfied = requiresRequiredCoverage && internalUrlCount >= internalMinResults;
+
+    if (requiresRequiredCoverage) {
+      externalSearchReason = internalSatisfied
+        ? 'internal_satisfied_skip_external'
+        : 'required_fields_missing_internal_under_target';
+    }
+  }
 
   const canSearchInternet =
-    providerState.provider !== 'none' &&
-    (
-      (providerState.provider === 'bing' && providerState.bing_ready) ||
-      (providerState.provider === 'google' && providerState.google_ready) ||
-      (providerState.provider === 'dual' && (providerState.bing_ready || providerState.google_ready))
-    );
+    providerState.provider !== 'none' && Boolean(providerState.internet_ready);
 
-  if (canSearchInternet) {
+  if (canSearchInternet && !(internalFirst && internalSatisfied)) {
+    const dualFallbackSearxngOnly =
+      providerState.provider === 'dual' &&
+      !providerState.bing_ready &&
+      !providerState.google_ready &&
+      providerState.searxng_ready;
     for (const query of queries.slice(0, queryLimit)) {
       logger?.info?.('discovery_query_started', {
         query,
@@ -401,7 +448,8 @@ export async function discoverCandidateSources({
       searchAttempts.push({
         query,
         provider: config.searchProvider,
-        result_count: providerResults.length
+        result_count: providerResults.length,
+        reason_code: dualFallbackSearxngOnly ? 'dual_fallback_searxng_only' : 'internet_search'
       });
       logger?.info?.('discovery_query_completed', {
         query,
@@ -409,7 +457,7 @@ export async function discoverCandidateSources({
         result_count: providerResults.length
       });
     }
-  } else {
+  } else if (rawResults.length === 0) {
     const planned = buildPlanOnlyResults({
       categoryConfig,
       queries,
@@ -420,7 +468,8 @@ export async function discoverCandidateSources({
     searchAttempts.push({
       query: '',
       provider: 'plan',
-      result_count: planned.length
+      result_count: planned.length,
+      reason_code: 'plan_only_no_provider'
     });
   }
 
@@ -521,6 +570,8 @@ export async function discoverCandidateSources({
     queries,
     llm_queries: llmQueries,
     targeted_missing_fields: missingFields,
+    internal_satisfied: internalSatisfied,
+    external_search_reason: externalSearchReason,
     search_attempts: searchAttempts,
     discovered
   };
@@ -553,6 +604,8 @@ export async function discoverCandidateSources({
     candidateUrls: candidateOnly.map((item) => item.url),
     queries,
     llm_queries: llmQueries,
+    internal_satisfied: internalSatisfied,
+    external_search_reason: externalSearchReason,
     search_attempts: searchAttempts
   };
 }

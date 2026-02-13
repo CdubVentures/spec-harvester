@@ -17,6 +17,12 @@ Commands:
 - `run-ad-hoc --category <category> --brand <brand> --model <model> [--profile <standard|thorough|fast>] [--thorough]`
 - `run-batch --category mouse [--brand <brand>] [--strategy <explore|exploit|mixed|bandit>]`
 - `run-until-complete --s3key <key> [--max-rounds <n>] [--mode aggressive|balanced]`
+- `category-compile --category <category> [--workbook <path>] [--map <path>]`
+- `compile-rules --category <category> [--workbook <path>] [--map <path>] [--dry-run]`
+- `validate-rules --category <category>`
+- `init-category --category <category> [--template electronics]`
+- `list-fields --category <category> [--group <group>] [--required-level <level>]`
+- `field-report --category <category> [--format md|json]`
 - `discover --category mouse [--brand <brand>]`
 - `ingest-csv --category <category> --path <csv>`
 - `watch-imports [--imports-root <path>] [--category <category>|--all] [--once]`
@@ -30,6 +36,24 @@ Commands:
 - `benchmark --category mouse [--fixture <path>] [--max-cases <n>]`
 - `rebuild-index --category mouse`
 - `intel-graph-api --category mouse [--host <host>] [--port <port>]`
+
+## Field Rules Studio
+
+Phase 1 authoring/validation commands:
+
+```bash
+# Compile generated rule artifacts
+node src/cli/spec.js compile-rules --category mouse
+
+# Validate generated artifacts against shared JSON schemas
+node src/cli/spec.js validate-rules --category mouse
+
+# Preview compile impact without writing
+node src/cli/spec.js compile-rules --category mouse --dry-run
+
+# Bootstrap a new category (creates helper/category skeleton + _source/field_catalog.xlsx)
+node src/cli/spec.js init-category --category monitor --template electronics
+```
 
 ## Local-First Output Mode
 

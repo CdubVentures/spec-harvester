@@ -452,6 +452,36 @@ function extractHtmlLinkCandidates(html) {
   return candidates;
 }
 
+function shouldIgnoreDimensionPath(field, path) {
+  if (!['width', 'height', 'lngth'].includes(field)) {
+    return false;
+  }
+  const token = normalizeKey(path);
+  if (!token) {
+    return false;
+  }
+
+  // Ignore typical render/asset dimensions so we do not treat image/canvas size as product size.
+  const denyHints = [
+    'image',
+    'images',
+    'thumbnail',
+    'thumb',
+    'sprite',
+    'render',
+    'viewport',
+    'screen',
+    'display',
+    'canvas',
+    'pixel',
+    'resolution',
+    'srcset'
+  ];
+  const hasVisualHint = denyHints.some((hint) => token.includes(hint));
+  const hasProductHint = token.includes('product') || token.includes('spec') || token.includes('dimension');
+  return hasVisualHint && !hasProductHint;
+}
+
 export function extractCandidatesFromPage({
   host,
   html,
@@ -479,6 +509,9 @@ export function extractCandidatesFromPage({
       for (const item of flattened) {
         const field = pickFieldFromPath(item.path);
         if (!field) {
+          continue;
+        }
+        if (shouldIgnoreDimensionPath(field, item.path)) {
           continue;
         }
 

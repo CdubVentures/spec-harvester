@@ -1,17 +1,23 @@
-import { buildEvidencePackV2 } from '../evidence/evidencePackV2.js';
+import { buildEvidencePackV2, fingerprintEvidenceCandidate } from '../evidence/evidencePackV2.js';
 
 export function buildEvidencePack({
   source,
   pageData,
   adapterExtra,
   config,
-  targetFields = []
+  targetFields = [],
+  deterministicCandidates = []
 }) {
   return buildEvidencePackV2({
     source,
     pageData,
     adapterExtra,
     config,
-    targetFields
+    targetFields,
+    deterministicCandidates
   });
+}
+
+export function buildEvidenceCandidateFingerprint(candidate) {
+  return fingerprintEvidenceCandidate(candidate);
 }

@@ -1,79 +1,156 @@
 {
   "artifacts": {
     "control_plane_version": {
-      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_control_plane\\_versions\\20260213T001112Z",
-      "version_id": "20260213T001112Z"
+      "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_control_plane\\_versions\\20260213T024158Z",
+      "version_id": "20260213T024158Z"
     },
     "draft": {
-      "hash": "d44ce6a97eade8b70a7b3e4ec06802e3b5b9e5969031f2bcdd4851759ef52410",
+      "hash": "bd52d0cc4fa42215fc4e22509140c3155ccc4bdc4ba68e6707988b14115916ef",
       "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_control_plane\\draft.json"
     },
     "field_rules": {
       "changed": true,
-      "hash": "3d68b6b20da774f770c4c530f1afebfca6cd900662701c618dc1ceafeae47ab3",
+      "hash": "9fe40686ec51e767247f1452f627eb09dc394d5ee893c81d31a9386b1f22f122",
       "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_generated\\field_rules.json"
     },
     "field_rules_draft": {
-      "hash": "59cff50732d21ab605fa747822858dfa435635b4129aebdcc8c8e0ce3718b8da",
+      "hash": "f88a1374461f78c23172124bd0a076880fcde70e5d0611db3da54dc0beebabf5",
       "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_control_plane\\field_rules_draft.json"
     },
     "field_rules_full": {
-      "hash": "8c5b7247305e33fbc760e7b4da7af44127af3d987ba53a1e25e843a19d58aa50",
+      "hash": "8e07956f24b77f51e4437ae9180c2511a9cae9a60ca7a45ebd0b3236c93d3835",
       "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_control_plane\\field_rules.full.json"
     },
     "field_rules_runtime": {
-      "bytes": 246284,
-      "hash": "3d68b6b20da774f770c4c530f1afebfca6cd900662701c618dc1ceafeae47ab3",
+      "bytes": 248041,
+      "hash": "9fe40686ec51e767247f1452f627eb09dc394d5ee893c81d31a9386b1f22f122",
       "identical_to_field_rules": true,
       "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_generated\\field_rules.runtime.json"
     },
     "key_migrations": {
-      "hash": "1c06259b779fca416248f078798553fcb9238104a1e22d6eeb8e010e0cf1b9c5",
+      "hash": "676aa4c3f4adef768577bd6224cf8f842941c08e6521b0d167cd20c421717ce5",
       "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_generated\\key_migrations.json"
     },
     "known_values": {
-      "hash": "f447dd70cca5bc7e11495f52dfc1c057f1ce277b4ed261cd565fd474e5f485d4",
+      "hash": "296b115adb9f6c7cf4147d33dd2aadbb29f8e178effcda3b1fee94268f7ae849",
       "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_generated\\known_values.json"
     },
     "ui_field_catalog": {
-      "hash": "507f4bd2f9c4992df998b1bcfe22bc436b9683abb88b28c9ff839520f5f18bc8",
+      "hash": "3c9c89366ea059aef386649fe7f353d46d149b7bebaf6a7845915c652c265d37",
       "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_generated\\ui_field_catalog.json"
     },
     "ui_field_catalog_draft": {
-      "hash": "3741f11ef40c3818a104f0bed4045e90be5ee954eb4484f37c068d97c35104bd",
+      "hash": "d7b9830691a0b47edce83560fd9a722695dac55b1f09ea732ad638b6b9dbc07e",
       "path": "C:\\Users\\Chris\\Desktop\\spec-harvester - og\\helper_files\\mouse\\_control_plane\\ui_field_catalog_draft.json"
     }
   },
   "category": "mouse",
   "compiled": true,
-  "compiled_at": "2026-02-13T00:11:11.523Z",
+  "compiled_at": "2026-02-13T02:18:36.677Z",
   "counts": {
     "component_types": 4,
-    "critical": 0,
-    "deep": 9,
-    "enums": 12,
+    "critical": 1,
+    "deep": 8,
+    "enums": 13,
     "expected_easy": 44,
     "expected_sometimes": 8,
     "fields": 75,
-    "identity": 0,
-    "required": 14
+    "identity": 1,
+    "required": 13
   },
   "diff": {
     "changed": true,
-    "current_hash": "3d68b6b20da774f770c4c530f1afebfca6cd900662701c618dc1ceafeae47ab3",
+    "current_hash": "9fe40686ec51e767247f1452f627eb09dc394d5ee893c81d31a9386b1f22f122",
     "fields": {
       "added_count": 0,
       "added_keys": [],
-      "changed_count": 0,
-      "changed_keys": [],
+      "changed_count": 75,
+      "changed_keys": [
+        "acceleration",
+        "adjustable_scroll_wheel",
+        "adjustable_weight",
+        "battery_hours",
+        "bluetooth",
+        "cable_type",
+        "click_force",
+        "click_latency",
+        "click_latency_list",
+        "coating",
+        "colors",
+        "computer_side_connector",
+        "connection",
+        "connectivity",
+        "debounce",
+        "design",
+        "discontinued",
+        "dpi",
+        "encoder",
+        "encoder_brand",
+        "encoder_link",
+        "feet_material",
+        "flawless_sensor",
+        "form_factor",
+        "front_flare",
+        "grip",
+        "hand_size",
+        "hardware_acceleration",
+        "height",
+        "honeycomb_frame",
+        "hot_swappable",
+        "hump",
+        "ips",
+        "lift",
+        "lift_settings",
+        "lighting",
+        "lngth",
+        "material",
+        "mcu",
+        "mcu_link",
+        "middle_buttons",
+        "motion_sync",
+        "mouse_side_connector",
+        "nvidia_reflex",
+        "onboard_memory",
+        "onboard_memory_value",
+        "paracord",
+        "polling_rate",
+        "price_range",
+        "profile_switching",
+        "programmable_buttons",
+        "release_date",
+        "rgb",
+        "sensor",
+        "sensor_brand",
+        "sensor_date",
+        "sensor_latency",
+        "sensor_latency_list",
+        "sensor_link",
+        "sensor_type",
+        "shape",
+        "shift_latency",
+        "side_buttons",
+        "silent_clicks",
+        "sku",
+        "smoothing",
+        "switch",
+        "switch_brand",
+        "switch_type",
+        "switches_link",
+        "thumb_rest",
+        "tilt_scroll_wheel",
+        "weight",
+        "width",
+        "wireless_charging"
+      ],
       "removed_count": 0,
       "removed_keys": []
     },
-    "previous_hash": "431202315137a3f4c7785f27873508e804d9af6302731d3b6d9d83857623e3d7"
+    "previous_hash": "82b166153243c0eb7ea58cfe368be3705f12db0c1030912c8538379ce56a430d"
   },
   "errors": [],
-  "generated_at": "2026-02-13T00:11:11.523Z",
+  "generated_at": "2026-02-13T02:18:36.677Z",
   "source_summary": {
+    "component_sheets": 4,
     "component_sources": 4,
     "enum_lists": 15,
     "key_rows": 75,

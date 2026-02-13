@@ -128,3 +128,15 @@ export function normalizeRequiredFieldPaths(values, options = {}) {
 export function isIdentityField(value) {
   return IDENTITY_FIELDS.has(String(value || '').trim().toLowerCase());
 }
+
+export function normalizeMissingFieldTargets(values, options = {}) {
+  const allFields = normalizeFieldList(values, options);
+  const fields = allFields.filter((field) => !isIdentityField(field));
+  const identityFields = allFields.filter((field) => isIdentityField(field));
+  const requiredPaths = normalizeRequiredFieldPaths(values, options);
+  return {
+    fields,
+    identityFields,
+    requiredPaths
+  };
+}

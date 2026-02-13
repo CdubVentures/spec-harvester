@@ -154,7 +154,16 @@ class DeterministicParser {
                 raw_match: match[0],
                 extraction_method: 'parse_template',
                 pattern_used: pattern.regex,
+
+                // Provenance (MUST pass Phase 3 evidence audit)
+                source_id: snippet.source,
                 snippet_id: snippetId,
+                snippet_hash: snippet.snippet_hash,
+                quote: match[0],                         // exact regex match (verbatim)
+                quote_span: snippet.normalized_text
+                  ? [regex.lastIndex - match[0].length, regex.lastIndex]  // example span calc
+                  : null,
+
                 source: evidencePack.sources[snippet.source],
                 confidence: 0.95  // High confidence for regex match
               });
@@ -173,7 +182,14 @@ class DeterministicParser {
               extraction_method: 'spec_table_match',
               key_matched: snippet.key,
               similarity_score: similarity,
+
+              // Provenance
+              source_id: snippet.source,
               snippet_id: snippetId,
+              snippet_hash: snippet.snippet_hash,
+              quote: snippet.text,          // table row is the exact evidence
+              quote_span: snippet.normalized_text ? [0, snippet.normalized_text.length] : null,
+
               source: evidencePack.sources[snippet.source],
               confidence: similarity * 0.95
             });
@@ -181,16 +197,28 @@ class DeterministicParser {
         }
       }
 
-      // Strategy 3: JSON-LD mapping
-      for (const jsonLd of evidencePack.jsonLdProducts || []) {
+      // Strategy 3: JSON-LD mapping (JSON-LD is stored as first-class snippets in the EvidencePack)
+      for (const [snippetId, snippet] of Object.entries(evidencePack.snippets)) {
+        if (snippet.type !== 'json_ld_product') continue;
+
+        let product = null;
+        try { product = JSON.parse(snippet.text); } catch { continue; }
+
         const mapping = this.getJsonLdMapping(fieldKey);
-        if (mapping && jsonLd[mapping.path]) {
+        if (mapping && product && product[mapping.path] != null) {
           candidates[fieldKey].push({
-            value: jsonLd[mapping.path],
+            value: product[mapping.path],
             extraction_method: 'json_ld',
             json_path: mapping.path,
-            snippet_id: `jsonld_${jsonLd['@id'] || 'product'}`,
-            source: { tier: 'tier1_manufacturer' },
+
+            // Provenance
+            source_id: snippet.source,
+            snippet_id: snippetId,
+            snippet_hash: snippet.snippet_hash,
+            quote: snippet.text,
+            quote_span: snippet.normalized_text ? [0, snippet.normalized_text.length] : null,
+
+            source: evidencePack.sources[snippet.source],
             confidence: 0.90
           });
         }
@@ -437,12 +465,14 @@ EVIDENCE:
 
 RULES:
 1. Extract ONLY from the evidence text above — never infer or guess
-2. For each field, cite the snippet_id where you found the value
-3. If a field cannot be found in the evidence, set value to "unk" and provide the reason
-4. Normalize values to the specified units (e.g., convert oz to grams)
-5. For enum fields, use ONLY the canonical values listed
-6. For list fields, use the specified separator
-7. DO NOT extract specs for comparison products mentioned in reviews — only the target product
+2. For each field, choose ONE best `snippet_id` that contains the value
+3. Copy an exact, verbatim `quote` from that snippet (no paraphrasing)
+4. Provide `quote_span` = [start, end] offsets into the snippet's `normalized_text`
+5. If a field cannot be found in the evidence, set value to "unk" and provide `unknown_reason`
+6. Normalize values to the specified units (e.g., convert oz to grams)
+7. For enum fields, use ONLY the canonical values listed
+8. For list fields, output a JSON array (not a comma-separated string)
+9. DO NOT extract specs for comparison products mentioned in reviews — only the target product
 
 OUTPUT FORMAT: JSON matching the schema provided.`;
 
@@ -450,9 +480,22 @@ OUTPUT FORMAT: JSON matching the schema provided.`;
 const ExtractionBatchSchema = z.object({
   product_confirmed: z.boolean(),
   fields: z.record(z.string(), z.object({
-    value: z.union([z.string(), z.number(), z.boolean(), z.null()]),
+    // NOTE: list/structured fields MUST stay structured (arrays/objects), not flattened strings.
+    value: z.union([
+      z.string(),
+      z.number(),
+      z.boolean(),
+      z.null(),
+      z.array(z.union([z.string(), z.number(), z.boolean()])),
+      z.record(z.any())
+    ]),
+
+    // Evidence (must pass Phase 3 audit)
     snippet_id: z.string().nullable(),
+    snippet_hash: z.string().nullable(),
     quote: z.string().nullable(),
+    quote_span: z.tuple([z.number().int().nonnegative(), z.number().int().nonnegative()]).nullable(),
+
     confidence: z.number().min(0).max(1),
     notes: z.string().optional(),
     unknown_reason: z.string().optional()
@@ -531,6 +574,22 @@ class LLMCache {
 ```
 
 ---
+
+
+---
+
+## EVIDENCE VERIFIER (ACCURACY FIREWALL)
+
+Before any LLM candidate is allowed to compete in scoring, run a deterministic **Evidence Verifier**:
+
+- Confirm `snippet_id` exists
+- Confirm `snippet_hash` matches the current snippet
+- Confirm `quote_span` slices the snippet and equals `quote`
+- Confirm the extracted `value` text appears inside the cited snippet (or table cell) for non-numeric fields
+
+If verification fails, **drop the candidate** (or convert to `unk` with `unknown_reason="evidence_missing"`). This single step prevents the most common high-confidence failure mode: *LLM paraphrasing that cannot be audited later*.
+
+Optional auto-repair (safe): if `value` is numeric and `quote` is missing, attempt to locate the number string inside the snippet and rebuild `quote_span`.
 
 ### Stage 4: Candidate Merger & Confidence Scoring
 
@@ -614,8 +673,9 @@ class CandidateMerger {
       score += 0.15;
     }
 
-    // Evidence quality
-    if (candidate.snippet_id && candidate.quote) score += 0.15;
+    // Evidence quality (verifiable > paraphrased)
+    if (candidate.snippet_id && (candidate.quote_span || candidate.quote)) score += 0.15;
+    if (candidate.snippet_hash) score += 0.05;
     if (candidate.confidence) score += candidate.confidence * 0.10;
 
     return Math.min(1.0, score);

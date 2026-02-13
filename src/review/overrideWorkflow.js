@@ -2,6 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { nowIso } from '../utils/common.js';
 import { toRawFieldKey } from '../utils/fieldKeys.js';
+import { createFieldRulesEngine } from '../engine/fieldRulesEngine.js';
+import { applyRuntimeFieldRules } from '../engine/runtimeGate.js';
 
 function normalizeToken(value) {
   return String(value || '').trim().toLowerCase();
@@ -48,6 +50,23 @@ function removeFieldFromList(list = [], field = '') {
     const token = String(entry || '').trim().toLowerCase();
     return token && token !== fieldRaw && token !== fieldPrefixed;
   });
+}
+
+function addFieldToList(list = [], field = '') {
+  const out = Array.isArray(list) ? [...list] : [];
+  const normalizedField = normalizeField(field);
+  if (!normalizedField) {
+    return out;
+  }
+  const prefixed = `fields.${normalizedField}`;
+  const hasField = out.some((entry) => {
+    const token = String(entry || '').trim().toLowerCase();
+    return token === normalizedField || token === prefixed;
+  });
+  if (!hasField) {
+    out.push(normalizedField);
+  }
+  return out;
 }
 
 function reviewKeys(storage, category, productId) {
@@ -328,11 +347,60 @@ export async function finalizeOverrides({
     });
   }
 
+  let runtimeGateResult = {
+    applied: false,
+    failures: [],
+    warnings: [],
+    changes: []
+  };
+  let runtimeEngineReady = false;
+  try {
+    const runtimeEngine = await createFieldRulesEngine(category, { config });
+    runtimeEngineReady = true;
+    const migratedInput = runtimeEngine.applyKeyMigrations(nextNormalized.fields);
+    runtimeGateResult = applyRuntimeFieldRules({
+      engine: runtimeEngine,
+      fields: migratedInput,
+      provenance: nextProvenance,
+      fieldOrder: runtimeEngine.getAllFieldKeys(),
+      enforceEvidence: false,
+      strictEvidence: false,
+      evidencePack: null
+    });
+    nextNormalized.fields = runtimeGateResult.fields || nextNormalized.fields;
+  } catch {
+    runtimeEngineReady = false;
+  }
+
+  for (const failure of runtimeGateResult.failures || []) {
+    const normalizedField = normalizeField(failure?.field);
+    if (!normalizedField) {
+      continue;
+    }
+    const existingReasoning = isObject(nextFieldReasoning[normalizedField]) ? nextFieldReasoning[normalizedField] : {};
+    const existingReasons = toArray(existingReasoning.reasons).filter(Boolean);
+    nextFieldReasoning[normalizedField] = {
+      ...existingReasoning,
+      value: 'unk',
+      unknown_reason: String(failure.reason_code || 'override_rejected_by_runtime_engine'),
+      reasons: [...new Set([...existingReasons, 'override_rejected_by_runtime_engine'])]
+    };
+    nextSummary.missing_required_fields = addFieldToList(nextSummary.missing_required_fields, normalizedField);
+    nextSummary.fields_below_pass_target = addFieldToList(nextSummary.fields_below_pass_target, normalizedField);
+    nextSummary.critical_fields_below_pass_target = addFieldToList(
+      nextSummary.critical_fields_below_pass_target,
+      normalizedField
+    );
+  }
+
   nextSummary.field_reasoning = nextFieldReasoning;
   nextSummary.review_overrides = {
     applied_at: nowIso(),
     override_count: appliedRows.length,
-    fields: appliedRows.map((row) => row.field)
+    fields: appliedRows.map((row) => row.field),
+    runtime_engine_ready: runtimeEngineReady,
+    runtime_engine_failure_count: (runtimeGateResult.failures || []).length,
+    runtime_engine_warning_count: (runtimeGateResult.warnings || []).length
   };
 
   await Promise.all([
@@ -350,6 +418,13 @@ export async function finalizeOverrides({
     applied_count: appliedRows.length,
     applied_fields: appliedRows.map((row) => row.field),
     rows: appliedRows,
+    runtime_gate: {
+      applied: Boolean(runtimeGateResult.applied),
+      failure_count: (runtimeGateResult.failures || []).length,
+      warning_count: (runtimeGateResult.warnings || []).length,
+      failures: runtimeGateResult.failures || [],
+      warnings: runtimeGateResult.warnings || []
+    },
     latest_keys: latest
   };
   await writeStorageJson(storage, review.finalizeReportKey, report);
@@ -364,6 +439,11 @@ export async function finalizeOverrides({
     applied_count: appliedRows.length,
     latest_keys: latest,
     finalize_report_key: review.finalizeReportKey,
-    applied_fields: appliedRows.map((row) => row.field)
+    applied_fields: appliedRows.map((row) => row.field),
+    runtime_gate: {
+      applied: Boolean(runtimeGateResult.applied),
+      failure_count: (runtimeGateResult.failures || []).length,
+      warning_count: (runtimeGateResult.warnings || []).length
+    }
   };
 }

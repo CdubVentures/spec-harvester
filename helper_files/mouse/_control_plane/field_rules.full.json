@@ -929,10 +929,6 @@
       "canonical_key": null,
       "component": null,
       "contract": {
-        "range": {
-          "max": 100,
-          "min": 1
-        },
         "rounding": {
           "decimals": 0,
           "mode": "nearest"
@@ -945,13 +941,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -982,8 +977,6 @@
       },
       "key": "acceleration",
       "parse": {
-        "accept_bare_numbers_as_mode": false,
-        "allow_ranges": false,
         "allow_unitless": true,
         "strict_unit_required": false,
         "template": "number_with_unit",
@@ -1063,9 +1056,14 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
-        "policy": "closed",
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open_prefer_known",
         "source": "yes_no"
       },
       "evidence": {
@@ -1093,24 +1091,7 @@
       },
       "key": "adjustable_scroll_wheel",
       "parse": {
-        "false_tokens": [
-          "no",
-          "false",
-          "0",
-          "off"
-        ],
-        "template": "boolean_yes_no_unk",
-        "true_tokens": [
-          "yes",
-          "true",
-          "1",
-          "on"
-        ],
-        "unknown_tokens": [
-          "unk",
-          "n/a",
-          ""
-        ]
+        "template": "boolean_yes_no_unk"
       },
       "priority": {
         "availability": "sometimes",
@@ -1150,6 +1131,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Buttons & Features",
@@ -1174,14 +1156,20 @@
       "contract": {
         "shape": "scalar",
         "type": "string",
+        "unit": "g",
         "unknown_reason_required": true,
         "unknown_token": "unk"
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
-        "policy": "closed",
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open_prefer_known",
         "source": "yes_no"
       },
       "evidence": {
@@ -1210,24 +1198,7 @@
       },
       "key": "adjustable_weight",
       "parse": {
-        "false_tokens": [
-          "no",
-          "false",
-          "0",
-          "off"
-        ],
-        "template": "boolean_yes_no_unk",
-        "true_tokens": [
-          "yes",
-          "true",
-          "1",
-          "on"
-        ],
-        "unknown_tokens": [
-          "unk",
-          "n/a",
-          ""
-        ]
+        "template": "boolean_yes_no_unk"
       },
       "priority": {
         "availability": "sometimes",
@@ -1267,6 +1238,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Construction",
@@ -1286,18 +1258,14 @@
     },
     "battery_hours": {
       "aliases": [
-        "battery_hours",
         "battery life",
         "battery life (hours)",
-        "battery runtime"
+        "battery runtime",
+        "battery_hours"
       ],
       "canonical_key": null,
       "component": null,
       "contract": {
-        "range": {
-          "max": 500,
-          "min": 1
-        },
         "rounding": {
           "decimals": 0,
           "mode": "nearest"
@@ -1310,13 +1278,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -1429,9 +1396,14 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
-        "policy": "closed",
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open_prefer_known",
         "source": "yes_no"
       },
       "evidence": {
@@ -1459,24 +1431,7 @@
       },
       "key": "bluetooth",
       "parse": {
-        "false_tokens": [
-          "no",
-          "false",
-          "0",
-          "off"
-        ],
-        "template": "boolean_yes_no_unk",
-        "true_tokens": [
-          "yes",
-          "true",
-          "1",
-          "on"
-        ],
-        "unknown_tokens": [
-          "unk",
-          "n/a",
-          ""
-        ]
+        "template": "boolean_yes_no_unk"
       },
       "priority": {
         "availability": "sometimes",
@@ -1516,6 +1471,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Connectivity",
@@ -1545,12 +1501,12 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -1620,6 +1576,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Connectivity",
@@ -1654,12 +1611,12 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -1692,6 +1649,7 @@
       "parse": {
         "strict_unit_required": false,
         "template": "number_with_unit",
+        "unit": "gf",
         "unit_accepts": [
           "gf",
           "g",
@@ -1775,13 +1733,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -1814,6 +1771,7 @@
       "parse": {
         "strict_unit_required": true,
         "template": "number_with_unit",
+        "unit": "ms",
         "unit_accepts": [
           "ms"
         ]
@@ -1932,13 +1890,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -1994,6 +1951,7 @@
         },
         "strict_unit_required": false,
         "template": "latency_list_modes_ms",
+        "unit": "ms",
         "unit_accepts": [
           "ms"
         ]
@@ -2036,6 +1994,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Switches",
@@ -2060,7 +2019,7 @@
       "contract": {
         "list_rules": {
           "dedupe": true,
-          "max_items": 30,
+          "max_items": 100,
           "min_items": 0,
           "sort": "none"
         },
@@ -2071,16 +2030,15 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open_prefer_known",
-        "source": null
+        "source": "data_lists.coating"
       },
       "evidence": {
         "conflict_policy": "resolve_by_tier_else_unknown",
@@ -2164,6 +2122,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Construction",
@@ -2179,7 +2138,7 @@
         "tooltip_md": "Define 'Coating' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "value_form": "list_tokens"
+      "value_form": "list"
     },
     "colors": {
       "aliases": [],
@@ -2188,7 +2147,7 @@
       "contract": {
         "list_rules": {
           "dedupe": true,
-          "max_items": 30,
+          "max_items": 100,
           "min_items": 0,
           "sort": "none"
         },
@@ -2199,13 +2158,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open_prefer_known",
         "source": null
@@ -2286,6 +2244,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "General",
@@ -2301,7 +2260,7 @@
         "tooltip_md": "Colorway tokens. Use list<string>. Normalize grey→gray; multi-colorways may use '+'.",
         "tooltip_source": null
       },
-      "value_form": "list_tokens"
+      "value_form": "list"
     },
     "computer_side_connector": {
       "aliases": [],
@@ -2315,12 +2274,12 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -2390,6 +2349,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Connectivity",
@@ -2419,7 +2379,6 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "policy": "closed",
@@ -2462,8 +2421,7 @@
       },
       "key": "connection",
       "parse": {
-        "notes": "Prefer normalized connection mode.",
-        "template": "enum_string"
+        "template": "text_field"
       },
       "priority": {
         "availability": "expected",
@@ -2528,9 +2486,9 @@
       "contract": {
         "list_rules": {
           "dedupe": true,
-          "max_items": 10,
+          "max_items": 100,
           "min_items": 0,
-          "sort": "asc"
+          "sort": "none"
         },
         "shape": "list",
         "type": "string",
@@ -2539,16 +2497,15 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open_prefer_known",
-        "source": null
+        "source": "data_lists.connectivity"
       },
       "evidence": {
         "conflict_policy": "resolve_by_tier_else_unknown",
@@ -2632,6 +2589,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Connectivity",
@@ -2654,10 +2612,6 @@
       "canonical_key": null,
       "component": null,
       "contract": {
-        "range": {
-          "max": 50,
-          "min": 0
-        },
         "rounding": {
           "decimals": 2,
           "mode": "nearest"
@@ -2670,13 +2624,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -2776,7 +2729,7 @@
       "contract": {
         "list_rules": {
           "dedupe": true,
-          "max_items": 30,
+          "max_items": 100,
           "min_items": 0,
           "sort": "none"
         },
@@ -2787,13 +2740,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open_prefer_known",
         "source": null
@@ -2870,6 +2822,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "General",
@@ -2885,7 +2838,7 @@
         "tooltip_md": "Define 'Design' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "value_form": "list_tokens"
+      "value_form": "list"
     },
     "discontinued": {
       "aliases": [],
@@ -2899,9 +2852,14 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
-        "policy": "closed",
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open_prefer_known",
         "source": "yes_no"
       },
       "evidence": {
@@ -2918,29 +2876,13 @@
         "dataEntry": {
           "key_cell": "B10",
           "row": 10,
+          "sample_values": [],
           "sheet": "dataEntry"
         }
       },
       "key": "discontinued",
       "parse": {
-        "false_tokens": [
-          "no",
-          "false",
-          "0",
-          "off"
-        ],
-        "template": "boolean_yes_no_unk",
-        "true_tokens": [
-          "yes",
-          "true",
-          "1",
-          "on"
-        ],
-        "unknown_tokens": [
-          "unk",
-          "n/a",
-          ""
-        ]
+        "template": "boolean_yes_no_unk"
       },
       "priority": {
         "availability": "sometimes",
@@ -2980,6 +2922,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "General",
@@ -2999,10 +2942,10 @@
     },
     "dpi": {
       "aliases": [
+        "cpi",
         "dpi",
         "max dpi",
-        "maximum dpi",
-        "cpi"
+        "maximum dpi"
       ],
       "canonical_key": null,
       "component": null,
@@ -3023,13 +2966,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -3060,6 +3002,7 @@
       },
       "key": "dpi",
       "parse": {
+        "allow_unitless": true,
         "strict_unit_required": false,
         "template": "number_with_unit",
         "unit": "dpi",
@@ -3144,13 +3087,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open_prefer_known",
         "source": "component_db.encoder"
@@ -3171,6 +3113,10 @@
         "dataEntry": {
           "key_cell": "B73",
           "row": 73,
+          "sample_values": [
+            "Black",
+            "Black"
+          ],
           "sheet": "dataEntry"
         }
       },
@@ -3217,6 +3163,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Encoder",
@@ -3246,13 +3193,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open_prefer_known",
         "source": null
@@ -3273,13 +3219,17 @@
         "dataEntry": {
           "key_cell": "B74",
           "row": 74,
+          "sample_values": [
+            "kailh",
+            "kailh"
+          ],
           "sheet": "dataEntry"
         },
         "related_to": "encoder"
       },
       "key": "encoder_brand",
       "parse": {
-        "template": "enum_string"
+        "template": "text_field"
       },
       "priority": {
         "availability": "sometimes",
@@ -3319,6 +3269,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Encoder",
@@ -3341,7 +3292,6 @@
       "canonical_key": null,
       "component": null,
       "contract": {
-        "format": "url",
         "shape": "scalar",
         "type": "string",
         "unknown_reason_required": true,
@@ -3349,12 +3299,12 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -3373,6 +3323,7 @@
         "dataEntry": {
           "key_cell": "B75",
           "row": 75,
+          "sample_values": [],
           "sheet": "dataEntry"
         },
         "related_to": "encoder"
@@ -3419,6 +3370,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Encoder",
@@ -3448,7 +3400,6 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "policy": "closed",
@@ -3490,7 +3441,7 @@
       },
       "key": "feet_material",
       "parse": {
-        "template": "enum_string"
+        "template": "text_field"
       },
       "priority": {
         "availability": "expected",
@@ -3530,6 +3481,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Construction",
@@ -3559,9 +3511,14 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
-        "policy": "closed",
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open_prefer_known",
         "source": "yes_no"
       },
       "evidence": {
@@ -3589,24 +3546,7 @@
       },
       "key": "flawless_sensor",
       "parse": {
-        "false_tokens": [
-          "no",
-          "false",
-          "0",
-          "off"
-        ],
-        "template": "boolean_yes_no_unk",
-        "true_tokens": [
-          "yes",
-          "true",
-          "1",
-          "on"
-        ],
-        "unknown_tokens": [
-          "unk",
-          "n/a",
-          ""
-        ]
+        "template": "boolean_yes_no_unk"
       },
       "priority": {
         "availability": "sometimes",
@@ -3646,6 +3586,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Sensor & Performance",
@@ -3675,7 +3616,6 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "policy": "closed",
@@ -3718,7 +3658,7 @@
       },
       "key": "form_factor",
       "parse": {
-        "template": "enum_string"
+        "template": "text_field"
       },
       "priority": {
         "availability": "expected",
@@ -3758,6 +3698,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Ergonomics",
@@ -3787,7 +3728,6 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "policy": "closed",
@@ -3829,7 +3769,7 @@
       },
       "key": "front_flare",
       "parse": {
-        "template": "enum_string"
+        "template": "text_field"
       },
       "priority": {
         "availability": "expected",
@@ -3869,6 +3809,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Ergonomics",
@@ -3893,9 +3834,9 @@
       "contract": {
         "list_rules": {
           "dedupe": true,
-          "max_items": 8,
+          "max_items": 100,
           "min_items": 0,
-          "sort": "asc"
+          "sort": "none"
         },
         "shape": "list",
         "type": "string",
@@ -3904,16 +3845,15 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open_prefer_known",
-        "source": "grip"
+        "source": null
       },
       "evidence": {
         "conflict_policy": "resolve_by_tier_else_unknown",
@@ -3986,6 +3926,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Ergonomics",
@@ -4010,9 +3951,9 @@
       "contract": {
         "list_rules": {
           "dedupe": true,
-          "max_items": 8,
+          "max_items": 100,
           "min_items": 0,
-          "sort": "asc"
+          "sort": "none"
         },
         "shape": "list",
         "type": "string",
@@ -4021,16 +3962,15 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open_prefer_known",
-        "source": "hand_size"
+        "source": null
       },
       "evidence": {
         "conflict_policy": "resolve_by_tier_else_unknown",
@@ -4103,6 +4043,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Ergonomics",
@@ -4132,9 +4073,14 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
-        "policy": "closed",
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open_prefer_known",
         "source": "yes_no"
       },
       "evidence": {
@@ -4162,24 +4108,7 @@
       },
       "key": "hardware_acceleration",
       "parse": {
-        "false_tokens": [
-          "no",
-          "false",
-          "0",
-          "off"
-        ],
-        "template": "boolean_yes_no_unk",
-        "true_tokens": [
-          "yes",
-          "true",
-          "1",
-          "on"
-        ],
-        "unknown_tokens": [
-          "unk",
-          "n/a",
-          ""
-        ]
+        "template": "boolean_yes_no_unk"
       },
       "priority": {
         "availability": "sometimes",
@@ -4219,6 +4148,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Sensor & Performance",
@@ -4245,10 +4175,6 @@
       "canonical_key": null,
       "component": null,
       "contract": {
-        "range": {
-          "max": 250,
-          "min": 20
-        },
         "rounding": {
           "decimals": 1,
           "mode": "nearest"
@@ -4261,13 +4187,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -4298,6 +4223,7 @@
       },
       "key": "height",
       "parse": {
+        "allow_unitless": true,
         "strict_unit_required": true,
         "template": "number_with_unit",
         "unit": "mm",
@@ -4383,9 +4309,14 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
-        "policy": "closed",
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open_prefer_known",
         "source": "yes_no"
       },
       "evidence": {
@@ -4413,24 +4344,7 @@
       },
       "key": "honeycomb_frame",
       "parse": {
-        "false_tokens": [
-          "no",
-          "false",
-          "0",
-          "off"
-        ],
-        "template": "boolean_yes_no_unk",
-        "true_tokens": [
-          "yes",
-          "true",
-          "1",
-          "on"
-        ],
-        "unknown_tokens": [
-          "unk",
-          "n/a",
-          ""
-        ]
+        "template": "boolean_yes_no_unk"
       },
       "priority": {
         "availability": "sometimes",
@@ -4470,6 +4384,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Construction",
@@ -4499,9 +4414,14 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
-        "policy": "closed",
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open_prefer_known",
         "source": "yes_no"
       },
       "evidence": {
@@ -4529,24 +4449,7 @@
       },
       "key": "hot_swappable",
       "parse": {
-        "false_tokens": [
-          "no",
-          "false",
-          "0",
-          "off"
-        ],
-        "template": "boolean_yes_no_unk",
-        "true_tokens": [
-          "yes",
-          "true",
-          "1",
-          "on"
-        ],
-        "unknown_tokens": [
-          "unk",
-          "n/a",
-          ""
-        ]
+        "template": "boolean_yes_no_unk"
       },
       "priority": {
         "availability": "sometimes",
@@ -4616,7 +4519,6 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "policy": "closed",
@@ -4658,7 +4560,7 @@
       },
       "key": "hump",
       "parse": {
-        "template": "enum_string"
+        "template": "text_field"
       },
       "priority": {
         "availability": "expected",
@@ -4698,6 +4600,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Ergonomics",
@@ -4717,17 +4620,13 @@
     },
     "ips": {
       "aliases": [
+        "inches per second",
         "ips",
-        "max ips",
-        "inches per second"
+        "max ips"
       ],
       "canonical_key": null,
       "component": null,
       "contract": {
-        "range": {
-          "max": 1000,
-          "min": 10
-        },
         "rounding": {
           "decimals": 0,
           "mode": "nearest"
@@ -4740,13 +4639,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -4776,6 +4674,7 @@
       },
       "key": "ips",
       "parse": {
+        "allow_unitless": true,
         "strict_unit_required": false,
         "template": "number_with_unit",
         "unit": "ips",
@@ -4845,32 +4744,18 @@
     "lift": {
       "aliases": [
         "lift",
-        "lod",
         "lift off distance",
-        "lift-off distance"
+        "lift-off distance",
+        "lod"
       ],
       "canonical_key": null,
       "component": null,
       "contract": {
-        "item_union": [
-          "number",
-          {
-            "schema": {
-              "max": {
-                "type": "number"
-              },
-              "min": {
-                "type": "number"
-              }
-            },
-            "type": "object"
-          }
-        ],
         "list_rules": {
           "dedupe": true,
-          "max_items": 10,
+          "max_items": 100,
           "min_items": 0,
-          "sort": "asc"
+          "sort": "none"
         },
         "shape": "list",
         "type": "number",
@@ -4880,13 +4765,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -4917,6 +4801,7 @@
       },
       "key": "lift",
       "parse": {
+        "allow_unitless": true,
         "delimiters": [
           ",",
           "/",
@@ -5009,7 +4894,7 @@
       "contract": {
         "list_rules": {
           "dedupe": true,
-          "max_items": 30,
+          "max_items": 100,
           "min_items": 0,
           "sort": "none"
         },
@@ -5020,13 +4905,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open_prefer_known",
         "source": null
@@ -5109,6 +4993,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Sensor & Performance",
@@ -5124,7 +5009,7 @@
         "tooltip_md": "Define 'Lift Settings' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "value_form": "list_tokens"
+      "value_form": "list"
     },
     "lighting": {
       "aliases": [],
@@ -5133,7 +5018,7 @@
       "contract": {
         "list_rules": {
           "dedupe": true,
-          "max_items": 30,
+          "max_items": 100,
           "min_items": 0,
           "sort": "none"
         },
@@ -5144,16 +5029,15 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open_prefer_known",
-        "source": null
+        "source": "data_lists.lighting"
       },
       "evidence": {
         "conflict_policy": "resolve_by_tier_else_unknown",
@@ -5237,6 +5121,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "General",
@@ -5252,7 +5137,7 @@
         "tooltip_md": "Define 'Lighting' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "value_form": "list_tokens"
+      "value_form": "list"
     },
     "lngth": {
       "aliases": [
@@ -5264,10 +5149,6 @@
       "canonical_key": "length",
       "component": null,
       "contract": {
-        "range": {
-          "max": 250,
-          "min": 20
-        },
         "rounding": {
           "decimals": 1,
           "mode": "nearest"
@@ -5280,13 +5161,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -5317,6 +5197,7 @@
       },
       "key": "lngth",
       "parse": {
+        "allow_unitless": true,
         "strict_unit_required": true,
         "template": "number_with_unit",
         "unit": "mm",
@@ -5396,7 +5277,7 @@
       "canonical_key": null,
       "component": {
         "allow_new_components": true,
-        "require_identity_evidence": false,
+        "require_identity_evidence": true,
         "source": "component_db.material",
         "type": "material"
       },
@@ -5408,13 +5289,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open_prefer_known",
         "source": "component_db.material"
@@ -5487,6 +5367,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Construction",
@@ -5516,13 +5397,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.9,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open_prefer_known",
         "source": "data_lists.mcu"
@@ -5563,7 +5443,7 @@
       },
       "key": "mcu",
       "parse": {
-        "template": "enum_string"
+        "template": "text_field"
       },
       "priority": {
         "availability": "sometimes",
@@ -5603,6 +5483,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Electronics",
@@ -5625,7 +5506,6 @@
       "canonical_key": null,
       "component": null,
       "contract": {
-        "format": "url",
         "shape": "scalar",
         "type": "string",
         "unknown_reason_required": true,
@@ -5633,12 +5513,12 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -5706,6 +5586,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Electronics",
@@ -5728,28 +5609,24 @@
       "canonical_key": null,
       "component": null,
       "contract": {
-        "range": {
-          "max": 40,
-          "min": 0
-        },
         "rounding": {
           "decimals": 0,
           "mode": "nearest"
         },
         "shape": "scalar",
         "type": "integer",
+        "unit": "none",
         "unknown_reason_required": true,
         "unknown_token": "unk"
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -5779,7 +5656,10 @@
       },
       "key": "middle_buttons",
       "parse": {
-        "template": "integer_field"
+        "allow_unitless": true,
+        "strict_unit_required": false,
+        "template": "number_with_unit",
+        "unit": "none"
       },
       "priority": {
         "availability": "expected",
@@ -5849,9 +5729,14 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
-        "policy": "closed",
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open_prefer_known",
         "source": "yes_no"
       },
       "evidence": {
@@ -5879,24 +5764,7 @@
       },
       "key": "motion_sync",
       "parse": {
-        "false_tokens": [
-          "no",
-          "false",
-          "0",
-          "off"
-        ],
-        "template": "boolean_yes_no_unk",
-        "true_tokens": [
-          "yes",
-          "true",
-          "1",
-          "on"
-        ],
-        "unknown_tokens": [
-          "unk",
-          "n/a",
-          ""
-        ]
+        "template": "boolean_yes_no_unk"
       },
       "priority": {
         "availability": "sometimes",
@@ -5936,6 +5804,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Sensor & Performance",
@@ -5965,12 +5834,12 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -6040,6 +5909,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Connectivity",
@@ -6069,9 +5939,14 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
-        "policy": "closed",
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open_prefer_known",
         "source": "yes_no"
       },
       "evidence": {
@@ -6099,24 +5974,7 @@
       },
       "key": "nvidia_reflex",
       "parse": {
-        "false_tokens": [
-          "no",
-          "false",
-          "0",
-          "off"
-        ],
-        "template": "boolean_yes_no_unk",
-        "true_tokens": [
-          "yes",
-          "true",
-          "1",
-          "on"
-        ],
-        "unknown_tokens": [
-          "unk",
-          "n/a",
-          ""
-        ]
+        "template": "boolean_yes_no_unk"
       },
       "priority": {
         "availability": "rare",
@@ -6156,6 +6014,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Sensor & Performance",
@@ -6185,9 +6044,14 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
-        "policy": "closed",
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open_prefer_known",
         "source": "yes_no"
       },
       "evidence": {
@@ -6215,24 +6079,7 @@
       },
       "key": "onboard_memory",
       "parse": {
-        "false_tokens": [
-          "no",
-          "false",
-          "0",
-          "off"
-        ],
-        "template": "boolean_yes_no_unk",
-        "true_tokens": [
-          "yes",
-          "true",
-          "1",
-          "on"
-        ],
-        "unknown_tokens": [
-          "unk",
-          "n/a",
-          ""
-        ]
+        "template": "boolean_yes_no_unk"
       },
       "priority": {
         "availability": "sometimes",
@@ -6272,6 +6119,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Buttons & Features",
@@ -6294,28 +6142,24 @@
       "canonical_key": null,
       "component": null,
       "contract": {
-        "range": {
-          "max": 20,
-          "min": 0
-        },
         "rounding": {
           "decimals": 0,
           "mode": "nearest"
         },
         "shape": "scalar",
         "type": "integer",
+        "unit": "none",
         "unknown_reason_required": true,
         "unknown_token": "unk"
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -6345,7 +6189,9 @@
       },
       "key": "onboard_memory_value",
       "parse": {
-        "template": "integer_field"
+        "strict_unit_required": false,
+        "template": "number_with_unit",
+        "unit": "none"
       },
       "priority": {
         "availability": "expected",
@@ -6415,9 +6261,14 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
-        "policy": "closed",
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open_prefer_known",
         "source": "yes_no"
       },
       "evidence": {
@@ -6445,24 +6296,7 @@
       },
       "key": "paracord",
       "parse": {
-        "false_tokens": [
-          "no",
-          "false",
-          "0",
-          "off"
-        ],
-        "template": "boolean_yes_no_unk",
-        "true_tokens": [
-          "yes",
-          "true",
-          "1",
-          "on"
-        ],
-        "unknown_tokens": [
-          "unk",
-          "n/a",
-          ""
-        ]
+        "template": "boolean_yes_no_unk"
       },
       "priority": {
         "availability": "sometimes",
@@ -6502,6 +6336,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Connectivity",
@@ -6521,10 +6356,10 @@
     },
     "polling_rate": {
       "aliases": [
-        "polling_rate",
+        "hz",
         "polling",
         "polling rate",
-        "hz",
+        "polling_rate",
         "report rate"
       ],
       "canonical_key": null,
@@ -6532,9 +6367,13 @@
       "contract": {
         "list_rules": {
           "dedupe": true,
-          "max_items": 16,
+          "max_items": 100,
           "min_items": 0,
-          "sort": "asc"
+          "sort": "none"
+        },
+        "range": {
+          "max": 10000,
+          "min": 10
         },
         "shape": "list",
         "type": "number",
@@ -6544,15 +6383,15 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open_prefer_known",
-        "source": "known_values.polling_rate_hz"
+        "source": null
       },
       "evidence": {
         "conflict_policy": "resolve_by_tier_else_unknown",
@@ -6598,20 +6437,20 @@
           "|",
           ";"
         ],
+        "strict_unit_required": false,
         "template": "list_of_numbers_with_unit",
         "unit": "Hz",
         "unit_accepts": [
-          "Hz",
-          "hz"
+          "Hz"
         ]
       },
       "priority": {
         "availability": "expected",
-        "block_publish_when_unk": true,
+        "block_publish_when_unk": false,
         "difficulty": "medium",
         "effort": 6,
-        "publish_gate": true,
-        "required_level": "required"
+        "publish_gate": false,
+        "required_level": "critical"
       },
       "search_hints": {
         "domain_hints": [
@@ -6673,18 +6512,18 @@
       "contract": {
         "shape": "scalar",
         "type": "string",
+        "unit": "usd",
         "unknown_reason_required": true,
         "unknown_token": "unk"
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open_prefer_known",
         "source": null
@@ -6715,8 +6554,8 @@
       },
       "key": "price_range",
       "parse": {
-        "notes": "Prefer MSRP bracket tokens like '0-50', '50-100', or '$99'. Keep as string; numeric parsing is category-specific.",
-        "template": "price_range_string"
+        "allow_unitless": true,
+        "template": "text_field"
       },
       "priority": {
         "availability": "sometimes",
@@ -6756,6 +6595,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "General",
@@ -6785,9 +6625,14 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
-        "policy": "closed",
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open_prefer_known",
         "source": "yes_no"
       },
       "evidence": {
@@ -6815,24 +6660,7 @@
       },
       "key": "profile_switching",
       "parse": {
-        "false_tokens": [
-          "no",
-          "false",
-          "0",
-          "off"
-        ],
-        "template": "boolean_yes_no_unk",
-        "true_tokens": [
-          "yes",
-          "true",
-          "1",
-          "on"
-        ],
-        "unknown_tokens": [
-          "unk",
-          "n/a",
-          ""
-        ]
+        "template": "boolean_yes_no_unk"
       },
       "priority": {
         "availability": "sometimes",
@@ -6872,6 +6700,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Buttons & Features",
@@ -6894,28 +6723,24 @@
       "canonical_key": null,
       "component": null,
       "contract": {
-        "range": {
-          "max": 40,
-          "min": 0
-        },
         "rounding": {
           "decimals": 0,
           "mode": "nearest"
         },
         "shape": "scalar",
         "type": "integer",
+        "unit": "none",
         "unknown_reason_required": true,
         "unknown_token": "unk"
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -6945,7 +6770,10 @@
       },
       "key": "programmable_buttons",
       "parse": {
-        "template": "integer_field"
+        "allow_unitless": true,
+        "strict_unit_required": false,
+        "template": "number_with_unit",
+        "unit": "none"
       },
       "priority": {
         "availability": "expected",
@@ -6985,6 +6813,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Buttons & Features",
@@ -7007,7 +6836,6 @@
       "canonical_key": null,
       "component": null,
       "contract": {
-        "format": "date",
         "shape": "scalar",
         "type": "string",
         "unknown_reason_required": true,
@@ -7015,12 +6843,12 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -7097,6 +6925,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "General",
@@ -7126,9 +6955,14 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
-        "policy": "closed",
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open_prefer_known",
         "source": "yes_no"
       },
       "evidence": {
@@ -7156,24 +6990,7 @@
       },
       "key": "rgb",
       "parse": {
-        "false_tokens": [
-          "no",
-          "false",
-          "0",
-          "off"
-        ],
-        "template": "boolean_yes_no_unk",
-        "true_tokens": [
-          "yes",
-          "true",
-          "1",
-          "on"
-        ],
-        "unknown_tokens": [
-          "unk",
-          "n/a",
-          ""
-        ]
+        "template": "boolean_yes_no_unk"
       },
       "priority": {
         "availability": "sometimes",
@@ -7213,6 +7030,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "General",
@@ -7247,13 +7065,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open_prefer_known",
         "source": "component_db.sensor"
@@ -7331,6 +7148,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Sensor & Performance",
@@ -7360,13 +7178,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open_prefer_known",
         "source": null
@@ -7399,7 +7216,7 @@
       },
       "key": "sensor_brand",
       "parse": {
-        "template": "enum_string"
+        "template": "text_field"
       },
       "priority": {
         "availability": "expected",
@@ -7439,6 +7256,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Sensor & Performance",
@@ -7473,13 +7291,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open_prefer_known",
         "source": null
@@ -7515,8 +7332,7 @@
           "YYYY-MM",
           "YYYY-MM-DD"
         ],
-        "strict": false,
-        "template": "year_field"
+        "template": "date_field"
       },
       "priority": {
         "availability": "sometimes",
@@ -7591,13 +7407,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -7630,6 +7445,7 @@
       "parse": {
         "strict_unit_required": true,
         "template": "number_with_unit",
+        "unit": "ms",
         "unit_accepts": [
           "ms"
         ]
@@ -7748,13 +7564,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -7810,6 +7625,7 @@
         },
         "strict_unit_required": false,
         "template": "latency_list_modes_ms",
+        "unit": "ms",
         "unit_accepts": [
           "ms"
         ]
@@ -7852,6 +7668,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Sensor & Performance",
@@ -7874,7 +7691,6 @@
       "canonical_key": null,
       "component": null,
       "contract": {
-        "format": "url",
         "shape": "scalar",
         "type": "string",
         "unknown_reason_required": true,
@@ -7882,12 +7698,12 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -7958,6 +7774,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Sensor & Performance",
@@ -7987,7 +7804,6 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "policy": "closed",
@@ -8029,7 +7845,7 @@
       },
       "key": "sensor_type",
       "parse": {
-        "template": "enum_string"
+        "template": "text_field"
       },
       "priority": {
         "availability": "expected",
@@ -8099,7 +7915,6 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "policy": "closed",
@@ -8141,7 +7956,7 @@
       },
       "key": "shape",
       "parse": {
-        "template": "enum_string"
+        "template": "text_field"
       },
       "priority": {
         "availability": "expected",
@@ -8181,6 +7996,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Ergonomics",
@@ -8215,13 +8031,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -8254,6 +8069,7 @@
       "parse": {
         "strict_unit_required": true,
         "template": "number_with_unit",
+        "unit": "ms",
         "unit_accepts": [
           "ms"
         ]
@@ -8319,28 +8135,24 @@
       "canonical_key": null,
       "component": null,
       "contract": {
-        "range": {
-          "max": 40,
-          "min": 0
-        },
         "rounding": {
           "decimals": 0,
           "mode": "nearest"
         },
         "shape": "scalar",
         "type": "integer",
+        "unit": "none",
         "unknown_reason_required": true,
         "unknown_token": "unk"
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -8370,7 +8182,10 @@
       },
       "key": "side_buttons",
       "parse": {
-        "template": "integer_field"
+        "allow_unitless": true,
+        "strict_unit_required": false,
+        "template": "number_with_unit",
+        "unit": "none"
       },
       "priority": {
         "availability": "expected",
@@ -8440,9 +8255,14 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
-        "policy": "closed",
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open_prefer_known",
         "source": "yes_no"
       },
       "evidence": {
@@ -8470,24 +8290,7 @@
       },
       "key": "silent_clicks",
       "parse": {
-        "false_tokens": [
-          "no",
-          "false",
-          "0",
-          "off"
-        ],
-        "template": "boolean_yes_no_unk",
-        "true_tokens": [
-          "yes",
-          "true",
-          "1",
-          "on"
-        ],
-        "unknown_tokens": [
-          "unk",
-          "n/a",
-          ""
-        ]
+        "template": "boolean_yes_no_unk"
       },
       "priority": {
         "availability": "sometimes",
@@ -8527,6 +8330,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Construction",
@@ -8556,12 +8360,12 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -8594,12 +8398,12 @@
         "template": "text_field"
       },
       "priority": {
-        "availability": "sometimes",
-        "block_publish_when_unk": false,
+        "availability": "expected",
+        "block_publish_when_unk": true,
         "difficulty": "easy",
         "effort": 4,
-        "publish_gate": false,
-        "required_level": "expected"
+        "publish_gate": true,
+        "required_level": "identity"
       },
       "search_hints": {
         "domain_hints": [
@@ -8631,6 +8435,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "General",
@@ -8660,9 +8465,14 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
-        "policy": "closed",
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open_prefer_known",
         "source": "yes_no"
       },
       "evidence": {
@@ -8690,24 +8500,7 @@
       },
       "key": "smoothing",
       "parse": {
-        "false_tokens": [
-          "no",
-          "false",
-          "0",
-          "off"
-        ],
-        "template": "boolean_yes_no_unk",
-        "true_tokens": [
-          "yes",
-          "true",
-          "1",
-          "on"
-        ],
-        "unknown_tokens": [
-          "unk",
-          "n/a",
-          ""
-        ]
+        "template": "boolean_yes_no_unk"
       },
       "priority": {
         "availability": "sometimes",
@@ -8747,6 +8540,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Sensor & Performance",
@@ -8781,13 +8575,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open_prefer_known",
         "source": "component_db.switch"
@@ -8865,6 +8658,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Switches",
@@ -8894,13 +8688,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open_prefer_known",
         "source": null
@@ -8933,7 +8726,7 @@
       },
       "key": "switch_brand",
       "parse": {
-        "template": "enum_string"
+        "template": "text_field"
       },
       "priority": {
         "availability": "expected",
@@ -8973,6 +8766,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Switches",
@@ -9002,7 +8796,6 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "policy": "closed",
@@ -9045,7 +8838,7 @@
       },
       "key": "switch_type",
       "parse": {
-        "template": "enum_string"
+        "template": "text_field"
       },
       "priority": {
         "availability": "expected",
@@ -9085,6 +8878,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Switches",
@@ -9103,30 +8897,136 @@
       "value_form": "scalar"
     },
     "switches_link": {
+      "aliases": [
+        "Switch Link",
+        "switch_link",
+        "switches_link"
+      ],
+      "canonical_key": "switch_link",
+      "component": null,
       "contract": {
         "shape": "scalar",
         "type": "string",
         "unknown_reason_required": true,
         "unknown_token": "unk"
       },
+      "enum": {
+        "match": {
+          "strategy": "alias"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 1,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "excel_hints": {
+        "dataEntry": {
+          "key_cell": "B67",
+          "row": 67,
+          "sample_values": [
+            "https://www.mouser.com/ProductDetail/Omron-Electronics/D2FC-F-7N20M?qs=17ckDYBRdek0%2FvhX1fLcuQ%3D%3D",
+            "https://www.amazon.com/Acinkeety-Transparent-Switch-Microswitch-Million/dp/B0CMQRMTN8?&linkCode=ll1&tag=eggear-20&linkId=c0844220fc8fd56d9e1870ad75c86ffb&language=en_US&ref_=as_li_ss_tl",
+            "https://rog.asus.com/us/articles/gaming-keyboards-gaming-mice/guide-how-to-replace-the-switches-in-your-rog-gladius-iii-gaming-mouse/",
+            "https://rog.asus.com/us/articles/gaming-keyboards-gaming-mice/guide-how-to-replace-the-switches-in-your-rog-gladius-iii-gaming-mouse/",
+            "https://rog.asus.com/us/articles/gaming-keyboards-gaming-mice/guide-how-to-replace-the-switches-in-your-rog-gladius-iii-gaming-mouse/",
+            "https://rog.asus.com/us/articles/gaming-keyboards-gaming-mice/guide-how-to-replace-the-switches-in-your-rog-gladius-iii-gaming-mouse/",
+            "https://rog.asus.com/us/articles/gaming-keyboards-gaming-mice/guide-how-to-replace-the-switches-in-your-rog-gladius-iii-gaming-mouse/",
+            "https://rog.asus.com/us/articles/gaming-keyboards-gaming-mice/guide-how-to-replace-the-switches-in-your-rog-gladius-iii-gaming-mouse/",
+            "https://rog.asus.com/us/articles/gaming-keyboards-gaming-mice/guide-how-to-replace-the-switches-in-your-rog-gladius-iii-gaming-mouse/",
+            "https://rog.asus.com/us/articles/gaming-keyboards-gaming-mice/guide-how-to-replace-the-switches-in-your-rog-gladius-iii-gaming-mouse/",
+            "https://www.logitechg.com/en-us/discover/technology/lightforce",
+            "https://www.logitechg.com/en-us/discover/technology/lightforce"
+          ],
+          "sheet": "dataEntry"
+        },
+        "key_column": "B",
+        "key_row": 67,
+        "key_sheet": "dataEntry",
+        "sample_values": [
+          "https://www.mouser.com/ProductDetail/Omron-Electronics/D2FC-F-7N20M?qs=17ckDYBRdek0%2FvhX1fLcuQ%3D%3D"
+        ]
+      },
       "key": "switches_link",
       "parse": {
-        "template": "string"
+        "template": "text_field"
       },
       "priority": {
         "availability": "sometimes",
         "block_publish_when_unk": false,
-        "difficulty": "medium",
-        "effort": 5,
+        "difficulty": "easy",
+        "effort": 3,
         "publish_gate": false,
-        "required_level": "optional"
+        "required_level": "expected"
+      },
+      "search_hints": {
+        "availability_bias": "sometimes",
+        "difficulty_bias": "easy",
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "parse_template": "list_of_tokens_delimited",
+        "preferred_content_types": [
+          "support",
+          "manual",
+          "spec",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "priority_weight": 0.75,
+        "query_bias": [
+          "manual",
+          "datasheet",
+          "spec"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Switches Link"
+        ]
       },
       "ui": {
-        "group": "Unsorted",
-        "label": "switches_link",
-        "order": 999,
-        "tooltip_md": ""
-      }
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "controls",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "switch_link",
+        "order": 59,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "",
+        "tooltip_source": null
+      },
+      "value_form": "scalar"
     },
     "thumb_rest": {
       "aliases": [],
@@ -9140,12 +9040,12 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -9215,6 +9115,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Ergonomics",
@@ -9244,9 +9145,14 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
-        "policy": "closed",
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open_prefer_known",
         "source": "yes_no"
       },
       "evidence": {
@@ -9274,24 +9180,7 @@
       },
       "key": "tilt_scroll_wheel",
       "parse": {
-        "false_tokens": [
-          "no",
-          "false",
-          "0",
-          "off"
-        ],
-        "template": "boolean_yes_no_unk",
-        "true_tokens": [
-          "yes",
-          "true",
-          "1",
-          "on"
-        ],
-        "unknown_tokens": [
-          "unk",
-          "n/a",
-          ""
-        ]
+        "template": "boolean_yes_no_unk"
       },
       "priority": {
         "availability": "sometimes",
@@ -9331,6 +9220,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Buttons & Features",
@@ -9350,17 +9240,17 @@
     },
     "weight": {
       "aliases": [
-        "weight",
-        "weight_g",
+        "grams",
         "mass",
-        "grams"
+        "weight",
+        "weight_g"
       ],
       "canonical_key": null,
       "component": null,
       "contract": {
         "range": {
-          "max": 250,
-          "min": 20
+          "max": 500,
+          "min": 1
         },
         "rounding": {
           "decimals": 1,
@@ -9374,13 +9264,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -9411,6 +9300,7 @@
       },
       "key": "weight",
       "parse": {
+        "allow_unitless": true,
         "strict_unit_required": false,
         "template": "number_with_unit",
         "unit": "g",
@@ -9483,17 +9373,13 @@
     },
     "width": {
       "aliases": [
+        "overall width",
         "width",
-        "width_mm",
-        "overall width"
+        "width_mm"
       ],
       "canonical_key": null,
       "component": null,
       "contract": {
-        "range": {
-          "max": 250,
-          "min": 20
-        },
         "rounding": {
           "decimals": 1,
           "mode": "nearest"
@@ -9506,13 +9392,12 @@
       },
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
           "accept_if_evidence": true,
           "mark_needs_curation": true,
-          "suggestion_target": "helper_files/mouse/_suggestions/enums.json"
+          "suggestion_target": "_suggestions/enums.json"
         },
         "policy": "open",
         "source": null
@@ -9543,6 +9428,7 @@
       },
       "key": "width",
       "parse": {
+        "allow_unitless": true,
         "strict_unit_required": true,
         "template": "number_with_unit",
         "unit": "mm",
@@ -9628,9 +9514,14 @@
       },
       "enum": {
         "match": {
-          "strategy": "exact"
+          "strategy": "alias"
         },
-        "policy": "closed",
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open_prefer_known",
         "source": "yes_no"
       },
       "evidence": {
@@ -9658,24 +9549,7 @@
       },
       "key": "wireless_charging",
       "parse": {
-        "false_tokens": [
-          "no",
-          "false",
-          "0",
-          "off"
-        ],
-        "template": "boolean_yes_no_unk",
-        "true_tokens": [
-          "yes",
-          "true",
-          "1",
-          "on"
-        ],
-        "unknown_tokens": [
-          "unk",
-          "n/a",
-          ""
-        ]
+        "template": "boolean_yes_no_unk"
       },
       "priority": {
         "availability": "sometimes",
@@ -9715,6 +9589,7 @@
         ]
       },
       "ui": {
+        "display_decimals": 0,
         "display_mode": "all",
         "examples": [],
         "group": "Connectivity",
@@ -9733,7 +9608,7 @@
       "value_form": "scalar"
     }
   },
-  "generated_at": "2026-02-13T00:11:11.523Z",
+  "generated_at": "2026-02-13T02:18:36.677Z",
   "global": {
     "availability_levels": [
       "expected",
@@ -9778,7 +9653,9 @@
     ]
   },
   "key_migrations_suggested": {
-    "lngth": "length"
+    "lngth": "length",
+    "switch_link": "switches_link",
+    "switches_link": "switch_link"
   },
   "key_source": {
     "range": "B9:B83",
@@ -9898,6 +9775,10 @@
       "TTC Optical Microswitch",
       "unk",
       "unspecified"
+    ],
+    "yes_no": [
+      "yes",
+      "no"
     ]
   },
   "parse_templates": {
@@ -10064,7 +9945,9 @@
     }
   },
   "schema": {
-    "critical_fields": [],
+    "critical_fields": [
+      "polling_rate"
+    ],
     "deep_fields": [
       "click_force",
       "click_latency",
@@ -10073,8 +9956,7 @@
       "nvidia_reflex",
       "sensor_latency",
       "sensor_latency_list",
-      "shift_latency",
-      "switches_link"
+      "shift_latency"
     ],
     "exclude_fields": [
       "id",
@@ -10124,9 +10006,9 @@
       "sensor_type",
       "shape",
       "silent_clicks",
-      "sku",
       "smoothing",
       "switch_type",
+      "switches_link",
       "thumb_rest",
       "tilt_scroll_wheel"
     ],
@@ -10140,7 +10022,9 @@
       "release_date",
       "wireless_charging"
     ],
-    "identity_fields": [],
+    "identity_fields": [
+      "sku"
+    ],
     "include_fields": [
       "acceleration",
       "adjustable_scroll_wheel",
@@ -10226,7 +10110,6 @@
       "height",
       "lngth",
       "middle_buttons",
-      "polling_rate",
       "sensor",
       "sensor_brand",
       "side_buttons",

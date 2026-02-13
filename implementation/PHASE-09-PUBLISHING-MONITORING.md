@@ -37,7 +37,7 @@ OUTPUT FORMAT MATRIX:
 │ Format          │ Use Case                                          │
 ├─────────────────┼────────────────────────────────────────────────────┤
 │ JSON (full)     │ API consumption, front-end rendering, internal    │
-│ JSON (compact)  │ Lightweight API responses, mobile apps            │
+│ JSON (compact)  │ Lightweight API responses, mobile apps (lists stay arrays) │
 │ Excel (.xlsx)   │ Human review, sharing, manual analysis            │
 │ CSV             │ Data import, spreadsheet tools, flat file exchange│
 │ SQLite          │ Local queryable database, analytics               │
@@ -89,7 +89,7 @@ Overrides (Phase 8)
 ┌─────────────────────────────────────────────────┐
 │  STAGE 2: FINAL VALIDATION                       │
 │  - Re-run FieldRulesEngine on merged record      │
-│  - Verify all evidence citations still valid      │
+│  - Verify all evidence citations still valid (snippet_id exists, snippet_hash matches, quote_span slices correctly)      │
 │  - Check required fields are filled              │
 │  - Flag any new issues                           │
 └────────────────────┬────────────────────────────┘
@@ -179,7 +179,7 @@ output/
     "height": 39.8,
     "sensor": "Focus Pro 26K V2",
     "dpi": 35000,
-    "polling_rate": "8000, 4000, 2000, 1000, 500, 250, 125",
+    "polling_rate": [8000, 4000, 2000, 1000, 500, 250, 125],
     "connection": "hybrid",
     "click_latency": 0.2,
     // ... all fields
@@ -192,7 +192,13 @@ output/
       "confidence": 0.98,
       "source": "razer.com",
       "source_tier": "tier1_manufacturer",
-      "last_verified": "2026-02-12T10:30:00Z"
+      "last_verified": "2026-02-12T10:30:00Z",
+
+      // Minimal provenance pointers (full provenance lives in provenance.json)
+      "source_id": "razer_com",
+      "snippet_id": "snp_001",
+      "snippet_hash": "sha256:…",
+      "quote_span": [0, 27]
     }
     // ... all fields with metadata
   },
@@ -252,6 +258,19 @@ output/
 ```
 
 ---
+
+
+---
+
+## DRIFT DETECTION & AUTO-REPUBLISH (ACCURACY OVER TIME)
+
+Add a daily job that checks `page_content_hash` / `text_hash` for Tier 1+2 sources on recently published products.
+
+- If hashes change, re-run extraction for the affected fields.
+- If extracted values change (diff), queue the product for **review** before republishing.
+- If evidence audit fails (snippet_hash mismatch), quarantine the product until a re-crawl rebuilds EvidencePack.
+
+This prevents stale-but-wrong specs from silently living forever.
 
 ### Accuracy Monitoring System
 

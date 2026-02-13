@@ -474,10 +474,10 @@
     },
     {
       "aliases": [
-        "battery_hours",
         "battery life",
         "battery life (hours)",
-        "battery runtime"
+        "battery runtime",
+        "battery_hours"
       ],
       "array_handling": "none",
       "canonical_key": "battery_hours",
@@ -659,10 +659,10 @@
     },
     {
       "aliases": [
-        "weight",
-        "weight_g",
+        "grams",
         "mass",
-        "grams"
+        "weight",
+        "weight_g"
       ],
       "array_handling": "none",
       "canonical_key": "weight",
@@ -759,9 +759,9 @@
     },
     {
       "aliases": [
+        "overall width",
         "width",
-        "width_mm",
-        "overall width"
+        "width_mm"
       ],
       "array_handling": "none",
       "canonical_key": "width",
@@ -1367,10 +1367,10 @@
     },
     {
       "aliases": [
-        "polling_rate",
+        "hz",
         "polling",
         "polling rate",
-        "hz",
+        "polling_rate",
         "report rate"
       ],
       "array_handling": "none",
@@ -1403,10 +1403,10 @@
     },
     {
       "aliases": [
+        "cpi",
         "dpi",
         "max dpi",
-        "maximum dpi",
-        "cpi"
+        "maximum dpi"
       ],
       "array_handling": "none",
       "canonical_key": "dpi",
@@ -1438,9 +1438,9 @@
     },
     {
       "aliases": [
+        "inches per second",
         "ips",
-        "max ips",
-        "inches per second"
+        "max ips"
       ],
       "array_handling": "none",
       "canonical_key": "ips",
@@ -1480,7 +1480,16 @@
       "canonical_key": "acceleration",
       "display_decimals": 0,
       "display_mode": "all",
-      "examples": [],
+      "examples": [
+        "40",
+        "50",
+        "50",
+        "50",
+        "50",
+        "10",
+        "40",
+        "50"
+      ],
       "group": "Sensor & Performance",
       "guidance_md": null,
       "input_control": "number",
@@ -1493,21 +1502,14 @@
       "suffix": "g",
       "tooltip_key": "acceleration",
       "tooltip_md": "Define 'Max Acceleration' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
-      "tooltip_source": "hbs_tooltipsMouse.js",
-      "required_level": "expected",
-      "availability": "expected",
-      "difficulty": "easy",
-      "effort": 3,
-      "type": "integer",
-      "shape": "scalar",
-      "unit": "g"
+      "tooltip_source": "hbs_tooltipsMouse.js"
     },
     {
       "aliases": [
         "lift",
-        "lod",
         "lift off distance",
-        "lift-off distance"
+        "lift-off distance",
+        "lod"
       ],
       "array_handling": "none",
       "canonical_key": "lift",
@@ -1566,6 +1568,31 @@
       "tooltip_key": "lift_settings",
       "tooltip_md": "Define 'Lift Settings' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
       "tooltip_source": "hbs_tooltipsMouse.js"
+    },
+    {
+      "aliases": [
+        "Switch Link",
+        "switch_link",
+        "switches_link"
+      ],
+      "array_handling": "none",
+      "canonical_key": "switch_link",
+      "display_decimals": 0,
+      "display_mode": "all",
+      "examples": [],
+      "group": "controls",
+      "guidance_md": null,
+      "input_control": "text",
+      "key": "switches_link",
+      "label": "switch_link",
+      "order": 59,
+      "placeholder": "unk",
+      "prefix": null,
+      "short_label": null,
+      "suffix": null,
+      "tooltip_key": null,
+      "tooltip_md": "",
+      "tooltip_source": null
     },
     {
       "aliases": [],
@@ -2235,29 +2262,8 @@
       "tooltip_key": "profile_switching",
       "tooltip_md": "Define 'Profile Switching' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
       "tooltip_source": "hbs_tooltipsMouse.js"
-    },
-    {
-      "aliases": [],
-      "array_handling": "none",
-      "canonical_key": "switches_link",
-      "display_decimals": 0,
-      "display_mode": "all",
-      "examples": [],
-      "group": "Unsorted",
-      "guidance_md": null,
-      "input_control": "text",
-      "key": "switches_link",
-      "label": "switches_link",
-      "order": 999,
-      "placeholder": "unk",
-      "prefix": null,
-      "short_label": null,
-      "suffix": null,
-      "tooltip_key": null,
-      "tooltip_md": "",
-      "tooltip_source": null
     }
   ],
-  "generated_at": "2026-02-13T00:11:11.523Z",
+  "generated_at": "2026-02-13T02:18:36.677Z",
   "version": 1
 }

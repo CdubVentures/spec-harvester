@@ -6,6 +6,7 @@ import { extractEmbeddedState } from '../extractors/embeddedStateExtractor.js';
 import { NetworkRecorder } from './networkRecorder.js';
 import { replayGraphqlRequests } from './graphqlReplay.js';
 import { wait } from '../utils/common.js';
+import { RobotsPolicyCache } from './robotsPolicy.js';
 
 function fixtureFilenameFromHost(host) {
   return `${host.toLowerCase()}.json`;
@@ -18,6 +19,10 @@ export class PlaywrightFetcher {
     this.browser = null;
     this.context = null;
     this.hostLastAccess = new Map();
+    this.robotsPolicy = new RobotsPolicyCache({
+      timeoutMs: Number(this.config.robotsTxtTimeoutMs || 6000),
+      logger
+    });
   }
 
   async start() {
@@ -41,18 +46,67 @@ export class PlaywrightFetcher {
     }
   }
 
-  async waitForHostSlot(host) {
+  async waitForHostSlot(host, minDelayMs = this.config.perHostMinDelayMs) {
     const now = Date.now();
     const last = this.hostLastAccess.get(host) || 0;
     const delta = now - last;
-    if (delta < this.config.perHostMinDelayMs) {
-      await wait(this.config.perHostMinDelayMs - delta);
+    const delayMs = Math.max(0, Number(minDelayMs || this.config.perHostMinDelayMs || 0));
+    if (delta < delayMs) {
+      await wait(delayMs - delta);
     }
     this.hostLastAccess.set(host, Date.now());
   }
 
+  async enforceRobots(source) {
+    if (this.config.robotsTxtCompliant === false || source?.robotsTxtCompliant === false) {
+      return null;
+    }
+
+    let decision;
+    try {
+      decision = await this.robotsPolicy.canFetch({
+        url: source.url,
+        userAgent: this.config.userAgent || '*'
+      });
+    } catch (error) {
+      this.logger?.warn?.('robots_policy_check_failed', {
+        url: source.url,
+        message: error.message
+      });
+      return null;
+    }
+
+    if (decision?.allowed !== false) {
+      return null;
+    }
+
+    return {
+      url: source.url,
+      finalUrl: source.url,
+      status: 451,
+      title: '',
+      html: '',
+      ldjsonBlocks: [],
+      embeddedState: {},
+      networkResponses: [],
+      blockedByRobots: true,
+      robotsDecision: decision
+    };
+  }
+
   async fetch(source) {
-    await this.waitForHostSlot(source.host);
+    const robotsBlocked = await this.enforceRobots(source);
+    if (robotsBlocked) {
+      this.logger?.warn?.('source_blocked_by_robots', {
+        url: source.url,
+        host: source.host,
+        robots_url: robotsBlocked.robotsDecision?.robots_url,
+        matched_rule: robotsBlocked.robotsDecision?.matched_rule || null
+      });
+      return robotsBlocked;
+    }
+
+    await this.waitForHostSlot(source.host, source?.crawlConfig?.rate_limit_ms);
     const page = await this.context.newPage();
     const recorder = new NetworkRecorder({
       maxJsonBytes: this.config.maxJsonBytes,
@@ -185,24 +239,76 @@ export class HttpFetcher {
     this.config = config;
     this.logger = logger;
     this.hostLastAccess = new Map();
+    this.robotsPolicy = new RobotsPolicyCache({
+      timeoutMs: Number(this.config.robotsTxtTimeoutMs || 6000),
+      logger
+    });
   }
 
   async start() {}
 
   async stop() {}
 
-  async waitForHostSlot(host) {
+  async waitForHostSlot(host, minDelayMs = this.config.perHostMinDelayMs) {
     const now = Date.now();
     const last = this.hostLastAccess.get(host) || 0;
     const delta = now - last;
-    if (delta < this.config.perHostMinDelayMs) {
-      await wait(this.config.perHostMinDelayMs - delta);
+    const delayMs = Math.max(0, Number(minDelayMs || this.config.perHostMinDelayMs || 0));
+    if (delta < delayMs) {
+      await wait(delayMs - delta);
     }
     this.hostLastAccess.set(host, Date.now());
   }
 
+  async enforceRobots(source) {
+    if (this.config.robotsTxtCompliant === false || source?.robotsTxtCompliant === false) {
+      return null;
+    }
+    let decision;
+    try {
+      decision = await this.robotsPolicy.canFetch({
+        url: source.url,
+        userAgent: this.config.userAgent || '*'
+      });
+    } catch (error) {
+      this.logger?.warn?.('robots_policy_check_failed', {
+        url: source.url,
+        message: error.message
+      });
+      return null;
+    }
+
+    if (decision?.allowed !== false) {
+      return null;
+    }
+
+    return {
+      url: source.url,
+      finalUrl: source.url,
+      status: 451,
+      title: '',
+      html: '',
+      ldjsonBlocks: [],
+      embeddedState: {},
+      networkResponses: [],
+      blockedByRobots: true,
+      robotsDecision: decision
+    };
+  }
+
   async fetch(source) {
-    await this.waitForHostSlot(source.host);
+    const robotsBlocked = await this.enforceRobots(source);
+    if (robotsBlocked) {
+      this.logger?.warn?.('source_blocked_by_robots', {
+        url: source.url,
+        host: source.host,
+        robots_url: robotsBlocked.robotsDecision?.robots_url,
+        matched_rule: robotsBlocked.robotsDecision?.matched_rule || null
+      });
+      return robotsBlocked;
+    }
+
+    await this.waitForHostSlot(source.host, source?.crawlConfig?.rate_limit_ms);
 
     let result;
     try {

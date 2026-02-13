@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import ExcelJS from 'exceljs';
 import {
   compileRules,
   initCategory,
+  normalizeFieldRulesForPhase1,
   validateRules
 } from '../src/field-rules/compiler.js';
 
@@ -48,6 +50,22 @@ function buildMouseWorkbookMap(workbookPath) {
     enum_lists: [],
     component_sheets: [],
     field_overrides: {}
+  };
+}
+
+function buildMouseWorkbookMapWithOverrides({
+  workbookPath,
+  fieldOverrides = {},
+  expectations = {}
+}) {
+  const base = buildMouseWorkbookMap(workbookPath);
+  return {
+    ...base,
+    expectations: {
+      ...base.expectations,
+      ...expectations
+    },
+    field_overrides: fieldOverrides
   };
 }
 
@@ -142,6 +160,95 @@ test('compileRules dry-run reports no diff after stable compile', async () => {
   }
 });
 
+test('compileRules dry-run uses existing control-plane map when workbookMap is not provided', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'phase1-compiler-dry-run-existing-map-'));
+  const helperRoot = path.join(root, 'helper_files');
+  const categoriesRoot = path.join(root, 'categories');
+  try {
+    const workbookPath = mouseWorkbookPath();
+    const workbookMap = buildMouseWorkbookMap(workbookPath);
+    const first = await compileRules({
+      category: 'mouse',
+      workbookPath,
+      workbookMap,
+      config: {
+        helperFilesRoot: helperRoot,
+        categoriesRoot
+      }
+    });
+    assert.equal(first.compiled, true);
+
+    const dryRun = await compileRules({
+      category: 'mouse',
+      dryRun: true,
+      config: {
+        helperFilesRoot: helperRoot,
+        categoriesRoot
+      }
+    });
+    assert.equal(dryRun.dry_run, true);
+    assert.equal(dryRun.would_change, false);
+    assert.equal(
+      (dryRun.warnings || []).some((row) => String(row).includes('selected_keys: empty')),
+      false
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('compileRules enforces critical and identity buckets from expectations and canonical identity keys', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'phase1-compiler-buckets-'));
+  const helperRoot = path.join(root, 'helper_files');
+  const categoriesRoot = path.join(root, 'categories');
+  try {
+    const workbookPath = mouseWorkbookPath();
+    const workbookMap = buildMouseWorkbookMapWithOverrides({
+      workbookPath,
+      fieldOverrides: {
+        polling_rate: {
+          required_level: 'expected',
+          priority: {
+            required_level: 'expected'
+          }
+        },
+        sku: {
+          required_level: 'expected',
+          priority: {
+            required_level: 'expected'
+          }
+        }
+      },
+      expectations: {
+        critical_fields: ['polling_rate']
+      }
+    });
+    const compiled = await compileRules({
+      category: 'mouse',
+      workbookPath,
+      workbookMap,
+      config: {
+        helperFilesRoot: helperRoot,
+        categoriesRoot
+      }
+    });
+    assert.equal(compiled.compiled, true);
+
+    const generatedRoot = path.join(helperRoot, 'mouse', '_generated');
+    const fieldRules = JSON.parse(await fs.readFile(path.join(generatedRoot, 'field_rules.json'), 'utf8'));
+    const compileReport = JSON.parse(await fs.readFile(path.join(generatedRoot, '_compile_report.json'), 'utf8'));
+
+    assert.equal(fieldRules.fields.polling_rate.required_level, 'critical');
+    assert.equal(fieldRules.fields.polling_rate.priority.required_level, 'critical');
+    assert.equal(fieldRules.fields.sku.required_level, 'identity');
+    assert.equal(fieldRules.fields.sku.priority.required_level, 'identity');
+    assert.equal(Number(compileReport.counts.critical) >= 1, true);
+    assert.equal(Number(compileReport.counts.identity) >= 1, true);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('validateRules reports missing required artifacts', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'phase1-compiler-missing-'));
   const helperRoot = path.join(root, 'helper_files');
@@ -223,6 +330,49 @@ test('validateRules fails when artifact violates shared JSON schema', async () =
   }
 });
 
+test('validateRules reports missing required per-field metadata', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'phase1-compiler-metadata-invalid-'));
+  const helperRoot = path.join(root, 'helper_files');
+  const categoriesRoot = path.join(root, 'categories');
+  try {
+    const workbookPath = mouseWorkbookPath();
+    const workbookMap = buildMouseWorkbookMap(workbookPath);
+    const compiled = await compileRules({
+      category: 'mouse',
+      workbookPath,
+      workbookMap,
+      config: {
+        helperFilesRoot: helperRoot,
+        categoriesRoot
+      }
+    });
+    assert.equal(compiled.compiled, true);
+
+    const generatedRoot = path.join(helperRoot, 'mouse', '_generated');
+    const fieldRulesPath = path.join(generatedRoot, 'field_rules.json');
+    const fieldRules = JSON.parse(await fs.readFile(fieldRulesPath, 'utf8'));
+    fieldRules.fields.connection.required_level = '';
+    fieldRules.fields.connection.priority.required_level = '';
+    await fs.writeFile(fieldRulesPath, `${JSON.stringify(fieldRules, null, 2)}\n`, 'utf8');
+
+    const validation = await validateRules({
+      category: 'mouse',
+      config: {
+        helperFilesRoot: helperRoot,
+        categoriesRoot
+      }
+    });
+    assert.equal(validation.valid, false);
+    assert.equal(validation.stats.fields_with_incomplete_metadata > 0, true);
+    assert.equal(
+      validation.errors.some((row) => String(row).includes("metadata validation failed: field 'connection'")),
+      true
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('initCategory creates category scaffolding in helper_files and categories roots', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'phase1-init-category-'));
   const helperRoot = path.join(root, 'helper_files');
@@ -241,12 +391,60 @@ test('initCategory creates category scaffolding in helper_files and categories r
     assert.equal(await exists(path.join(helperRoot, 'monitor', '_generated')), true);
     assert.equal(await exists(path.join(helperRoot, 'monitor', '_suggestions')), true);
     assert.equal(await exists(path.join(helperRoot, 'monitor', '_overrides')), true);
+    const starterWorkbookPath = path.join(helperRoot, 'monitor', '_source', 'field_catalog.xlsx');
+    assert.equal(await exists(starterWorkbookPath), true);
     assert.equal(await exists(path.join(categoriesRoot, 'monitor', 'schema.json')), true);
     assert.equal(await exists(path.join(categoriesRoot, 'monitor', 'sources.json')), true);
     assert.equal(await exists(path.join(categoriesRoot, 'monitor', 'required_fields.json')), true);
     assert.equal(await exists(path.join(categoriesRoot, 'monitor', 'search_templates.json')), true);
     assert.equal(await exists(path.join(categoriesRoot, 'monitor', 'anchors.json')), true);
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(starterWorkbookPath);
+    const catalog = workbook.getWorksheet('field_catalog');
+    assert.equal(Boolean(catalog), true);
+    const header = catalog.getRow(1).values;
+    assert.equal(Array.isArray(header), true);
+    const rows = [];
+    catalog.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) {
+        return;
+      }
+      rows.push(row.values);
+    });
+    assert.equal(rows.length > 10, true);
+    assert.equal(
+      rows.some((row) => String(row[2] || '').trim() === 'brand'),
+      true
+    );
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
+});
+
+test('normalizeFieldRulesForPhase1 backfills required schema blocks for sparse fields', () => {
+  const normalized = normalizeFieldRulesForPhase1({
+    category: 'mouse',
+    fields: {
+      switches_link: {
+        data_type: 'string',
+        output_shape: 'scalar',
+        required_level: 'optional',
+        availability: 'sometimes',
+        difficulty: 'medium',
+        effort: 5,
+        evidence_required: false
+      }
+    }
+  });
+
+  const row = normalized?.fields?.switches_link || {};
+  assert.equal(typeof row.contract, 'object');
+  assert.equal(row.contract.type, 'string');
+  assert.equal(row.contract.shape, 'scalar');
+  assert.equal(typeof row.priority, 'object');
+  assert.equal(row.priority.required_level, 'optional');
+  assert.equal(typeof row.parse, 'object');
+  assert.equal(typeof row.evidence, 'object');
+  assert.equal(row.evidence.required, false);
 });

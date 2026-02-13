@@ -1,0 +1,69 @@
+{
+  "algorithm": "sha256",
+  "artifact_count": 12,
+  "artifacts": [
+    {
+      "bytes": 3312,
+      "path": "component_db/encoders.json",
+      "sha256": "25c9f05e0c53e527e62485215c8babbea5e49454432fbfd332f9790df372b3b9"
+    },
+    {
+      "bytes": 301,
+      "path": "component_db/materials.json",
+      "sha256": "06ea05645033ce67bdaeb8637e31fb99585181b2ef023fb7ef64ea573fd2cb67"
+    },
+    {
+      "bytes": 11904,
+      "path": "component_db/sensors.json",
+      "sha256": "8731be7db7189f44910c3ea952d5f3fe6be30f546514eebaa83513646952f19d"
+    },
+    {
+      "bytes": 13135,
+      "path": "component_db/switches.json",
+      "sha256": "f5fcddd9c08536634f1b99c96f7d8d5856154228718ffc2337e1ec96bbb53dc1"
+    },
+    {
+      "bytes": 2188,
+      "path": "cross_validation_rules.json",
+      "sha256": "b7eb2302cbca949647e5682025d10be64467195b0bc4ea9d73b44a6cf61ebf63"
+    },
+    {
+      "bytes": 5176,
+      "path": "field_groups.json",
+      "sha256": "b1da5656dd7d0706e407aaae1bae21323feade6bdb8cae846f577da1b0e61945"
+    },
+    {
+      "bytes": 276040,
+      "path": "field_rules.json",
+      "sha256": "51d82d2fdba0cf30e96fec2bf3f5ecb04c850aeb05feeca0078579cadc0ab1fa"
+    },
+    {
+      "bytes": 276040,
+      "path": "field_rules.runtime.json",
+      "sha256": "51d82d2fdba0cf30e96fec2bf3f5ecb04c850aeb05feeca0078579cadc0ab1fa"
+    },
+    {
+      "bytes": 710,
+      "path": "key_migrations.json",
+      "sha256": "ef09155ec59953a9f4e50b3a43ed1b2904b44f7c934a5804aa3b11bc8632a65c"
+    },
+    {
+      "bytes": 2448,
+      "path": "known_values.json",
+      "sha256": "1ba2e58cb50a07d6ad7c44f5412c3552e6730846164e6163d5686444586c268b"
+    },
+    {
+      "bytes": 11977,
+      "path": "parse_templates.json",
+      "sha256": "a6b9230af44dca089b25ea3023eb83094818e57a65df31818c7ff6e1f03f8925"
+    },
+    {
+      "bytes": 79626,
+      "path": "ui_field_catalog.json",
+      "sha256": "0f98433c46c7ba95caf2556855544b382cc8c6438b9c696c3185fad711c6d742"
+    }
+  ],
+  "category": "mouse",
+  "generated_at": "2026-02-13T02:41:58.865Z",
+  "version": 1
+}

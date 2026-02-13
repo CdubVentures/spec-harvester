@@ -28,11 +28,23 @@ import { runLlmHealthCheck } from '../llm/healthCheck.js';
 import { verifyGeneratedFieldRules } from '../ingest/fieldRulesVerify.js';
 import {
   compileRules,
+  compileRulesAll,
   fieldReport,
   initCategory,
   listFields,
+  readCompileReport,
+  rulesDiff,
+  watchCompileRules,
   validateRules
 } from '../field-rules/compiler.js';
+import {
+  buildAccuracyReport,
+  createGoldenFixture,
+  createGoldenFromExcel,
+  renderAccuracyReportMarkdown,
+  validateGoldenFixtures
+} from '../testing/goldenFiles.js';
+import { generateTypesForCategory } from '../build/generate-types.js';
 
 function usage() {
   return [
@@ -45,12 +57,20 @@ function usage() {
     '  run-batch --category <category> [--brand <brand>] [--strategy <explore|exploit|mixed|bandit>] [--local] [--dry-run]',
     '  run-until-complete --s3key <key> [--max-rounds <n>] [--mode aggressive|balanced] [--local]',
     '  category-compile --category <category> [--workbook <path>] [--map <path>] [--local]',
-    '  compile-rules --category <category> [--workbook <path>] [--map <path>] [--dry-run] [--local]',
+    '  compile-rules --category <category> [--workbook <path>] [--map <path>] [--dry-run] [--watch] [--watch-seconds <n>] [--max-events <n>] [--local]',
+    '  compile-rules --all [--dry-run] [--local]',
+    '  compile-report --category <category> [--local]',
+    '  rules-diff --category <category> [--local]',
     '  validate-rules --category <category> [--local]',
     '  init-category --category <category> [--template electronics] [--local]',
     '  list-fields --category <category> [--group <group>] [--required-level <level>] [--local]',
     '  field-report --category <category> [--format md|json] [--local]',
-    '  field-rules-verify --category <category> [--fixture <path>] [--local]',
+    '  field-rules-verify --category <category> [--fixture <path>] [--strict-bytes] [--local]',
+    '  create-golden --category <category> --product-id <id> [--fields-json <json>] [--identity-json <json>] [--unknowns-json <json>] [--notes <text>] [--local]',
+    '  create-golden --category <category> --from-excel [--count <n>] [--product-id <id>] [--local]',
+    '  test-golden --category <category> [--local]',
+    '  accuracy-report --category <category> [--format md|json] [--max-cases <n>] [--local]',
+    '  generate-types --category <category> [--out-dir <path>] [--local]',
     '  discover --category <category> [--brand <brand>] [--local]',
     '  ingest-csv --category <category> --path <csv> [--imports-root <path>] [--local]',
     '  watch-imports [--imports-root <path>] [--category <category>|--all] [--once] [--local]',
@@ -63,6 +83,7 @@ function usage() {
     '  sources-plan --category <category> [--local]',
     '  sources-report --category <category> [--top <n>] [--top-paths <n>] [--local]',
     '  benchmark --category <category> [--fixture <path>] [--max-cases <n>] [--local]',
+    '  benchmark-golden --category <category> [--fixture <path>] [--max-cases <n>] [--local]',
     '  rebuild-index --category <category> [--local]',
     '  intel-graph-api --category <category> [--host <host>] [--port <port>] [--local]',
     '',
@@ -485,13 +506,49 @@ async function commandCategoryCompile(config, _storage, args) {
 }
 
 async function commandCompileRules(config, _storage, args) {
-  const category = String(args.category || '').trim();
-  if (!category) {
-    throw new Error('compile-rules requires --category <category>');
-  }
+  const all = asBool(args.all, false);
+  const watch = asBool(args.watch, false);
   const workbookPath = String(args.workbook || '').trim();
   const mapPath = String(args.map || '').trim();
   const dryRun = asBool(args['dry-run'], false);
+  if (all) {
+    if (watch) {
+      throw new Error('compile-rules --all does not support --watch');
+    }
+    const result = await compileRulesAll({
+      dryRun,
+      config
+    });
+    return {
+      command: 'compile-rules',
+      mode: 'all',
+      ...result
+    };
+  }
+
+  const category = String(args.category || '').trim();
+  if (!category) {
+    throw new Error('compile-rules requires --category <category> or --all');
+  }
+  if (watch) {
+    const watchSeconds = Math.max(0, Number.parseInt(String(args['watch-seconds'] || '0'), 10) || 0);
+    const maxEvents = Math.max(0, Number.parseInt(String(args['max-events'] || '0'), 10) || 0);
+    const debounceMs = Math.max(50, Number.parseInt(String(args['debounce-ms'] || '500'), 10) || 500);
+    const watchResult = await watchCompileRules({
+      category,
+      config,
+      workbookPath,
+      mapPath: mapPath || null,
+      watchSeconds,
+      maxEvents,
+      debounceMs
+    });
+    return {
+      command: 'compile-rules',
+      mode: 'watch',
+      ...watchResult
+    };
+  }
   const result = await compileRules({
     category,
     workbookPath,
@@ -501,6 +558,144 @@ async function commandCompileRules(config, _storage, args) {
   });
   return {
     command: 'compile-rules',
+    ...result
+  };
+}
+
+async function commandCompileReport(config, _storage, args) {
+  const category = String(args.category || '').trim();
+  if (!category) {
+    throw new Error('compile-report requires --category <category>');
+  }
+  const result = await readCompileReport({
+    category,
+    config
+  });
+  return {
+    command: 'compile-report',
+    ...result
+  };
+}
+
+async function commandRulesDiff(config, _storage, args) {
+  const category = String(args.category || '').trim();
+  if (!category) {
+    throw new Error('rules-diff requires --category <category>');
+  }
+  const result = await rulesDiff({
+    category,
+    config
+  });
+  return {
+    command: 'rules-diff',
+    ...result
+  };
+}
+
+async function commandCreateGolden(config, _storage, args) {
+  const category = String(args.category || '').trim();
+  if (!category) {
+    throw new Error('create-golden requires --category <category>');
+  }
+  const fromExcel = asBool(args['from-excel'], false);
+  if (fromExcel) {
+    const count = Math.max(1, Number.parseInt(String(args.count || '50'), 10) || 50);
+    const productId = String(args['product-id'] || '').trim();
+    const result = await createGoldenFromExcel({
+      category,
+      count,
+      productId,
+      config
+    });
+    return {
+      command: 'create-golden',
+      mode: 'from-excel',
+      ...result
+    };
+  }
+
+  const productId = String(args['product-id'] || '').trim();
+  if (!productId) {
+    throw new Error('create-golden requires --product-id <id> when --from-excel is not set');
+  }
+  const identity = parseJsonArg('identity-json', args['identity-json'], {});
+  const fields = parseJsonArg('fields-json', args['fields-json'], {});
+  const expectedUnknowns = parseJsonArg('unknowns-json', args['unknowns-json'], {});
+  const notes = String(args.notes || '').trim();
+
+  const result = await createGoldenFixture({
+    category,
+    productId,
+    identity,
+    fields,
+    expectedUnknowns,
+    notes,
+    config
+  });
+  return {
+    command: 'create-golden',
+    mode: 'single',
+    ...result
+  };
+}
+
+async function commandTestGolden(config, _storage, args) {
+  const category = String(args.category || '').trim();
+  if (!category) {
+    throw new Error('test-golden requires --category <category>');
+  }
+  const result = await validateGoldenFixtures({
+    category,
+    config
+  });
+  return {
+    command: 'test-golden',
+    ...result
+  };
+}
+
+async function commandAccuracyReport(config, storage, args) {
+  const category = String(args.category || '').trim();
+  if (!category) {
+    throw new Error('accuracy-report requires --category <category>');
+  }
+  const format = String(args.format || 'json').trim().toLowerCase();
+  const maxCases = Math.max(0, Number.parseInt(String(args['max-cases'] || '0'), 10) || 0);
+  const report = await buildAccuracyReport({
+    category,
+    storage,
+    config,
+    maxCases
+  });
+  if (format === 'md') {
+    return {
+      command: 'accuracy-report',
+      format: 'md',
+      category: report.category,
+      report_markdown: renderAccuracyReportMarkdown(report),
+      report
+    };
+  }
+  return {
+    command: 'accuracy-report',
+    format: 'json',
+    ...report
+  };
+}
+
+async function commandGenerateTypes(config, _storage, args) {
+  const category = String(args.category || '').trim();
+  if (!category) {
+    throw new Error('generate-types requires --category <category>');
+  }
+  const outDir = String(args['out-dir'] || '').trim();
+  const result = await generateTypesForCategory({
+    category,
+    config,
+    outDir
+  });
+  return {
+    command: 'generate-types',
     ...result
   };
 }
@@ -577,10 +772,12 @@ async function commandFieldRulesVerify(config, _storage, args) {
     throw new Error('field-rules-verify requires --category <category>');
   }
   const fixturePath = String(args.fixture || '').trim();
+  const strictBytes = asBool(args['strict-bytes'], false);
   const result = await verifyGeneratedFieldRules({
     category,
     config,
-    fixturePath
+    fixturePath,
+    strictBytes
   });
   return {
     command: 'field-rules-verify',
@@ -882,7 +1079,7 @@ async function commandRebuildIndex(config, storage, args) {
   };
 }
 
-async function commandBenchmark(config, storage, args) {
+async function commandBenchmark(config, storage, args, commandName = 'benchmark') {
   const category = args.category || 'mouse';
   const fixturePath = args.fixture || null;
   const maxCases = Math.max(0, Number.parseInt(String(args['max-cases'] || '0'), 10) || 0);
@@ -895,7 +1092,7 @@ async function commandBenchmark(config, storage, args) {
   });
 
   return {
-    command: 'benchmark',
+    command: commandName,
     category,
     fixture_path: result.fixture_path,
     case_count: result.case_count,
@@ -1055,6 +1252,10 @@ async function main() {
     output = await commandCategoryCompile(config, storage, args);
   } else if (command === 'compile-rules') {
     output = await commandCompileRules(config, storage, args);
+  } else if (command === 'compile-report') {
+    output = await commandCompileReport(config, storage, args);
+  } else if (command === 'rules-diff') {
+    output = await commandRulesDiff(config, storage, args);
   } else if (command === 'validate-rules') {
     output = await commandValidateRules(config, storage, args);
   } else if (command === 'init-category') {
@@ -1065,6 +1266,14 @@ async function main() {
     output = await commandFieldReport(config, storage, args);
   } else if (command === 'field-rules-verify') {
     output = await commandFieldRulesVerify(config, storage, args);
+  } else if (command === 'create-golden') {
+    output = await commandCreateGolden(config, storage, args);
+  } else if (command === 'test-golden') {
+    output = await commandTestGolden(config, storage, args);
+  } else if (command === 'accuracy-report') {
+    output = await commandAccuracyReport(config, storage, args);
+  } else if (command === 'generate-types') {
+    output = await commandGenerateTypes(config, storage, args);
   } else if (command === 'run-batch') {
     output = await commandRunBatch(config, storage, args);
   } else if (command === 'discover') {
@@ -1092,7 +1301,9 @@ async function main() {
   } else if (command === 'rebuild-index') {
     output = await commandRebuildIndex(config, storage, args);
   } else if (command === 'benchmark') {
-    output = await commandBenchmark(config, storage, args);
+    output = await commandBenchmark(config, storage, args, 'benchmark');
+  } else if (command === 'benchmark-golden') {
+    output = await commandBenchmark(config, storage, args, 'benchmark-golden');
   } else if (command === 'intel-graph-api') {
     output = await commandIntelGraphApi(config, storage, args);
   } else {

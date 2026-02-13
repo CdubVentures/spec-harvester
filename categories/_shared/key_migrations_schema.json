@@ -2,16 +2,79 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://specfactory.local/schemas/key_migrations_schema.json",
   "title": "Key Migrations",
-  "type": "object",
-  "additionalProperties": {
-    "oneOf": [
-      {
-        "type": "string"
-      },
-      {
-        "type": "object",
-        "additionalProperties": true
+  "oneOf": [
+    {
+      "title": "Legacy Key Map",
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "string" },
+          { "type": "object", "additionalProperties": true }
+        ]
       }
-    ]
-  }
+    },
+    {
+      "title": "Migration Document",
+      "type": "object",
+      "required": ["version", "previous_version", "migrations"],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$"
+        },
+        "previous_version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$"
+        },
+        "bump": {
+          "type": "string",
+          "enum": ["major", "minor", "patch"]
+        },
+        "summary": {
+          "type": "object",
+          "properties": {
+            "added_count": { "type": "integer", "minimum": 0 },
+            "removed_count": { "type": "integer", "minimum": 0 },
+            "changed_count": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": true
+        },
+        "key_map": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "migrations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["rename", "merge", "split", "deprecate"]
+              },
+              "from": {
+                "oneOf": [
+                  { "type": "string" },
+                  { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+                ]
+              },
+              "to": {
+                "oneOf": [
+                  { "type": "string" },
+                  { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+                ]
+              },
+              "field": { "type": "string" },
+              "reason": { "type": "string" },
+              "replacement": { "type": "string" },
+              "shape_change": { "type": "string" }
+            },
+            "required": ["type"],
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  ]
 }

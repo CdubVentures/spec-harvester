@@ -12,6 +12,10 @@ function normalizeHost(host) {
   return String(host || '').trim().toLowerCase().replace(/^www\./, '');
 }
 
+function isObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
 function getHost(url) {
   try {
     return normalizeHost(new URL(url).hostname);
@@ -202,6 +206,10 @@ export class SourcePlanner {
     this.sitemapUrlsDiscovered = 0;
 
     this.allowlistHosts = new Set();
+    this.sourceHostMap =
+      categoryConfig.sourceHostMap instanceof Map
+        ? categoryConfig.sourceHostMap
+        : new Map((categoryConfig.sourceHosts || []).map((row) => [normalizeHost(row.host), row]));
     for (const sourceHost of categoryConfig.sourceHosts || []) {
       this.allowlistHosts.add(normalizeHost(sourceHost.host));
     }
@@ -490,9 +498,12 @@ export class SourcePlanner {
 
     const approvedDomain = this.shouldUseApprovedQueue(host, forceApproved, forceCandidate);
     const rootDomain = extractRootDomain(host);
-    const tier = resolveTierForHost(host, this.categoryConfig);
-    const tierName = resolveTierNameForHost(host, this.categoryConfig);
-    const role = inferRoleForHost(host, this.categoryConfig);
+    const hostMeta = this.sourceHostMap.get(host) || null;
+    const tier = Number.isFinite(Number(hostMeta?.tier))
+      ? Number(hostMeta.tier)
+      : resolveTierForHost(host, this.categoryConfig);
+    const tierName = String(hostMeta?.tierName || resolveTierNameForHost(host, this.categoryConfig));
+    const role = String(hostMeta?.role || inferRoleForHost(host, this.categoryConfig));
     const manufacturerBrandRestricted =
       role === 'manufacturer' &&
       this.brandManufacturerHostSet.size > 0 &&
@@ -552,7 +563,14 @@ export class SourcePlanner {
         priorityScore: 0,
         approvedDomain: true,
         discoveredFrom,
-        candidateSource: false
+        candidateSource: false,
+        sourceId: String(hostMeta?.sourceId || ''),
+        displayName: String(hostMeta?.displayName || ''),
+        crawlConfig: isObject(hostMeta?.crawlConfig) ? hostMeta.crawlConfig : null,
+        fieldCoverage: isObject(hostMeta?.fieldCoverage) ? hostMeta.fieldCoverage : null,
+        robotsTxtCompliant: hostMeta?.robotsTxtCompliant === null || hostMeta?.robotsTxtCompliant === undefined
+          ? null
+          : Boolean(hostMeta.robotsTxtCompliant)
       };
       row.priorityScore = this.sourcePriority(row);
 
@@ -1190,6 +1208,7 @@ export function buildSourceSummary(sources) {
     used: sources.map((source) => ({
       url: source.url,
       host: source.host,
+      source_id: source.sourceId || '',
       tier: source.tier,
       tier_name: source.tierName,
       role: source.role,

@@ -309,6 +309,13 @@ LEVEL 4: LIVE INTEGRATION TESTS (run monthly)
   - Verify extraction still works against live pages
   - Detect source layout changes
   Total: 9 live tests, <1 hour
+
+LEVEL 5: DRIFT CANARY TESTS (run daily)
+  - Crawl a tiny set of high-risk sources (e.g., RTINGS, major manufacturers)
+  - Compare `page_content_hash` / `snippet_hash` against last known-good snapshots
+  - If drift detected, run extractor on cached evidence to see which fields break
+  - Auto-open a GitHub issue / alert when a source layout change likely impacts accuracy
+  Total: 5–10 canaries, <10 minutes
 ```
 
 ### Golden File Structure (Multi-Category)
@@ -407,6 +414,7 @@ LLM returns wrong schema              │ Instructor-JS auto-retry (max 3)
 Disk full                             │ Alert + auto-cleanup old evidence
 Process OOM                           │ pm2 auto-restart + memory limit
 Evidence file corrupted               │ Delete cache, re-crawl from scratch
+Evidence drift (snippet_hash mismatch)│ Quarantine product, re-crawl affected sources, block publish
 Field rules compilation fail          │ Block publishing, alert admin
 Network outage                        │ Pause queue, resume on connectivity
 Power failure                         │ pm2 auto-restart, resume from last checkpoint
@@ -453,6 +461,17 @@ const CLEANUP_RULES = {
   golden_file_runs: { retain_count: 10 }    // Keep last 10 benchmark runs
 };
 ```
+
+### Observability & Traceability (24/7 Reliability)
+
+Add first-class observability so you can diagnose *accuracy* issues (not just uptime):
+
+- **OpenTelemetry traces** for each run (crawl → identity → extract → validate → publish)
+- **Structured logs** with run_id/product_id/source_id on every line
+- **Metrics**: per-field unknown rate, per-source block rate, per-model parse failure rate, evidence audit failure rate
+- **Sampling**: keep full traces for any run that ends in `awaiting_review` or `quarantined`
+
+This makes “accuracy regressions” debuggable instead of mysterious.
 
 ### Comprehensive Documentation
 

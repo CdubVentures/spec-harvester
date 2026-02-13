@@ -25,7 +25,8 @@ A React-based web application (localhost) that:
 - Groups fields by category (identity, physical, sensor, switch, connectivity, etc.)
 - Color-codes by confidence (green=high, yellow=medium, red=low/conflict)
 - Shows ALL candidates per field (not just the selected one)
-- Links every value to its source evidence (clickable URL + highlighted quote)
+- Links every value to its source evidence (clickable URL + **highlighted snippet span**)
+- (Optional) Shows the per-snippet screenshot crop captured in Phase 4 for pixel-perfect review
 - Supports keyboard-driven review (Tab/Enter to approve, arrow keys to navigate)
 
 ### Deliverable 8B: Override System
@@ -172,6 +173,18 @@ Bulk:
       "override_reason": "Selected RTINGS value — more recent test methodology",
       "override_source": "candidate_selection",
       "candidate_index": 0,
+
+      // Critical: store provenance so Phase 9 can publish without losing auditability
+      "override_provenance": {
+        "url": "https://www.rtings.com/mouse/reviews/razer/viper-v3-pro",
+        "source_id": "rtings_com",
+        "retrieved_at": "2026-02-12T10:31:02Z",
+        "snippet_id": "snp_010",
+        "snippet_hash": "sha256:…",
+        "quote_span": [0, 20],
+        "quote": "Click Latency: 0.2 ms"
+      },
+
       "overridden_by": "reviewer_1",
       "overridden_at": "2026-02-12T11:00:00Z",
       "validated": true
@@ -182,7 +195,16 @@ Bulk:
       "override_value": "matte with textured sides",
       "override_reason": "More accurate description from RTINGS detail",
       "override_source": "manual_entry",
-      "evidence_url": "https://www.rtings.com/mouse/reviews/razer/viper-v3-pro",
+
+      // Manual entries MUST still be evidence-backed.
+      // The Review Grid should create a synthetic snippet_id (manual_snp_*) so Phase 3 evidence audit still applies.
+      "manual_evidence": {
+        "url": "https://www.rtings.com/mouse/reviews/razer/viper-v3-pro",
+        "manual_snippet_id": "manual_snp_001",
+        "snippet_hash": "sha256:…",
+        "quote_span": [123, 167],
+        "quote": "The body has a matte finish with textured rubber sides"
+      },
       "overridden_by": "reviewer_1",
       "overridden_at": "2026-02-12T11:01:00Z",
       "validated": true,
@@ -217,6 +239,9 @@ Bulk:
       "evidence": {
         "product_id": "mouse-razer-viper-v3-pro-wireless",
         "url": "https://www.rtings.com/mouse/reviews/razer/viper-v3-pro",
+        "snippet_id": "snp_0xx",
+        "snippet_hash": "sha256:…",
+        "quote_span": [123, 167],
         "quote": "The body has a matte finish with textured rubber sides"
       },
       "submitted_by": "reviewer_1",
@@ -300,6 +325,7 @@ WebSocket /ws/queue                       → Real-time queue updates
 2. ☐ Color-coding reflects confidence: green ≥0.85, yellow 0.60–0.84, red <0.60
 3. ☐ Clicking a field shows ALL candidates with source, tier, score, and quote
 4. ☐ Evidence URL is clickable and opens in browser
+4b. ☐ Evidence panel highlights the exact `quote_span` inside the snippet text (and shows screenshot crop if available)
 5. ☐ Override system saves selections without modifying original pipeline data
 6. ☐ Manual value entry runs through FieldRulesEngine validation before saving
 7. ☐ Keyboard navigation works: Tab through flagged fields, Enter to approve, 1–9 for candidate selection

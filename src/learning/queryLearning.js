@@ -1,4 +1,5 @@
 import { nowIso } from '../utils/common.js';
+import { isIdentityField, normalizeFieldList } from '../utils/fieldKeys.js';
 
 function round(value, digits = 6) {
   return Number.parseFloat(Number(value || 0).toFixed(digits));
@@ -112,13 +113,11 @@ export function updateQueryLearning({
 
   const successSignal = buildSuccessSignal(summary);
   const brand = String(job?.identityLock?.brand || '').trim().toLowerCase();
-  const focusFields = [
-    ...new Set([
-      ...toArray(summary?.missing_required_fields),
-      ...toArray(summary?.critical_fields_below_pass_target),
-      ...toArray(job?.requirements?.llmTargetFields)
-    ])
-  ];
+  const focusFields = normalizeFieldList([
+    ...toArray(summary?.missing_required_fields),
+    ...toArray(summary?.critical_fields_below_pass_target),
+    ...toArray(job?.requirements?.llmTargetFields)
+  ]).filter((field) => field && !isIdentityField(field));
   const providers = {};
   for (const row of toArray(discoveryResult?.candidates)) {
     const provider = String(row.provider || '').trim().toLowerCase();

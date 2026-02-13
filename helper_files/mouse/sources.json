@@ -1,0 +1,145 @@
+{
+  "category": "mouse",
+  "version": "1.0.0",
+  "approved": {
+    "manufacturer": [
+      "razer.com",
+      "logitechg.com",
+      "steelseries.com"
+    ],
+    "lab": [
+      "rtings.com",
+      "techpowerup.com"
+    ],
+    "database": [
+      "pcpartpicker.com",
+      "pangoly.com",
+      "versus.com",
+      "reddit.com"
+    ],
+    "retailer": [
+      "bestbuy.com",
+      "newegg.com",
+      "bhphotovideo.com",
+      "amazon.com"
+    ]
+  },
+  "denylist": [],
+  "sources": {
+    "razer_com": {
+      "display_name": "Razer Official",
+      "tier": "tier1_manufacturer",
+      "base_url": "https://www.razer.com",
+      "crawl_config": {
+        "method": "playwright",
+        "rate_limit_ms": 2000,
+        "timeout_ms": 15000,
+        "robots_txt_compliant": true
+      },
+      "field_coverage": {
+        "high": [
+          "weight",
+          "sensor",
+          "dpi",
+          "polling_rate",
+          "connection"
+        ],
+        "medium": [
+          "switches",
+          "battery_hours",
+          "dimensions"
+        ],
+        "low": [
+          "click_latency",
+          "sensor_latency"
+        ]
+      }
+    },
+    "logitechg_com": {
+      "display_name": "Logitech G Official",
+      "tier": "tier1_manufacturer",
+      "base_url": "https://www.logitechg.com",
+      "crawl_config": {
+        "method": "playwright",
+        "rate_limit_ms": 2000,
+        "timeout_ms": 15000,
+        "robots_txt_compliant": true
+      }
+    },
+    "steelseries_com": {
+      "display_name": "SteelSeries Official",
+      "tier": "tier1_manufacturer",
+      "base_url": "https://steelseries.com",
+      "crawl_config": {
+        "method": "playwright",
+        "rate_limit_ms": 2200,
+        "timeout_ms": 15000,
+        "robots_txt_compliant": true
+      }
+    },
+    "rtings_com": {
+      "display_name": "RTINGS",
+      "tier": "tier2_lab",
+      "base_url": "https://www.rtings.com",
+      "crawl_config": {
+        "method": "playwright",
+        "rate_limit_ms": 3000,
+        "timeout_ms": 20000,
+        "robots_txt_compliant": true
+      },
+      "field_coverage": {
+        "high": [
+          "click_latency",
+          "sensor_latency",
+          "weight",
+          "polling_rate",
+          "dpi"
+        ]
+      }
+    },
+    "techpowerup_com": {
+      "display_name": "TechPowerUp",
+      "tier": "tier2_lab",
+      "base_url": "https://www.techpowerup.com",
+      "crawl_config": {
+        "method": "http",
+        "rate_limit_ms": 2000,
+        "timeout_ms": 12000,
+        "robots_txt_compliant": true
+      }
+    },
+    "bestbuy_com": {
+      "display_name": "Best Buy",
+      "tier": "tier3_retailer",
+      "base_url": "https://www.bestbuy.com",
+      "crawl_config": {
+        "method": "http",
+        "rate_limit_ms": 1400,
+        "timeout_ms": 12000,
+        "robots_txt_compliant": true
+      }
+    },
+    "pcpartpicker_com": {
+      "display_name": "PCPartPicker",
+      "tier": "tier5_aggregator",
+      "base_url": "https://pcpartpicker.com",
+      "crawl_config": {
+        "method": "http",
+        "rate_limit_ms": 1800,
+        "timeout_ms": 10000,
+        "robots_txt_compliant": true
+      }
+    },
+    "reddit_com": {
+      "display_name": "Reddit",
+      "tier": "tier4_community",
+      "base_url": "https://www.reddit.com",
+      "crawl_config": {
+        "method": "http",
+        "rate_limit_ms": 2500,
+        "timeout_ms": 10000,
+        "robots_txt_compliant": true
+      }
+    }
+  }
+}

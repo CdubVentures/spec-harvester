@@ -1,3 +1,35 @@
 {
-  "lngth": "length"
+  "bump": "patch",
+  "key_map": {
+    "lngth": "length",
+    "switch_link": "switches_link",
+    "switches_link": "switch_link"
+  },
+  "migrations": [
+    {
+      "from": "lngth",
+      "reason": "auto-generated from key map",
+      "to": "length",
+      "type": "rename"
+    },
+    {
+      "from": "switch_link",
+      "reason": "auto-generated from key map",
+      "to": "switches_link",
+      "type": "rename"
+    },
+    {
+      "from": "switches_link",
+      "reason": "auto-generated from key map",
+      "to": "switch_link",
+      "type": "rename"
+    }
+  ],
+  "previous_version": "1.0.0",
+  "summary": {
+    "added_count": 0,
+    "changed_count": 0,
+    "removed_count": 0
+  },
+  "version": "1.0.0"
 }
