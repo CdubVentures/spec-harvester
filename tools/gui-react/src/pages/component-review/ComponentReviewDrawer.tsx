@@ -33,6 +33,7 @@ interface ComponentReviewDrawerProps {
   rowIndex?: number;
   pendingReviewItems?: ComponentReviewFlaggedItem[];
   isSynthetic?: boolean;
+  debugLinkedProducts?: boolean;
 }
 
 const varianceBadge: Record<string, string> = {
@@ -578,6 +579,7 @@ export function ComponentReviewDrawer({
   rowIndex,
   pendingReviewItems = [],
   isSynthetic = false,
+  debugLinkedProducts = false,
 }: ComponentReviewDrawerProps) {
   const drawerPendingReviewItems = (() => {
     const propKey = String(focusedProperty || '').trim();
@@ -723,6 +725,22 @@ export function ComponentReviewDrawer({
       : Boolean(ids.componentValueId);
   }
 
+  const debugComponentIdentityId = toPositiveId(item.component_identity_id);
+  function renderDebugIdentitySection(slotId?: number | null) {
+    if (!debugLinkedProducts) return null;
+    const componentValueId = toPositiveId(slotId);
+    return (
+      <DrawerSection title="Debug Identity">
+        <div className="text-[10px] text-cyan-700 dark:text-cyan-300 space-y-0.5">
+          <div>{`row: ${componentType} | ${item.name} | ${item.maker || '(blank maker)'}`}</div>
+          <div>{`componentIdentityId: ${debugComponentIdentityId ?? 'n/a'}`}</div>
+          <div>{`componentValueId: ${componentValueId ?? 'n/a'}`}</div>
+          <div>{`focusedProperty: ${focusedProperty || 'n/a'}`}</div>
+        </div>
+      </DrawerSection>
+    );
+  }
+
   function buildPendingSharedCandidateIds({
     hasSharedPending,
     candidates,
@@ -795,6 +813,7 @@ export function ComponentReviewDrawer({
         pendingAIConfirmation={hasSharedPending}
         pendingSharedCandidateIds={pendingSharedCandidateIds}
         candidateUiContext="shared"
+        showCandidateDebugIds={debugLinkedProducts}
         onManualOverride={(value) => {
           if (!canMutateFocused) return;
           overrideMut.mutate({
@@ -867,6 +886,7 @@ export function ComponentReviewDrawer({
                 defaultExpanded
               />
             )}
+            {renderDebugIdentitySection(state.slot_id ?? null)}
             {impactSection}
           </>
         }
@@ -921,6 +941,7 @@ export function ComponentReviewDrawer({
         pendingAIConfirmation={hasSharedPending}
         pendingSharedCandidateIds={pendingSharedCandidateIds}
         candidateUiContext="shared"
+        showCandidateDebugIds={debugLinkedProducts}
         onManualOverride={(value) => {
           if (!canMutateFocused) return;
           overrideMut.mutate({
@@ -993,6 +1014,7 @@ export function ComponentReviewDrawer({
                 defaultExpanded
               />
             )}
+            {renderDebugIdentitySection(state.slot_id ?? null)}
             {impactSection}
           </>
         }
@@ -1002,7 +1024,7 @@ export function ComponentReviewDrawer({
 
   const propertyKeys = Object.keys(item.properties).sort();
   const subtitle = [item.maker, componentType].filter(Boolean).join(' | ');
-  const componentIdentityId = toPositiveId(item.component_identity_id);
+  const componentIdentityId = debugComponentIdentityId;
 
   const topBadges: Array<{ label: string; className: string }> = [
     { label: `${item.metrics.property_count} properties`, className: 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300' },

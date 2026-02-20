@@ -33,6 +33,71 @@ function splitCandidateParts(v) {
   return [...new Set(parts)];
 }
 
+function parseReviewItemAttributes(reviewItem) {
+  const raw = reviewItem?.product_attributes;
+  if (!raw) return {};
+  if (typeof raw === 'object' && !Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function makerTokensFromReviewItem(reviewItem, componentType) {
+  const attrs = parseReviewItemAttributes(reviewItem);
+  const fieldKey = String(reviewItem?.field_key || '').trim();
+  const keys = [
+    `${componentType}_brand`,
+    `${componentType}_maker`,
+    fieldKey ? `${fieldKey}_brand` : '',
+    fieldKey ? `${fieldKey}_maker` : '',
+    'brand',
+    'maker',
+  ].filter(Boolean);
+
+  const tokens = [];
+  for (const key of keys) {
+    for (const value of splitCandidateParts(attrs[key])) {
+      const token = normalizeToken(value);
+      if (!hasKnownValue(token)) continue;
+      tokens.push(token);
+    }
+  }
+  for (const value of splitCandidateParts(reviewItem?.ai_suggested_maker)) {
+    const token = normalizeToken(value);
+    if (!hasKnownValue(token)) continue;
+    tokens.push(token);
+  }
+  return [...new Set(tokens)];
+}
+
+function reviewItemMatchesMakerLane(reviewItem, {
+  componentType,
+  maker,
+  allowMakerlessForNamedLane = false,
+}) {
+  const makerTokens = makerTokensFromReviewItem(reviewItem, componentType);
+  const laneMakerToken = normalizeToken(maker);
+  if (!laneMakerToken) {
+    return makerTokens.length === 0;
+  }
+  if (makerTokens.length === 0) {
+    return Boolean(allowMakerlessForNamedLane);
+  }
+  return makerTokens.includes(laneMakerToken);
+}
+
+function componentLaneSlug(componentName, componentMaker = '') {
+  return `${slugify(componentName)}_${slugify(componentMaker || 'na')}`;
+}
+
 function stableSerialize(value) {
   if (Array.isArray(value)) return `[${value.map((item) => stableSerialize(item)).join(',')}]`;
   if (value && typeof value === 'object') {
@@ -815,6 +880,7 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
         buildWorkbookComponentCandidateId({
           componentType,
           componentName: itemName,
+          componentMaker: itemMaker,
           propertyKey: '__name',
           value: workbookNameValue,
         }),
@@ -849,6 +915,7 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
       buildWorkbookComponentCandidateId({
         componentType,
         componentName: itemName,
+        componentMaker: itemMaker,
         propertyKey: '__maker',
         value: workbookMakerValue,
       }),
@@ -885,66 +952,9 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
       overridden: false,
     }));
 
-    // Enrich name/maker candidates from pipeline review items
-    const itemReviewItems = reviewByComponent.get(String(itemName || '').toLowerCase()) || [];
-    const itemReviewAttribution = buildPipelineAttributionContext(itemReviewItems);
-    if (itemReviewItems.length > 0) {
-      // Name candidates from pipeline (per review item / source identity)
-      const existingNameCandidateIds = new Set(name_tracked.candidates.map((candidate) => String(candidate?.candidate_id || '').trim()));
-      for (const ri of itemReviewItems) {
-        const val = (ri.raw_query || '').trim();
-        if (!val) continue;
-        const candidateId = buildComponentReviewSyntheticCandidateId({
-          productId: ri.product_id || '',
-          fieldKey: '__name',
-          reviewId: ri.review_id || '',
-          value: val,
-        });
-        if (existingNameCandidateIds.has(candidateId)) continue;
-        existingNameCandidateIds.add(candidateId);
-        const productLabel = String(ri.product_id || '').trim() || 'unknown_product';
-        name_tracked.candidates.push(buildPipelineReviewCandidate({
-          candidateId,
-          value: val,
-          reviewItem: ri,
-          method: ri.match_type || 'component_review',
-          quote: `Extracted from ${productLabel}${ri.review_id ? ` (${ri.review_id})` : ''}`,
-          snippetText: `Component ${ri.match_type === 'fuzzy_flagged' ? 'fuzzy matched' : 'not found in DB'}`,
-          attributionContext: itemReviewAttribution,
-        }));
-      }
-      name_tracked.candidate_count = name_tracked.candidates.length;
-
-      // Maker candidates from pipeline product_attributes
-      const brandKey = `${componentType}_brand`;
-      const existingMakerCandidateIds = new Set(maker_tracked.candidates.map((candidate) => String(candidate?.candidate_id || '').trim()));
-      for (const ri of itemReviewItems) {
-        const attrs = isObject(ri.product_attributes) ? ri.product_attributes : {};
-        const makerFromPipeline = attrs[brandKey] || attrs.ai_suggested_maker || ri.ai_suggested_maker;
-        if (!makerFromPipeline) continue;
-        for (const val of splitCandidateParts(makerFromPipeline)) {
-          const candidateId = buildComponentReviewSyntheticCandidateId({
-            productId: ri.product_id || '',
-            fieldKey: '__maker',
-            reviewId: ri.review_id || '',
-            value: val,
-          });
-          if (existingMakerCandidateIds.has(candidateId)) continue;
-          existingMakerCandidateIds.add(candidateId);
-          const productLabel = String(ri.product_id || '').trim() || 'unknown_product';
-          maker_tracked.candidates.push(buildPipelineReviewCandidate({
-            candidateId,
-            value: val,
-            reviewItem: ri,
-            method: 'product_extraction',
-            quote: `Extracted ${brandKey}="${val}" from ${productLabel}${ri.review_id ? ` (${ri.review_id})` : ''}`,
-            snippetText: 'Pipeline extraction from product runs',
-            attributionContext: itemReviewAttribution,
-          }));
-        }
-      }
-      maker_tracked.candidate_count = maker_tracked.candidates.length;
-    }
+    const reviewItemsForName = reviewByComponent.get(String(itemName || '').toLowerCase()) || [];
+    let itemReviewItems = [];
+    let itemReviewAttribution = buildPipelineAttributionContext([]);
 
     // Build properties
     const properties = {};
@@ -1001,6 +1011,7 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
     // Pipeline review rows are used only as fallback when there are no linked products.
 
     // SpecDb enrichment: product-level candidates from SQLite
+    const laneSlug = componentLaneSlug(itemName, itemMaker);
     let linkedProducts = [];
     let hasDbLinkedProducts = false;
     try {
@@ -1024,7 +1035,7 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
           appendAllSpecDbCandidates(
             name_tracked.candidates,
             nameCandRows,
-            `specdb_${componentType}_${slugify(itemName)}_name`
+            `specdb_${componentType}_${laneSlug}_name`
           );
           name_tracked.candidate_count = name_tracked.candidates.length;
         }
@@ -1035,7 +1046,7 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
           appendAllSpecDbCandidates(
             maker_tracked.candidates,
             makerCandRows,
-            `specdb_${componentType}_${slugify(itemName)}_maker`
+            `specdb_${componentType}_${laneSlug}_maker`
           );
           maker_tracked.candidate_count = maker_tracked.candidates.length;
         }
@@ -1049,7 +1060,7 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
             appendAllSpecDbCandidates(
               prop.candidates,
               propCandRows,
-              `specdb_${componentType}_${slugify(itemName)}_${key}`
+              `specdb_${componentType}_${laneSlug}_${key}`
             );
             prop.candidate_count = prop.candidates.length;
           }
@@ -1087,6 +1098,68 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
     } catch (_specDbErr) {
       // SpecDb enrichment is best-effort
     }
+    if (!hasDbLinkedProducts && reviewItemsForName.length > 0) {
+      itemReviewItems = reviewItemsForName.filter((ri) => reviewItemMatchesMakerLane(ri, {
+        componentType,
+        maker: itemMaker,
+      }));
+      itemReviewAttribution = buildPipelineAttributionContext(itemReviewItems);
+      if (itemReviewItems.length > 0) {
+        const existingNameCandidateIds = new Set(name_tracked.candidates.map((candidate) => String(candidate?.candidate_id || '').trim()));
+        for (const ri of itemReviewItems) {
+          const val = (ri.raw_query || '').trim();
+          if (!val) continue;
+          const candidateId = buildComponentReviewSyntheticCandidateId({
+            productId: ri.product_id || '',
+            fieldKey: '__name',
+            reviewId: ri.review_id || '',
+            value: val,
+          });
+          if (existingNameCandidateIds.has(candidateId)) continue;
+          existingNameCandidateIds.add(candidateId);
+          const productLabel = String(ri.product_id || '').trim() || 'unknown_product';
+          name_tracked.candidates.push(buildPipelineReviewCandidate({
+            candidateId,
+            value: val,
+            reviewItem: ri,
+            method: ri.match_type || 'component_review',
+            quote: `Extracted from ${productLabel}${ri.review_id ? ` (${ri.review_id})` : ''}`,
+            snippetText: `Component ${ri.match_type === 'fuzzy_flagged' ? 'fuzzy matched' : 'not found in DB'}`,
+            attributionContext: itemReviewAttribution,
+          }));
+        }
+        name_tracked.candidate_count = name_tracked.candidates.length;
+
+        const brandKey = `${componentType}_brand`;
+        const existingMakerCandidateIds = new Set(maker_tracked.candidates.map((candidate) => String(candidate?.candidate_id || '').trim()));
+        for (const ri of itemReviewItems) {
+          const attrs = parseReviewItemAttributes(ri);
+          const makerFromPipeline = attrs[brandKey] || attrs.ai_suggested_maker || ri.ai_suggested_maker;
+          if (!makerFromPipeline) continue;
+          for (const val of splitCandidateParts(makerFromPipeline)) {
+            const candidateId = buildComponentReviewSyntheticCandidateId({
+              productId: ri.product_id || '',
+              fieldKey: '__maker',
+              reviewId: ri.review_id || '',
+              value: val,
+            });
+            if (existingMakerCandidateIds.has(candidateId)) continue;
+            existingMakerCandidateIds.add(candidateId);
+            const productLabel = String(ri.product_id || '').trim() || 'unknown_product';
+            maker_tracked.candidates.push(buildPipelineReviewCandidate({
+              candidateId,
+              value: val,
+              reviewItem: ri,
+              method: 'product_extraction',
+              quote: `Extracted ${brandKey}="${val}" from ${productLabel}${ri.review_id ? ` (${ri.review_id})` : ''}`,
+              snippetText: 'Pipeline extraction from product runs',
+              attributionContext: itemReviewAttribution,
+            }));
+          }
+        }
+        maker_tracked.candidate_count = maker_tracked.candidates.length;
+      }
+    }
     if (linkedProducts.length === 0 && itemReviewAttribution.productIds.length > 0) {
       linkedProducts = itemReviewAttribution.productIds.map((productId) => ({
         product_id: productId,
@@ -1101,7 +1174,7 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
         if (!prop) continue;
         const existingPropCandidateIds = new Set(prop.candidates.map((candidate) => String(candidate?.candidate_id || '').trim()));
         for (const ri of itemReviewItems) {
-          const attrs = isObject(ri.product_attributes) ? ri.product_attributes : {};
+          const attrs = parseReviewItemAttributes(ri);
           const pipelineVal = attrs[key];
           if (pipelineVal === undefined || pipelineVal === null || pipelineVal === '') continue;
           for (const valStr of splitCandidateParts(pipelineVal)) {
@@ -1130,12 +1203,12 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
     }
 
     ensureTrackedStateCandidateInvariant(name_tracked, {
-      fallbackCandidateId: `component_${slugify(componentType)}_${slugify(itemName)}_name`,
+      fallbackCandidateId: `component_${slugify(componentType)}_${laneSlug}_name`,
       fallbackQuote: `Selected ${componentType} name retained for authoritative review`,
     });
     annotateCandidateSharedReviews(name_tracked.candidates, []);
     ensureTrackedStateCandidateInvariant(maker_tracked, {
-      fallbackCandidateId: `component_${slugify(componentType)}_${slugify(itemName)}_maker`,
+      fallbackCandidateId: `component_${slugify(componentType)}_${laneSlug}_maker`,
       fallbackQuote: `Selected ${componentType} maker retained for authoritative review`,
     });
     annotateCandidateSharedReviews(maker_tracked.candidates, []);
@@ -1143,7 +1216,7 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
       const prop = properties[key];
       if (!prop) continue;
       ensureTrackedStateCandidateInvariant(prop, {
-        fallbackCandidateId: `component_${slugify(componentType)}_${slugify(itemName)}_${slugify(key)}`,
+        fallbackCandidateId: `component_${slugify(componentType)}_${laneSlug}_${slugify(key)}`,
         fallbackQuote: `Selected ${key} retained for authoritative review`,
       });
       const slotId = Number(prop?.slot_id);
@@ -1335,6 +1408,7 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
       candidate_id: buildWorkbookComponentCandidateId({
         componentType,
         componentName: item.name,
+        componentMaker: item.maker || '',
         propertyKey: '__name',
         value: item.name,
       }),
@@ -1382,6 +1456,7 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
         candidate_id: buildSyntheticComponentCandidateId({
           componentType,
           componentName: item.name,
+          componentMaker: item.maker || '',
           propertyKey: '__name_identity',
           value: item.name,
         }),
@@ -1449,6 +1524,7 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
       candidate_id: buildWorkbookComponentCandidateId({
         componentType,
         componentName: item.name,
+        componentMaker: item.maker || '',
         propertyKey: '__maker',
         value: item.maker,
       }),
@@ -1579,6 +1655,7 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
         candidate_id: buildWorkbookComponentCandidateId({
           componentType,
           componentName: item.name,
+          componentMaker: item.maker || '',
           propertyKey: key,
           value: rawValue,
         }),
@@ -1693,7 +1770,7 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
               const best = meta.rows[0];
               const count = meta.count;
               name_tracked.candidates.push({
-                candidate_id: `specdb_${componentType}_${slugify(item.name)}_name_${slugify(val)}`,
+                candidate_id: `specdb_${componentType}_${componentLaneSlug(item.name, item.maker || '')}_name_${slugify(val)}`,
                 value: val,
                 score: best.score ?? 0,
                 source_id: 'specdb',
@@ -1731,7 +1808,7 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
               const best = meta.rows[0];
               const count = meta.count;
               maker_tracked.candidates.push({
-                candidate_id: `specdb_${componentType}_${slugify(item.name)}_maker_${slugify(val)}`,
+                candidate_id: `specdb_${componentType}_${componentLaneSlug(item.name, item.maker || '')}_maker_${slugify(val)}`,
                 value: val,
                 score: best.score ?? 0,
                 source_id: 'specdb',
@@ -1772,7 +1849,7 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
                 const best = meta.rows[0];
                 const count = meta.count;
                 prop.candidates.push({
-                  candidate_id: `specdb_${componentType}_${slugify(item.name)}_${key}_${slugify(val)}`,
+                  candidate_id: `specdb_${componentType}_${componentLaneSlug(item.name, item.maker || '')}_${key}_${slugify(val)}`,
                   value: val,
                   score: best.score ?? 0,
                   source_id: 'specdb',
@@ -1836,18 +1913,18 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
     }
 
     ensureTrackedStateCandidateInvariant(name_tracked, {
-      fallbackCandidateId: `component_${slugify(componentType)}_${slugify(item.name)}_name`,
+      fallbackCandidateId: `component_${slugify(componentType)}_${componentLaneSlug(item.name, item.maker || '')}_name`,
       fallbackQuote: `Selected ${componentType} name retained for authoritative review`,
     });
     ensureTrackedStateCandidateInvariant(maker_tracked, {
-      fallbackCandidateId: `component_${slugify(componentType)}_${slugify(item.name)}_maker`,
+      fallbackCandidateId: `component_${slugify(componentType)}_${componentLaneSlug(item.name, item.maker || '')}_maker`,
       fallbackQuote: `Selected ${componentType} maker retained for authoritative review`,
     });
     for (const key of propertyColumns) {
       const prop = properties[key];
       if (!prop) continue;
       ensureTrackedStateCandidateInvariant(prop, {
-        fallbackCandidateId: `component_${slugify(componentType)}_${slugify(item.name)}_${slugify(key)}`,
+        fallbackCandidateId: `component_${slugify(componentType)}_${componentLaneSlug(item.name, item.maker || '')}_${slugify(key)}`,
         fallbackQuote: `Selected ${key} retained for authoritative review`,
       });
     }

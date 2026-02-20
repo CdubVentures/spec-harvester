@@ -1,4 +1,4 @@
-import { useMemo, useEffect } from 'react';
+import { useMemo, useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { useUiStore } from '../../stores/uiStore';
@@ -20,6 +20,7 @@ export function ComponentReviewPage() {
   // NOT when cellEditValue or other unrelated store slices change.
   const activeSubTab = useComponentReviewStore((s) => s.activeSubTab);
   const setActiveSubTab = useComponentReviewStore((s) => s.setActiveSubTab);
+  const [debugLinkedProducts, setDebugLinkedProducts] = useState(false);
   const queryClient = useQueryClient();
 
   const { data: layout, isLoading: layoutLoading } = useQuery({
@@ -94,6 +95,20 @@ export function ComponentReviewPage() {
 
   return (
     <div className="space-y-3">
+      <div className="flex items-center justify-end">
+        <button
+          onClick={() => setDebugLinkedProducts((value) => !value)}
+          className={`px-2.5 py-1 rounded text-[11px] font-medium border transition-colors ${
+            debugLinkedProducts
+              ? 'bg-cyan-100 dark:bg-cyan-900/40 text-cyan-700 dark:text-cyan-300 border-cyan-300 dark:border-cyan-700'
+              : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-700 hover:bg-gray-200 dark:hover:bg-gray-700'
+          }`}
+          title="Toggle linked-product and identity debug overlays."
+        >
+          Debug LP+ID {debugLinkedProducts ? 'ON' : 'OFF'}
+        </button>
+      </div>
+
       {/* Metrics */}
       {metrics && <MetricRow metrics={metrics} />}
 
@@ -119,11 +134,21 @@ export function ComponentReviewPage() {
       {isLoading && <Spinner className="h-6 w-6 mx-auto mt-8" />}
 
       {!isLoading && activeSubTab === 'enums' && enumData && (
-        <EnumSubTab data={enumData} category={category} queryClient={queryClient} />
+        <EnumSubTab
+          data={enumData}
+          category={category}
+          queryClient={queryClient}
+          debugLinkedProducts={debugLinkedProducts}
+        />
       )}
 
       {!isLoading && activeSubTab !== 'enums' && componentData && (
-        <ComponentSubTab data={componentData} category={category} queryClient={queryClient} />
+        <ComponentSubTab
+          data={componentData}
+          category={category}
+          queryClient={queryClient}
+          debugLinkedProducts={debugLinkedProducts}
+        />
       )}
     </div>
   );

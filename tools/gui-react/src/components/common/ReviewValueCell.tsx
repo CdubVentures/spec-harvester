@@ -28,6 +28,8 @@ interface ReviewValueCellProps {
   pendingAI?: boolean;
   pendingAIPrimary?: boolean;
   pendingAIShared?: boolean;
+  showLinkedProductBadge?: boolean;
+  linkedProductCount?: number;
 }
 
 function joinClassNames(parts: Array<string | false | null | undefined>): string {
@@ -50,11 +52,15 @@ export function ReviewValueCell({
   pendingAI = false,
   pendingAIPrimary = false,
   pendingAIShared = false,
+  showLinkedProductBadge = false,
+  linkedProductCount = 0,
 }: ReviewValueCellProps) {
   // Two-lane pending flags; legacy pendingAI maps to shared for backward compat
   const hasPrimary = pendingAIPrimary;
   const hasShared = pendingAIShared || (pendingAI && !pendingAIPrimary && !pendingAIShared);
-  const hasAnyPending = hasPrimary || hasShared;
+  const normalizedLinkedProductCount = Number.isFinite(Number(linkedProductCount))
+    ? Math.max(0, Math.trunc(Number(linkedProductCount)))
+    : 0;
   if (hasRun === false) {
     return <>{emptyWhenNoRun}</>;
   }
@@ -111,6 +117,14 @@ export function ReviewValueCell({
       )}
       {hasShared && (
         <span className="px-1 py-0.5 rounded text-[8px] font-bold bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 shrink-0" title="Shared AI review pending">AI</span>
+      )}
+      {showLinkedProductBadge && normalizedLinkedProductCount > 0 && (
+        <span
+          className="px-1 py-0.5 rounded text-[8px] font-bold bg-cyan-100 dark:bg-cyan-900/50 text-cyan-700 dark:text-cyan-300 shrink-0"
+          title={`${normalizedLinkedProductCount} linked product${normalizedLinkedProductCount !== 1 ? 's' : ''}`}
+        >
+          LP {normalizedLinkedProductCount}
+        </span>
       )}
       {flagCount > 0 && (
         <span className="inline-flex items-center gap-0.5 text-[9px] text-amber-600 dark:text-amber-400 flex-shrink-0" title={`${flagCount} flag${flagCount > 1 ? 's' : ''}`}>

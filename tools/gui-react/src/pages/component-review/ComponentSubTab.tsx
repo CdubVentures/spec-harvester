@@ -24,6 +24,7 @@ interface ComponentSubTabProps {
   data: ComponentReviewPayload;
   category: string;
   queryClient: QueryClient;
+  debugLinkedProducts?: boolean;
 }
 
 /** Check if a selectedCell matches a specific row + property using row index for uniqueness */
@@ -115,7 +116,12 @@ function applyComponentOptimisticOverride(
   };
 }
 
-export function ComponentSubTab({ data, category, queryClient }: ComponentSubTabProps) {
+export function ComponentSubTab({
+  data,
+  category,
+  queryClient,
+  debugLinkedProducts = false,
+}: ComponentSubTabProps) {
   // Query component review items to show inline pending_ai indicators
   const { data: reviewDoc } = useQuery({
     queryKey: ['componentReview', category],
@@ -344,6 +350,8 @@ export function ComponentSubTab({ data, category, queryClient }: ComponentSubTab
               showConfidence
               showOverrideBadge
               pendingAI={cellIsPendingAI}
+              showLinkedProductBadge={debugLinkedProducts}
+              linkedProductCount={row.original.linked_products?.length ?? 0}
               emptyWhenMissing={<span className="font-semibold text-gray-900 dark:text-gray-100">{row.original.name}</span>}
             />
           );
@@ -377,6 +385,8 @@ export function ComponentSubTab({ data, category, queryClient }: ComponentSubTab
               showConfidence
               showOverrideBadge
               pendingAI={cellIsPendingAI}
+              showLinkedProductBadge={debugLinkedProducts}
+              linkedProductCount={row.original.linked_products?.length ?? 0}
               emptyWhenMissing={<span className="text-gray-700 dark:text-gray-300">{row.original.maker || ''}</span>}
             />
           );
@@ -486,6 +496,8 @@ export function ComponentSubTab({ data, category, queryClient }: ComponentSubTab
               showOverrideBadge
               flagCount={flagCount}
               pendingAI={cellIsPendingAI}
+              showLinkedProductBadge={debugLinkedProducts}
+              linkedProductCount={row.original.linked_products?.length ?? 0}
             />
           );
         },
@@ -557,6 +569,7 @@ export function ComponentSubTab({ data, category, queryClient }: ComponentSubTab
     cellEditMode,
     handleCommitEdit,
     cancelComponentEdit,
+    debugLinkedProducts,
   ]);
 
   const selectedItem = useMemo<ExtendedComponentReviewItem | null>(() => {
@@ -626,6 +639,7 @@ export function ComponentSubTab({ data, category, queryClient }: ComponentSubTab
               rowIndex={selectedEntity?.rowIndex}
               pendingReviewItems={reviewItemsForDrawer}
               isSynthetic={Boolean(selectedItem._isSynthetic)}
+              debugLinkedProducts={debugLinkedProducts}
             />
           );
         })()}

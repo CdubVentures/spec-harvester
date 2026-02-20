@@ -220,6 +220,180 @@ test('component payload does not hydrate queue-only property candidates when lin
   }
 });
 
+test('component payload isolates same-name lanes by maker for linked-product candidate attribution', async () => {
+  const { tempRoot, specDb } = await createTempSpecDb();
+  try {
+    const componentType = 'switch';
+    const componentName = 'Omron D2FC-F-7N';
+    const makerA = 'Omron';
+    const makerB = 'Huano';
+    const propertyKey = 'actuation_force';
+    const productsA = ['mouse-omron-a1', 'mouse-omron-a2'];
+    const productsB = ['mouse-huano-b1', 'mouse-huano-b2'];
+
+    const upsertLane = (maker, value) => {
+      specDb.upsertComponentIdentity({
+        componentType,
+        canonicalName: componentName,
+        maker,
+        links: [],
+        source: 'pipeline',
+      });
+      specDb.upsertComponentValue({
+        componentType,
+        componentName,
+        componentMaker: maker,
+        propertyKey,
+        value: String(value),
+        confidence: 1,
+        variancePolicy: null,
+        source: 'pipeline',
+        acceptedCandidateId: null,
+        needsReview: true,
+        overridden: false,
+        constraints: [],
+      });
+    };
+
+    upsertLane(makerA, 55);
+    upsertLane(makerB, 65);
+
+    const linkAndSeedCandidates = (productId, maker, forceValue) => {
+      specDb.upsertItemComponentLink({
+        productId,
+        fieldKey: 'switch',
+        componentType,
+        componentName,
+        componentMaker: maker,
+        matchType: 'shared_accept',
+        matchScore: 1,
+      });
+      specDb.insertCandidate({
+        candidate_id: `${productId}::switch::name`,
+        category: CATEGORY,
+        product_id: productId,
+        field_key: 'switch',
+        value: componentName,
+        normalized_value: componentName.toLowerCase(),
+        score: 0.95,
+        rank: 1,
+        source_host: 'contract.test',
+        source_method: 'pipeline_extract',
+        source_tier: 1,
+      });
+      specDb.insertCandidate({
+        candidate_id: `${productId}::switch_brand::maker`,
+        category: CATEGORY,
+        product_id: productId,
+        field_key: 'switch_brand',
+        value: maker,
+        normalized_value: maker.toLowerCase(),
+        score: 0.9,
+        rank: 1,
+        source_host: 'contract.test',
+        source_method: 'pipeline_extract',
+        source_tier: 1,
+      });
+      specDb.insertCandidate({
+        candidate_id: `${productId}::${propertyKey}::value`,
+        category: CATEGORY,
+        product_id: productId,
+        field_key: propertyKey,
+        value: String(forceValue),
+        normalized_value: String(forceValue),
+        score: 0.88,
+        rank: 1,
+        source_host: 'contract.test',
+        source_method: 'pipeline_extract',
+        source_tier: 1,
+      });
+    };
+
+    for (const productId of productsA) {
+      linkAndSeedCandidates(productId, makerA, 55);
+    }
+    for (const productId of productsB) {
+      linkAndSeedCandidates(productId, makerB, 65);
+    }
+
+    const helperRoot = path.join(tempRoot, 'helper_files');
+    const reviewPath = path.join(helperRoot, CATEGORY, '_suggestions', 'component_review.json');
+    await fs.mkdir(path.dirname(reviewPath), { recursive: true });
+    await fs.writeFile(
+      reviewPath,
+      `${JSON.stringify({
+        version: 1,
+        category: CATEGORY,
+        items: [
+          {
+            review_id: 'rv_switch_omron',
+            category: CATEGORY,
+            component_type: componentType,
+            field_key: 'switch',
+            raw_query: componentName,
+            matched_component: componentName,
+            match_type: 'exact',
+            status: 'pending_ai',
+            product_id: productsA[0],
+            created_at: '2026-02-20T00:00:00.000Z',
+            product_attributes: {
+              switch_brand: makerA,
+              [propertyKey]: '55',
+            },
+          },
+          {
+            review_id: 'rv_switch_huano',
+            category: CATEGORY,
+            component_type: componentType,
+            field_key: 'switch',
+            raw_query: componentName,
+            matched_component: componentName,
+            match_type: 'exact',
+            status: 'pending_ai',
+            product_id: productsB[0],
+            created_at: '2026-02-20T00:00:01.000Z',
+            product_attributes: {
+              switch_brand: makerB,
+              [propertyKey]: '65',
+            },
+          },
+        ],
+      }, null, 2)}\n`,
+      'utf8',
+    );
+
+    const payload = await buildComponentReviewPayloads({
+      config: { helperFilesRoot: helperRoot },
+      category: CATEGORY,
+      componentType,
+      specDb,
+    });
+    const rowA = payload.items.find((item) => item.name === componentName && item.maker === makerA);
+    const rowB = payload.items.find((item) => item.name === componentName && item.maker === makerB);
+
+    assert.ok(rowA, 'expected maker A row');
+    assert.ok(rowB, 'expected maker B row');
+    assert.equal((rowA.linked_products || []).length, 2);
+    assert.equal((rowB.linked_products || []).length, 2);
+
+    const makerValuesA = new Set((rowA.maker_tracked?.candidates || []).map((candidate) => String(candidate?.value || '').trim()));
+    const makerValuesB = new Set((rowB.maker_tracked?.candidates || []).map((candidate) => String(candidate?.value || '').trim()));
+    assert.equal(makerValuesA.has(makerA), true);
+    assert.equal(makerValuesA.has(makerB), false);
+    assert.equal(makerValuesB.has(makerB), true);
+    assert.equal(makerValuesB.has(makerA), false);
+
+    const propCandidatesA = rowA.properties?.[propertyKey]?.candidates || [];
+    const propCandidatesB = rowB.properties?.[propertyKey]?.candidates || [];
+    assert.equal(propCandidatesA.length, 2);
+    assert.equal(propCandidatesB.length, 2);
+    assert.equal(propCandidatesA.every((candidate) => String(candidate?.value || '') === '55'), true);
+    assert.equal(propCandidatesB.every((candidate) => String(candidate?.value || '') === '65'), true);
+  } finally {
+    await cleanupTempSpecDb(tempRoot, specDb);
+  }
+});
+
 test('component payload keeps shared pending when AI lane is still pending even after user accept', async () => {
   const { tempRoot, specDb } = await createTempSpecDb();
   try {

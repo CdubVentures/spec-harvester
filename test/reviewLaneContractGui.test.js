@@ -870,6 +870,14 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
 
     await page.getByRole('link', { name: 'Review Components' }).click();
     await page.waitForSelector('text=Enum Lists', { timeout: 20_000 });
+    const debugToggle = page.getByRole('button', { name: /Debug LP\+ID/ }).first();
+    if ((await debugToggle.count()) > 0) {
+      const label = String(await debugToggle.innerText());
+      if (!label.includes('ON')) {
+        await debugToggle.click();
+      }
+      await waitForCondition(async () => String(await debugToggle.innerText()).includes('ON'), 10_000, 120, 'component_debug_toggle_on');
+    }
     await page.getByRole('button', { name: /^Sensor/ }).first().click();
     await page.waitForSelector('span[title="35000"]', { timeout: 20_000 });
     // Regression: component name cell should not show pending AI badge just because

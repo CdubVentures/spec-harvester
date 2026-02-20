@@ -17,6 +17,7 @@ interface EnumSubTabProps {
   data: EnumReviewPayload;
   category: string;
   queryClient: QueryClient;
+  debugLinkedProducts?: boolean;
 }
 
 function enumToCellState(valueItem: EnumValueReviewItem): ReviewValueCellState {
@@ -109,6 +110,7 @@ function ValueRow({
   onRunAIReview,
   aiPending,
   onClick,
+  debugLinkedProducts,
 }: {
   item: EnumValueReviewItem;
   isEditing: boolean;
@@ -120,6 +122,7 @@ function ValueRow({
   onRunAIReview: () => void;
   aiPending: boolean;
   onClick: () => void;
+  debugLinkedProducts: boolean;
 }) {
   const [linksExpanded, setLinksExpanded] = useState(false);
   const linkedCount = item.linked_products?.length ?? 0;
@@ -167,6 +170,8 @@ function ValueRow({
           valueMaxChars={linkedCount > 0 ? 36 : 48}
           showConfidence
           pendingAI={isPipelineReview}
+          showLinkedProductBadge={debugLinkedProducts}
+          linkedProductCount={linkedCount}
         />
         {linkedCount > 0 && (
           <span
@@ -211,7 +216,12 @@ function ValueRow({
   );
 }
 
-export function EnumSubTab({ data, category, queryClient }: EnumSubTabProps) {
+export function EnumSubTab({
+  data,
+  category,
+  queryClient,
+  debugLinkedProducts = false,
+}: EnumSubTabProps) {
   // Individual selectors to avoid re-renders from unrelated store changes
   const selectedEnumField = useComponentReviewStore((s) => s.selectedEnumField);
   const setSelectedEnumField = useComponentReviewStore((s) => s.setSelectedEnumField);
@@ -583,6 +593,7 @@ export function EnumSubTab({ data, category, queryClient }: EnumSubTabProps) {
                       onRunAIReview={() => aiReviewBatchMut.mutate()}
                       aiPending={aiReviewBatchMut.isPending}
                       onClick={() => handleValueClick(valueItem, valueIndex)}
+                      debugLinkedProducts={debugLinkedProducts}
                     />
                   ))}
                 </div>
@@ -702,6 +713,7 @@ export function EnumSubTab({ data, category, queryClient }: EnumSubTabProps) {
                 pendingAIConfirmation={hasSharedPending}
                 pendingSharedCandidateIds={pendingSharedCandidateIds}
                 candidateUiContext="shared"
+                showCandidateDebugIds={debugLinkedProducts}
                 onManualOverride={(newVal) => {
                   if (!canMutateValueSlot) return;
                   const trimmed = String(newVal || '').trim();
@@ -776,6 +788,14 @@ export function EnumSubTab({ data, category, queryClient }: EnumSubTabProps) {
                         maxHeight={180}
                         defaultExpanded
                       />
+                    )}
+                    {debugLinkedProducts && (
+                      <div className="px-3 py-2 border border-cyan-200 dark:border-cyan-800 rounded bg-cyan-50/60 dark:bg-cyan-900/20 text-[10px] text-cyan-700 dark:text-cyan-300 space-y-0.5">
+                        <div>{`field: ${fd.field}`}</div>
+                        <div>{`value: ${vi.value}`}</div>
+                        <div>{`listValueId: ${listValueId ?? 'n/a'}`}</div>
+                        <div>{`enumListId: ${enumListId ?? 'n/a'}`}</div>
+                      </div>
                     )}
                   </>
                 }

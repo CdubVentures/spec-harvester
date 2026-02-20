@@ -62,12 +62,20 @@ export function buildComponentReviewSyntheticCandidateId({ productId, fieldKey, 
   return buildCandidateId('pl_cr', [productId, fieldKey, reviewId || value, value]);
 }
 
-export function buildSyntheticComponentCandidateId({ componentType, componentName, propertyKey, value }) {
-  return buildCandidateId('pl_comp', [componentType, componentName, propertyKey, value]);
+export function buildSyntheticComponentCandidateId({ componentType, componentName, componentMaker, propertyKey, value }) {
+  const baseParts = [componentType, componentName, propertyKey, value];
+  const withMaker = componentMaker !== undefined
+    ? [componentType, componentName, componentMaker, propertyKey, value]
+    : baseParts;
+  return buildCandidateId('pl_comp', withMaker);
 }
 
-export function buildWorkbookComponentCandidateId({ componentType, componentName, propertyKey, value = '' }) {
-  return buildCandidateId('wb_comp', [componentType, componentName, propertyKey, value]);
+export function buildWorkbookComponentCandidateId({ componentType, componentName, componentMaker, propertyKey, value = '' }) {
+  const baseParts = [componentType, componentName, propertyKey, value];
+  const withMaker = componentMaker !== undefined
+    ? [componentType, componentName, componentMaker, propertyKey, value]
+    : baseParts;
+  return buildCandidateId('wb_comp', withMaker);
 }
 
 export function buildPipelineEnumCandidateId({ fieldKey, value }) {

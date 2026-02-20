@@ -2,6 +2,7 @@ import {
   ruleMinEvidenceRefs,
   ruleRequiredLevel
 } from '../engine/ruleAccessors.js';
+import { normalizeAmbiguityLevel } from '../utils/identityNormalize.js';
 
 const UNKNOWN_VALUE_TOKENS = new Set(['', 'unk', 'unknown', 'n/a', 'na', 'none', 'null', 'undefined']);
 
@@ -192,21 +193,6 @@ function normalizeIdentityState(input = {}) {
   return 'unlocked';
 }
 
-function normalizeAmbiguityLevel(value = '', familyModelCount = 0) {
-  const token = String(value || '').trim().toLowerCase();
-  if (token === 'easy' || token === 'low') return 'easy';
-  if (token === 'medium' || token === 'mid') return 'medium';
-  if (token === 'hard' || token === 'high') return 'hard';
-  if (token === 'very_hard' || token === 'very-hard' || token === 'very hard') return 'very_hard';
-  if (token === 'extra_hard' || token === 'extra-hard' || token === 'extra hard') return 'extra_hard';
-  const count = Math.max(0, Number.parseInt(String(familyModelCount || 0), 10) || 0);
-  if (count >= 9) return 'extra_hard';
-  if (count >= 6) return 'very_hard';
-  if (count >= 4) return 'hard';
-  if (count >= 2) return 'medium';
-  if (count === 1) return 'easy';
-  return 'unknown';
-}
 
 function confidenceCapForIdentityState(status = 'unlocked') {
   const token = String(status || '').trim().toLowerCase();

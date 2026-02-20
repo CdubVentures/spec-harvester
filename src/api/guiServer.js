@@ -3923,6 +3923,39 @@ function parseReviewItemAttributes(reviewItem) {
   return {};
 }
 
+function makerTokensFromReviewItem(reviewItem, componentType) {
+  const attrs = parseReviewItemAttributes(reviewItem);
+  const fieldKey = String(reviewItem?.field_key || '').trim();
+  const keys = [
+    `${componentType}_brand`,
+    `${componentType}_maker`,
+    fieldKey ? `${fieldKey}_brand` : '',
+    fieldKey ? `${fieldKey}_maker` : '',
+    'brand',
+    'maker',
+  ].filter(Boolean);
+  const tokens = [];
+  for (const key of keys) {
+    for (const valuePart of splitCandidateParts(attrs[key])) {
+      if (!isMeaningfulValue(valuePart)) continue;
+      tokens.push(normalizeLower(valuePart));
+    }
+  }
+  for (const valuePart of splitCandidateParts(reviewItem?.ai_suggested_maker)) {
+    if (!isMeaningfulValue(valuePart)) continue;
+    tokens.push(normalizeLower(valuePart));
+  }
+  return [...new Set(tokens)];
+}
+
+function reviewItemMatchesMakerLane(reviewItem, { componentType, componentMaker }) {
+  const laneMaker = normalizeLower(componentMaker || '');
+  const makerTokens = makerTokensFromReviewItem(reviewItem, componentType);
+  if (!laneMaker) return makerTokens.length === 0;
+  if (!makerTokens.length) return false;
+  return makerTokens.includes(laneMaker);
+}
+
 function isResolvedCandidateReview(
   reviewRow,
   {
@@ -3997,6 +4030,7 @@ async function collectComponentReviewPropertyCandidateRows({
   category,
   componentType,
   componentName,
+  componentMaker,
   propertyKey,
 }) {
   const normalizedComponentName = normalizeLower(componentName);
@@ -4021,6 +4055,7 @@ async function collectComponentReviewPropertyCandidateRows({
       ? matchedName === normalizedComponentName
       : rawName === normalizedComponentName;
     if (!isSameComponent) continue;
+    if (!reviewItemMatchesMakerLane(item, { componentType, componentMaker })) continue;
 
     const attrs = parseReviewItemAttributes(item);
     const matchedEntry = Object.entries(attrs).find(([attrKey]) => (
@@ -4143,6 +4178,7 @@ async function getPendingComponentSharedCandidateIdsAsync(specDb, {
     category,
     componentType,
     componentName,
+    componentMaker,
     propertyKey,
   });
   return collectPendingCandidateIds({

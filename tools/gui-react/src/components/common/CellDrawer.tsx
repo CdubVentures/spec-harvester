@@ -212,6 +212,7 @@ export interface CellDrawerProps {
   onAcceptPrimaryCandidate?: (candidateId: string, candidate: ReviewCandidate) => void;
   onAcceptSharedCandidate?: (candidateId: string, candidate: ReviewCandidate) => void;
   candidateUiContext?: 'grid' | 'shared';
+  showCandidateDebugIds?: boolean;
 }
 
 export function CellDrawer({
@@ -251,6 +252,7 @@ export function CellDrawer({
   onAcceptPrimaryCandidate,
   onAcceptSharedCandidate,
   candidateUiContext = 'grid',
+  showCandidateDebugIds = false,
 }: CellDrawerProps) {
   const pendingPrimaryIdSet = new Set(
     (Array.isArray(pendingPrimaryCandidateIds) && pendingPrimaryCandidateIds.length > 0
@@ -556,12 +558,14 @@ export function CellDrawer({
                       <span className={`font-mono text-sm flex-1 truncate ${valueClass}`} title={String(candidate.value)}>
                         {String(candidate.value)}
                       </span>
-                      <span
-                        className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 max-w-[220px] truncate"
-                        title={`candidate_id: ${candidateId}`}
-                      >
-                        id:{compactId(candidateId)}
-                      </span>
+                      {showCandidateDebugIds && (
+                        <span
+                          className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 max-w-[220px] truncate"
+                          title={`candidate_id: ${candidateId}`}
+                        >
+                          id:{compactId(candidateId)}
+                        </span>
+                      )}
                       <span className="text-xs text-gray-400">{pct(candidate.score)}</span>
                       {isActiveAccepted && (
                         <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-green-100 dark:bg-green-800 text-green-700 dark:text-green-200">
