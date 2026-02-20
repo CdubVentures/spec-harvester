@@ -1,0 +1,99 @@
+{
+  "usableSessionsCount": 2,
+  "retiredSessionsCount": 0,
+  "sessions": [
+    {
+      "id": "session_e4sN4GF2z2",
+      "cookieJar": {
+        "version": "tough-cookie@6.0.0",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2026-02-20T03:25:23.934Z",
+      "createdAt": "2026-02-20T02:35:23.934Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_Bqx3UMZ5R0",
+      "cookieJar": {
+        "version": "tough-cookie@6.0.0",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": [
+          {
+            "key": "current-pageviews",
+            "value": "1",
+            "expires": "2026-02-21T02:35:25.347Z",
+            "domain": "rtings.com",
+            "path": "/",
+            "hostOnly": false,
+            "creation": "2026-02-20T02:35:26.214Z",
+            "lastAccessed": "2026-02-20T02:35:26.214Z"
+          },
+          {
+            "key": "page-history",
+            "value": "%5B%22%2Fmonitor%2Freviews%2Fdell%2Falienware-aw2725df%22%5D",
+            "expires": "2026-02-21T02:35:25.347Z",
+            "domain": "rtings.com",
+            "path": "/",
+            "hostOnly": false,
+            "creation": "2026-02-20T02:35:26.217Z",
+            "lastAccessed": "2026-02-20T02:35:26.217Z"
+          },
+          {
+            "key": "_rtings_session",
+            "value": "%2FpesxhQ%2FMClY5UHWBRuu8TdIhp1r1isgxg9GkhE6sGklbcIlpTg7hzAV798wBOWRMVIcWRV2561qJY6KSzfiLLj9ZjWRyfTJaJ8EoLKz4%2FHwwJBtacOWFg3VzEDrUnXn6XQgh3KYtMQA700%2B2Swo6GKJO7KmKgV2JeCf9vIUIE5O5r1oF4NR3Ud2kECOoT6ODdmBrluzWFuB9VX0jugwbcOGHurLmTWMIn5n5WnWxnxFN%2FyppWG3t3vcan8Tlhfp5d8MAaPkIpQAXpNNhhue%2BkdmYCiElGbU7N4aykHhG8Qe1kcrh9Iq7rYbu30g%2B%2FfVKxFZ%2Fes%3D--MNG1mzn8UNN6bjcc--pW3T12hiP8M%2FdVfKvRma9A%3D%3D",
+            "expires": "2026-03-20T02:35:25.347Z",
+            "domain": "rtings.com",
+            "path": "/",
+            "secure": true,
+            "httpOnly": true,
+            "hostOnly": false,
+            "creation": "2026-02-20T02:35:26.218Z",
+            "lastAccessed": "2026-02-20T02:35:26.218Z"
+          },
+          {
+            "key": "pref-country",
+            "value": "us",
+            "expires": "2026-02-27T02:35:26.000Z",
+            "domain": "www.rtings.com",
+            "path": "/",
+            "hostOnly": true,
+            "creation": "2026-02-20T02:35:26.219Z",
+            "lastAccessed": "2026-02-20T02:35:26.219Z"
+          },
+          {
+            "key": "global-store",
+            "value": "auto",
+            "expires": "2026-02-27T02:35:26.000Z",
+            "domain": "www.rtings.com",
+            "path": "/",
+            "hostOnly": true,
+            "creation": "2026-02-20T02:35:26.219Z",
+            "lastAccessed": "2026-02-20T02:35:26.219Z"
+          }
+        ]
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2026-02-20T03:25:23.936Z",
+      "createdAt": "2026-02-20T02:35:23.936Z",
+      "usageCount": 1,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    }
+  ]
+}
