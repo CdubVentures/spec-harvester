@@ -66,11 +66,16 @@ function sanitizeText(message, secrets = []) {
 
 function inferImageMimeType(uri = '', fallback = 'image/jpeg') {
   const token = String(uri || '').toLowerCase();
+  if (token.endsWith('.jpg') || token.endsWith('.jpeg')) return 'image/jpeg';
   if (token.endsWith('.png')) return 'image/png';
   if (token.endsWith('.webp')) return 'image/webp';
   if (token.endsWith('.gif')) return 'image/gif';
   if (token.endsWith('.bmp')) return 'image/bmp';
   return fallback;
+}
+
+function isImageMimeType(mime = '') {
+  return String(mime || '').trim().toLowerCase().startsWith('image/');
 }
 
 function normalizeUserInput(user) {
@@ -102,7 +107,18 @@ async function resolveImageUrlForPrompt({
 } = {}) {
   const token = String(uri || '').trim();
   if (!token) return null;
+  const normalizedMime = String(mimeType || '').trim().toLowerCase();
+  if (normalizedMime && !isImageMimeType(normalizedMime)) {
+    return null;
+  }
   if (/^https?:\/\//i.test(token) || token.startsWith('data:')) {
+    if (token.startsWith('data:')) {
+      const mimeMatch = token.match(/^data:([^;,]+)[;,]/i);
+      const dataMime = String(mimeMatch?.[1] || '').trim().toLowerCase();
+      if (dataMime && !isImageMimeType(dataMime)) {
+        return null;
+      }
+    }
     return token;
   }
   if (/^(s3|gs):\/\//i.test(token)) {
@@ -141,11 +157,27 @@ async function buildUserMessageContent({
   const maxInlineBytes = Math.max(64_000, Number.parseInt(String(usageContext?.multimodal_max_inline_bytes || 700_000), 10) || 700_000);
   const images = [];
   const imageSources = [];
+  const imageDebug = [];
   for (const image of normalized.images.slice(0, maxImages)) {
+    const effectiveMime = String(image.mime_type || inferImageMimeType(image.file_uri, 'image/jpeg')).trim();
+    if (!isImageMimeType(effectiveMime)) {
+      imageDebug.push({
+        file_uri: image.file_uri,
+        mime_type: effectiveMime,
+        resolved: false,
+        skipped_reason: 'unsupported_mime'
+      });
+      continue;
+    }
     const resolved = await resolveImageUrlForPrompt({
       uri: image.file_uri,
-      mimeType: image.mime_type || inferImageMimeType(image.file_uri, 'image/jpeg'),
+      mimeType: effectiveMime,
       maxInlineBytes
+    });
+    imageDebug.push({
+      file_uri: image.file_uri,
+      mime_type: effectiveMime,
+      resolved: Boolean(resolved)
     });
     if (!resolved) {
       continue;
@@ -159,7 +191,7 @@ async function buildUserMessageContent({
     imageSources.push({
       id: image.id || '',
       file_uri: image.file_uri,
-      mime_type: image.mime_type || inferImageMimeType(image.file_uri, 'image/jpeg'),
+      mime_type: effectiveMime,
       caption: image.caption || ''
     });
   }
@@ -168,7 +200,8 @@ async function buildUserMessageContent({
       content: text,
       text,
       imageCount: 0,
-      imageSources
+      imageSources,
+      imageDebug
     };
   }
   const content = [
@@ -179,7 +212,8 @@ async function buildUserMessageContent({
     content,
     text,
     imageCount: images.length,
-    imageSources
+    imageSources,
+    imageDebug
   };
 }
 
@@ -787,6 +821,9 @@ export async function callOpenAI({
     max_tokens_applied: effectiveMaxTokens,
     multimodal_image_count: Number(userMessage.imageCount || 0),
     multimodal_image_sources: userMessage.imageSources,
+    multimodal_image_debug: Array.isArray(userMessage.imageDebug)
+      ? userMessage.imageDebug.slice(0, 8)
+      : [],
     prompt_preview: promptPreview
   });
 

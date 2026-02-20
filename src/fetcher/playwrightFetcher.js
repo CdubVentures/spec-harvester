@@ -109,6 +109,24 @@ async function captureScreenshotArtifact(page, config = {}, policy = {}) {
   }
 }
 
+function policySnapshotForTelemetry(fetchPolicy = {}) {
+  return {
+    per_host_min_delay_ms: Number(fetchPolicy?.perHostMinDelayMs || 0),
+    page_goto_timeout_ms: Number(fetchPolicy?.pageGotoTimeoutMs || 0),
+    page_network_idle_timeout_ms: Number(fetchPolicy?.pageNetworkIdleTimeoutMs || 0),
+    post_load_wait_ms: Number(fetchPolicy?.postLoadWaitMs || 0),
+    auto_scroll_enabled: Boolean(fetchPolicy?.autoScrollEnabled),
+    auto_scroll_passes: Number(fetchPolicy?.autoScrollPasses || 0),
+    auto_scroll_delay_ms: Number(fetchPolicy?.autoScrollDelayMs || 0),
+    graphql_replay_enabled: fetchPolicy?.graphqlReplayEnabled !== false,
+    max_graphql_replays: Number(fetchPolicy?.maxGraphqlReplays || 0),
+    retry_budget: Number(fetchPolicy?.retryBudget || 0),
+    retry_backoff_ms: Number(fetchPolicy?.retryBackoffMs || 0),
+    matched_host: String(fetchPolicy?.matchedHost || '').trim() || null,
+    override_applied: Boolean(fetchPolicy?.overrideApplied)
+  };
+}
+
 export class PlaywrightFetcher {
   constructor(config, logger) {
     this.config = config;
@@ -149,10 +167,13 @@ export class PlaywrightFetcher {
     const last = this.hostLastAccess.get(host) || 0;
     const delta = now - last;
     const delayMs = Math.max(0, Number(minDelayMs || this.config.perHostMinDelayMs || 0));
+    let waitedMs = 0;
     if (delta < delayMs) {
-      await wait(delayMs - delta);
+      waitedMs = delayMs - delta;
+      await wait(waitedMs);
     }
     this.hostLastAccess.set(host, Date.now());
+    return waitedMs;
   }
 
   async enforceRobots(source) {
@@ -224,6 +245,7 @@ export class PlaywrightFetcher {
     }
 
     const maxAttempts = Math.max(1, Number(fetchPolicy.retryBudget || 0) + 1);
+    const startedAtMs = Date.now();
 
     let html = '';
     let title = '';
@@ -231,9 +253,20 @@ export class PlaywrightFetcher {
     let finalUrl = source.url;
     let networkResponses = [];
     let screenshot = null;
+    let replayRowsAdded = 0;
+    let attemptsUsed = 0;
+    const retryReasons = [];
+    let hostWaitMs = 0;
+    let navigationMs = 0;
+    let networkIdleWaitMs = 0;
+    let interactiveWaitMs = 0;
+    let graphqlReplayMs = 0;
+    let contentCaptureMs = 0;
+    let screenshotMs = 0;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      await this.waitForHostSlot(
+      attemptsUsed = attempt;
+      hostWaitMs += await this.waitForHostSlot(
         source.host,
         source?.crawlConfig?.rate_limit_ms ?? fetchPolicy.perHostMinDelayMs
       );
@@ -249,10 +282,12 @@ export class PlaywrightFetcher {
       });
 
       try {
+        const navigationStartedAt = Date.now();
         const response = await page.goto(source.url, {
           waitUntil: 'domcontentloaded',
           timeout: fetchPolicy.pageGotoTimeoutMs || this.config.pageGotoTimeoutMs || 30_000
         });
+        navigationMs += Math.max(0, Date.now() - navigationStartedAt);
         status = response?.status() || 0;
         finalUrl = page.url();
 
@@ -261,16 +296,21 @@ export class PlaywrightFetcher {
         }
 
         try {
+          const networkIdleStartedAt = Date.now();
           await page.waitForLoadState('networkidle', {
             timeout: fetchPolicy.pageNetworkIdleTimeoutMs || this.config.pageNetworkIdleTimeoutMs || 6_000
           });
+          networkIdleWaitMs += Math.max(0, Date.now() - networkIdleStartedAt);
         } catch {
           // Best effort only.
         }
 
+        const interactiveStartedAt = Date.now();
         await this.captureInteractiveSignals(page, fetchPolicy);
+        interactiveWaitMs += Math.max(0, Date.now() - interactiveStartedAt);
 
         if (fetchPolicy.graphqlReplayEnabled) {
+          const replayStartedAt = Date.now();
           const replayRows = await replayGraphqlRequests({
             page,
             capturedResponses: recorder.rows,
@@ -278,19 +318,26 @@ export class PlaywrightFetcher {
             maxJsonBytes: this.config.maxJsonBytes,
             logger: this.logger
           });
+          graphqlReplayMs += Math.max(0, Date.now() - replayStartedAt);
           if (replayRows.length) {
             recorder.rows.push(...replayRows);
+            replayRowsAdded += replayRows.length;
           }
         }
 
+        const captureStartedAt = Date.now();
         html = await page.content();
         title = await page.title();
+        contentCaptureMs += Math.max(0, Date.now() - captureStartedAt);
+        const screenshotStartedAt = Date.now();
         screenshot = await captureScreenshotArtifact(page, this.config, fetchPolicy);
+        screenshotMs += Math.max(0, Date.now() - screenshotStartedAt);
         networkResponses = recorder.rows;
         await page.close();
         break;
       } catch (error) {
         await page.close();
+        retryReasons.push(String(error?.message || 'retryable_error'));
         const shouldRetry = attempt < maxAttempts && isRetryableFetchError(error);
         if (!shouldRetry) {
           throw error;
@@ -311,6 +358,33 @@ export class PlaywrightFetcher {
 
     const ldjsonBlocks = extractLdJsonBlocks(html);
     const embeddedState = extractEmbeddedState(html);
+    const fetchTelemetry = {
+      fetcher_kind: 'playwright',
+      attempts: attemptsUsed || 1,
+      retry_count: Math.max(0, (attemptsUsed || 1) - 1),
+      retry_reasons: retryReasons.slice(0, 8),
+      policy: policySnapshotForTelemetry(fetchPolicy),
+      timings_ms: {
+        total: Math.max(0, Date.now() - startedAtMs),
+        host_wait: hostWaitMs,
+        navigation: navigationMs,
+        network_idle_wait: networkIdleWaitMs,
+        interactive_wait: interactiveWaitMs,
+        graphql_replay: graphqlReplayMs,
+        content_capture: contentCaptureMs,
+        screenshot_capture: screenshotMs
+      },
+      payload_counts: {
+        network_rows: Array.isArray(networkResponses) ? networkResponses.length : 0,
+        graphql_replay_rows: replayRowsAdded,
+        ldjson_blocks: Array.isArray(ldjsonBlocks) ? ldjsonBlocks.length : 0
+      },
+      capture: {
+        screenshot_available: Boolean(screenshot),
+        screenshot_kind: String(screenshot?.kind || '').trim() || null,
+        screenshot_selector: String(screenshot?.selector || '').trim() || null
+      }
+    };
 
     return {
       url: source.url,
@@ -321,7 +395,8 @@ export class PlaywrightFetcher {
       ldjsonBlocks,
       embeddedState,
       networkResponses,
-      screenshot
+      screenshot,
+      fetchTelemetry
     };
   }
 
@@ -407,10 +482,13 @@ export class HttpFetcher {
     const last = this.hostLastAccess.get(host) || 0;
     const delta = now - last;
     const delayMs = Math.max(0, Number(minDelayMs || this.config.perHostMinDelayMs || 0));
+    let waitedMs = 0;
     if (delta < delayMs) {
-      await wait(delayMs - delta);
+      waitedMs = delayMs - delta;
+      await wait(waitedMs);
     }
     this.hostLastAccess.set(host, Date.now());
+    return waitedMs;
   }
 
   async enforceRobots(source) {
@@ -475,15 +553,22 @@ export class HttpFetcher {
     }
 
     const maxAttempts = Math.max(1, Number(fetchPolicy.retryBudget || 0) + 1);
+    const startedAtMs = Date.now();
     let result;
+    let attemptsUsed = 0;
+    let hostWaitMs = 0;
+    let requestMs = 0;
+    const retryReasons = [];
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      await this.waitForHostSlot(
+      attemptsUsed = attempt;
+      hostWaitMs += await this.waitForHostSlot(
         source.host,
         source?.crawlConfig?.rate_limit_ms ?? fetchPolicy.perHostMinDelayMs
       );
 
       try {
+        const requestStartedAt = Date.now();
         result = await fetchTextWithTimeout(
           source.url,
           fetchPolicy.pageGotoTimeoutMs || this.config.pageGotoTimeoutMs || 30_000,
@@ -492,6 +577,7 @@ export class HttpFetcher {
             accept: '*/*'
           }
         );
+        requestMs += Math.max(0, Date.now() - requestStartedAt);
 
         const status = Number(result?.response?.status || 0);
         if (isRetryableStatus(status) && attempt < maxAttempts) {
@@ -502,6 +588,7 @@ export class HttpFetcher {
             max_attempts: maxAttempts,
             reason: `status_${status}`
           });
+          retryReasons.push(`status_${status}`);
           const retryBackoffMs = Math.max(0, Number(fetchPolicy.retryBackoffMs || 0));
           if (retryBackoffMs > 0) {
             await wait(retryBackoffMs);
@@ -521,6 +608,7 @@ export class HttpFetcher {
           max_attempts: maxAttempts,
           reason: String(error?.message || 'retryable_error')
         });
+        retryReasons.push(String(error?.message || 'retryable_error'));
         const retryBackoffMs = Math.max(0, Number(fetchPolicy.retryBackoffMs || 0));
         if (retryBackoffMs > 0) {
           await wait(retryBackoffMs);
@@ -567,6 +655,33 @@ export class HttpFetcher {
         jsonPreview
       });
     }
+    const fetchTelemetry = {
+      fetcher_kind: 'http',
+      attempts: attemptsUsed || 1,
+      retry_count: Math.max(0, (attemptsUsed || 1) - 1),
+      retry_reasons: retryReasons.slice(0, 8),
+      policy: policySnapshotForTelemetry(fetchPolicy),
+      timings_ms: {
+        total: Math.max(0, Date.now() - startedAtMs),
+        host_wait: hostWaitMs,
+        navigation: requestMs,
+        network_idle_wait: 0,
+        interactive_wait: 0,
+        graphql_replay: 0,
+        content_capture: 0,
+        screenshot_capture: 0
+      },
+      payload_counts: {
+        network_rows: networkResponses.length,
+        graphql_replay_rows: 0,
+        ldjson_blocks: Array.isArray(ldjsonBlocks) ? ldjsonBlocks.length : 0
+      },
+      capture: {
+        screenshot_available: false,
+        screenshot_kind: null,
+        screenshot_selector: null
+      }
+    };
 
     return {
       url: source.url,
@@ -576,7 +691,8 @@ export class HttpFetcher {
       html,
       ldjsonBlocks,
       embeddedState,
-      networkResponses
+      networkResponses,
+      fetchTelemetry
     };
   }
 }
@@ -612,10 +728,13 @@ export class CrawleeFetcher {
     const last = this.hostLastAccess.get(host) || 0;
     const delta = now - last;
     const delayMs = Math.max(0, Number(minDelayMs || this.config.perHostMinDelayMs || 0));
+    let waitedMs = 0;
     if (delta < delayMs) {
-      await wait(delayMs - delta);
+      waitedMs = delayMs - delta;
+      await wait(waitedMs);
     }
     this.hostLastAccess.set(host, Date.now());
+    return waitedMs;
   }
 
   async enforceRobots(source) {
@@ -722,7 +841,8 @@ export class CrawleeFetcher {
       return robotsBlocked;
     }
 
-    await this.waitForHostSlot(
+    const startedAtMs = Date.now();
+    let hostWaitMs = await this.waitForHostSlot(
       source.host,
       source?.crawlConfig?.rate_limit_ms ?? fetchPolicy.perHostMinDelayMs
     );
@@ -748,6 +868,15 @@ export class CrawleeFetcher {
 
     let result = null;
     let lastError = null;
+    let attemptsUsed = 1;
+    const retryReasons = [];
+    let navigationMs = 0;
+    let networkIdleWaitMs = 0;
+    let interactiveWaitMs = 0;
+    let graphqlReplayMs = 0;
+    let contentCaptureMs = 0;
+    let screenshotMs = 0;
+    let replayRowsAdded = 0;
 
     const crawler = new PlaywrightCrawler({
       maxRequestsPerCrawl: 1,
@@ -762,7 +891,9 @@ export class CrawleeFetcher {
         async ({ request }, gotoOptions) => {
           gotoOptions.waitUntil = 'domcontentloaded';
           gotoOptions.timeout = navigationTimeout;
+          attemptsUsed = Math.max(attemptsUsed, Number(request?.retryCount || 0) + 1);
           if (request.retryCount > 0 && retryBackoffMs > 0) {
+            retryReasons.push('crawlee_retry_backoff');
             this.logger?.warn?.('dynamic_fetch_retry', {
               host: source.host,
               url: source.url,
@@ -772,6 +903,7 @@ export class CrawleeFetcher {
               reason: 'crawlee_retry_backoff'
             });
             await wait(retryBackoffMs);
+            hostWaitMs += retryBackoffMs;
           }
         }
       ],
@@ -790,16 +922,21 @@ export class CrawleeFetcher {
         });
 
         try {
+          const networkIdleStartedAt = Date.now();
           await page.waitForLoadState('networkidle', {
             timeout: networkIdleTimeout
           });
+          networkIdleWaitMs += Math.max(0, Date.now() - networkIdleStartedAt);
         } catch {
           // Best effort only.
         }
 
+        const interactiveStartedAt = Date.now();
         await this.captureInteractiveSignals(page, fetchPolicy);
+        interactiveWaitMs += Math.max(0, Date.now() - interactiveStartedAt);
 
         if (fetchPolicy.graphqlReplayEnabled) {
+          const replayStartedAt = Date.now();
           const replayRows = await replayGraphqlRequests({
             page,
             capturedResponses: recorder.rows,
@@ -807,15 +944,51 @@ export class CrawleeFetcher {
             maxJsonBytes: this.config.maxJsonBytes,
             logger: this.logger
           });
+          graphqlReplayMs += Math.max(0, Date.now() - replayStartedAt);
           if (replayRows.length) {
             recorder.rows.push(...replayRows);
+            replayRowsAdded += replayRows.length;
           }
         }
 
+        const captureStartedAt = Date.now();
         const html = await page.content();
         const title = await page.title();
         const finalUrl = page.url();
+        contentCaptureMs += Math.max(0, Date.now() - captureStartedAt);
+        const screenshotStartedAt = Date.now();
         const screenshot = await captureScreenshotArtifact(page, this.config, fetchPolicy);
+        screenshotMs += Math.max(0, Date.now() - screenshotStartedAt);
+        navigationMs += Math.max(0, Number(request?.loadedTimeMillis || 0));
+        const ldjsonBlocks = extractLdJsonBlocks(html);
+        const embeddedState = extractEmbeddedState(html);
+        const fetchTelemetry = {
+          fetcher_kind: 'crawlee',
+          attempts: attemptsUsed,
+          retry_count: Math.max(0, attemptsUsed - 1),
+          retry_reasons: retryReasons.slice(0, 8),
+          policy: policySnapshotForTelemetry(fetchPolicy),
+          timings_ms: {
+            total: Math.max(0, Date.now() - startedAtMs),
+            host_wait: hostWaitMs,
+            navigation: navigationMs,
+            network_idle_wait: networkIdleWaitMs,
+            interactive_wait: interactiveWaitMs,
+            graphql_replay: graphqlReplayMs,
+            content_capture: contentCaptureMs,
+            screenshot_capture: screenshotMs
+          },
+          payload_counts: {
+            network_rows: recorder.rows.length,
+            graphql_replay_rows: replayRowsAdded,
+            ldjson_blocks: Array.isArray(ldjsonBlocks) ? ldjsonBlocks.length : 0
+          },
+          capture: {
+            screenshot_available: Boolean(screenshot),
+            screenshot_kind: String(screenshot?.kind || '').trim() || null,
+            screenshot_selector: String(screenshot?.selector || '').trim() || null
+          }
+        };
 
         result = {
           url: source.url,
@@ -823,23 +996,30 @@ export class CrawleeFetcher {
           status,
           title,
           html,
-          ldjsonBlocks: extractLdJsonBlocks(html),
-          embeddedState: extractEmbeddedState(html),
+          ldjsonBlocks,
+          embeddedState,
           networkResponses: recorder.rows,
-          screenshot
+          screenshot,
+          fetchTelemetry
         };
       },
       failedRequestHandler: async ({ request, error }) => {
+        retryReasons.push(String(error?.message || 'crawlee_failed'));
         lastError = error || new Error(`crawlee_failed_${request.url}`);
       },
       errorHandler: async ({ error }) => {
         if (!lastError) {
           lastError = error;
         }
+        retryReasons.push(String(error?.message || 'crawlee_error'));
       }
     });
 
-    await crawler.run([source.url]);
+    const uniqueKey = `${String(source.url || '')}::${Date.now()}::${Math.random().toString(36).slice(2, 10)}`;
+    await crawler.run([{
+      url: source.url,
+      uniqueKey
+    }]);
 
     if (result) {
       return result;

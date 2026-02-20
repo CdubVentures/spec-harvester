@@ -1,4 +1,21 @@
-﻿# Deep Spec Harvester â€” Phased Implementation Plan (Accuracyâ€‘Max)
+﻿# Phase 10 - Learning and Compounding
+
+## Canonical Status
+- This is the single canonical file for this phase.
+- Consolidated on 2026-02-20 from split planning plus improvement docs.
+- Includes implemented status and remaining work from merged sources.
+- Keep all unfinished items active until code plus GUI proof confirms completion.
+
+## Merged Source Files
+- PHASE-10-learning-compounding.md
+- PHASE-10-IMPROVMENT.md
+
+## Full Merged Spec
+
+### Source: PHASE-10-learning-compounding.md
+
+> Original header: Deep Spec Harvester â€” Phased Implementation Plan (Accuracyâ€‘Max)
+
 
 This phase file is written as an **implementation prompt for senior software engineers**.
 It includes: exact deliverables, file touchpoints, schemas/events, test strategy, and **GUI proof**.
@@ -86,4 +103,26 @@ Proof steps:
 
 ## Exit criteria
 - Learning updates are visible and explainable, and improve subsequent runs.
+
+
+### Source: PHASE-10-IMPROVMENT.md
+
+> Original header: PHASE-10 IMPROVMENT
+
+
+## What I'd Add
+1. Add strict learning acceptance gates: confidence, refs, tier, identity safety.
+2. Add separate memory stores for anchors, domain yield, and identity aliases.
+3. Add rollback-safe learning suggestions (propose first, accept later).
+4. Add decay and expiration for stale or low-yield learned entries.
+
+## What We Should Implement Now
+1. Only learn from accepted prime sources with sufficient evidence policy pass.
+2. Add Learning Feed rows that show exact source refs and acceptance reason.
+3. Add optional identity alias memory keyed by `identity_fingerprint`.
+
+## Definition Of Done
+1. Learning improves future runs without contaminating quality.
+2. Every learned entry is auditable and reversible.
+3. Low-value learned data naturally decays out.
 

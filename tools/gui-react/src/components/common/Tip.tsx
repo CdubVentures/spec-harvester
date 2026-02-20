@@ -7,7 +7,11 @@ export function Tip({ text }: { text: string }) {
       <Tooltip.Trigger asChild>
         <span
           tabIndex={0}
-          className="inline-flex items-center justify-center w-4 h-4 ml-1 text-[10px] font-bold leading-none text-gray-400 dark:text-gray-500 border border-gray-300 dark:border-gray-600 rounded-full cursor-help hover:text-accent hover:border-accent focus:text-accent focus:border-accent focus:outline-none align-middle"
+          className="inline-flex shrink-0 items-center justify-center rounded-full border border-gray-300 font-semibold leading-none text-gray-500 align-middle cursor-help hover:text-accent hover:border-accent focus:text-accent focus:border-accent focus:outline-none dark:border-gray-600 dark:text-gray-400 ml-1"
+          style={{
+            width: 'calc(1em + 0.2rem)',
+            height: 'calc(1em + 0.2rem)'
+          }}
         >
           ?
         </span>

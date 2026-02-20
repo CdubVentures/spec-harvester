@@ -15,6 +15,18 @@ const TIER_WEIGHT = {
 
 const METHOD_WEIGHT = {
   network_json: 1,
+  pdf_table: 0.95,
+  pdf_kv: 0.93,
+  pdf: 0.82,
+  scanned_pdf_ocr_table: 0.88,
+  scanned_pdf_ocr_kv: 0.86,
+  scanned_pdf_ocr_text: 0.78,
+  json_ld: 0.9,
+  microdata: 0.88,
+  opengraph: 0.8,
+  microformat: 0.78,
+  rdfa: 0.78,
+  twitter_card: 0.78,
   embedded_state: 0.85,
   ldjson: 0.75,
   dom: 0.4

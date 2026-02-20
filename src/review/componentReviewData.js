@@ -76,11 +76,12 @@ function normalizeSourceToken(source) {
 
 function sourceLabelFromToken(token, fallback = '') {
   const normalized = normalizeSourceToken(token);
-  if (normalized === 'workbook') return 'Excel Import';
-  if (normalized === 'pipeline') return 'Pipeline';
-  if (normalized === 'specdb') return 'SpecDb';
-  if (normalized === 'user') return 'user';
-  return fallback || normalized || '';
+  const fallbackLabel = String(fallback || '').trim();
+  if (normalized === 'workbook') return fallbackLabel || 'Excel Import';
+  if (normalized === 'pipeline') return fallbackLabel || 'Pipeline';
+  if (normalized === 'specdb') return fallbackLabel || 'SpecDb';
+  if (normalized === 'user') return fallbackLabel || 'user';
+  return fallbackLabel || normalized || '';
 }
 
 function sourceMethodFromToken(token, fallback = null) {
@@ -94,6 +95,68 @@ function sourceMethodFromToken(token, fallback = null) {
 
 function candidateSourceToken(candidate, fallback = '') {
   return normalizeSourceToken(candidate?.source_id || candidate?.source || fallback);
+}
+
+function buildPipelineAttributionContext(reviewItems) {
+  const productIds = [...new Set(
+    toArray(reviewItems)
+      .map((entry) => String(entry?.product_id || '').trim())
+      .filter(Boolean)
+  )];
+  const productCount = productIds.length;
+  return {
+    productIds,
+    productCount,
+    productLabel: `${productCount} product${productCount === 1 ? '' : 's'}`,
+  };
+}
+
+function pipelineSourceFromAttribution(attributionContext) {
+  const label = String(attributionContext?.productLabel || '').trim();
+  return label ? `Pipeline (${label})` : 'Pipeline';
+}
+
+function buildPipelineEvidenceQuote(baseQuote, attributionContext) {
+  const quote = String(baseQuote || '').trim();
+  const label = String(attributionContext?.productLabel || '').trim();
+  if (!label) return quote;
+  if (!quote) return `Observed across ${label}`;
+  return `${quote}; observed across ${label}`;
+}
+
+function reviewItemScore(reviewItem, fallback = 0.5) {
+  const value = Number(reviewItem?.combined_score);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function buildPipelineReviewCandidate({
+  candidateId,
+  value,
+  reviewItem,
+  method,
+  quote,
+  snippetText,
+  attributionContext,
+}) {
+  return {
+    candidate_id: candidateId,
+    value,
+    score: reviewItemScore(reviewItem),
+    source_id: 'pipeline',
+    source: pipelineSourceFromAttribution(attributionContext),
+    tier: null,
+    method,
+    evidence: {
+      url: '',
+      retrieved_at: reviewItem?.created_at || '',
+      snippet_id: '',
+      snippet_hash: '',
+      quote: buildPipelineEvidenceQuote(quote, attributionContext),
+      quote_span: null,
+      snippet_text: String(snippetText || '').trim(),
+      source_id: 'pipeline',
+    },
+  };
 }
 
 function sortCandidatesByScore(candidates) {
@@ -370,6 +433,16 @@ function hasActionableCandidate(candidates) {
   ));
 }
 
+function shouldIncludeEnumValueEntry(entry, { requireLinkedPendingPipeline = false } = {}) {
+  if (!isObject(entry)) return false;
+  if (!requireLinkedPendingPipeline) return true;
+  const isPipeline = normalizeSourceToken(entry.source) === 'pipeline';
+  const isPending = Boolean(entry.needs_review) && hasActionableCandidate(entry.candidates);
+  if (!isPipeline || !isPending) return true;
+  const linkedCount = Array.isArray(entry.linked_products) ? entry.linked_products.length : 0;
+  return linkedCount > 0;
+}
+
 function buildCandidateReviewLookup(reviewRows) {
   const exact = new Map();
   for (const row of toArray(reviewRows)) {
@@ -391,8 +464,17 @@ function getCandidateReviewRow(lookup, candidateId) {
 function normalizeCandidateSharedReviewStatus(candidate, reviewRow = null) {
   if (candidate?.is_synthetic_selected) return 'accepted';
   if (reviewRow) {
-    if (Number(reviewRow.human_accepted) === 1) return 'accepted';
     const aiStatus = normalizeToken(reviewRow.ai_review_status);
+    const aiReason = normalizeToken(reviewRow.ai_reason);
+    // Shared-lane accept is independent from AI confirm.
+    // Legacy rows with ai_reason=shared_accept (or human_accepted) must remain pending
+    // so AI confirm buttons stay candidate-scoped and independent.
+    if (
+      (Number(reviewRow.human_accepted) === 1 || aiReason === 'shared_accept')
+      && aiStatus === 'accepted'
+    ) {
+      return 'pending';
+    }
     if (aiStatus === 'accepted') return 'accepted';
     if (aiStatus === 'rejected') return 'rejected';
     return 'pending';
@@ -805,6 +887,7 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
 
     // Enrich name/maker candidates from pipeline review items
     const itemReviewItems = reviewByComponent.get(String(itemName || '').toLowerCase()) || [];
+    const itemReviewAttribution = buildPipelineAttributionContext(itemReviewItems);
     if (itemReviewItems.length > 0) {
       // Name candidates from pipeline (per review item / source identity)
       const existingNameCandidateIds = new Set(name_tracked.candidates.map((candidate) => String(candidate?.candidate_id || '').trim()));
@@ -820,25 +903,15 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
         if (existingNameCandidateIds.has(candidateId)) continue;
         existingNameCandidateIds.add(candidateId);
         const productLabel = String(ri.product_id || '').trim() || 'unknown_product';
-        name_tracked.candidates.push({
-          candidate_id: candidateId,
+        name_tracked.candidates.push(buildPipelineReviewCandidate({
+          candidateId,
           value: val,
-          score: Number.isFinite(Number(ri.combined_score)) ? Number(ri.combined_score) : 0.5,
-          source_id: 'pipeline',
-          source: `Pipeline (${productLabel})`,
-          tier: null,
+          reviewItem: ri,
           method: ri.match_type || 'component_review',
-          evidence: {
-            url: '',
-            retrieved_at: ri.created_at || '',
-            snippet_id: '',
-            snippet_hash: '',
-            quote: `Extracted from ${productLabel}${ri.review_id ? ` (${ri.review_id})` : ''}`,
-            quote_span: null,
-            snippet_text: `Component ${ri.match_type === 'fuzzy_flagged' ? 'fuzzy matched' : 'not found in DB'}`,
-            source_id: 'pipeline',
-          },
-        });
+          quote: `Extracted from ${productLabel}${ri.review_id ? ` (${ri.review_id})` : ''}`,
+          snippetText: `Component ${ri.match_type === 'fuzzy_flagged' ? 'fuzzy matched' : 'not found in DB'}`,
+          attributionContext: itemReviewAttribution,
+        }));
       }
       name_tracked.candidate_count = name_tracked.candidates.length;
 
@@ -859,25 +932,15 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
           if (existingMakerCandidateIds.has(candidateId)) continue;
           existingMakerCandidateIds.add(candidateId);
           const productLabel = String(ri.product_id || '').trim() || 'unknown_product';
-          maker_tracked.candidates.push({
-            candidate_id: candidateId,
+          maker_tracked.candidates.push(buildPipelineReviewCandidate({
+            candidateId,
             value: val,
-            score: Number.isFinite(Number(ri.combined_score)) ? Number(ri.combined_score) : 0.5,
-            source_id: 'pipeline',
-            source: `Pipeline (${productLabel})`,
-            tier: null,
+            reviewItem: ri,
             method: 'product_extraction',
-            evidence: {
-              url: '',
-              retrieved_at: ri.created_at || '',
-              snippet_id: '',
-              snippet_hash: '',
-              quote: `Extracted ${brandKey}="${val}" from ${productLabel}${ri.review_id ? ` (${ri.review_id})` : ''}`,
-              quote_span: null,
-              snippet_text: 'Pipeline extraction from product runs',
-              source_id: 'pipeline',
-            },
-          });
+            quote: `Extracted ${brandKey}="${val}" from ${productLabel}${ri.review_id ? ` (${ri.review_id})` : ''}`,
+            snippetText: 'Pipeline extraction from product runs',
+            attributionContext: itemReviewAttribution,
+          }));
         }
       }
       maker_tracked.candidate_count = maker_tracked.candidates.length;
@@ -909,30 +972,6 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
       if (isOverridden) reasonCodes.push('manual_override');
       for (const c of fieldConstraints) reasonCodes.push(`constraint:${c}`);
 
-      // Workbook candidate (from component_db source rows)
-      const workbookRawValue = workbookItem?.properties?.[key];
-      const hasWorkbookRawValue = workbookRawValue !== undefined && workbookRawValue !== null && workbookRawValue !== '' && workbookRawValue !== '-';
-      const wbCandidate = hasWorkbookRawValue ? [{
-        candidate_id: buildWorkbookComponentCandidateId({
-          componentType,
-          componentName: itemName,
-          propertyKey: key,
-          value: workbookRawValue,
-        }),
-        value: workbookRawValue,
-        score: 1.0,
-        source_id: 'workbook',
-        source: 'Excel Import',
-        tier: null,
-        method: 'workbook_import',
-        evidence: {
-          url: '', retrieved_at: '', snippet_id: '', snippet_hash: '',
-          quote: `Imported from ${category}Data.xlsm`,
-          quote_span: null, snippet_text: `Imported from ${category}Data.xlsm`,
-          source_id: 'workbook',
-        },
-      }] : [];
-
       properties[key] = {
         slot_id: dbRow?.id ?? null,
         selected: {
@@ -948,8 +987,8 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
         variance_policy: variance,
         constraints: fieldConstraints,
         overridden: isOverridden,
-        candidate_count: wbCandidate.length,
-        candidates: wbCandidate,
+        candidate_count: 0,
+        candidates: [],
         accepted_candidate_id: String(propertyKeyState?.selected_candidate_id || '').trim()
           || dbRow?.accepted_candidate_id
           || null,
@@ -958,56 +997,16 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
       itemPropCount++;
     }
 
-    // Pipeline property candidates from component_review items
-    if (itemReviewItems.length > 0) {
-      for (const key of propertyColumns) {
-        const prop = properties[key];
-        if (!prop) continue;
-        const existingPropCandidateIds = new Set(prop.candidates.map((candidate) => String(candidate?.candidate_id || '').trim()));
-        for (const ri of itemReviewItems) {
-          const attrs = isObject(ri.product_attributes) ? ri.product_attributes : {};
-          const pipelineVal = attrs[key];
-          if (pipelineVal === undefined || pipelineVal === null || pipelineVal === '') continue;
-          for (const valStr of splitCandidateParts(pipelineVal)) {
-            const candidateId = buildComponentReviewSyntheticCandidateId({
-              productId: ri.product_id || '',
-              fieldKey: key,
-              reviewId: ri.review_id || '',
-              value: valStr,
-            });
-            if (existingPropCandidateIds.has(candidateId)) continue;
-            existingPropCandidateIds.add(candidateId);
-            const productLabel = String(ri.product_id || '').trim() || 'unknown_product';
-            prop.candidates.push({
-              candidate_id: candidateId,
-              value: valStr,
-              score: Number.isFinite(Number(ri.combined_score)) ? Number(ri.combined_score) : 0.5,
-              source_id: 'pipeline',
-              source: `Pipeline (${productLabel})`,
-              tier: null,
-              method: 'product_extraction',
-              evidence: {
-                url: '',
-                retrieved_at: ri.created_at || '',
-                snippet_id: '',
-                snippet_hash: '',
-                quote: `Extracted ${key}="${valStr}" from ${productLabel}${ri.review_id ? ` (${ri.review_id})` : ''}`,
-                quote_span: null,
-                snippet_text: 'Pipeline extraction from product runs',
-                source_id: 'pipeline',
-              },
-            });
-          }
-        }
-        prop.candidate_count = prop.candidates.length;
-      }
-    }
+    // Property candidates are sourced from linked-product candidate rows (SpecDb).
+    // Pipeline review rows are used only as fallback when there are no linked products.
 
     // SpecDb enrichment: product-level candidates from SQLite
     let linkedProducts = [];
+    let hasDbLinkedProducts = false;
     try {
       const linkRows = specDb.getProductsForComponent(componentType, itemName, itemMaker);
       const productIds = linkRows.map(r => r.product_id);
+      hasDbLinkedProducts = productIds.length > 0;
       linkedProducts = linkRows.map(r => ({
         product_id: r.product_id,
         field_key: r.field_key,
@@ -1088,18 +1087,46 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
     } catch (_specDbErr) {
       // SpecDb enrichment is best-effort
     }
-    if (linkedProducts.length === 0 && itemReviewItems.length > 0) {
-      const productIdsFromReview = [...new Set(
-        itemReviewItems
-          .map((ri) => String(ri?.product_id || '').trim())
-          .filter(Boolean)
-      )];
-      linkedProducts = productIdsFromReview.map((productId) => ({
+    if (linkedProducts.length === 0 && itemReviewAttribution.productIds.length > 0) {
+      linkedProducts = itemReviewAttribution.productIds.map((productId) => ({
         product_id: productId,
         field_key: componentType,
         match_type: 'pipeline_review',
         match_score: null,
       }));
+    }
+    if (!hasDbLinkedProducts && itemReviewItems.length > 0) {
+      for (const key of propertyColumns) {
+        const prop = properties[key];
+        if (!prop) continue;
+        const existingPropCandidateIds = new Set(prop.candidates.map((candidate) => String(candidate?.candidate_id || '').trim()));
+        for (const ri of itemReviewItems) {
+          const attrs = isObject(ri.product_attributes) ? ri.product_attributes : {};
+          const pipelineVal = attrs[key];
+          if (pipelineVal === undefined || pipelineVal === null || pipelineVal === '') continue;
+          for (const valStr of splitCandidateParts(pipelineVal)) {
+            const candidateId = buildComponentReviewSyntheticCandidateId({
+              productId: ri.product_id || '',
+              fieldKey: key,
+              reviewId: ri.review_id || '',
+              value: valStr,
+            });
+            if (existingPropCandidateIds.has(candidateId)) continue;
+            existingPropCandidateIds.add(candidateId);
+            const productLabel = String(ri.product_id || '').trim() || 'unknown_product';
+            prop.candidates.push(buildPipelineReviewCandidate({
+              candidateId,
+              value: valStr,
+              reviewItem: ri,
+              method: 'product_extraction',
+              quote: `Extracted ${key}="${valStr}" from ${productLabel}${ri.review_id ? ` (${ri.review_id})` : ''}`,
+              snippetText: 'Pipeline extraction from product runs',
+              attributionContext: itemReviewAttribution,
+            }));
+          }
+        }
+        prop.candidate_count = prop.candidates.length;
+      }
     }
 
     ensureTrackedStateCandidateInvariant(name_tracked, {
@@ -1385,6 +1412,7 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
     // Enrich name/maker candidates from component_review items (pipeline product extractions)
     // Keep one candidate per review item/source (no value-collapsing).
     const itemReviewItems = reviewByComponent.get(String(item.name || '').toLowerCase()) || [];
+    const itemReviewAttribution = buildPipelineAttributionContext(itemReviewItems);
     if (itemReviewItems.length > 0) {
       const existingNameCandidateIds = new Set(name_tracked.candidates.map((candidate) => String(candidate?.candidate_id || '').trim()));
       for (const ri of itemReviewItems) {
@@ -1399,25 +1427,15 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
         if (existingNameCandidateIds.has(candidateId)) continue;
         existingNameCandidateIds.add(candidateId);
         const productLabel = String(ri.product_id || '').trim() || 'unknown_product';
-        name_tracked.candidates.push({
-          candidate_id: candidateId,
+        name_tracked.candidates.push(buildPipelineReviewCandidate({
+          candidateId,
           value: val,
-          score: Number.isFinite(Number(ri.combined_score)) ? Number(ri.combined_score) : 0.5,
-          source_id: 'pipeline',
-          source: `Pipeline (${productLabel})`,
-          tier: null,
+          reviewItem: ri,
           method: ri.match_type || 'component_review',
-          evidence: {
-            url: '',
-            retrieved_at: ri.created_at || '',
-            snippet_id: '',
-            snippet_hash: '',
-            quote: `Extracted from ${productLabel}${ri.review_id ? ` (${ri.review_id})` : ''}`,
-            quote_span: null,
-            snippet_text: `Component ${ri.match_type === 'fuzzy_flagged' ? 'fuzzy matched' : 'not found in DB'}`,
-            source_id: 'pipeline',
-          },
-        });
+          quote: `Extracted from ${productLabel}${ri.review_id ? ` (${ri.review_id})` : ''}`,
+          snippetText: `Component ${ri.match_type === 'fuzzy_flagged' ? 'fuzzy matched' : 'not found in DB'}`,
+          attributionContext: itemReviewAttribution,
+        }));
       }
       name_tracked.candidate_count = name_tracked.candidates.length;
     }
@@ -1489,25 +1507,15 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
           if (existingMakerCandidateIds.has(candidateId)) continue;
           existingMakerCandidateIds.add(candidateId);
           const productLabel = String(ri.product_id || '').trim() || 'unknown_product';
-          maker_tracked.candidates.push({
-            candidate_id: candidateId,
+          maker_tracked.candidates.push(buildPipelineReviewCandidate({
+            candidateId,
             value: val,
-            score: Number.isFinite(Number(ri.combined_score)) ? Number(ri.combined_score) : 0.5,
-            source_id: 'pipeline',
-            source: `Pipeline (${productLabel})`,
-            tier: null,
+            reviewItem: ri,
             method: 'product_extraction',
-            evidence: {
-              url: '',
-              retrieved_at: ri.created_at || '',
-              snippet_id: '',
-              snippet_hash: '',
-              quote: `Extracted ${brandKey}="${val}" from ${productLabel}${ri.review_id ? ` (${ri.review_id})` : ''}`,
-              quote_span: null,
-              snippet_text: `Pipeline extraction from product runs`,
-              source_id: 'pipeline',
-            },
-          });
+            quote: `Extracted ${brandKey}="${val}" from ${productLabel}${ri.review_id ? ` (${ri.review_id})` : ''}`,
+            snippetText: 'Pipeline extraction from product runs',
+            attributionContext: itemReviewAttribution,
+          }));
         }
       }
       maker_tracked.candidate_count = maker_tracked.candidates.length;
@@ -1634,25 +1642,15 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
             if (existingPropCandidateIds.has(candidateId)) continue;
             existingPropCandidateIds.add(candidateId);
             const productLabel = String(ri.product_id || '').trim() || 'unknown_product';
-            prop.candidates.push({
-              candidate_id: candidateId,
+            prop.candidates.push(buildPipelineReviewCandidate({
+              candidateId,
               value: valStr,
-              score: Number.isFinite(Number(ri.combined_score)) ? Number(ri.combined_score) : 0.5,
-              source_id: 'pipeline',
-              source: `Pipeline (${productLabel})`,
-              tier: null,
+              reviewItem: ri,
               method: 'product_extraction',
-              evidence: {
-                url: '',
-                retrieved_at: ri.created_at || '',
-                snippet_id: '',
-                snippet_hash: '',
-                quote: `Extracted ${key}="${valStr}" from ${productLabel}${ri.review_id ? ` (${ri.review_id})` : ''}`,
-                quote_span: null,
-                snippet_text: `Pipeline extraction from product runs`,
-                source_id: 'pipeline',
-              },
-            });
+              quote: `Extracted ${key}="${valStr}" from ${productLabel}${ri.review_id ? ` (${ri.review_id})` : ''}`,
+              snippetText: 'Pipeline extraction from product runs',
+              attributionContext: itemReviewAttribution,
+            }));
           }
         }
         prop.candidate_count = prop.candidates.length;
@@ -1828,13 +1826,8 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
         // SpecDb enrichment is best-effort — don't break the drawer
       }
     }
-    if (linkedProducts.length === 0 && itemReviewItems.length > 0) {
-      const productIdsFromReview = [...new Set(
-        itemReviewItems
-          .map((ri) => String(ri?.product_id || '').trim())
-          .filter(Boolean)
-      )];
-      linkedProducts = productIdsFromReview.map((productId) => ({
+    if (linkedProducts.length === 0 && itemReviewAttribution.productIds.length > 0) {
+      linkedProducts = itemReviewAttribution.productIds.map((productId) => ({
         product_id: productId,
         field_key: componentType,
         match_type: 'pipeline_review',
@@ -2037,10 +2030,7 @@ async function buildEnumReviewPayloadsSpecDb({ config = {}, category, specDb }) 
 
       // SpecDb enrichment: linked products and additional candidates
       try {
-        let productRows = specDb.getProductsForListValue(field, row.value);
-        if (!productRows.length) {
-          productRows = specDb.getProductsForFieldValue(field, row.value);
-        }
+        const productRows = specDb.getProductsByListValueId(row.id);
         if (productRows.length > 0) {
           entry.linked_products = productRows.map(r => ({
             product_id: r.product_id,
@@ -2048,10 +2038,7 @@ async function buildEnumReviewPayloadsSpecDb({ config = {}, category, specDb }) 
           }));
         }
 
-        let candRows = specDb.getCandidatesByListValue(field, row.id);
-        if (!candRows.length) {
-          candRows = specDb.getCandidatesForFieldValue(field, row.value);
-        }
+        const candRows = specDb.getCandidatesByListValue(field, row.id);
         if (candRows.length > 0) {
           appendAllSpecDbCandidates(
             entry.candidates,
@@ -2077,6 +2064,9 @@ async function buildEnumReviewPayloadsSpecDb({ config = {}, category, specDb }) 
     }
 
     const values = [...valueMap.values()]
+      .filter((entry) => shouldIncludeEnumValueEntry(entry, {
+        requireLinkedPendingPipeline: true,
+      }))
       .sort((a, b) => a.value.localeCompare(b.value));
     const flagCount = values.filter(v => (
       v.needs_review
@@ -2251,10 +2241,7 @@ async function buildEnumReviewPayloadsLegacy({ config = {}, category, specDb = n
           if (!lvRow) continue;
 
           // Linked products for this enum value
-          let productRows = specDb.getProductsForListValue(field, entry.value);
-          if (!productRows.length) {
-            productRows = specDb.getProductsForFieldValue(field, entry.value);
-          }
+          const productRows = specDb.getProductsByListValueId(lvRow.id);
           if (productRows.length > 0) {
             entry.linked_products = productRows.map(r => ({
               product_id: r.product_id,
@@ -2267,10 +2254,7 @@ async function buildEnumReviewPayloadsLegacy({ config = {}, category, specDb = n
             entry.accepted_candidate_id = lvRow.accepted_candidate_id || null;
           }
 
-          let candRows = specDb.getCandidatesByListValue(field, lvRow.id);
-          if (!candRows.length) {
-            candRows = specDb.getCandidatesForFieldValue(field, entry.value);
-          }
+          const candRows = specDb.getCandidatesByListValue(field, lvRow.id);
           if (!candRows.length) continue;
           appendAllSpecDbCandidates(
             entry.candidates,
@@ -2291,6 +2275,9 @@ async function buildEnumReviewPayloadsLegacy({ config = {}, category, specDb = n
     }
 
     const values = [...valueMap.values()]
+      .filter((entry) => shouldIncludeEnumValueEntry(entry, {
+        requireLinkedPendingPipeline: Boolean(specDb),
+      }))
       .sort((a, b) => a.value.localeCompare(b.value));
     const flagCount = values.filter(v => (
       v.needs_review

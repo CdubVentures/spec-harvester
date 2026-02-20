@@ -747,17 +747,6 @@ export function ComponentReviewDrawer({
     )];
   }
 
-  function countPendingSharedCandidates(
-    candidates: import('../../types/review').ReviewCandidate[],
-  ): number {
-    return (candidates || []).filter((candidate) => {
-      const candidateId = String(candidate?.candidate_id || '').trim();
-      if (!candidateId || !hasKnownValue(candidate?.value) || candidate?.is_synthetic_selected) return false;
-      const sharedStatus = String(candidate?.shared_review_status || '').trim().toLowerCase();
-      return !sharedStatus || sharedStatus === 'pending';
-    }).length;
-  }
-
   // Handle __name/__maker in focused mode via CellDrawer
   if (focusedProperty === '__name' || focusedProperty === '__maker') {
     const state = focusedProperty === '__name' ? item.name_tracked : item.maker_tracked;
@@ -779,6 +768,11 @@ export function ComponentReviewDrawer({
       hasSharedPending,
       candidates,
     });
+    const fallbackSharedConfirmCandidateId = String(
+      state.accepted_candidate_id
+      || pendingSharedCandidateIds[0]
+      || '',
+    ).trim() || undefined;
     const focusedMutationIds = getMutationIds(focusedProperty);
     const canMutateFocused = canMutateProperty(focusedProperty);
 
@@ -848,7 +842,7 @@ export function ComponentReviewDrawer({
             name: item.name,
             maker: item.maker,
             property: focusedProperty,
-            candidateId: state.accepted_candidate_id || undefined,
+            candidateId: fallbackSharedConfirmCandidateId,
             candidateValue: hasValue ? String(state.selected.value) : undefined,
             candidateConfidence: Number(state.selected.confidence ?? 0),
             ...focusedMutationIds,
@@ -859,7 +853,7 @@ export function ComponentReviewDrawer({
             {drawerPendingReviewItems.length > 0 && (
               <PendingAIReviewSection
                 items={drawerPendingReviewItems}
-                pendingCandidateCount={countPendingSharedCandidates(candidates)}
+                pendingCandidateCount={pendingSharedCandidateIds.length}
                 category={category}
                 queryClient={queryClient}
               />
@@ -900,6 +894,11 @@ export function ComponentReviewDrawer({
       hasSharedPending,
       candidates,
     });
+    const fallbackSharedConfirmCandidateId = String(
+      state.accepted_candidate_id
+      || pendingSharedCandidateIds[0]
+      || '',
+    ).trim() || undefined;
     const focusedMutationIds = getMutationIds(focusedProperty);
     const canMutateFocused = canMutateProperty(focusedProperty);
 
@@ -969,7 +968,7 @@ export function ComponentReviewDrawer({
             name: item.name,
             maker: item.maker,
             property: focusedProperty,
-            candidateId: state.accepted_candidate_id || undefined,
+            candidateId: fallbackSharedConfirmCandidateId,
             candidateValue: hasValue ? String(state.selected.value) : undefined,
             candidateConfidence: Number(state.selected.confidence ?? 0),
             ...focusedMutationIds,
@@ -980,7 +979,7 @@ export function ComponentReviewDrawer({
             {drawerPendingReviewItems.length > 0 && (
               <PendingAIReviewSection
                 items={drawerPendingReviewItems}
-                pendingCandidateCount={countPendingSharedCandidates(candidates)}
+                pendingCandidateCount={pendingSharedCandidateIds.length}
                 category={category}
                 queryClient={queryClient}
               />

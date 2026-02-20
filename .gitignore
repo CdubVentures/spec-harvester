@@ -21,6 +21,8 @@ __pycache__/
 # Local runtime/cache data
 .specfactory_tmp/
 artifacts/
+debug/
+storage/
 
 # Local temporary scratch files
 .tmp-*
@@ -38,7 +40,16 @@ tools/dist/
 fixtures/s3/specs/inputs/_discovery/
 fixtures/s3/specs/inputs/_sources/candidates/
 fixtures/s3/specs/inputs/_test_*/
+fixtures/s3/specs/inputs/*/products/*e2e*.json
+fixtures/s3/specs/inputs/*/products/*merge*.json
+fixtures/s3/specs/inputs/*/products/*proof*.json
+fixtures/s3/specs/inputs/*/products/*indexlab*.json
+fixtures/s3/specs/inputs/*/products/*-dltest.json
 
 # Local helper staging/test data
 helper_files/_test_*/
 helper_files/_global/
+
+# Launcher binaries (runtime artifacts)
+SpecFactory.exe
+Launcher.exe

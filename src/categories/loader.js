@@ -419,7 +419,7 @@ async function loadGeneratedCategoryArtifacts(category, runtimeConfig = {}) {
 
   const sources = isObject(generatedSourcesRaw)
     ? generatedSourcesRaw
-    : (isObject(helperSourcesRaw) ? helperSourcesRaw : defaultSources());
+    : (isObject(helperSourcesRaw) ? helperSourcesRaw : null);
   const anchors = isObject(generatedAnchorsRaw)
     ? generatedAnchorsRaw
     : (isObject(helperAnchorsRaw) ? helperAnchorsRaw : {});
@@ -525,7 +525,7 @@ export async function loadCategoryConfig(category, options = {}) {
     ? generated.requiredFields
     : (baseConfig.requiredFields || []);
 
-  let sources = generated.sources || baseConfig.sources || defaultSources();
+  let sources = mergeSources(baseConfig.sources || defaultSources(), generated.sources || null);
   let sourcesOverrideKey = null;
 
   if (storage && runtimeConfig?.s3InputPrefix) {
@@ -538,7 +538,7 @@ export async function loadCategoryConfig(category, options = {}) {
     );
     const overrideSources = await storage.readJsonOrNull(overrideKey);
     if (overrideSources) {
-      sources = mergeSources(baseConfig.sources, overrideSources);
+      sources = mergeSources(sources, overrideSources);
       sourcesOverrideKey = overrideKey;
     }
   }

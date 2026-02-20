@@ -108,12 +108,23 @@ function tryNormalizeValue(value) {
 function phaseFromMethod(method = '') {
   const token = String(method || '').trim().toLowerCase();
   if (!token) return 'phase_01_static_html';
-  if (token.includes('network') || token.includes('json') || token.includes('embedded_state') || token.includes('ldjson')) {
+  if (
+    token.includes('network')
+    || token.includes('json')
+    || token.includes('embedded_state')
+    || token.includes('ldjson')
+    || token.includes('microdata')
+    || token.includes('opengraph')
+    || token.includes('microformat')
+    || token.includes('rdfa')
+    || token.includes('twitter_card')
+  ) {
     return 'phase_05_embedded_json';
   }
   if (token.includes('article')) return 'phase_03_main_article';
-  if (token.includes('table') || token.includes('spec')) return 'phase_04_html_spec_table';
+  if (token.includes('scanned_pdf_ocr')) return 'phase_07_scanned_pdf_ocr';
   if (token.includes('pdf')) return 'phase_06_text_pdf';
+  if (token.includes('table') || token.includes('spec')) return 'phase_04_html_spec_table';
   if (token.includes('ocr') || token.includes('image') || token.includes('screenshot')) return 'phase_08_image_ocr';
   if (token.includes('chart')) return 'phase_09_chart_graph';
   if (token.includes('office') || token.includes('xlsx') || token.includes('docx') || token.includes('pptx')) {
@@ -132,11 +143,19 @@ function sourceSurfaceFromMethod(method = '') {
   if (token.includes('graphql')) return 'graphql_replay';
   if (token.includes('ldjson') || token.includes('json_ld')) return 'json_ld';
   if (token.includes('embedded_state')) return 'embedded_state';
+  if (token.includes('microdata')) return 'microdata';
+  if (token.includes('opengraph')) return 'opengraph';
+  if (token.includes('microformat')) return 'microformat';
+  if (token.includes('rdfa')) return 'rdfa';
+  if (token.includes('twitter_card')) return 'twitter_card';
   if (token.includes('article')) return 'main_article';
-  if (token.includes('html_table') || token.includes('spec_table') || token.includes('table')) return 'html_spec_table';
+  if (token.includes('scanned_pdf_ocr_table')) return 'scanned_pdf_ocr_table';
+  if (token.includes('scanned_pdf_ocr_kv')) return 'scanned_pdf_ocr_kv';
+  if (token.includes('scanned_pdf_ocr_text')) return 'scanned_pdf_ocr_text';
   if (token.includes('pdf_table')) return 'pdf_table';
   if (token.includes('pdf_kv')) return 'pdf_kv';
   if (token === 'pdf') return 'pdf_text';
+  if (token.includes('html_table') || token.includes('spec_table') || token.includes('table')) return 'html_spec_table';
   if (token.includes('screenshot')) return 'screenshot_capture';
   if (token.includes('image_ocr')) return 'image_ocr_text';
   if (token.includes('chart')) return 'chart_script_config';

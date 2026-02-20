@@ -119,10 +119,12 @@ export const techPowerUpAdapter = {
     return hostMatches(source);
   },
 
-  async extractFromPage({ pageData }) {
+  async extractFromPage({ pageData, config }) {
     const jsonExtraction = extractFromJsonPayloads(pageData.networkResponses || []);
 
-    const tablePairs = extractTablePairs(pageData.html || '');
+    const tablePairs = extractTablePairs(pageData.html || '', {
+      useV2: config?.htmlTableExtractorV2 !== false
+    });
     const tableFields = mapPairsToFieldCandidates(tablePairs, 'html_table');
     const tableIdentity = extractIdentityFromPairs(tablePairs);
 

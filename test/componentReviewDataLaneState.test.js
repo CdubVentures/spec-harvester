@@ -25,6 +25,43 @@ async function cleanupTempSpecDb(tempRoot, specDb) {
   await fs.rm(tempRoot, { recursive: true, force: true });
 }
 
+function getComponentIdentityId(specDb, componentType, canonicalName, maker = '') {
+  const row = specDb.db.prepare(
+    `SELECT id
+     FROM component_identity
+     WHERE category = ? AND component_type = ? AND canonical_name = ? AND maker = ?
+     LIMIT 1`
+  ).get(CATEGORY, componentType, canonicalName, maker);
+  return row?.id ?? null;
+}
+
+function getComponentValueId(specDb, componentType, componentName, componentMaker, propertyKey) {
+  const row = specDb.db.prepare(
+    `SELECT id
+     FROM component_values
+     WHERE category = ?
+       AND component_type = ?
+       AND component_name = ?
+       AND component_maker = ?
+       AND property_key = ?
+     LIMIT 1`
+  ).get(CATEGORY, componentType, componentName, componentMaker, propertyKey);
+  return row?.id ?? null;
+}
+
+function getEnumSlot(specDb, fieldKey, value) {
+  const row = specDb.db.prepare(
+    `SELECT id, list_id
+     FROM list_values
+     WHERE category = ? AND field_key = ? AND value = ?
+     LIMIT 1`
+  ).get(CATEGORY, fieldKey, value);
+  return {
+    listValueId: row?.id ?? null,
+    enumListId: row?.list_id ?? null,
+  };
+}
+
 test('component payload hydrates __name/__maker accepted_candidate_id from key_review_state', async () => {
   const { tempRoot, specDb } = await createTempSpecDb();
   try {
@@ -60,12 +97,15 @@ test('component payload hydrates __name/__maker accepted_candidate_id from key_r
     });
 
     const componentIdentifier = buildComponentIdentifier('sensor', 'PAW3950', 'PixArt');
+    const componentIdentityId = getComponentIdentityId(specDb, 'sensor', 'PAW3950', 'PixArt');
+    assert.ok(componentIdentityId, 'expected component identity slot id');
     specDb.upsertKeyReviewState({
       category: CATEGORY,
       targetKind: 'component_key',
       fieldKey: '__name',
       componentIdentifier,
       propertyKey: '__name',
+      componentIdentityId,
       selectedValue: 'PAW3950',
       selectedCandidateId: 'cand_name',
       confidenceScore: 1,
@@ -78,6 +118,7 @@ test('component payload hydrates __name/__maker accepted_candidate_id from key_r
       fieldKey: '__maker',
       componentIdentifier,
       propertyKey: '__maker',
+      componentIdentityId,
       selectedValue: 'PixArt',
       selectedCandidateId: 'cand_maker',
       confidenceScore: 1,
@@ -100,7 +141,7 @@ test('component payload hydrates __name/__maker accepted_candidate_id from key_r
   }
 });
 
-test('component payload splits comma-delimited pipeline property values into distinct candidates', async () => {
+test('component payload does not hydrate queue-only property candidates when linked product candidates drive the slot', async () => {
   const { tempRoot, specDb } = await createTempSpecDb();
   try {
     specDb.upsertComponentIdentity({
@@ -172,9 +213,8 @@ test('component payload splits comma-delimited pipeline property values into dis
     const row = payload.items.find((item) => item.name === 'PAW3950' && item.maker === 'PixArt');
     assert.ok(row, 'expected PAW3950/PixArt row');
     const values = (row?.properties?.dpi_max?.candidates || []).map((candidate) => String(candidate.value));
-    assert.equal(values.includes('26000'), true);
-    assert.equal(values.includes('30000'), true);
-    assert.equal(values.includes('26000, 30000'), false);
+    assert.equal(values.includes('26000'), false);
+    assert.equal(values.includes('30000'), false);
   } finally {
     await cleanupTempSpecDb(tempRoot, specDb);
   }
@@ -215,12 +255,15 @@ test('component payload keeps shared pending when AI lane is still pending even 
     });
 
     const componentIdentifier = buildComponentIdentifier('sensor', 'PAW3950', 'PixArt');
+    const componentValueId = getComponentValueId(specDb, 'sensor', 'PAW3950', 'PixArt', 'dpi_max');
+    assert.ok(componentValueId, 'expected component value slot id');
     specDb.upsertKeyReviewState({
       category: CATEGORY,
       targetKind: 'component_key',
       fieldKey: 'dpi_max',
       componentIdentifier,
       propertyKey: 'dpi_max',
+      componentValueId,
       selectedValue: '35000',
       selectedCandidateId: 'cand_dpi',
       confidenceScore: 0.6,
@@ -263,6 +306,7 @@ test('enum payload keeps pending when AI shared lane is pending even if user acc
       targetKind: 'enum_key',
       fieldKey: 'connection',
       enumValueNorm: 'bluetooth',
+      ...getEnumSlot(specDb, 'connection', 'Bluetooth'),
       selectedValue: 'Bluetooth',
       selectedCandidateId: 'cand_bt',
       confidenceScore: 0.6,
@@ -401,12 +445,15 @@ test('component payload keeps candidate evidence visible after shared lane confi
       constraints: [],
     });
     const componentIdentifier = buildComponentIdentifier('sensor', 'PAW3970', 'PixArt');
+    const componentValueId = getComponentValueId(specDb, 'sensor', 'PAW3970', 'PixArt', 'dpi_max');
+    assert.ok(componentValueId, 'expected component value slot id');
     specDb.upsertKeyReviewState({
       category: CATEGORY,
       targetKind: 'component_key',
       fieldKey: 'dpi_max',
       componentIdentifier,
       propertyKey: 'dpi_max',
+      componentValueId,
       selectedValue: '35000',
       selectedCandidateId: null,
       confidenceScore: 0.9,
@@ -555,6 +602,63 @@ test('enum payload synthesizes backing candidate when selected non-manual value 
     assert.ok(value, 'expected connection=Bluetooth entry');
     assert.equal(value.candidates.some((candidate) => String(candidate?.value || '').toLowerCase() === 'bluetooth'), true);
     assert.equal(value.candidates.length >= 1, true);
+  } finally {
+    await cleanupTempSpecDb(tempRoot, specDb);
+  }
+});
+
+test('enum payload hides pending pipeline values without linked products', async () => {
+  const { tempRoot, specDb } = await createTempSpecDb();
+  try {
+    const linkedProductId = 'mouse-test-enum-linked';
+    specDb.upsertListValue({
+      fieldKey: 'connection',
+      value: 'Bluetooth',
+      normalizedValue: 'bluetooth',
+      source: 'pipeline',
+      enumPolicy: 'closed',
+      acceptedCandidateId: null,
+      needsReview: true,
+      overridden: false,
+      sourceTimestamp: '2026-02-18T00:00:00.000Z',
+    });
+    specDb.upsertListValue({
+      fieldKey: 'connection',
+      value: 'Wireless',
+      normalizedValue: 'wireless',
+      source: 'pipeline',
+      enumPolicy: 'closed',
+      acceptedCandidateId: null,
+      needsReview: true,
+      overridden: false,
+      sourceTimestamp: '2026-02-18T00:00:00.000Z',
+    });
+    specDb.upsertItemFieldState({
+      productId: linkedProductId,
+      fieldKey: 'connection',
+      value: 'Bluetooth',
+      confidence: 0.6,
+      source: 'pipeline',
+      acceptedCandidateId: null,
+      overridden: false,
+      needsAiReview: true,
+      aiReviewComplete: false,
+    });
+    specDb.syncItemListLinkForFieldValue({
+      productId: linkedProductId,
+      fieldKey: 'connection',
+      value: 'Bluetooth',
+    });
+
+    const payload = await buildEnumReviewPayloads({
+      config: { helperFilesRoot: path.join(tempRoot, 'helper_files') },
+      category: CATEGORY,
+      specDb,
+    });
+    const field = payload.fields.find((entry) => entry.field === 'connection');
+    const values = (field?.values || []).map((entry) => String(entry?.value || ''));
+    assert.equal(values.includes('Bluetooth'), true);
+    assert.equal(values.includes('Wireless'), false);
   } finally {
     await cleanupTempSpecDb(tempRoot, specDb);
   }

@@ -7,6 +7,7 @@ import {
   mergeModelPricingMaps
 } from './billing/modelPricingCatalog.js';
 import { normalizeDynamicFetchPolicyMap } from './fetcher/dynamicFetchPolicy.js';
+import { normalizeArticleExtractorPolicyMap } from './extract/articleExtractorPolicy.js';
 
 function parseIntEnv(name, defaultValue) {
   const raw = process.env[name];
@@ -151,6 +152,41 @@ function normalizeOutputMode(value, fallback = 'dual') {
 
 function normalizeBaseUrl(value) {
   return String(value || '').trim().replace(/\/+$/, '');
+}
+
+function normalizeStaticDomMode(value, fallback = 'cheerio') {
+  const token = String(value || '').trim().toLowerCase();
+  if (token === 'regex_fallback') {
+    return 'regex_fallback';
+  }
+  if (token === 'cheerio') {
+    return 'cheerio';
+  }
+  return fallback;
+}
+
+function normalizePdfBackend(value, fallback = 'auto') {
+  const token = String(value || '').trim().toLowerCase();
+  if (['auto', 'pdfplumber', 'pymupdf', 'camelot', 'tabula', 'legacy'].includes(token)) {
+    return token;
+  }
+  const fallbackToken = String(fallback || '').trim().toLowerCase();
+  if (['auto', 'pdfplumber', 'pymupdf', 'camelot', 'tabula', 'legacy'].includes(fallbackToken)) {
+    return fallbackToken;
+  }
+  return 'auto';
+}
+
+function normalizeScannedPdfOcrBackend(value, fallback = 'auto') {
+  const token = String(value || '').trim().toLowerCase();
+  if (['auto', 'tesseract', 'none'].includes(token)) {
+    return token;
+  }
+  const fallbackToken = String(fallback || '').trim().toLowerCase();
+  if (['auto', 'tesseract', 'none'].includes(fallbackToken)) {
+    return fallbackToken;
+  }
+  return 'auto';
 }
 
 function defaultChatmockDir() {
@@ -361,6 +397,20 @@ export function loadConfig(overrides = {}) {
     maxRunSeconds: parseIntEnv('MAX_RUN_SECONDS', 300),
     maxJsonBytes: parseIntEnv('MAX_JSON_BYTES', 2_000_000),
     maxPdfBytes: parseIntEnv('MAX_PDF_BYTES', 8_000_000),
+    pdfBackendRouterEnabled: parseBoolEnv('PDF_BACKEND_ROUTER_ENABLED', false),
+    pdfPreferredBackend: process.env.PDF_PREFERRED_BACKEND || 'auto',
+    pdfBackendRouterTimeoutMs: parseIntEnv('PDF_BACKEND_ROUTER_TIMEOUT_MS', 120_000),
+    pdfBackendRouterMaxPages: parseIntEnv('PDF_BACKEND_ROUTER_MAX_PAGES', 60),
+    pdfBackendRouterMaxPairs: parseIntEnv('PDF_BACKEND_ROUTER_MAX_PAIRS', 5000),
+    pdfBackendRouterMaxTextPreviewChars: parseIntEnv('PDF_BACKEND_ROUTER_MAX_TEXT_PREVIEW_CHARS', 20_000),
+    scannedPdfOcrEnabled: parseBoolEnv('SCANNED_PDF_OCR_ENABLED', true),
+    scannedPdfOcrPromoteCandidates: parseBoolEnv('SCANNED_PDF_OCR_PROMOTE_CANDIDATES', true),
+    scannedPdfOcrBackend: process.env.SCANNED_PDF_OCR_BACKEND || 'auto',
+    scannedPdfOcrMaxPages: parseIntEnv('SCANNED_PDF_OCR_MAX_PAGES', 4),
+    scannedPdfOcrMaxPairs: parseIntEnv('SCANNED_PDF_OCR_MAX_PAIRS', 800),
+    scannedPdfOcrMinCharsPerPage: parseIntEnv('SCANNED_PDF_OCR_MIN_CHARS_PER_PAGE', 30),
+    scannedPdfOcrMinLinesPerPage: parseIntEnv('SCANNED_PDF_OCR_MIN_LINES_PER_PAGE', 2),
+    scannedPdfOcrMinConfidence: parseFloatEnv('SCANNED_PDF_OCR_MIN_CONFIDENCE', 0.5),
     concurrency: parseIntEnv('CONCURRENCY', 2),
     perHostMinDelayMs: parseIntEnv('PER_HOST_MIN_DELAY_MS', 900),
     userAgent:
@@ -654,6 +704,20 @@ export function loadConfig(overrides = {}) {
     articleExtractorMinChars: parseIntEnv('ARTICLE_EXTRACTOR_MIN_CHARS', 700),
     articleExtractorMinScore: parseIntEnv('ARTICLE_EXTRACTOR_MIN_SCORE', 45),
     articleExtractorMaxChars: parseIntEnv('ARTICLE_EXTRACTOR_MAX_CHARS', 24_000),
+    articleExtractorDomainPolicyMap: normalizeArticleExtractorPolicyMap(
+      parseJsonEnv('ARTICLE_EXTRACTOR_DOMAIN_POLICY_MAP_JSON', {})
+    ),
+    htmlTableExtractorV2: parseBoolEnv('HTML_TABLE_EXTRACTOR_V2', true),
+    staticDomExtractorEnabled: parseBoolEnv('STATIC_DOM_EXTRACTOR_ENABLED', true),
+    staticDomMode: normalizeStaticDomMode(process.env.STATIC_DOM_MODE || 'cheerio'),
+    staticDomTargetMatchThreshold: parseFloatEnv('STATIC_DOM_TARGET_MATCH_THRESHOLD', 0.55),
+    staticDomMaxEvidenceSnippets: parseIntEnv('STATIC_DOM_MAX_EVIDENCE_SNIPPETS', 120),
+    structuredMetadataExtructEnabled: parseBoolEnv('STRUCTURED_METADATA_EXTRUCT_ENABLED', false),
+    structuredMetadataExtructUrl: process.env.STRUCTURED_METADATA_EXTRUCT_URL || 'http://127.0.0.1:8011/extract/structured',
+    structuredMetadataExtructTimeoutMs: parseIntEnv('STRUCTURED_METADATA_EXTRUCT_TIMEOUT_MS', 2000),
+    structuredMetadataExtructMaxItemsPerSurface: parseIntEnv('STRUCTURED_METADATA_EXTRUCT_MAX_ITEMS_PER_SURFACE', 200),
+    structuredMetadataExtructCacheEnabled: parseBoolEnv('STRUCTURED_METADATA_EXTRUCT_CACHE_ENABLED', true),
+    structuredMetadataExtructCacheLimit: parseIntEnv('STRUCTURED_METADATA_EXTRUCT_CACHE_LIMIT', 400),
     dynamicCrawleeEnabled: parseBoolEnv('DYNAMIC_CRAWLEE_ENABLED', true),
     crawleeHeadless: parseBoolEnv('CRAWLEE_HEADLESS', true),
     crawleeRequestHandlerTimeoutSecs: parseIntEnv('CRAWLEE_REQUEST_HANDLER_TIMEOUT_SECS', 75),
@@ -740,6 +804,68 @@ export function loadConfig(overrides = {}) {
   merged.llmModelReasoning = merged.llmModelReasoning || merged.llmModelExtract;
   merged.llmModelValidate = merged.llmModelValidate || merged.openaiModelWrite;
   merged.llmModelWrite = merged.llmModelWrite || merged.llmModelValidate;
+  merged.staticDomMode = normalizeStaticDomMode(merged.staticDomMode, 'cheerio');
+  merged.staticDomTargetMatchThreshold = Math.max(0, Math.min(
+    1,
+    Number.parseFloat(String(merged.staticDomTargetMatchThreshold ?? 0.55))
+  ));
+  merged.staticDomMaxEvidenceSnippets = Math.max(
+    10,
+    Math.min(500, Number.parseInt(String(merged.staticDomMaxEvidenceSnippets ?? 120), 10) || 120)
+  );
+  merged.pdfPreferredBackend = normalizePdfBackend(merged.pdfPreferredBackend || 'auto', 'auto');
+  merged.pdfBackendRouterTimeoutMs = Math.max(
+    10_000,
+    Math.min(300_000, Number.parseInt(String(merged.pdfBackendRouterTimeoutMs ?? 120_000), 10) || 120_000)
+  );
+  merged.pdfBackendRouterMaxPages = Math.max(
+    1,
+    Math.min(300, Number.parseInt(String(merged.pdfBackendRouterMaxPages ?? 60), 10) || 60)
+  );
+  merged.pdfBackendRouterMaxPairs = Math.max(
+    100,
+    Math.min(20_000, Number.parseInt(String(merged.pdfBackendRouterMaxPairs ?? 5000), 10) || 5000)
+  );
+  merged.pdfBackendRouterMaxTextPreviewChars = Math.max(
+    1000,
+    Math.min(100_000, Number.parseInt(String(merged.pdfBackendRouterMaxTextPreviewChars ?? 20_000), 10) || 20_000)
+  );
+  merged.scannedPdfOcrBackend = normalizeScannedPdfOcrBackend(merged.scannedPdfOcrBackend || 'auto', 'auto');
+  merged.scannedPdfOcrMaxPages = Math.max(
+    1,
+    Math.min(100, Number.parseInt(String(merged.scannedPdfOcrMaxPages ?? 8), 10) || 8)
+  );
+  merged.scannedPdfOcrMaxPairs = Math.max(
+    50,
+    Math.min(20_000, Number.parseInt(String(merged.scannedPdfOcrMaxPairs ?? 1200), 10) || 1200)
+  );
+  merged.scannedPdfOcrMinCharsPerPage = Math.max(
+    1,
+    Math.min(500, Number.parseInt(String(merged.scannedPdfOcrMinCharsPerPage ?? 45), 10) || 45)
+  );
+  merged.scannedPdfOcrMinLinesPerPage = Math.max(
+    1,
+    Math.min(100, Number.parseInt(String(merged.scannedPdfOcrMinLinesPerPage ?? 3), 10) || 3)
+  );
+  merged.scannedPdfOcrMinConfidence = Math.max(
+    0,
+    Math.min(1, Number.parseFloat(String(merged.scannedPdfOcrMinConfidence ?? 0.55)) || 0.55)
+  );
+  merged.structuredMetadataExtructUrl = normalizeBaseUrl(
+    merged.structuredMetadataExtructUrl || 'http://127.0.0.1:8011/extract/structured'
+  );
+  merged.structuredMetadataExtructTimeoutMs = Math.max(
+    250,
+    Math.min(15_000, Number.parseInt(String(merged.structuredMetadataExtructTimeoutMs ?? 2000), 10) || 2000)
+  );
+  merged.structuredMetadataExtructMaxItemsPerSurface = Math.max(
+    1,
+    Math.min(1000, Number.parseInt(String(merged.structuredMetadataExtructMaxItemsPerSurface ?? 200), 10) || 200)
+  );
+  merged.structuredMetadataExtructCacheLimit = Math.max(
+    32,
+    Math.min(5000, Number.parseInt(String(merged.structuredMetadataExtructCacheLimit ?? 400), 10) || 400)
+  );
   merged.llmPlanProvider = merged.llmPlanProvider || merged.llmProvider;
   merged.llmPlanBaseUrl = merged.llmPlanBaseUrl || merged.llmBaseUrl;
   merged.llmPlanApiKey = merged.llmPlanApiKey || merged.llmApiKey;

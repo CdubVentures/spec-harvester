@@ -24,14 +24,61 @@ async function cleanupTempSpecDb(tempRoot, specDb) {
   await fs.rm(tempRoot, { recursive: true, force: true });
 }
 
+function ensureEnumSlot(specDb, fieldKey, value, {
+  source = 'pipeline',
+  enumPolicy = 'closed',
+  needsReview = true,
+  overridden = false,
+} = {}) {
+  specDb.upsertListValue({
+    fieldKey,
+    value,
+    normalizedValue: String(value || '').trim().toLowerCase(),
+    source,
+    enumPolicy,
+    acceptedCandidateId: null,
+    needsReview,
+    overridden,
+    sourceTimestamp: null,
+  });
+  const row = specDb.getListValueByFieldAndValue(fieldKey, value);
+  if (!row?.id) {
+    throw new Error(`Failed to create enum slot for ${fieldKey}=${value}`);
+  }
+  return row;
+}
+
+function ensureComponentIdentitySlot(specDb, componentType, canonicalName, maker = '') {
+  specDb.upsertComponentIdentity({
+    componentType,
+    canonicalName,
+    maker,
+    links: [],
+    source: 'pipeline',
+  });
+  const row = specDb.db.prepare(
+    `SELECT id
+     FROM component_identity
+     WHERE category = ? AND component_type = ? AND canonical_name = ? AND maker = ?
+     LIMIT 1`
+  ).get(CATEGORY, componentType, canonicalName, maker);
+  if (!row?.id) {
+    throw new Error(`Failed to create component identity slot for ${componentType}/${canonicalName}/${maker}`);
+  }
+  return row.id;
+}
+
 test('applySharedLaneState(confirm) does not change selected candidate/value or clear shared accept', async () => {
   const { tempRoot, specDb } = await createTempSpecDb();
   try {
+    const enumSlot = ensureEnumSlot(specDb, 'connection', 'Wireless');
     const id = specDb.upsertKeyReviewState({
       category: CATEGORY,
       targetKind: 'enum_key',
       fieldKey: 'connection',
       enumValueNorm: 'wireless',
+      listValueId: enumSlot.id,
+      enumListId: enumSlot.list_id ?? null,
       selectedValue: 'Wireless',
       selectedCandidateId: 'cand_wireless',
       confidenceScore: 0.92,
@@ -45,6 +92,8 @@ test('applySharedLaneState(confirm) does not change selected candidate/value or 
       targetKind: 'enum_key',
       fieldKey: 'connection',
       enumValueNorm: 'wireless',
+      listValueId: enumSlot.id,
+      enumListId: enumSlot.list_id ?? null,
       selectedCandidateId: 'cand_bluetooth',
       selectedValue: 'Bluetooth',
       confidenceScore: 0.31,
@@ -64,12 +113,14 @@ test('applySharedLaneState(confirm) does not change selected candidate/value or 
 test('applySharedLaneState(accept) updates selected candidate/value and does not auto-confirm', async () => {
   const { tempRoot, specDb } = await createTempSpecDb();
   try {
+    const componentIdentityId = ensureComponentIdentitySlot(specDb, 'sensor', 'PAW3950', 'PixArt');
     specDb.upsertKeyReviewState({
       category: CATEGORY,
       targetKind: 'component_key',
       fieldKey: '__maker',
       componentIdentifier: 'sensor::paw3950::pixart',
       propertyKey: '__maker',
+      componentIdentityId,
       selectedValue: 'PixArt',
       selectedCandidateId: null,
       confidenceScore: 0.5,
@@ -84,6 +135,7 @@ test('applySharedLaneState(accept) updates selected candidate/value and does not
       fieldKey: '__maker',
       componentIdentifier: 'sensor::paw3950::pixart',
       propertyKey: '__maker',
+      componentIdentityId,
       selectedCandidateId: 'cand_pixart',
       selectedValue: 'PixArt',
       confidenceScore: 1,
@@ -102,11 +154,14 @@ test('applySharedLaneState(accept) updates selected candidate/value and does not
 test('applySharedLaneState(accept) preserves confirmed shared status when selection is unchanged', async () => {
   const { tempRoot, specDb } = await createTempSpecDb();
   try {
+    const enumSlot = ensureEnumSlot(specDb, 'connection', 'Wireless');
     specDb.upsertKeyReviewState({
       category: CATEGORY,
       targetKind: 'enum_key',
       fieldKey: 'connection',
       enumValueNorm: 'wireless',
+      listValueId: enumSlot.id,
+      enumListId: enumSlot.list_id ?? null,
       selectedValue: 'Wireless',
       selectedCandidateId: 'cand_wireless',
       confidenceScore: 1,
@@ -120,6 +175,8 @@ test('applySharedLaneState(accept) preserves confirmed shared status when select
       targetKind: 'enum_key',
       fieldKey: 'connection',
       enumValueNorm: 'wireless',
+      listValueId: enumSlot.id,
+      enumListId: enumSlot.list_id ?? null,
       selectedCandidateId: 'cand_wireless',
       selectedValue: 'Wireless',
       confidenceScore: 1,
@@ -138,11 +195,14 @@ test('applySharedLaneState(accept) preserves confirmed shared status when select
 test('applySharedLaneState(accept) reopens shared pending when selection changes', async () => {
   const { tempRoot, specDb } = await createTempSpecDb();
   try {
+    const enumSlot = ensureEnumSlot(specDb, 'connection', 'Wireless');
     specDb.upsertKeyReviewState({
       category: CATEGORY,
       targetKind: 'enum_key',
       fieldKey: 'connection',
       enumValueNorm: 'wireless',
+      listValueId: enumSlot.id,
+      enumListId: enumSlot.list_id ?? null,
       selectedValue: 'Wireless',
       selectedCandidateId: 'cand_wireless',
       confidenceScore: 1,
@@ -156,6 +216,8 @@ test('applySharedLaneState(accept) reopens shared pending when selection changes
       targetKind: 'enum_key',
       fieldKey: 'connection',
       enumValueNorm: 'wireless',
+      listValueId: enumSlot.id,
+      enumListId: enumSlot.list_id ?? null,
       selectedCandidateId: 'cand_bluetooth',
       selectedValue: 'Bluetooth',
       confidenceScore: 0.5,
@@ -174,12 +236,15 @@ test('applySharedLaneState(accept) reopens shared pending when selection changes
 test('applySharedLaneState(confirm) on new row creates state without auto-accept', async () => {
   const { tempRoot, specDb } = await createTempSpecDb();
   try {
+    const enumSlot = ensureEnumSlot(specDb, 'cable_type', 'USB-C');
     const created = applySharedLaneState({
       specDb,
       category: CATEGORY,
       targetKind: 'enum_key',
       fieldKey: 'cable_type',
       enumValueNorm: 'usb-c',
+      listValueId: enumSlot.id,
+      enumListId: enumSlot.list_id ?? null,
       selectedCandidateId: null,
       selectedValue: 'USB-C',
       confidenceScore: 0.6,

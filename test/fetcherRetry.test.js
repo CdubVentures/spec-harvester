@@ -55,6 +55,8 @@ test('HttpFetcher retries once on transient fetch error when retry budget is con
     assert.equal(page.status, 200);
     assert.equal(page.title, 'Recovered');
     assert.equal(attempts, 2);
+    assert.equal(page.fetchTelemetry.fetcher_kind, 'http');
+    assert.equal(page.fetchTelemetry.retry_count, 1);
   } finally {
     global.fetch = originalFetch;
   }
@@ -100,6 +102,8 @@ test('HttpFetcher retries once on transient 5xx status when retry budget is conf
     assert.equal(page.status, 200);
     assert.equal(page.title, 'Recovered');
     assert.equal(attempts, 2);
+    assert.equal(page.fetchTelemetry.fetcher_kind, 'http');
+    assert.equal(page.fetchTelemetry.retry_count, 1);
   } finally {
     global.fetch = originalFetch;
   }

@@ -57,6 +57,25 @@ function normalizeCategory(value) {
     .replace(/_+$/g, '');
 }
 
+async function resolveCategoryAlias(helperRoot, category) {
+  if (!category) {
+    return category;
+  }
+  if (category.startsWith('_test_') || !category.startsWith('test_')) {
+    return category;
+  }
+  const directPath = path.join(helperRoot, category, '_generated', 'field_rules.json');
+  if (await fileExists(directPath)) {
+    return category;
+  }
+  const canonicalTestCategory = `_${category}`;
+  const aliasedPath = path.join(helperRoot, canonicalTestCategory, '_generated', 'field_rules.json');
+  if (await fileExists(aliasedPath)) {
+    return canonicalTestCategory;
+  }
+  return category;
+}
+
 async function fileExists(filePath) {
   try {
     await fs.access(filePath);
@@ -353,22 +372,23 @@ export async function loadFieldRules(category, options = {}) {
   }
 
   const helperRoot = path.resolve(options.config?.helperFilesRoot || 'helper_files');
-  const cacheKey = keyForCache(normalizedCategory, helperRoot);
+  const resolvedCategory = await resolveCategoryAlias(helperRoot, normalizedCategory);
+  const cacheKey = keyForCache(resolvedCategory, helperRoot);
   const cached = cache.get(cacheKey);
   if (!options.reload && cached) {
-    const cacheSignature = await getFieldRulesSignature(helperRoot, normalizedCategory);
+    const cacheSignature = await getFieldRulesSignature(helperRoot, resolvedCategory);
     if (cached.signature === cacheSignature) {
       return cached.loaded;
     }
   }
 
-  const generatedRoot = path.join(helperRoot, normalizedCategory, '_generated');
+  const generatedRoot = path.join(helperRoot, resolvedCategory, '_generated');
   const fieldRulesPath = path.join(generatedRoot, 'field_rules.json');
   if (!(await fileExists(fieldRulesPath))) {
     throw new Error(`missing_field_rules:${fieldRulesPath}`);
   }
 
-  const overrideDir = path.join(helperRoot, normalizedCategory, '_overrides', 'components');
+  const overrideDir = path.join(helperRoot, resolvedCategory, '_overrides', 'components');
   const [rulesRaw, knownRaw, parseRaw, crossRaw, uiRaw, componentDBs] = await Promise.all([
     readJsonIfExists(fieldRulesPath),
     readJsonIfExists(path.join(generatedRoot, 'known_values.json')),
@@ -433,10 +453,10 @@ export async function loadFieldRules(category, options = {}) {
   const knownValues = normalizeKnownValues(knownRaw || {});
   const parseTemplates = normalizeParseTemplates(parseRaw || {}, rules);
   const crossValidation = normalizeCrossValidation(crossRaw || {}, rules);
-  const uiFieldCatalog = isObject(uiRaw) ? uiRaw : { category: normalizedCategory, fields: [] };
+  const uiFieldCatalog = isObject(uiRaw) ? uiRaw : { category: resolvedCategory, fields: [] };
 
   const loaded = {
-    category: normalizedCategory,
+    category: resolvedCategory,
     generatedRoot,
     rules,
     knownValues,
@@ -446,7 +466,7 @@ export async function loadFieldRules(category, options = {}) {
     uiFieldCatalog
   };
 
-  const signature = await buildFieldRulesSignature(helperRoot, normalizedCategory);
+  const signature = await buildFieldRulesSignature(helperRoot, resolvedCategory);
   signatureCache.set(cacheKey, { at: Date.now(), value: signature });
   cache.set(cacheKey, { signature, loaded });
   return loaded;

@@ -36,6 +36,11 @@ function expandListLinkValues(value) {
   return out;
 }
 
+function toPositiveInteger(value) {
+  const n = Number.parseInt(String(value ?? ''), 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS candidates (
   candidate_id TEXT PRIMARY KEY,
@@ -94,6 +99,7 @@ CREATE TABLE IF NOT EXISTS component_values (
   component_type TEXT NOT NULL,
   component_name TEXT NOT NULL,
   component_maker TEXT DEFAULT '',
+  component_identity_id INTEGER REFERENCES component_identity(id),
   property_key TEXT NOT NULL,
   value TEXT,
   confidence REAL DEFAULT 1.0,
@@ -141,7 +147,7 @@ CREATE TABLE IF NOT EXISTS enum_lists (
 CREATE TABLE IF NOT EXISTS list_values (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   category TEXT NOT NULL,
-  list_id INTEGER REFERENCES enum_lists(id),
+  list_id INTEGER NOT NULL REFERENCES enum_lists(id),
   field_key TEXT NOT NULL,
   value TEXT NOT NULL,
   normalized_value TEXT,
@@ -428,6 +434,7 @@ CREATE TABLE IF NOT EXISTS key_review_state (
   property_key TEXT,
   item_field_state_id INTEGER REFERENCES item_field_state(id),
   component_value_id INTEGER REFERENCES component_values(id),
+  component_identity_id INTEGER REFERENCES component_identity(id),
   list_value_id INTEGER REFERENCES list_values(id),
   enum_list_id INTEGER REFERENCES enum_lists(id),
 
@@ -878,6 +885,7 @@ export class SpecDb {
       `ALTER TABLE component_identity ADD COLUMN review_status TEXT DEFAULT 'pending'`,
       `ALTER TABLE component_identity ADD COLUMN aliases_overridden INTEGER DEFAULT 0`,
       `ALTER TABLE component_values ADD COLUMN constraints TEXT`,
+      `ALTER TABLE component_values ADD COLUMN component_identity_id INTEGER REFERENCES component_identity(id)`,
       `ALTER TABLE list_values ADD COLUMN source_timestamp TEXT`,
       `ALTER TABLE list_values ADD COLUMN list_id INTEGER REFERENCES enum_lists(id)`,
       `ALTER TABLE source_assertions ADD COLUMN item_field_state_id INTEGER REFERENCES item_field_state(id)`,
@@ -886,6 +894,7 @@ export class SpecDb {
       `ALTER TABLE source_assertions ADD COLUMN enum_list_id INTEGER REFERENCES enum_lists(id)`,
       `ALTER TABLE key_review_state ADD COLUMN item_field_state_id INTEGER REFERENCES item_field_state(id)`,
       `ALTER TABLE key_review_state ADD COLUMN component_value_id INTEGER REFERENCES component_values(id)`,
+      `ALTER TABLE key_review_state ADD COLUMN component_identity_id INTEGER REFERENCES component_identity(id)`,
       `ALTER TABLE key_review_state ADD COLUMN list_value_id INTEGER REFERENCES list_values(id)`,
       `ALTER TABLE key_review_state ADD COLUMN enum_list_id INTEGER REFERENCES enum_lists(id)`,
       `ALTER TABLE llm_route_matrix ADD COLUMN enable_websearch INTEGER DEFAULT 1`,
@@ -896,6 +905,7 @@ export class SpecDb {
       }
     }
     this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_cv_identity_id ON component_values(component_identity_id);
       CREATE INDEX IF NOT EXISTS idx_lv_list_id ON list_values(list_id);
       CREATE INDEX IF NOT EXISTS idx_sa_item_slot ON source_assertions(item_field_state_id);
       CREATE INDEX IF NOT EXISTS idx_sa_component_slot ON source_assertions(component_value_id);
@@ -906,12 +916,16 @@ export class SpecDb {
         WHERE target_kind = 'enum_key' AND list_value_id IS NOT NULL;
       CREATE UNIQUE INDEX IF NOT EXISTS ux_krs_component_slot ON key_review_state(category, component_value_id)
         WHERE target_kind = 'component_key' AND component_value_id IS NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS ux_krs_component_identity_slot ON key_review_state(category, component_identity_id, property_key)
+        WHERE target_kind = 'component_key' AND component_identity_id IS NOT NULL;
       CREATE INDEX IF NOT EXISTS idx_krs_item_slot ON key_review_state(item_field_state_id);
       CREATE INDEX IF NOT EXISTS idx_krs_component_slot ON key_review_state(component_value_id);
+      CREATE INDEX IF NOT EXISTS idx_krs_component_identity_slot ON key_review_state(component_identity_id, property_key);
       CREATE INDEX IF NOT EXISTS idx_krs_list_slot ON key_review_state(list_value_id, enum_list_id);
     `);
-    this.backfillEnumListIds();
-    this.backfillKeyReviewSlotIds();
+    // Auto-prune legacy unscoped key_review_state rows from old fallback-era builds.
+    this.cleanupLegacyIdentityFallbackRows();
+    this.assertStrictIdentitySlotIntegrity();
 
     // Prepared statements
     this._insertCandidate = this.db.prepare(`
@@ -972,15 +986,16 @@ export class SpecDb {
 
     this._upsertComponentValue = this.db.prepare(`
       INSERT INTO component_values (
-        category, component_type, component_name, component_maker, property_key,
+        category, component_type, component_name, component_maker, component_identity_id, property_key,
         value, confidence, variance_policy, source, accepted_candidate_id,
         needs_review, overridden, constraints
       ) VALUES (
-        @category, @component_type, @component_name, @component_maker, @property_key,
+        @category, @component_type, @component_name, @component_maker, @component_identity_id, @property_key,
         @value, @confidence, @variance_policy, @source, @accepted_candidate_id,
         @needs_review, @overridden, @constraints
       )
       ON CONFLICT(category, component_type, component_name, component_maker, property_key) DO UPDATE SET
+        component_identity_id = COALESCE(excluded.component_identity_id, component_identity_id),
         value = excluded.value,
         confidence = excluded.confidence,
         variance_policy = COALESCE(excluded.variance_policy, variance_policy),
@@ -1271,7 +1286,7 @@ export class SpecDb {
       INSERT INTO key_review_state (
         category, target_kind, item_identifier, field_key, enum_value_norm,
         component_identifier, property_key,
-        item_field_state_id, component_value_id, list_value_id, enum_list_id,
+        item_field_state_id, component_value_id, component_identity_id, list_value_id, enum_list_id,
         required_level, availability, difficulty, effort, ai_mode, parse_template,
         evidence_policy, min_evidence_refs_effective, min_distinct_sources_required,
         send_mode, component_send_mode, list_send_mode,
@@ -1288,7 +1303,7 @@ export class SpecDb {
       ) VALUES (
         @category, @target_kind, @item_identifier, @field_key, @enum_value_norm,
         @component_identifier, @property_key,
-        @item_field_state_id, @component_value_id, @list_value_id, @enum_list_id,
+        @item_field_state_id, @component_value_id, @component_identity_id, @list_value_id, @enum_list_id,
         @required_level, @availability, @difficulty, @effort, @ai_mode, @parse_template,
         @evidence_policy, @min_evidence_refs_effective, @min_distinct_sources_required,
         @send_mode, @component_send_mode, @list_send_mode,
@@ -1401,6 +1416,112 @@ export class SpecDb {
     `);
   }
 
+  cleanupLegacyIdentityFallbackRows() {
+    const rows = this.db.prepare(`
+      SELECT id
+      FROM key_review_state
+      WHERE
+        (target_kind = 'grid_key' AND item_field_state_id IS NULL)
+        OR (
+          target_kind = 'component_key'
+          AND component_value_id IS NULL
+          AND (
+            component_identity_id IS NULL
+            OR TRIM(COALESCE(property_key, '')) = ''
+          )
+        )
+        OR (target_kind = 'enum_key' AND list_value_id IS NULL)
+    `).all();
+    const ids = rows
+      .map((row) => Number.parseInt(String(row?.id ?? ''), 10))
+      .filter((id) => Number.isFinite(id) && id > 0);
+    if (ids.length === 0) return 0;
+
+    const placeholders = ids.map(() => '?').join(',');
+    const tx = this.db.transaction((targetIds) => {
+      this.db.prepare(`
+        DELETE FROM key_review_run_sources
+        WHERE key_review_run_id IN (
+          SELECT run_id
+          FROM key_review_runs
+          WHERE key_review_state_id IN (${placeholders})
+        )
+      `).run(...targetIds);
+      this.db.prepare(
+        `DELETE FROM key_review_runs WHERE key_review_state_id IN (${placeholders})`
+      ).run(...targetIds);
+      this.db.prepare(
+        `DELETE FROM key_review_audit WHERE key_review_state_id IN (${placeholders})`
+      ).run(...targetIds);
+      this.db.prepare(
+        `DELETE FROM key_review_state WHERE id IN (${placeholders})`
+      ).run(...targetIds);
+    });
+    tx(ids);
+    return ids.length;
+  }
+
+  assertStrictIdentitySlotIntegrity() {
+    const issues = [];
+    const unresolvedComponentIdentities = Number(this.db.prepare(`
+      SELECT COUNT(*) AS c
+      FROM component_values
+      WHERE component_identity_id IS NULL
+    `).get()?.c || 0);
+    if (unresolvedComponentIdentities > 0) {
+      issues.push(`component_values missing component_identity_id: ${unresolvedComponentIdentities}`);
+    }
+
+    const unresolvedListOwnership = Number(this.db.prepare(`
+      SELECT COUNT(*) AS c
+      FROM list_values
+      WHERE list_id IS NULL
+    `).get()?.c || 0);
+    if (unresolvedListOwnership > 0) {
+      issues.push(`list_values missing list_id: ${unresolvedListOwnership}`);
+    }
+
+    const unresolvedGridSlots = Number(this.db.prepare(`
+      SELECT COUNT(*) AS c
+      FROM key_review_state
+      WHERE target_kind = 'grid_key'
+        AND item_field_state_id IS NULL
+    `).get()?.c || 0);
+    if (unresolvedGridSlots > 0) {
+      issues.push(`grid key_review_state rows missing item_field_state_id: ${unresolvedGridSlots}`);
+    }
+
+    const unresolvedComponentSlots = Number(this.db.prepare(`
+      SELECT COUNT(*) AS c
+      FROM key_review_state
+      WHERE target_kind = 'component_key'
+        AND component_value_id IS NULL
+        AND (
+          component_identity_id IS NULL
+          OR TRIM(COALESCE(property_key, '')) = ''
+        )
+    `).get()?.c || 0);
+    if (unresolvedComponentSlots > 0) {
+      issues.push(`component key_review_state rows missing slot identity: ${unresolvedComponentSlots}`);
+    }
+
+    const unresolvedEnumSlots = Number(this.db.prepare(`
+      SELECT COUNT(*) AS c
+      FROM key_review_state
+      WHERE target_kind = 'enum_key'
+        AND list_value_id IS NULL
+    `).get()?.c || 0);
+    if (unresolvedEnumSlots > 0) {
+      issues.push(`enum key_review_state rows missing list_value_id: ${unresolvedEnumSlots}`);
+    }
+
+    if (issues.length > 0) {
+      throw new Error(
+        `Legacy review identity fallback data detected. Use an explicit migration/wipe before startup. ${issues.join('; ')}`
+      );
+    }
+  }
+
   close() {
     this.db.close();
   }
@@ -1472,21 +1593,9 @@ export class SpecDb {
   getCandidateById(candidateId) {
     const key = String(candidateId || '').trim();
     if (!key) return null;
-    const exact = this.db
-      .prepare('SELECT * FROM candidates WHERE candidate_id = ?')
-      .get(key);
-    if (exact) return exact;
-    if (key.includes('::')) return null;
     return this.db
-      .prepare(`
-        SELECT *
-        FROM candidates
-        WHERE category = ?
-          AND candidate_id LIKE ?
-        ORDER BY candidate_id
-        LIMIT 1
-      `)
-      .get(this.category, `%::${key}`) || null;
+      .prepare('SELECT * FROM candidates WHERE candidate_id = ?')
+      .get(key) || null;
   }
 
   // --- Reviews ---
@@ -1511,18 +1620,9 @@ export class SpecDb {
   getReviewsForCandidate(candidateId) {
     const key = String(candidateId || '').trim();
     if (!key) return [];
-    const exact = this.db
+    return this.db
       .prepare('SELECT * FROM candidate_reviews WHERE candidate_id = ?')
       .all(key);
-    if (exact.length > 0) return exact;
-    if (key.includes('::')) return [];
-    return this.db
-      .prepare(`
-        SELECT *
-        FROM candidate_reviews
-        WHERE candidate_id LIKE ?
-      `)
-      .all(`%::${key}`);
   }
 
   getReviewsForContext(contextType, contextId) {
@@ -1555,12 +1655,37 @@ export class SpecDb {
     });
   }
 
-  upsertComponentValue({ componentType, componentName, componentMaker, propertyKey, value, confidence, variancePolicy, source, acceptedCandidateId, needsReview, overridden, constraints }) {
+  upsertComponentValue({
+    componentType,
+    componentName,
+    componentMaker,
+    componentIdentityId,
+    propertyKey,
+    value,
+    confidence,
+    variancePolicy,
+    source,
+    acceptedCandidateId,
+    needsReview,
+    overridden,
+    constraints,
+  }) {
+    const normalizedMaker = componentMaker || '';
+    const resolvedIdentityId = Number(componentIdentityId) > 0
+      ? Number(componentIdentityId)
+      : (this.upsertComponentIdentity({
+        componentType,
+        canonicalName: componentName,
+        maker: normalizedMaker,
+        links: null,
+        source: source || 'component_db',
+      })?.id ?? null);
     this._upsertComponentValue.run({
       category: this.category,
       component_type: componentType,
       component_name: componentName,
-      component_maker: componentMaker || '',
+      component_maker: normalizedMaker,
+      component_identity_id: resolvedIdentityId,
       property_key: propertyKey,
       value: value != null ? String(value) : null,
       confidence: confidence ?? 1.0,
@@ -1609,6 +1734,44 @@ export class SpecDb {
 
   // --- Lists ---
 
+  backfillComponentIdentityIds() {
+    const tx = this.db.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO component_identity (category, component_type, canonical_name, maker, source)
+        SELECT DISTINCT
+          cv.category,
+          cv.component_type,
+          cv.component_name,
+          COALESCE(cv.component_maker, ''),
+          COALESCE(NULLIF(cv.source, ''), 'backfill')
+        FROM component_values cv
+        LEFT JOIN component_identity ci
+          ON ci.category = cv.category
+         AND ci.component_type = cv.component_type
+         AND ci.canonical_name = cv.component_name
+         AND ci.maker = COALESCE(cv.component_maker, '')
+        WHERE ci.id IS NULL
+        ON CONFLICT(category, component_type, canonical_name, maker) DO NOTHING
+      `).run();
+
+      this.db.prepare(`
+        UPDATE component_values
+        SET component_identity_id = (
+          SELECT ci.id
+          FROM component_identity ci
+          WHERE ci.category = component_values.category
+            AND ci.component_type = component_values.component_type
+            AND ci.canonical_name = component_values.component_name
+            AND ci.maker = COALESCE(component_values.component_maker, '')
+          LIMIT 1
+        ),
+        updated_at = datetime('now')
+        WHERE component_identity_id IS NULL
+      `).run();
+    });
+    tx();
+  }
+
   backfillEnumListIds() {
     const tx = this.db.transaction(() => {
       this.db.prepare(`
@@ -1631,6 +1794,97 @@ export class SpecDb {
       `).run();
     });
     tx();
+  }
+
+  hardenListValueOwnership() {
+    const listIdColumn = this.db
+      .prepare('PRAGMA table_info(list_values)')
+      .all()
+      .find((row) => String(row?.name || '') === 'list_id');
+    const listIdStrict = Number(listIdColumn?.notnull || 0) === 1;
+    if (listIdStrict) return;
+
+    this.backfillEnumListIds();
+
+    const unresolved = Number(this.db.prepare(`
+      SELECT COUNT(*) AS c
+      FROM list_values
+      WHERE list_id IS NULL
+    `).get()?.c || 0);
+    if (unresolved > 0) {
+      throw new Error(`Cannot harden list_values.list_id: ${unresolved} rows remain without enum_lists linkage.`);
+    }
+
+    const fkState = Number(this.db.pragma('foreign_keys', { simple: true }) || 0);
+    if (fkState) this.db.pragma('foreign_keys = OFF');
+    try {
+      const tx = this.db.transaction(() => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS list_values__strict (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category TEXT NOT NULL,
+            list_id INTEGER NOT NULL REFERENCES enum_lists(id),
+            field_key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            normalized_value TEXT,
+            source TEXT DEFAULT 'known_values',
+            accepted_candidate_id TEXT,
+            enum_policy TEXT,
+            needs_review INTEGER DEFAULT 0,
+            overridden INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
+            source_timestamp TEXT,
+            UNIQUE(category, field_key, value)
+          );
+        `);
+
+        this.db.exec(`
+          INSERT INTO list_values__strict (
+            id,
+            category,
+            list_id,
+            field_key,
+            value,
+            normalized_value,
+            source,
+            accepted_candidate_id,
+            enum_policy,
+            needs_review,
+            overridden,
+            created_at,
+            updated_at,
+            source_timestamp
+          )
+          SELECT
+            id,
+            category,
+            list_id,
+            field_key,
+            value,
+            normalized_value,
+            source,
+            accepted_candidate_id,
+            enum_policy,
+            needs_review,
+            overridden,
+            created_at,
+            updated_at,
+            source_timestamp
+          FROM list_values;
+        `);
+
+        this.db.exec('DROP TABLE list_values;');
+        this.db.exec('ALTER TABLE list_values__strict RENAME TO list_values;');
+        this.db.exec(`
+          CREATE INDEX IF NOT EXISTS idx_lv_field ON list_values(field_key);
+          CREATE INDEX IF NOT EXISTS idx_lv_list_id ON list_values(list_id);
+        `);
+      });
+      tx();
+    } finally {
+      if (fkState) this.db.pragma('foreign_keys = ON');
+    }
   }
 
   backfillKeyReviewSlotIds() {
@@ -1666,6 +1920,36 @@ export class SpecDb {
         WHERE target_kind = 'component_key'
           AND component_value_id IS NULL
           AND COALESCE(property_key, '') NOT IN ('__name', '__maker', '__links', '__aliases')
+      `).run();
+
+      this.db.prepare(`
+        UPDATE key_review_state
+        SET component_identity_id = (
+          SELECT cv.component_identity_id
+          FROM component_values cv
+          WHERE cv.id = key_review_state.component_value_id
+          LIMIT 1
+        ),
+        updated_at = datetime('now')
+        WHERE target_kind = 'component_key'
+          AND component_identity_id IS NULL
+          AND component_value_id IS NOT NULL
+      `).run();
+
+      this.db.prepare(`
+        UPDATE key_review_state
+        SET component_identity_id = (
+          SELECT ci.id
+          FROM component_identity ci
+          WHERE ci.category = key_review_state.category
+            AND (
+              ci.component_type || '::' || ci.canonical_name || '::' || COALESCE(ci.maker, '')
+            ) = key_review_state.component_identifier
+          LIMIT 1
+        ),
+        updated_at = datetime('now')
+        WHERE target_kind = 'component_key'
+          AND component_identity_id IS NULL
       `).run();
 
       this.db.prepare(`
@@ -1908,8 +2192,7 @@ export class SpecDb {
   // --- Reverse-Lookup Queries (component/enum review) ---
 
   getProductsForComponent(componentType, componentName, componentMaker) {
-    // Primary: direct item_component_links
-    const linkRows = this.db
+    return this.db
       .prepare(`
         SELECT DISTINCT product_id, field_key, match_type, match_score
         FROM item_component_links
@@ -1917,38 +2200,10 @@ export class SpecDb {
         ORDER BY product_id
       `)
       .all(this.category, componentType, componentName, componentMaker || '');
-    if (linkRows.length > 0) return linkRows;
-
-    // Fallback: check item_field_state for products whose field value matches the component name or an alias
-    const names = [componentName];
-    try {
-      const idRow = this.db.prepare(
-        'SELECT id FROM component_identity WHERE category = ? AND component_type = ? AND canonical_name = ? AND maker = ?'
-      ).get(this.category, componentType, componentName, componentMaker || '');
-      if (idRow) {
-        const aliases = this.db.prepare('SELECT alias FROM component_aliases WHERE component_id = ?').all(idRow.id);
-        for (const a of aliases) {
-          if (a.alias && !names.includes(a.alias)) names.push(a.alias);
-        }
-      }
-    } catch { /* best-effort */ }
-
-    const placeholders = names.map(() => '?').join(',');
-    const fieldRows = this.db
-      .prepare(`
-        SELECT DISTINCT product_id, field_key, 'field_state' as match_type, 1.0 as match_score
-        FROM item_field_state
-        WHERE category = ? AND field_key = ? AND LOWER(TRIM(value)) IN (${names.map(() => 'LOWER(TRIM(?))').join(',')})
-          AND value IS NOT NULL AND LOWER(TRIM(value)) NOT IN ('unk', 'n/a', '')
-        ORDER BY product_id
-      `)
-      .all(this.category, componentType, ...names);
-    return fieldRows;
   }
 
   getCandidatesForComponentProperty(componentType, componentName, componentMaker, fieldKey) {
-    // Primary: via item_component_links
-    const linkCands = this.db
+    return this.db
       .prepare(`
         SELECT c.*
         FROM candidates c
@@ -1962,20 +2217,19 @@ export class SpecDb {
         ORDER BY c.score DESC, c.rank ASC, c.product_id
       `)
       .all(this.category, componentType, componentName, componentMaker || '', fieldKey);
-    if (linkCands.length > 0) return linkCands;
+  }
 
-    // Fallback: find products via item_field_state then get their candidates
-    const productRows = this.getProductsForComponent(componentType, componentName, componentMaker);
-    if (productRows.length === 0) return [];
-    const pids = productRows.map(r => r.product_id);
-    const pidPlaceholders = pids.map(() => '?').join(',');
+  getProductsByListValueId(listValueId) {
+    const id = Number(listValueId);
+    if (!Number.isFinite(id) || id <= 0) return [];
     return this.db
       .prepare(`
-        SELECT * FROM candidates
-        WHERE category = ? AND product_id IN (${pidPlaceholders}) AND field_key = ?
-        ORDER BY score DESC, rank ASC, product_id
+        SELECT DISTINCT product_id, field_key
+        FROM item_list_links
+        WHERE category = ? AND list_value_id = ?
+        ORDER BY product_id
       `)
-      .all(this.category, ...pids, fieldKey);
+      .all(this.category, id);
   }
 
   getProductsForListValue(fieldKey, value) {
@@ -2172,11 +2426,8 @@ export class SpecDb {
           FROM key_review_state
           WHERE category = ?
             AND target_kind = 'enum_key'
-            AND (
-              list_value_id = ?
-              OR (field_key = ? AND enum_value_norm = LOWER(TRIM(?)))
-            )
-        `).all(this.category, row.id, fieldKey, value).map((entry) => entry.id);
+            AND list_value_id = ?
+        `).all(this.category, row.id).map((entry) => entry.id);
         this.deleteKeyReviewStateRowsByIds(stateIds);
 
         this.db
@@ -3095,52 +3346,44 @@ export class SpecDb {
   // --- Key Review Methods ---
 
   upsertKeyReviewState(row) {
-    const toPositiveId = (value) => {
-      const n = Number.parseInt(String(value ?? ''), 10);
-      return Number.isFinite(n) && n > 0 ? n : null;
-    };
     const targetKind = row.targetKind || row.target_kind;
     const category = row.category || this.category;
-    const itemFieldStateId = toPositiveId(row.itemFieldStateId ?? row.item_field_state_id);
-    const componentValueId = toPositiveId(row.componentValueId ?? row.component_value_id);
-    const listValueId = toPositiveId(row.listValueId ?? row.list_value_id);
-    const enumListId = toPositiveId(row.enumListId ?? row.enum_list_id);
+    const itemFieldStateId = toPositiveInteger(row.itemFieldStateId ?? row.item_field_state_id);
+    const componentValueId = toPositiveInteger(row.componentValueId ?? row.component_value_id);
+    const componentIdentityId = toPositiveInteger(row.componentIdentityId ?? row.component_identity_id);
+    const listValueId = toPositiveInteger(row.listValueId ?? row.list_value_id);
+    const enumListId = toPositiveInteger(row.enumListId ?? row.enum_list_id);
+    const propertyKey = String(row.propertyKey ?? row.property_key ?? '').trim() || null;
 
-    // Check for existing row using target-kind-specific lookup
     let existing = null;
     if (targetKind === 'grid_key') {
-      if (itemFieldStateId) {
-        existing = this.db.prepare(
-          "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'grid_key' AND item_field_state_id = ?"
-        ).get(category, itemFieldStateId);
+      if (!itemFieldStateId) {
+        throw new Error('itemFieldStateId is required for grid key review state upsert.');
       }
-      if (!existing) {
-        existing = this.db.prepare(
-          "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'grid_key' AND item_identifier = ? AND field_key = ?"
-        ).get(category, row.itemIdentifier || row.item_identifier, row.fieldKey || row.field_key);
-      }
+      existing = this.db.prepare(
+        "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'grid_key' AND item_field_state_id = ?"
+      ).get(category, itemFieldStateId);
     } else if (targetKind === 'enum_key') {
-      if (listValueId) {
-        existing = this.db.prepare(
-          "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'enum_key' AND list_value_id = ?"
-        ).get(category, listValueId);
+      if (!listValueId) {
+        throw new Error('listValueId is required for enum key review state upsert.');
       }
-      if (!existing) {
-        existing = this.db.prepare(
-          "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'enum_key' AND field_key = ? AND enum_value_norm = ?"
-        ).get(category, row.fieldKey || row.field_key, row.enumValueNorm || row.enum_value_norm);
-      }
+      existing = this.db.prepare(
+        "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'enum_key' AND list_value_id = ?"
+      ).get(category, listValueId);
     } else if (targetKind === 'component_key') {
       if (componentValueId) {
         existing = this.db.prepare(
           "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'component_key' AND component_value_id = ?"
         ).get(category, componentValueId);
-      }
-      if (!existing) {
+      } else if (componentIdentityId && propertyKey) {
         existing = this.db.prepare(
-          "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'component_key' AND component_identifier = ? AND property_key = ?"
-        ).get(category, row.componentIdentifier || row.component_identifier, row.propertyKey || row.property_key);
+          "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'component_key' AND component_identity_id = ? AND property_key = ?"
+        ).get(category, componentIdentityId, propertyKey);
+      } else {
+        throw new Error('componentValueId or (componentIdentityId + propertyKey) is required for component key review state upsert.');
       }
+    } else {
+      throw new Error(`Unsupported key review targetKind '${targetKind}'.`);
     }
 
     const params = {
@@ -3150,9 +3393,10 @@ export class SpecDb {
       field_key: row.fieldKey || row.field_key || '',
       enum_value_norm: row.enumValueNorm ?? row.enum_value_norm ?? null,
       component_identifier: row.componentIdentifier ?? row.component_identifier ?? null,
-      property_key: row.propertyKey ?? row.property_key ?? null,
+      property_key: propertyKey,
       item_field_state_id: itemFieldStateId,
       component_value_id: componentValueId,
+      component_identity_id: componentIdentityId,
       list_value_id: listValueId,
       enum_list_id: enumListId,
       required_level: row.requiredLevel ?? row.required_level ?? null,
@@ -3203,6 +3447,7 @@ export class SpecDb {
         UPDATE key_review_state SET
           item_field_state_id = COALESCE(@item_field_state_id, item_field_state_id),
           component_value_id = COALESCE(@component_value_id, component_value_id),
+          component_identity_id = COALESCE(@component_identity_id, component_identity_id),
           list_value_id = COALESCE(@list_value_id, list_value_id),
           enum_list_id = COALESCE(@enum_list_id, enum_list_id),
           required_level = @required_level, availability = @availability, difficulty = @difficulty,
@@ -3248,50 +3493,38 @@ export class SpecDb {
   getKeyReviewState({
     category,
     targetKind,
-    itemIdentifier,
-    fieldKey,
-    enumValueNorm,
-    componentIdentifier,
     propertyKey,
     itemFieldStateId,
     componentValueId,
+    componentIdentityId,
     listValueId,
   }) {
-    const toPositiveId = (value) => {
-      const n = Number.parseInt(String(value ?? ''), 10);
-      return Number.isFinite(n) && n > 0 ? n : null;
-    };
     const cat = category || this.category;
     if (targetKind === 'grid_key') {
-      const slotId = toPositiveId(itemFieldStateId);
-      if (slotId) {
-        return this.db.prepare(
-          "SELECT * FROM key_review_state WHERE category = ? AND target_kind = 'grid_key' AND item_field_state_id = ?"
-        ).get(cat, slotId) || null;
-      }
+      const slotId = toPositiveInteger(itemFieldStateId);
+      if (!slotId) return null;
       return this.db.prepare(
-        "SELECT * FROM key_review_state WHERE category = ? AND target_kind = 'grid_key' AND item_identifier = ? AND field_key = ?"
-      ).get(cat, itemIdentifier, fieldKey) || null;
+        "SELECT * FROM key_review_state WHERE category = ? AND target_kind = 'grid_key' AND item_field_state_id = ?"
+      ).get(cat, slotId) || null;
     } else if (targetKind === 'enum_key') {
-      const slotId = toPositiveId(listValueId);
-      if (slotId) {
-        return this.db.prepare(
-          "SELECT * FROM key_review_state WHERE category = ? AND target_kind = 'enum_key' AND list_value_id = ?"
-        ).get(cat, slotId) || null;
-      }
+      const slotId = toPositiveInteger(listValueId);
+      if (!slotId) return null;
       return this.db.prepare(
-        "SELECT * FROM key_review_state WHERE category = ? AND target_kind = 'enum_key' AND field_key = ? AND enum_value_norm = ?"
-      ).get(cat, fieldKey, enumValueNorm) || null;
+        "SELECT * FROM key_review_state WHERE category = ? AND target_kind = 'enum_key' AND list_value_id = ?"
+      ).get(cat, slotId) || null;
     } else if (targetKind === 'component_key') {
-      const slotId = toPositiveId(componentValueId);
-      if (slotId) {
+      const valueSlotId = toPositiveInteger(componentValueId);
+      if (valueSlotId) {
         return this.db.prepare(
           "SELECT * FROM key_review_state WHERE category = ? AND target_kind = 'component_key' AND component_value_id = ?"
-        ).get(cat, slotId) || null;
+        ).get(cat, valueSlotId) || null;
       }
+      const identitySlotId = toPositiveInteger(componentIdentityId);
+      const normalizedPropertyKey = String(propertyKey || '').trim();
+      if (!identitySlotId || !normalizedPropertyKey) return null;
       return this.db.prepare(
-        "SELECT * FROM key_review_state WHERE category = ? AND target_kind = 'component_key' AND component_identifier = ? AND property_key = ?"
-      ).get(cat, componentIdentifier, propertyKey) || null;
+        "SELECT * FROM key_review_state WHERE category = ? AND target_kind = 'component_key' AND component_identity_id = ? AND property_key = ?"
+      ).get(cat, identitySlotId, normalizedPropertyKey) || null;
     }
     return null;
   }
@@ -3482,81 +3715,67 @@ export class SpecDb {
             )
             OR (
               target_kind = 'grid_key'
-              AND NOT EXISTS (
+              AND (
+                key_review_state.item_field_state_id IS NULL
+                OR NOT EXISTS (
                 SELECT 1
                 FROM candidates c
                 WHERE c.category = key_review_state.category
                   AND c.candidate_id = key_review_state.selected_candidate_id
-                  AND (
-                    (
-                      key_review_state.item_field_state_id IS NOT NULL
-                      AND EXISTS (
-                        SELECT 1
-                        FROM item_field_state ifs
-                        WHERE ifs.id = key_review_state.item_field_state_id
-                          AND ifs.category = key_review_state.category
-                          AND c.product_id = ifs.product_id
-                          AND c.field_key = ifs.field_key
-                      )
-                    )
-                    OR (
-                      key_review_state.item_field_state_id IS NULL
-                      AND c.product_id = key_review_state.item_identifier
-                      AND c.field_key = key_review_state.field_key
-                    )
+                  AND EXISTS (
+                    SELECT 1
+                    FROM item_field_state ifs
+                    WHERE ifs.id = key_review_state.item_field_state_id
+                      AND ifs.category = key_review_state.category
+                      AND c.product_id = ifs.product_id
+                      AND c.field_key = ifs.field_key
                   )
+              )
               )
             )
             OR (
               target_kind = 'enum_key'
-              AND NOT EXISTS (
+              AND (
+                key_review_state.list_value_id IS NULL
+                OR NOT EXISTS (
                 SELECT 1
                 FROM candidates c
                 WHERE c.category = key_review_state.category
                   AND c.candidate_id = key_review_state.selected_candidate_id
-                  AND (
-                    (
-                      key_review_state.list_value_id IS NOT NULL
-                      AND EXISTS (
-                        SELECT 1
-                        FROM list_values lv
-                        WHERE lv.id = key_review_state.list_value_id
-                          AND lv.category = key_review_state.category
-                          AND c.field_key = lv.field_key
-                      )
-                    )
-                    OR (
-                      key_review_state.list_value_id IS NULL
-                      AND c.field_key = key_review_state.field_key
-                    )
+                  AND EXISTS (
+                    SELECT 1
+                    FROM list_values lv
+                    WHERE lv.id = key_review_state.list_value_id
+                      AND lv.category = key_review_state.category
+                      AND c.field_key = lv.field_key
                   )
+              )
               )
             )
             OR (
               target_kind = 'component_key'
               AND property_key NOT IN ('__name', '__maker', '__links', '__aliases')
-              AND NOT EXISTS (
+              AND (
+                key_review_state.component_value_id IS NULL
+                OR NOT EXISTS (
                 SELECT 1
                 FROM candidates c
                 WHERE c.category = key_review_state.category
                   AND c.candidate_id = key_review_state.selected_candidate_id
-                  AND (
-                    (
-                      key_review_state.component_value_id IS NOT NULL
-                      AND EXISTS (
-                        SELECT 1
-                        FROM component_values cv
-                        WHERE cv.id = key_review_state.component_value_id
-                          AND cv.category = key_review_state.category
-                          AND c.field_key = cv.property_key
-                      )
-                    )
-                    OR (
-                      key_review_state.component_value_id IS NULL
-                      AND c.field_key = key_review_state.property_key
-                    )
+                  AND EXISTS (
+                    SELECT 1
+                    FROM component_values cv
+                    WHERE cv.id = key_review_state.component_value_id
+                      AND cv.category = key_review_state.category
+                      AND c.field_key = cv.property_key
                   )
               )
+              )
+            )
+            OR (
+              target_kind = 'component_key'
+              AND property_key IN ('__name', '__maker', '__links', '__aliases')
+              AND key_review_state.component_identity_id IS NULL
             )
           )
       `).run(category).changes;

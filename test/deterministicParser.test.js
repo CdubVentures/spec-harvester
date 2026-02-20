@@ -89,3 +89,56 @@ test('DeterministicParser extracts regex/spec-table/json-ld candidates with snip
   assert.deepEqual(byField.sensor.evidenceRefs, ['j1']);
 });
 
+test('DeterministicParser reads microdata/rdfa/opengraph snippet types via template path lookup', () => {
+  const parser = new DeterministicParser({
+    getAllParseTemplates() {
+      return {
+        weight: {
+          patterns: [],
+          context_keywords: ['weight'],
+          json_path: 'specs.weight'
+        },
+        dpi: {
+          patterns: [],
+          context_keywords: ['dpi'],
+          json_path: 'specs.dpi'
+        }
+      };
+    },
+    normalizeCandidate(_field, value) {
+      const token = String(value || '').trim();
+      return token ? { ok: true, normalized: token } : { ok: false, reason_code: 'empty' };
+    }
+  });
+
+  const pack = {
+    snippets: [
+      {
+        id: 'm1',
+        type: 'microdata_product',
+        text: '{"specs":{"weight":"60 g","dpi":"26000"}}'
+      },
+      {
+        id: 'r1',
+        type: 'rdfa_product',
+        text: '{"specs":{"weight":"59 g"}}'
+      },
+      {
+        id: 'o1',
+        type: 'opengraph_product',
+        text: '{"specs":{"dpi":"24000"}}'
+      }
+    ]
+  };
+
+  const rows = parser.extractFromEvidencePack(pack, {
+    targetFields: ['weight', 'dpi']
+  });
+  const hasMicrodataWeight = rows.some((row) => row.field === 'weight' && row.method === 'microdata' && row.evidenceRefs?.[0] === 'm1');
+  const hasRdfaWeight = rows.some((row) => row.field === 'weight' && row.method === 'rdfa' && row.evidenceRefs?.[0] === 'r1');
+  const hasOpengraphDpi = rows.some((row) => row.field === 'dpi' && row.method === 'opengraph' && row.evidenceRefs?.[0] === 'o1');
+
+  assert.equal(hasMicrodataWeight, true);
+  assert.equal(hasRdfaWeight, true);
+  assert.equal(hasOpengraphDpi, true);
+});

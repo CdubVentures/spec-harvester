@@ -164,8 +164,10 @@ export const eloShapesAdapter = {
     return hostMatches(source);
   },
 
-  async extractFromPage({ pageData }) {
-    const pairs = extractTablePairs(pageData.html || '');
+  async extractFromPage({ pageData, config }) {
+    const pairs = extractTablePairs(pageData.html || '', {
+      useV2: config?.htmlTableExtractorV2 !== false
+    });
     return {
       fieldCandidates: mapPairsToFieldCandidates(pairs, 'html_table'),
       identityCandidates: extractIdentityFromPairs(pairs),

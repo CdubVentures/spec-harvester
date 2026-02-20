@@ -312,8 +312,6 @@ export function CellDrawer({
   })();
   const acceptedCandidateIdToken = String(acceptedCandidateId || '').trim();
   const sharedAcceptedCandidateIdToken = String(sharedAcceptedCandidateId || '').trim();
-  const hasAcceptedIdInCandidates = Boolean(acceptedCandidateIdToken)
-    && candidates.some((c) => String(c?.candidate_id || '').trim() === acceptedCandidateIdToken);
   const hasPrimaryTargetInCandidates = pendingPrimaryIdSet.size > 0
     && candidates.some((c) => isActionableCandidate(c) && pendingPrimaryIdSet.has(String(c?.candidate_id || '').trim()));
   const hasSharedTargetInCandidates = pendingSharedIdSet.size > 0
@@ -330,22 +328,6 @@ export function CellDrawer({
     && currentValueIsMeaningful
     && Boolean(onConfirmShared)
     && (!hasCandidateRows || pendingSharedIdSet.size === 0 || !hasSharedTargetInCandidates);
-  const acceptedCandidateValueToken = acceptedCandidateIdToken
-    ? (() => {
-      const acceptedValue = candidates.find((candidate) => String(candidate?.candidate_id || '').trim() === acceptedCandidateIdToken)?.value;
-      return isMeaningfulValue(acceptedValue) ? normalizeComparable(acceptedValue) : '';
-    })()
-    : '';
-  const acceptedValueToken = acceptedCandidateValueToken || selectedValueToken;
-  const matchingValueIndices = selectedValueToken
-    ? candidates
-      .map((c, idx) => ({ idx, token: normalizeComparable(c?.value) }))
-      .filter((entry) => entry.token && entry.token === selectedValueToken)
-      .map((entry) => entry.idx)
-    : [];
-  const fallbackAcceptedIndex = (!acceptedCandidateIdToken && matchingValueIndices.length === 1)
-    ? matchingValueIndices[0]
-    : -1;
   const currentSourceCandidateIndex = (() => {
     if (currentValue.overridden || !currentValueIsMeaningful) return -1;
     if (acceptedCandidateIdToken) {
@@ -459,12 +441,9 @@ export function CellDrawer({
                 const candidateId = String(candidate.candidate_id || '').trim();
                 const candidateValueIsMeaningful = isMeaningfulValue(candidate.value);
                 const candidateIsActionable = isActionableCandidate(candidate);
-                const candidateValueToken = candidateValueIsMeaningful ? normalizeComparable(candidate.value) : '';
                 const isCurrentSourceCandidate = index === currentSourceCandidateIndex;
-                const isActiveAccepted = (
-                  Boolean(acceptedCandidateIdToken)
-                  && candidateId === acceptedCandidateIdToken
-                ) || (!hasAcceptedIdInCandidates && fallbackAcceptedIndex === index);
+                const isActiveAccepted = Boolean(acceptedCandidateIdToken)
+                  && candidateId === acceptedCandidateIdToken;
                 const isSharedAccepted = Boolean(sharedAcceptedCandidateIdToken)
                   && candidateId === sharedAcceptedCandidateIdToken;
                 const isPrimaryTarget = hasPrimary
@@ -542,15 +521,8 @@ export function CellDrawer({
                   }
                 };
 
-                // Candidate background rule:
-                // 1) Green only for accepted value (all equal-value candidates share green).
-                // 2) Pending hue only when that specific candidate is lane-targeted.
-                // 3) Otherwise neutral.
-                const isAcceptedValueCandidate = (
-                  Boolean(acceptedValueToken)
-                  && Boolean(candidateValueToken)
-                  && candidateValueToken === acceptedValueToken
-                ) || (isActiveAccepted && !acceptedValueToken);
+                // Candidate visuals are strictly ID-scoped.
+                // Accepting one candidate must not visually accept peer rows that share the same value.
                 const pendingTintClass = (() => {
                   if (isPrimaryTarget) {
                     return 'border-orange-300 dark:border-orange-700 bg-orange-50/50 dark:bg-orange-900/10';
@@ -560,14 +532,12 @@ export function CellDrawer({
                   }
                   return undefined;
                 })();
-                const cardClass = isAcceptedValueCandidate
-                  ? (isActiveAccepted
-                      ? 'border-green-400 dark:border-green-600 bg-green-50 dark:bg-green-900/20'
-                      : 'border-green-300 dark:border-green-700 bg-green-50/50 dark:bg-green-900/10')
+                const cardClass = isActiveAccepted
+                  ? 'border-green-400 dark:border-green-600 bg-green-50 dark:bg-green-900/20'
                   : pendingTintClass;
 
-                const valueClass = isAcceptedValueCandidate
-                  ? (isActiveAccepted ? 'text-green-700 dark:text-green-300 font-bold' : 'text-green-600 dark:text-green-400')
+                const valueClass = isActiveAccepted
+                  ? 'text-green-700 dark:text-green-300 font-bold'
                   : isPrimaryTarget
                     ? 'text-orange-700 dark:text-orange-300'
                     : isSharedTarget

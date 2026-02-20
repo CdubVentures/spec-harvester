@@ -1,4 +1,21 @@
-# Deep Spec Harvester - Phased Implementation Plan (Accuracy-Max)
+﻿# Phase 12 - Multi-Product Batch Automation
+
+## Canonical Status
+- This is the single canonical file for this phase.
+- Consolidated on 2026-02-20 from split planning plus improvement docs.
+- Includes implemented status and remaining work from merged sources.
+- Keep all unfinished items active until code plus GUI proof confirms completion.
+
+## Merged Source Files
+- PHASE-12-multi-product-batch-automation.md
+- PHASE-12-IMPROVMENT.md
+
+## Full Merged Spec
+
+### Source: PHASE-12-multi-product-batch-automation.md
+
+> Original header: Deep Spec Harvester - Phased Implementation Plan (Accuracy-Max)
+
 
 This phase file is written as an implementation prompt for senior software engineers.
 It includes: exact deliverables, file touchpoints, schemas/events, test strategy, and GUI proof.
@@ -156,4 +173,35 @@ Do not allow batch fan-out to bypass Phase 04/05/06B protections.
 - Batch order is explicit and operator-controlled.
 - Long tasks/scans are resumable, observable, and safe.
 - Batch runs produce deterministic, auditable per-item outcomes.
+
+
+### Source: PHASE-12-IMPROVMENT.md
+
+> Original header: PHASE-12 IMPROVMENT
+
+
+## What I'd Add
+1. Add a high-performance product selection grid with checkbox bulk actions by brand/model/variant.
+2. Add explicit brand-order orchestration controls (drag/drop or move up/down) to define batch execution priority.
+3. Add a preflight summary and validation gate so long scans are clear before launch.
+4. Add resumable batch state with durable checkpoints and clean recovery after app restart.
+
+## What We Should Implement Now
+1. Add `Batch Run Builder` GUI:
+   - vertical + horizontal scrolling table
+   - `Select All`, `Clear`, `Select Brand`, search/filter
+2. Add brand priority controls and show resolved run order preview.
+3. Add batch lifecycle controls:
+   - `Start`, `Pause`, `Resume`, `Stop`, `Force Stop`
+4. Add live long-task summary:
+   - queued/running/completed/failed counters
+   - ETA/throughput
+   - current product + recent failures
+
+## Definition Of Done
+1. Operators can build large multi-product runs quickly without manual per-product starts.
+2. Batch execution order is explicit, visible, and controllable.
+3. Long scans are safe to pause/resume/stop and recover after restart.
+4. GUI clearly proves batch state transitions and progress in real time.
+
 

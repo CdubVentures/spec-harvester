@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { buildRunId, normalizeWhitespace, wait } from '../utils/common.js';
+import { runWithRetry } from './pipelineSharedHelpers.js';
 import { loadCategoryConfig } from '../categories/loader.js';
 import { loadProductCatalog } from '../catalog/productCatalog.js';
 import { SourcePlanner, buildSourceSummary } from '../planner/sourcePlanner.js';
@@ -2233,101 +2234,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       });
     };
 
-    while (planner.hasNext()) {
-      await loadRuntimeOverrides();
-      applyRuntimeOverridesToPlanner(planner, runtimeOverrides);
-      llmContext.forcedHighFields = runtimeOverrides.force_high_fields || [];
-      if (runtimeOverrides.pause) {
-        if (!runtimePauseAnnounced) {
-          logger.info('runtime_pause_applied', {
-            reason: 'runtime_override',
-            control_key: runtimeControlKey
-          });
-          runtimePauseAnnounced = true;
-        }
-        await wait(1000);
-        continue;
-      } else if (runtimePauseAnnounced) {
-        logger.info('runtime_pause_resumed', {
-          reason: 'runtime_override'
-        });
-        runtimePauseAnnounced = false;
-      }
-
-      const elapsedSeconds = (Date.now() - startMs) / 1000;
-      if (elapsedSeconds >= config.maxRunSeconds) {
-        logger.warn('max_run_seconds_reached', { maxRunSeconds: config.maxRunSeconds });
-        break;
-      }
-
-      const source = planner.next();
-      if (!source) {
-        continue;
-      }
-      const sourceHost = normalizeHostToken(source.host || hostFromHttpUrl(source.url || ''));
-      const hostBudgetRow = ensureHostBudgetRow(hostBudgetByHost, sourceHost);
-      attemptedSourceUrls.add(String(source.url || '').trim());
-      if ((runtimeOverrides.blocked_domains || []).includes(String(source.host || '').toLowerCase().replace(/^www\./, ''))) {
-        logger.info('runtime_domain_block_applied', {
-          host: source.host,
-          url: source.url
-        });
-        resumeCooldownSkippedUrls.add(String(source.url || '').trim());
-        continue;
-      }
-      const cooldownDecision = frontierDb?.shouldSkipUrl?.(source.url) || { skip: false };
-      if (cooldownDecision.skip) {
-        hostBudgetRow.dedupe_hits += 1;
-        noteHostRetryTs(hostBudgetRow, cooldownDecision.next_retry_ts || '');
-        const hostBudget = resolveHostBudgetState(hostBudgetRow);
-        logger.info('source_fetch_skipped', {
-          url: source.url,
-          host: sourceHost || source.host || '',
-          skip_reason: 'cooldown',
-          reason: cooldownDecision.reason || 'frontier_cooldown',
-          next_retry_ts: cooldownDecision.next_retry_ts || null,
-          host_budget_score: hostBudget.score,
-          host_budget_state: hostBudget.state
-        });
-        logger.info('url_cooldown_applied', {
-          url: source.url,
-          status: null,
-          cooldown_seconds: null,
-          next_retry_ts: cooldownDecision.next_retry_ts || null,
-          reason: cooldownDecision.reason || 'frontier_cooldown'
-        });
-        resumeCooldownSkippedUrls.add(String(source.url || '').trim());
-        continue;
-      }
-
-      const hostBudgetBeforeFetch = resolveHostBudgetState(hostBudgetRow);
-      if (hostBudgetBeforeFetch.state === 'blocked') {
-        logger.info('source_fetch_skipped', {
-          url: source.url,
-          host: sourceHost || source.host || '',
-          skip_reason: 'blocked_budget',
-          reason: 'host_budget_blocked',
-          next_retry_ts: hostBudgetBeforeFetch.next_retry_ts || null,
-          host_budget_score: hostBudgetBeforeFetch.score,
-          host_budget_state: hostBudgetBeforeFetch.state
-        });
-        resumeCooldownSkippedUrls.add(String(source.url || '').trim());
-        continue;
-      }
-      if (hostBudgetBeforeFetch.state === 'backoff') {
-        logger.info('source_fetch_skipped', {
-          url: source.url,
-          host: sourceHost || source.host || '',
-          skip_reason: 'retry_later',
-          reason: 'host_budget_backoff',
-          next_retry_ts: hostBudgetBeforeFetch.next_retry_ts || null,
-          host_budget_score: hostBudgetBeforeFetch.score,
-          host_budget_state: hostBudgetBeforeFetch.state
-        });
-        resumeCooldownSkippedUrls.add(String(source.url || '').trim());
-        continue;
-      }
-
+    const fetchSourcePageData = async ({ source, sourceHost, hostBudgetRow } = {}) => {
       hostBudgetRow.started_count += 1;
       const hostBudgetAtStart = resolveHostBudgetState(hostBudgetRow);
       logger.info('source_fetch_started', {
@@ -2341,10 +2248,43 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         host_budget_state: hostBudgetAtStart.state
       });
 
-      let pageData;
       const fetchStartedAtMs = Date.now();
       try {
-        pageData = await fetcher.fetch(source);
+        const sourceFetchWrapperAttempts = Math.max(1, toInt(config.sourceFetchWrapperAttempts, 1));
+        const sourceFetchWrapperBackoffMs = Math.max(0, toInt(config.sourceFetchWrapperBackoffMs, 0));
+        const pageData = await runWithRetry(
+          () => fetcher.fetch(source),
+          {
+            attempts: sourceFetchWrapperAttempts,
+            shouldRetry: (error, { attempt, maxAttempts }) => {
+              if (attempt >= maxAttempts) {
+                return false;
+              }
+              const message = String(error?.message || '').toLowerCase();
+              return (
+                message.includes('no_result')
+                || message.includes('timeout')
+                || message.includes('timed out')
+                || message.includes('network')
+              );
+            },
+            onRetry: (error, { attempt, maxAttempts }) => {
+              logger.warn('source_fetch_wrapper_retry', {
+                url: source.url,
+                host: source.host,
+                attempt,
+                max_attempts: maxAttempts,
+                reason: String(error?.message || 'retryable_error')
+              });
+            },
+            backoffMs: sourceFetchWrapperBackoffMs
+          }
+        );
+        return {
+          ok: true,
+          pageData,
+          fetchDurationMs: Math.max(0, Date.now() - fetchStartedAtMs)
+        };
       } catch (error) {
         const fetchDurationMs = Math.max(0, Date.now() - fetchStartedAtMs);
         const fetchFailureOutcome = classifyFetchOutcome({
@@ -2404,26 +2344,204 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
             trace_path: fetchTrace.trace_path
           });
         }
-        continue;
+        return {
+          ok: false
+        };
+      }
+    };
+
+    const collectKnownCandidatesFromSource = (mergedFieldCandidatesWithEvidence = []) => {
+      const sourceFieldValueMap = {};
+      const knownCandidatesFromSource = (mergedFieldCandidatesWithEvidence || [])
+        .filter((candidate) => {
+          const value = String(candidate.value || '').trim().toLowerCase();
+          return value && value !== 'unk';
+        })
+        .map((candidate) => {
+          const field = String(candidate.field || '').trim();
+          if (field && sourceFieldValueMap[field] === undefined) {
+            sourceFieldValueMap[field] = String(candidate.value || '');
+          }
+          return field;
+        })
+        .filter(Boolean);
+      return {
+        sourceFieldValueMap,
+        knownCandidatesFromSource
+      };
+    };
+
+    const buildSourceProcessedPayload = ({
+      source,
+      sourceUrl,
+      fetchDurationMs,
+      parseDurationMs,
+      pageData,
+      sourceFetchOutcome,
+      fetchContentType,
+      pageContentHash,
+      pageBytes,
+      identity,
+      anchorStatus,
+      mergedFieldCandidatesWithEvidence,
+      llmFieldCandidates,
+      articleExtractionMeta,
+      staticDomMeta,
+      structuredMeta,
+      pdfExtractionMeta,
+      screenshotUri,
+      domSnippetUri,
+      hostBudgetAfterSource
+    } = {}) => ({
+      url: source.url,
+      final_url: sourceUrl,
+      host: source.host,
+      fetcher_kind: fetcherMode,
+      fetch_ms: fetchDurationMs,
+      parse_ms: parseDurationMs,
+      status: pageData.status,
+      outcome: sourceFetchOutcome,
+      content_type: fetchContentType,
+      content_hash: pageContentHash,
+      bytes: pageBytes,
+      identity_match: identity.match,
+      identity_score: identity.score,
+      anchor_status: anchorStatus,
+      candidate_count: mergedFieldCandidatesWithEvidence.length,
+      candidate_source: source.candidateSource,
+      llm_candidate_count: llmFieldCandidates.length,
+      fetch_attempts: Number(pageData?.fetchTelemetry?.attempts || 0),
+      fetch_retry_count: Number(pageData?.fetchTelemetry?.retry_count || 0),
+      fetch_policy_matched_host: String(pageData?.fetchTelemetry?.policy?.matched_host || '').trim(),
+      fetch_policy_override_applied: Boolean(pageData?.fetchTelemetry?.policy?.override_applied),
+      article_title: String(articleExtractionMeta.title || ''),
+      article_excerpt: String(articleExtractionMeta.excerpt || ''),
+      article_preview: String(articleExtractionMeta.preview || ''),
+      article_extraction_method: String(articleExtractionMeta.method || ''),
+      article_quality_score: Number(articleExtractionMeta.quality_score || 0),
+      article_char_count: Number(articleExtractionMeta.char_count || 0),
+      article_heading_count: Number(articleExtractionMeta.heading_count || 0),
+      article_duplicate_sentence_ratio: Number(articleExtractionMeta.duplicate_sentence_ratio || 0),
+      article_low_quality: Boolean(articleExtractionMeta.low_quality),
+      article_fallback_reason: String(articleExtractionMeta.fallback_reason || ''),
+      article_policy_mode: String(articleExtractionMeta.policy_mode || ''),
+      article_policy_matched_host: String(articleExtractionMeta.policy_matched_host || ''),
+      article_policy_override_applied: Boolean(articleExtractionMeta.policy_override_applied),
+      static_dom_mode: String(staticDomMeta.mode || ''),
+      static_dom_accepted_field_candidates: Number(staticDomMeta.accepted_field_candidates || 0),
+      static_dom_rejected_field_candidates: Number(staticDomMeta.rejected_field_candidates || 0),
+      static_dom_parse_error_count: Number(staticDomMeta.parse_error_count || 0),
+      static_dom_rejected_field_candidates_audit_count: Number(staticDomMeta.rejected_field_candidates_audit_count || 0),
+      structured_json_ld_count: Number(structuredMeta.json_ld_count || 0),
+      structured_microdata_count: Number(structuredMeta.microdata_count || 0),
+      structured_opengraph_count: Number(structuredMeta.opengraph_count || 0),
+      structured_candidates: Number(structuredMeta.structured_candidates || 0),
+      structured_rejected_candidates: Number(structuredMeta.structured_rejected_candidates || 0),
+      structured_error_count: Number(structuredMeta.error_count || 0),
+      structured_snippet_rows: Array.isArray(structuredMeta.snippet_rows)
+        ? structuredMeta.snippet_rows.slice(0, 20)
+        : [],
+      pdf_docs_parsed: Number(pdfExtractionMeta.docs_parsed || 0),
+      pdf_pairs_total: Number(pdfExtractionMeta.pair_count || 0),
+      pdf_kv_pairs: Number(pdfExtractionMeta.kv_pair_count || 0),
+      pdf_table_pairs: Number(pdfExtractionMeta.table_pair_count || 0),
+      pdf_pages_scanned: Number(pdfExtractionMeta.pages_scanned || 0),
+      pdf_error_count: Number(pdfExtractionMeta.error_count || 0),
+      pdf_backend_selected: String(pdfExtractionMeta.backend_selected || ''),
+      scanned_pdf_docs_detected: Number(pdfExtractionMeta.scanned_docs_detected || 0),
+      scanned_pdf_ocr_docs_attempted: Number(pdfExtractionMeta.scanned_docs_ocr_attempted || 0),
+      scanned_pdf_ocr_docs_succeeded: Number(pdfExtractionMeta.scanned_docs_ocr_succeeded || 0),
+      scanned_pdf_ocr_pairs: Number(pdfExtractionMeta.scanned_ocr_pair_count || 0),
+      scanned_pdf_ocr_kv_pairs: Number(pdfExtractionMeta.scanned_ocr_kv_pair_count || 0),
+      scanned_pdf_ocr_table_pairs: Number(pdfExtractionMeta.scanned_ocr_table_pair_count || 0),
+      scanned_pdf_ocr_low_conf_pairs: Number(pdfExtractionMeta.scanned_ocr_low_confidence_pairs || 0),
+      scanned_pdf_ocr_error_count: Number(pdfExtractionMeta.scanned_ocr_error_count || 0),
+      scanned_pdf_ocr_backend_selected: String(pdfExtractionMeta.scanned_ocr_backend_selected || ''),
+      scanned_pdf_ocr_confidence_avg: Number(pdfExtractionMeta.scanned_ocr_confidence_avg || 0),
+      screenshot_uri: screenshotUri || '',
+      dom_snippet_uri: domSnippetUri || '',
+      host_budget_score: hostBudgetAfterSource.score,
+      host_budget_state: hostBudgetAfterSource.state
+    });
+
+    const shouldSkipSourceBeforeFetch = ({
+      source,
+      sourceHost,
+      hostBudgetRow
+    } = {}) => {
+      if ((runtimeOverrides.blocked_domains || []).includes(String(source.host || '').toLowerCase().replace(/^www\./, ''))) {
+        logger.info('runtime_domain_block_applied', {
+          host: source.host,
+          url: source.url
+        });
+        resumeCooldownSkippedUrls.add(String(source.url || '').trim());
+        return true;
       }
 
-      const fetchDurationMs = Math.max(0, Date.now() - fetchStartedAtMs);
-      const parseStartedAtMs = Date.now();
-      const sourceStatusCode = Number.parseInt(String(pageData.status || 0), 10) || 0;
-      let fetchContentType = 'text/html';
-      const finalToken = String(pageData.finalUrl || source.url || '').toLowerCase();
-      if (finalToken.endsWith('.pdf')) {
-        fetchContentType = 'application/pdf';
-      } else if (finalToken.endsWith('.json')) {
-        fetchContentType = 'application/json';
-      } else if (!String(pageData.html || '').trim()) {
-        fetchContentType = 'application/octet-stream';
+      const cooldownDecision = frontierDb?.shouldSkipUrl?.(source.url) || { skip: false };
+      if (cooldownDecision.skip) {
+        hostBudgetRow.dedupe_hits += 1;
+        noteHostRetryTs(hostBudgetRow, cooldownDecision.next_retry_ts || '');
+        const hostBudget = resolveHostBudgetState(hostBudgetRow);
+        logger.info('source_fetch_skipped', {
+          url: source.url,
+          host: sourceHost || source.host || '',
+          skip_reason: 'cooldown',
+          reason: cooldownDecision.reason || 'frontier_cooldown',
+          next_retry_ts: cooldownDecision.next_retry_ts || null,
+          host_budget_score: hostBudget.score,
+          host_budget_state: hostBudget.state
+        });
+        logger.info('url_cooldown_applied', {
+          url: source.url,
+          status: null,
+          cooldown_seconds: null,
+          next_retry_ts: cooldownDecision.next_retry_ts || null,
+          reason: cooldownDecision.reason || 'frontier_cooldown'
+        });
+        resumeCooldownSkippedUrls.add(String(source.url || '').trim());
+        return true;
       }
-      const sourceFetchOutcome = classifyFetchOutcome({
-        status: sourceStatusCode,
-        contentType: fetchContentType,
-        html: pageData.html || ''
-      });
+
+      const hostBudgetBeforeFetch = resolveHostBudgetState(hostBudgetRow);
+      if (hostBudgetBeforeFetch.state === 'blocked') {
+        logger.info('source_fetch_skipped', {
+          url: source.url,
+          host: sourceHost || source.host || '',
+          skip_reason: 'blocked_budget',
+          reason: 'host_budget_blocked',
+          next_retry_ts: hostBudgetBeforeFetch.next_retry_ts || null,
+          host_budget_score: hostBudgetBeforeFetch.score,
+          host_budget_state: hostBudgetBeforeFetch.state
+        });
+        resumeCooldownSkippedUrls.add(String(source.url || '').trim());
+        return true;
+      }
+      if (hostBudgetBeforeFetch.state === 'backoff') {
+        logger.info('source_fetch_skipped', {
+          url: source.url,
+          host: sourceHost || source.host || '',
+          skip_reason: 'retry_later',
+          reason: 'host_budget_backoff',
+          next_retry_ts: hostBudgetBeforeFetch.next_retry_ts || null,
+          host_budget_score: hostBudgetBeforeFetch.score,
+          host_budget_state: hostBudgetBeforeFetch.state
+        });
+        resumeCooldownSkippedUrls.add(String(source.url || '').trim());
+        return true;
+      }
+
+      return false;
+    };
+
+    const buildSourceArtifacts = async ({
+      source,
+      pageData,
+      sourceStatusCode,
+      fetchDurationMs,
+      fetchContentType,
+      sourceFetchOutcome
+    } = {}) => {
       const domSnippetArtifact = buildDomSnippetArtifact(
         pageData.html,
         Math.max(600, toInt(config.domSnippetMaxChars, 3_600))
@@ -2432,7 +2550,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       artifactSequence += 1;
 
       const domSnippetUri = domSnippetArtifact
-        ? storage.resolveOutputKey(runArtifactsBase, 'raw', 'dom', artifactHostKey, 'dom_snippet.html')
+        ? `${runArtifactsBase}/raw/dom/${artifactHostKey}/dom_snippet.html`
         : '';
       if (domSnippetArtifact && domSnippetUri) {
         domSnippetArtifact.uri = domSnippetUri;
@@ -2449,13 +2567,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         ? 'png'
         : 'jpeg';
       const screenshotUri = screenshotArtifact
-        ? storage.resolveOutputKey(
-          runArtifactsBase,
-          'raw',
-          'screenshots',
-          artifactHostKey,
-          `screenshot.${screenshotExtension(screenshotFormat)}`
-        )
+        ? `${runArtifactsBase}/raw/screenshots/${artifactHostKey}/screenshot.${screenshotExtension(screenshotFormat)}`
         : '';
       const screenshotFileUri = screenshotArtifact && screenshotUri && typeof storage.resolveLocalPath === 'function'
         ? storage.resolveLocalPath(screenshotUri)
@@ -2465,6 +2577,36 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         screenshotArtifact.file_uri = screenshotFileUri;
         screenshotArtifact.mime_type = screenshotMimeType(screenshotFormat);
         screenshotArtifact.content_hash = screenshotArtifact.content_hash || sha256Buffer(screenshotBytes);
+      }
+      if (domSnippetArtifact && domSnippetUri) {
+        try {
+          await storage.writeObject(
+            domSnippetUri,
+            domSnippetArtifact.html || '',
+            { contentType: 'text/html; charset=utf-8' }
+          );
+        } catch (error) {
+          logger.warn('dom_snippet_persist_failed', {
+            url: source.url,
+            uri: domSnippetUri,
+            message: error?.message || 'write_failed'
+          });
+        }
+      }
+      if (screenshotArtifact && screenshotUri && Buffer.isBuffer(screenshotBytes)) {
+        try {
+          await storage.writeObject(
+            screenshotUri,
+            screenshotBytes,
+            { contentType: screenshotMimeType(screenshotFormat) }
+          );
+        } catch (error) {
+          logger.warn('screenshot_persist_failed', {
+            url: source.url,
+            uri: screenshotUri,
+            message: error?.message || 'write_failed'
+          });
+        }
       }
       if (traceWriter) {
         const fetchTrace = await traceWriter.writeJson({
@@ -2525,7 +2667,32 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
           });
         }
       }
+      return {
+        domSnippetArtifact,
+        artifactHostKey,
+        domSnippetUri,
+        screenshotArtifact,
+        screenshotUri,
+        screenshotFileUri
+      };
+    };
 
+    const runSourceExtraction = async ({
+      source,
+      pageData,
+      sourceStatusCode,
+      fetchDurationMs,
+      fetchContentType,
+      sourceFetchOutcome,
+      parseStartedAtMs,
+      hostBudgetRow,
+      domSnippetArtifact,
+      artifactHostKey,
+      domSnippetUri,
+      screenshotArtifact,
+      screenshotUri,
+      screenshotFileUri
+    } = {}) => {
       maybeApplyBlockedDomainCooldown({
         source,
         statusCode: sourceStatusCode,
@@ -2569,15 +2736,43 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       const extraction = discoveryOnlySource
         ? {
           identityCandidates: {},
-          fieldCandidates: []
+          fieldCandidates: [],
+          staticDom: {
+            parserStats: {
+              mode: '',
+              accepted_field_candidates: 0,
+              rejected_field_candidates: 0,
+              parse_error_count: 0
+            },
+            auditRejectedFieldCandidates: []
+          },
+          structuredMetadata: {
+            stats: {
+              json_ld_count: 0,
+              microdata_count: 0,
+              opengraph_count: 0,
+              structured_candidates: 0,
+              structured_rejected_candidates: 0
+            },
+            snippetRows: [],
+            errors: []
+          }
         }
         : extractCandidatesFromPage({
           host: source.host,
           html: pageData.html,
+          canonicalUrl: sourceUrl,
           title: pageData.title,
           ldjsonBlocks: pageData.ldjsonBlocks,
           embeddedState: pageData.embeddedState,
-          networkResponses: pageData.networkResponses
+          networkResponses: pageData.networkResponses,
+          structuredMetadata: pageData.structuredMetadata || null,
+          staticDomExtractorEnabled: config.staticDomExtractorEnabled !== false,
+          staticDomMode: config.staticDomMode || 'cheerio',
+          htmlTableExtractorV2: config.htmlTableExtractorV2 !== false,
+          staticDomTargetMatchThreshold: Number(config.staticDomTargetMatchThreshold || 0.55),
+          staticDomMaxEvidenceSnippets: Number(config.staticDomMaxEvidenceSnippets || 120),
+          identityTarget: job.identityLock || {}
         });
 
       const adapterExtra = discoveryOnlySource
@@ -2876,6 +3071,148 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         dom_snippet_content_hash: String(domSnippetArtifact?.content_hash || '').trim() || null
       };
 
+      const staticDomStats = extraction?.staticDom?.parserStats && typeof extraction.staticDom.parserStats === 'object'
+        ? extraction.staticDom.parserStats
+        : {};
+      const staticDomAuditRejectedCount = Array.isArray(extraction?.staticDom?.auditRejectedFieldCandidates)
+        ? extraction.staticDom.auditRejectedFieldCandidates.length
+        : 0;
+      const structuredStats = extraction?.structuredMetadata?.stats && typeof extraction.structuredMetadata.stats === 'object'
+        ? extraction.structuredMetadata.stats
+        : {};
+      const structuredSnippetRows = Array.isArray(extraction?.structuredMetadata?.snippetRows)
+        ? extraction.structuredMetadata.snippetRows
+        : [];
+      const structuredErrors = Array.isArray(extraction?.structuredMetadata?.errors)
+        ? extraction.structuredMetadata.errors
+        : [];
+      const pdfExtractionMeta = (
+        evidencePack?.meta?.pdf_extraction
+        && typeof evidencePack.meta.pdf_extraction === 'object'
+      )
+        ? evidencePack.meta.pdf_extraction
+        : {};
+
+      await finalizeProcessedSource({
+        source,
+        pageData,
+        sourceStatusCode,
+        discoveryOnlySource,
+        sourceUrl,
+        mergedIdentityCandidates,
+        mergedFieldCandidatesWithEvidence,
+        anchorCheck,
+        anchorStatus,
+        endpointIntel,
+        temporalSignals,
+        evidencePack,
+        artifactHostKey,
+        artifactRefs,
+        fingerprint,
+        parserHealth,
+        manufacturerBrandMismatch,
+        identity,
+        llmExtraction,
+        fetchContentType,
+        fetchDurationMs,
+        sourceFetchOutcome,
+        hostBudgetRow,
+        parseStartedAtMs,
+        llmFieldCandidates,
+        domSnippetArtifact,
+        adapterExtra,
+        staticDomStats,
+        staticDomAuditRejectedCount,
+        structuredStats,
+        structuredSnippetRows,
+        structuredErrors,
+        pdfExtractionMeta,
+        screenshotUri,
+        domSnippetUri
+      });
+    };
+    const processFetchedSource = async ({
+      source,
+      hostBudgetRow,
+      sourceFetch
+    } = {}) => {
+      const pageData = sourceFetch.pageData;
+      const fetchDurationMs = sourceFetch.fetchDurationMs;
+      const parseStartedAtMs = Date.now();
+      const sourceStatusCode = Number.parseInt(String(pageData.status || 0), 10) || 0;
+      let fetchContentType = 'text/html';
+      const finalToken = String(pageData.finalUrl || source.url || "").toLowerCase();
+      if (finalToken.endsWith('.pdf')) {
+        fetchContentType = 'application/pdf';
+      } else if (finalToken.endsWith('.json')) {
+        fetchContentType = 'application/json';
+      } else if (!String(pageData.html || '').trim()) {
+        fetchContentType = 'application/octet-stream';
+      }
+      const sourceFetchOutcome = classifyFetchOutcome({
+        status: sourceStatusCode,
+        contentType: fetchContentType,
+        html: pageData.html || ''
+      });
+
+      const artifactContext = await buildSourceArtifacts({
+        source,
+        pageData,
+        sourceStatusCode,
+        fetchDurationMs,
+        fetchContentType,
+        sourceFetchOutcome
+      });
+
+      await runSourceExtraction({
+        source,
+        pageData,
+        sourceStatusCode,
+        fetchDurationMs,
+        fetchContentType,
+        sourceFetchOutcome,
+        parseStartedAtMs,
+        hostBudgetRow,
+        ...artifactContext
+      });
+    };
+    const finalizeProcessedSource = async ({
+      source,
+      pageData,
+      sourceStatusCode,
+      discoveryOnlySource,
+      sourceUrl,
+      mergedIdentityCandidates,
+      mergedFieldCandidatesWithEvidence,
+      anchorCheck,
+      anchorStatus,
+      endpointIntel,
+      temporalSignals,
+      evidencePack,
+      artifactHostKey,
+      artifactRefs,
+      fingerprint,
+      parserHealth,
+      manufacturerBrandMismatch,
+      identity,
+      llmExtraction,
+      fetchContentType,
+      fetchDurationMs,
+      sourceFetchOutcome,
+      hostBudgetRow,
+      parseStartedAtMs,
+      llmFieldCandidates,
+      domSnippetArtifact,
+      adapterExtra,
+      staticDomStats,
+      staticDomAuditRejectedCount,
+      structuredStats,
+      structuredSnippetRows,
+      structuredErrors,
+      pdfExtractionMeta,
+      screenshotUri,
+      domSnippetUri
+    } = {}) => {
       sourceResults.push({
         ...source,
         ts: new Date().toISOString(),
@@ -2920,20 +3257,9 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         });
       }
 
-      const sourceFieldValueMap = {};
-      const knownCandidatesFromSource = mergedFieldCandidatesWithEvidence
-        .filter((candidate) => {
-          const value = String(candidate.value || '').trim().toLowerCase();
-          return value && value !== 'unk';
-        })
-        .map((candidate) => {
-          const field = String(candidate.field || '').trim();
-          if (field && sourceFieldValueMap[field] === undefined) {
-            sourceFieldValueMap[field] = String(candidate.value || '');
-          }
-          return field;
-        })
-        .filter(Boolean);
+      const { sourceFieldValueMap, knownCandidatesFromSource } = collectKnownCandidatesFromSource(
+        mergedFieldCandidatesWithEvidence
+      );
 
       if (
         source.approvedDomain &&
@@ -3075,39 +3401,124 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       )
         ? evidencePack.meta.article_extraction
         : {};
-      logger.info('source_processed', {
-        url: source.url,
-        final_url: sourceUrl,
-        host: source.host,
-        fetcher_kind: fetcherMode,
-        fetch_ms: fetchDurationMs,
-        parse_ms: parseDurationMs,
-        status: pageData.status,
-        outcome: sourceFetchOutcome,
-        content_type: fetchContentType,
-        content_hash: pageContentHash,
-        bytes: pageBytes,
-        identity_match: identity.match,
-        identity_score: identity.score,
-        anchor_status: anchorStatus,
-        candidate_count: mergedFieldCandidatesWithEvidence.length,
-        candidate_source: source.candidateSource,
-        llm_candidate_count: llmFieldCandidates.length,
-        article_title: String(articleExtractionMeta.title || ''),
-        article_excerpt: String(articleExtractionMeta.excerpt || ''),
-        article_preview: String(articleExtractionMeta.preview || ''),
-        article_extraction_method: String(articleExtractionMeta.method || ''),
-        article_quality_score: Number(articleExtractionMeta.quality_score || 0),
-        article_char_count: Number(articleExtractionMeta.char_count || 0),
-        article_heading_count: Number(articleExtractionMeta.heading_count || 0),
-        article_duplicate_sentence_ratio: Number(articleExtractionMeta.duplicate_sentence_ratio || 0),
-        article_low_quality: Boolean(articleExtractionMeta.low_quality),
-        article_fallback_reason: String(articleExtractionMeta.fallback_reason || ''),
-        screenshot_uri: screenshotUri || '',
-        dom_snippet_uri: domSnippetUri || '',
-        host_budget_score: hostBudgetAfterSource.score,
-        host_budget_state: hostBudgetAfterSource.state
+      const staticDomMeta = {
+        mode: String(staticDomStats?.mode || '').trim(),
+        accepted_field_candidates: Number(staticDomStats?.accepted_field_candidates || 0),
+        rejected_field_candidates: Number(staticDomStats?.rejected_field_candidates || 0),
+        parse_error_count: Number(staticDomStats?.parse_error_count || 0),
+        rejected_field_candidates_audit_count: Number(staticDomAuditRejectedCount || 0)
+      };
+      const structuredMeta = {
+        json_ld_count: Number(structuredStats?.json_ld_count || 0),
+        microdata_count: Number(structuredStats?.microdata_count || 0),
+        opengraph_count: Number(structuredStats?.opengraph_count || 0),
+        structured_candidates: Number(structuredStats?.structured_candidates || 0),
+        structured_rejected_candidates: Number(structuredStats?.structured_rejected_candidates || 0),
+        error_count: Array.isArray(structuredErrors) ? structuredErrors.length : 0,
+        snippet_rows: Array.isArray(structuredSnippetRows)
+          ? structuredSnippetRows.slice(0, 40).map((row) => ({
+            source_surface: String(row?.source_surface || row?.method || '').trim(),
+            key_path: String(row?.key_path || '').trim(),
+            value_preview: String(row?.value_preview || '').trim(),
+            target_match_score: Number(row?.target_match_score || 0),
+            target_match_passed: Boolean(row?.target_match_passed)
+          }))
+          : []
+      };
+      logger.info('source_processed', buildSourceProcessedPayload({
+        source,
+        sourceUrl,
+        fetchDurationMs,
+        parseDurationMs,
+        pageData,
+        sourceFetchOutcome,
+        fetchContentType,
+        pageContentHash,
+        pageBytes,
+        identity,
+        anchorStatus,
+        mergedFieldCandidatesWithEvidence,
+        llmFieldCandidates,
+        articleExtractionMeta,
+        staticDomMeta,
+        structuredMeta,
+        pdfExtractionMeta,
+        screenshotUri,
+        domSnippetUri,
+        hostBudgetAfterSource
+      }));
+    };
+
+    const prepareNextPlannerSource = async () => {
+      await loadRuntimeOverrides();
+      applyRuntimeOverridesToPlanner(planner, runtimeOverrides);
+      llmContext.forcedHighFields = runtimeOverrides.force_high_fields || [];
+      if (runtimeOverrides.pause) {
+        if (!runtimePauseAnnounced) {
+          logger.info('runtime_pause_applied', {
+            reason: 'runtime_override',
+            control_key: runtimeControlKey
+          });
+          runtimePauseAnnounced = true;
+        }
+        await wait(1000);
+        return { mode: 'skip' };
+      }
+      if (runtimePauseAnnounced) {
+        logger.info('runtime_pause_resumed', {
+          reason: 'runtime_override'
+        });
+        runtimePauseAnnounced = false;
+      }
+
+      const elapsedSeconds = (Date.now() - startMs) / 1000;
+      if (elapsedSeconds >= config.maxRunSeconds) {
+        logger.warn('max_run_seconds_reached', { maxRunSeconds: config.maxRunSeconds });
+        return { mode: 'stop' };
+      }
+
+      const source = planner.next();
+      if (!source) {
+        return { mode: 'skip' };
+      }
+      const sourceHost = normalizeHostToken(source.host || hostFromHttpUrl(source.url || ''));
+      const hostBudgetRow = ensureHostBudgetRow(hostBudgetByHost, sourceHost);
+      attemptedSourceUrls.add(String(source.url || '').trim());
+      return {
+        mode: 'process',
+        source,
+        sourceHost,
+        hostBudgetRow
+      };
+    };
+
+    while (planner.hasNext()) {
+      const preflight = await prepareNextPlannerSource();
+      if (preflight.mode === 'stop') {
+        break;
+      }
+      if (preflight.mode !== 'process') {
+        continue;
+      }
+      const { source, sourceHost, hostBudgetRow } = preflight;
+      if (shouldSkipSourceBeforeFetch({ source, sourceHost, hostBudgetRow })) {
+        continue;
+      }
+
+      const sourceFetch = await fetchSourcePageData({
+        source,
+        sourceHost,
+        hostBudgetRow
       });
+      if (!sourceFetch.ok) {
+        continue;
+      }
+      await processFetchedSource({
+        source,
+        hostBudgetRow,
+        sourceFetch
+      });
+
     }
   };
 

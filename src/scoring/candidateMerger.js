@@ -31,7 +31,18 @@ const TIER_WEIGHTS = {
 const METHOD_WEIGHTS = {
   spec_table_match: 0.3,
   parse_template: 0.28,
+  pdf_table: 0.3,
+  pdf_kv: 0.29,
+  pdf: 0.24,
+  scanned_pdf_ocr_table: 0.28,
+  scanned_pdf_ocr_kv: 0.26,
+  scanned_pdf_ocr_text: 0.2,
   json_ld: 0.25,
+  microdata: 0.24,
+  opengraph: 0.2,
+  microformat: 0.19,
+  rdfa: 0.19,
+  twitter_card: 0.19,
   llm_extract: 0.2,
   component_db_inference: 0.15
 };
@@ -194,4 +205,3 @@ export class CandidateMerger {
     };
   }
 }
-

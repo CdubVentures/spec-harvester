@@ -1,4 +1,21 @@
-# Deep Spec Harvester - Phase 08B - Visual Asset Capture + GUI Proof
+﻿# Phase 08B - Visual Asset Capture Proof
+
+## Canonical Status
+- This is the single canonical file for this phase.
+- Consolidated on 2026-02-20 from split planning plus improvement docs.
+- Includes implemented status and remaining work from merged sources.
+- Keep all unfinished items active until code plus GUI proof confirms completion.
+
+## Merged Source Files
+- PHASE-08B-visual-asset-capture-proof.md
+- PHASE-08B-IMPROVMENT.md
+
+## Full Merged Spec
+
+### Source: PHASE-08B-visual-asset-capture-proof.md
+
+> Original header: Deep Spec Harvester - Phase 08B - Visual Asset Capture + GUI Proof
+
 
 ## Goal
 Add a dedicated visual capture phase that stores page screenshots and product images per source, then exposes them to extraction/review with hash-backed lineage and live GUI proof.
@@ -158,3 +175,29 @@ Each event includes:
 - Deterministic `image_asset_id`/hash behavior on unchanged pages.
 - GUI can preview + download assets during active run.
 - Extraction context can attach visual refs for ambiguous fields.
+
+### Source: PHASE-08B-IMPROVMENT.md
+
+> Original header: PHASE-08B IMPROVMENT
+
+
+## What I'd Add
+1. Add deterministic image asset IDs and hash lineage for every captured screenshot/image.
+2. Add pHash clustering to collapse near-duplicate visual assets across sources.
+3. Add visual-to-field linking so ambiguous fields can show direct image proof.
+4. Add live GUI preview + download controls for every visual asset.
+5. Add multi-product target-match gate for every captured visual asset.
+
+## What We Should Implement Now
+1. Add visual capture events and run artifact output (`phase08b_visual_assets.json`).
+2. Add GUI panel for live thumbnails, metadata, and download action.
+3. Attach `image_asset_id` refs into Phase 08 extraction context for ambiguous fields.
+4. Keep textual evidence mandatory while visual evidence boosts confidence/identity checks.
+5. Require `quality_gate_passed=true` AND `target_match_passed=true` before visual refs are attachable.
+
+## Definition Of Done
+1. Each captured image has stable `image_asset_id`, `content_hash`, `storage_uri`.
+2. GUI can preview and download per-source images while run is active.
+3. Ambiguous identity/model fields can show linked visual refs in extraction context.
+4. Multi-product pages only attach target-passed images for the active item.
+

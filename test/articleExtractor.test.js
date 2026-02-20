@@ -64,3 +64,42 @@ test('article extractor: falls back when readability output is weak and fallback
   assert.ok(typeof extracted.quality.score === 'number');
   assert.ok(typeof extracted.quality.duplicate_sentence_ratio === 'number');
 });
+
+test('article extractor: policy mode prefer_fallback forces heuristic path', () => {
+  const html = `
+    <html>
+      <head><title>Example Review</title></head>
+      <body>
+        <article>
+          <h1>Example Review</h1>
+          <p>This is long enough text to allow readability extraction in normal mode.</p>
+          <p>Sensor and latency details are present.</p>
+        </article>
+      </body>
+    </html>
+  `;
+  const extracted = extractMainArticle(html, {
+    mode: 'prefer_fallback',
+    minChars: 20,
+    minScore: 1
+  });
+  assert.equal(extracted.method, 'heuristic_fallback');
+  assert.equal(extracted.fallback_reason, 'policy_prefer_fallback');
+});
+
+test('article extractor: policy mode prefer_readability keeps readability output even if low quality', () => {
+  const html = `
+    <html>
+      <body>
+        <article><p>Short text.</p></article>
+      </body>
+    </html>
+  `;
+  const extracted = extractMainArticle(html, {
+    mode: 'prefer_readability',
+    minChars: 200,
+    minScore: 80
+  });
+  assert.equal(extracted.method, 'readability');
+  assert.equal(extracted.low_quality, true);
+});

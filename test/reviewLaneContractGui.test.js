@@ -462,6 +462,131 @@ async function apiJson(baseUrl, method, apiPath, body = undefined) {
   return data;
 }
 
+function getItemFieldStateId(db, category, productId, fieldKey) {
+  const row = db.db.prepare(
+    `SELECT id
+     FROM item_field_state
+     WHERE category = ? AND product_id = ? AND field_key = ?
+     LIMIT 1`
+  ).get(category, productId, fieldKey);
+  return row?.id ?? null;
+}
+
+function getComponentIdentityId(db, category, componentType, name, maker = '') {
+  const row = db.db.prepare(
+    `SELECT id
+     FROM component_identity
+     WHERE category = ? AND component_type = ? AND canonical_name = ? AND maker = ?
+     LIMIT 1`
+  ).get(category, componentType, name, maker);
+  return row?.id ?? null;
+}
+
+function getComponentValueId(db, category, componentType, name, maker = '', propertyKey) {
+  const row = db.db.prepare(
+    `SELECT id
+     FROM component_values
+     WHERE category = ?
+       AND component_type = ?
+       AND component_name = ?
+       AND component_maker = ?
+       AND property_key = ?
+     LIMIT 1`
+  ).get(category, componentType, name, maker, propertyKey);
+  return row?.id ?? null;
+}
+
+function getEnumSlotIds(db, category, fieldKey, value) {
+  const row = db.db.prepare(
+    `SELECT id, list_id
+     FROM list_values
+     WHERE category = ? AND field_key = ? AND value = ?
+     LIMIT 1`
+  ).get(category, fieldKey, value);
+  return {
+    listValueId: row?.id ?? null,
+    enumListId: row?.list_id ?? null,
+  };
+}
+
+function parseComponentIdentifier(componentIdentifier) {
+  const parts = String(componentIdentifier || '').split('::');
+  if (parts.length < 2) return null;
+  const componentType = String(parts.shift() || '').trim();
+  const componentMaker = String(parts.pop() || '').trim();
+  const componentName = String(parts.join('::') || '').trim();
+  if (!componentType || !componentName) return null;
+  return { componentType, componentName, componentMaker };
+}
+
+function resolveStrictKeyReviewSlotIds(db, category, row = {}) {
+  const resolved = { ...row };
+  const targetKind = String(resolved.targetKind || resolved.target_kind || '').trim();
+  const fieldKey = String(resolved.fieldKey || resolved.field_key || '').trim();
+
+  if (targetKind === 'grid_key') {
+    resolved.itemFieldStateId = resolved.itemFieldStateId
+      ?? resolved.item_field_state_id
+      ?? getItemFieldStateId(db, category, resolved.itemIdentifier || resolved.item_identifier, fieldKey);
+    return resolved;
+  }
+
+  if (targetKind === 'enum_key') {
+    let listValueId = resolved.listValueId ?? resolved.list_value_id ?? null;
+    let enumListId = resolved.enumListId ?? resolved.enum_list_id ?? null;
+    if (!listValueId && fieldKey) {
+      const selectedValue = String(resolved.selectedValue ?? resolved.selected_value ?? '').trim();
+      if (selectedValue) {
+        const slot = getEnumSlotIds(db, category, fieldKey, selectedValue);
+        listValueId = slot.listValueId;
+        enumListId = slot.enumListId;
+      }
+      if (!listValueId) {
+        const enumNorm = String(resolved.enumValueNorm ?? resolved.enum_value_norm ?? '').trim().toLowerCase();
+        if (enumNorm) {
+          const rowByNorm = db.db.prepare(
+            `SELECT id, list_id
+             FROM list_values
+             WHERE category = ? AND field_key = ? AND normalized_value = ?
+             LIMIT 1`
+          ).get(category, fieldKey, enumNorm);
+          listValueId = rowByNorm?.id ?? null;
+          enumListId = rowByNorm?.list_id ?? enumListId;
+        }
+      }
+    }
+    resolved.listValueId = listValueId;
+    resolved.enumListId = enumListId;
+    return resolved;
+  }
+
+  if (targetKind === 'component_key') {
+    const propertyKey = String(resolved.propertyKey || resolved.property_key || '').trim();
+    const isIdentityProperty = ['__name', '__maker', '__links', '__aliases'].includes(propertyKey);
+    const parsed = parseComponentIdentifier(resolved.componentIdentifier || resolved.component_identifier);
+    if (isIdentityProperty) {
+      resolved.componentIdentityId = resolved.componentIdentityId
+        ?? resolved.component_identity_id
+        ?? (parsed ? getComponentIdentityId(db, category, parsed.componentType, parsed.componentName, parsed.componentMaker) : null);
+      return resolved;
+    }
+    resolved.componentValueId = resolved.componentValueId
+      ?? resolved.component_value_id
+      ?? (parsed ? getComponentValueId(db, category, parsed.componentType, parsed.componentName, parsed.componentMaker, propertyKey) : null);
+    return resolved;
+  }
+
+  return resolved;
+}
+
+function upsertStrictKeyReviewState(db, category, row) {
+  return db.upsertKeyReviewState(resolveStrictKeyReviewSlotIds(db, category, row));
+}
+
+function getStrictKeyReviewState(db, category, row) {
+  return db.getKeyReviewState(resolveStrictKeyReviewSlotIds(db, category, row));
+}
+
 async function stopProcess(child) {
   if (!child || child.exitCode !== null) return;
   child.kill('SIGTERM');
@@ -565,7 +690,7 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
     seedStrictLaneCandidates(db, CATEGORY);
 
     const componentIdentifier = buildComponentIdentifier('sensor', 'PAW3950', 'PixArt');
-    db.upsertKeyReviewState({
+    upsertStrictKeyReviewState(db, CATEGORY, {
       category: CATEGORY,
       targetKind: 'grid_key',
       itemIdentifier: PRODUCT_A,
@@ -576,7 +701,7 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
       aiConfirmPrimaryStatus: 'pending',
       userAcceptPrimaryStatus: null,
     });
-    db.upsertKeyReviewState({
+    upsertStrictKeyReviewState(db, CATEGORY, {
       category: CATEGORY,
       targetKind: 'grid_key',
       itemIdentifier: PRODUCT_A,
@@ -587,7 +712,7 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
       aiConfirmPrimaryStatus: 'pending',
       userAcceptPrimaryStatus: null,
     });
-    db.upsertKeyReviewState({
+    upsertStrictKeyReviewState(db, CATEGORY, {
       category: CATEGORY,
       targetKind: 'grid_key',
       itemIdentifier: PRODUCT_A,
@@ -598,7 +723,7 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
       aiConfirmSharedStatus: 'pending',
       userAcceptSharedStatus: null,
     });
-    db.upsertKeyReviewState({
+    upsertStrictKeyReviewState(db, CATEGORY, {
       category: CATEGORY,
       targetKind: 'grid_key',
       itemIdentifier: PRODUCT_B,
@@ -609,7 +734,7 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
       aiConfirmSharedStatus: 'pending',
       userAcceptSharedStatus: null,
     });
-    db.upsertKeyReviewState({
+    upsertStrictKeyReviewState(db, CATEGORY, {
       category: CATEGORY,
       targetKind: 'component_key',
       fieldKey: 'dpi_max',
@@ -621,7 +746,7 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
       aiConfirmSharedStatus: 'pending',
       userAcceptSharedStatus: null,
     });
-    db.upsertKeyReviewState({
+    upsertStrictKeyReviewState(db, CATEGORY, {
       category: CATEGORY,
       targetKind: 'component_key',
       fieldKey: 'ips',
@@ -633,7 +758,7 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
       aiConfirmSharedStatus: 'pending',
       userAcceptSharedStatus: null,
     });
-    db.upsertKeyReviewState({
+    upsertStrictKeyReviewState(db, CATEGORY, {
       category: CATEGORY,
       targetKind: 'component_key',
       fieldKey: '__name',
@@ -645,7 +770,7 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
       aiConfirmSharedStatus: 'confirmed',
       userAcceptSharedStatus: null,
     });
-    db.upsertKeyReviewState({
+    upsertStrictKeyReviewState(db, CATEGORY, {
       category: CATEGORY,
       targetKind: 'enum_key',
       fieldKey: 'connection',
@@ -656,7 +781,7 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
       aiConfirmSharedStatus: 'pending',
       userAcceptSharedStatus: null,
     });
-    db.upsertKeyReviewState({
+    upsertStrictKeyReviewState(db, CATEGORY, {
       category: CATEGORY,
       targetKind: 'enum_key',
       fieldKey: 'connection',
@@ -709,9 +834,17 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
     await ensureButtonVisible(page, 'Accept Item');
     await ensureButtonVisible(page, 'Confirm Item');
     await page.getByRole('button', { name: 'Accept Item' }).first().click();
+    const weightSlotId = getItemFieldStateId(db, CATEGORY, PRODUCT_A, 'weight');
+    assert.ok(weightSlotId, 'weight item slot id should exist');
     await waitForCondition(async () => {
-      const payload = await apiJson(baseUrl, 'GET', `/review/${CATEGORY}/candidates/${PRODUCT_A}/weight`);
-      return payload?.keyReview?.userAcceptPrimary === 'accepted' && payload?.keyReview?.primaryStatus === 'pending';
+      const state = getStrictKeyReviewState(db, CATEGORY, {
+        category: CATEGORY,
+        targetKind: 'grid_key',
+        itemIdentifier: PRODUCT_A,
+        fieldKey: 'weight',
+        itemFieldStateId: weightSlotId,
+      });
+      return state?.user_accept_primary_status === 'accepted';
     }, 15_000, 120, 'grid_item_accept_primary');
     const gridCandidatesSectionAfterAccept = page.locator('section').filter({ hasText: /Candidates \(/ }).first();
     const gridAcceptedValueCard = gridCandidatesSectionAfterAccept.locator('span[title="49"]').first();
@@ -754,7 +887,7 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
       .first();
     await componentAcceptButton.click();
     await waitForCondition(async () => {
-      const state = db.getKeyReviewState({
+      const state = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'component_key',
         fieldKey: 'dpi_max',
@@ -778,7 +911,7 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
       .first();
     await componentConfirmButton.click();
     await waitForCondition(async () => {
-      const state = db.getKeyReviewState({
+      const state = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'component_key',
         fieldKey: 'ips',
@@ -801,7 +934,7 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
       .first();
     await enumAcceptButton.click();
     await waitForCondition(async () => {
-      const state = db.getKeyReviewState({
+      const state = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'enum_key',
         fieldKey: 'connection',
@@ -828,13 +961,13 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
       await enumConfirmAfterAccept.click();
     }
     await waitForCondition(async () => {
-      const valueState = db.getKeyReviewState({
+      const valueState = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'enum_key',
         fieldKey: 'connection',
         enumValueNorm: '2.4ghz',
       });
-      const wirelessState = db.getKeyReviewState({
+      const wirelessState = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'enum_key',
         fieldKey: 'connection',
@@ -879,7 +1012,7 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
       overridden: false,
       constraints: [],
     });
-    db.upsertKeyReviewState({
+    upsertStrictKeyReviewState(db, CATEGORY, {
       category: CATEGORY,
       targetKind: 'component_key',
       fieldKey: 'custom_prop',
@@ -903,7 +1036,7 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
       overridden: false,
       sourceTimestamp: new Date().toISOString(),
     });
-    db.upsertKeyReviewState({
+    upsertStrictKeyReviewState(db, CATEGORY, {
       category: CATEGORY,
       targetKind: 'enum_key',
       fieldKey: 'connection',
@@ -933,7 +1066,7 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
     await page.getByRole('button', { name: /^Sensor/ }).first().click();
     await clickAndWaitForDrawer(page, 'alpha');
     assert.equal(await page.getByRole('button', { name: 'Confirm Shared' }).count(), 0);
-    const componentLaneState = db.getKeyReviewState({
+    const componentLaneState = getStrictKeyReviewState(db, CATEGORY, {
       category: CATEGORY,
       targetKind: 'component_key',
       fieldKey: 'custom_prop',
@@ -965,3 +1098,4 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
+

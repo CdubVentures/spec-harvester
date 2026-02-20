@@ -237,7 +237,17 @@ export class DeterministicParser {
   }
 
   parseJsonLd(field, template, snippet) {
-    if (normalizeToken(snippet?.type) !== 'json_ld_product') {
+    const snippetType = normalizeToken(snippet?.type);
+    const methodByType = {
+      json_ld_product: 'json_ld',
+      microdata_product: 'microdata',
+      opengraph_product: 'opengraph',
+      microformat_product: 'microformat',
+      rdfa_product: 'rdfa',
+      twitter_card_product: 'twitter_card'
+    };
+    const method = methodByType[snippetType];
+    if (!method) {
       return [];
     }
     const text = normalizeText(snippet?.text || snippet?.normalized_text || '');
@@ -272,9 +282,9 @@ export class DeterministicParser {
       const row = buildCandidate({
         field,
         value: normalized,
-        method: 'json_ld',
+        method,
         snippet,
-        keyPath: `json_ld.${pathToken}`,
+        keyPath: `${method}.${pathToken}`,
         quote: normalizeText(typeof value === 'string' ? value : JSON.stringify(value)),
         confidence: 0.9
       });
@@ -323,4 +333,3 @@ export class DeterministicParser {
     return rows;
   }
 }
-

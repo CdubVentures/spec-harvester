@@ -677,6 +677,11 @@ export function EnumSubTab({ data, category, queryClient }: EnumSubTabProps) {
                 return [...new Set(matches)];
               })()
               : [];
+            const fallbackSharedConfirmCandidateId = String(
+              vi.accepted_candidate_id
+              || pendingSharedCandidateIds[0]
+              || '',
+            ).trim() || undefined;
 
             return (
               <CellDrawer
@@ -755,6 +760,7 @@ export function EnumSubTab({ data, category, queryClient }: EnumSubTabProps) {
                     field: fd.field,
                     action: 'confirm',
                     value: confirmValue,
+                    candidateId: fallbackSharedConfirmCandidateId,
                     listValueId: listValueId ?? undefined,
                     enumListId: enumListId ?? undefined,
                   });

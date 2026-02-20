@@ -131,11 +131,13 @@ function buildFieldMeta(fieldRules) {
     const componentType = extractComponentTypeFromRule(rule);
     const shape = String(rule.output_shape || rule.contract?.shape || 'scalar').trim().toLowerCase() || 'scalar';
     const isList = shape === 'list';
+    const isEnum = isObject(rule.enum);
     const isComponentField = Boolean(componentType);
     meta[fieldKey] = {
       is_component_field: isComponentField,
       component_type: isComponentField ? componentType : null,
       is_list_field: isList,
+      is_enum_field: isEnum,
       shape,
       enum_policy: rule.enum?.policy ?? null
     };
@@ -440,8 +442,15 @@ async function seedProducts(db, config, category, fieldRules, fieldMeta) {
 
       if (!normalized) continue;
 
-      // Collect per-source candidates from the latest run when latest/candidates.json is empty
-      const perSourceCandidates = await collectPerSourceCandidates(outputRoot, productId, normalized.runId);
+      // Per-source fallback is only needed when merged latest/candidates.json is absent/empty.
+      // Inserting both merged + per-source rows inflates candidate counts for review slots.
+      const hasMergedCandidates = isObject(candidates)
+        && Object.values(candidates).some((fieldCandidates) => (
+          Array.isArray(fieldCandidates) && fieldCandidates.length > 0
+        ));
+      const perSourceCandidates = hasMergedCandidates
+        ? []
+        : await collectPerSourceCandidates(outputRoot, productId, normalized.runId);
       const usedCandidateIds = new Set();
       const bestCandidateByField = new Map();
       const bestCandidateByFieldValue = new Map();
@@ -702,15 +711,16 @@ async function seedProducts(db, config, category, fieldRules, fieldMeta) {
           }
         }
 
-        // Step 6: Insert item_list_links for list-type fields
+        // Step 6: Insert item_list_links for list + enum fields
         for (const [fieldKey, fm] of Object.entries(fieldMeta)) {
-          if (!fm.is_list_field) continue;
+          if (!fm.is_list_field && !fm.is_enum_field) continue;
           const rawValue = fields[fieldKey];
           db.removeItemListLinksForField(productId, fieldKey);
-          const normalizedListValue = normalizeSlotValueForShape(rawValue, 'list').value;
-          if (!isKnownSlotValue(normalizedListValue, 'list')) continue;
+          const linkShape = fm.is_list_field ? 'list' : (fm.shape || 'scalar');
+          const normalizedListValue = normalizeSlotValueForShape(rawValue, linkShape).value;
+          if (!isKnownSlotValue(normalizedListValue, linkShape)) continue;
 
-          const valueTokens = expandListLinkValues(slotValueToText(normalizedListValue, 'list'));
+          const valueTokens = expandListLinkValues(slotValueToText(normalizedListValue, linkShape));
           const linkedIds = new Set();
           for (const token of valueTokens) {
             const listRow = db.getListValueByFieldAndValue(fieldKey, token);
@@ -1320,6 +1330,7 @@ function seedSourceAndKeyReview(db, category, fieldMeta) {
         propertyKey: cv.property_key,
         fieldKey: cv.property_key,
         componentValueId: cv.id,
+        componentIdentityId: cv.component_identity_id ?? null,
         requiredLevel: route?.required_level ?? null,
         availability: route?.availability ?? null,
         difficulty: route?.difficulty ?? null,
@@ -1413,11 +1424,6 @@ function seedSourceAndKeyReview(db, category, fieldMeta) {
             "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'grid_key' AND item_field_state_id = ?"
           ).get(db.category, ifsRow.id);
         }
-        if (!stateRow) {
-          stateRow = db.db.prepare(
-            "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'grid_key' AND item_identifier = ? AND field_key = ?"
-          ).get(db.category, cand.product_id, cand.field_key);
-        }
       } else if (rev.context_type === 'component') {
         const link = db.db.prepare(
           'SELECT * FROM item_component_links WHERE category = ? AND product_id = ? AND field_key = ?'
@@ -1444,16 +1450,6 @@ function seedSourceAndKeyReview(db, category, fieldMeta) {
               "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'component_key' AND component_value_id = ?"
             ).get(db.category, cvRow.id);
           }
-          const compId = buildComponentIdentifier(
-            link.component_type,
-            link.component_name,
-            link.component_maker || ''
-          );
-          if (!stateRow) {
-            stateRow = db.db.prepare(
-              "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'component_key' AND component_identifier = ? AND property_key = ?"
-            ).get(db.category, compId, cand.field_key);
-          }
         }
       } else if (rev.context_type === 'list') {
         const norm = String(cand.value || '').trim().toLowerCase();
@@ -1464,11 +1460,6 @@ function seedSourceAndKeyReview(db, category, fieldMeta) {
           stateRow = db.db.prepare(
             "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'enum_key' AND list_value_id = ?"
           ).get(db.category, lvRow.id);
-        }
-        if (!stateRow) {
-          stateRow = db.db.prepare(
-            "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'enum_key' AND field_key = ? AND enum_value_norm = ?"
-          ).get(db.category, cand.field_key, norm);
         }
       }
 

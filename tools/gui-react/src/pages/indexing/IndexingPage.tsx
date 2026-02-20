@@ -782,6 +782,46 @@ interface IndexLabPhase08Response {
   };
 }
 
+interface IndexLabDynamicFetchDashboardHostRow {
+  host?: string;
+  request_count?: number;
+  success_count?: number;
+  failure_count?: number;
+  status_2xx_count?: number;
+  status_4xx_count?: number;
+  status_5xx_count?: number;
+  parse_error_count?: number;
+  screenshot_count?: number;
+  network_payload_rows_total?: number;
+  graphql_replay_rows_total?: number;
+  fetcher_kind_counts?: Record<string, number>;
+  attempts_total?: number;
+  retry_count_total?: number;
+  avg_attempts_per_request?: number;
+  avg_retry_per_request?: number;
+  avg_fetch_ms?: number;
+  avg_parse_ms?: number;
+  avg_host_wait_ms?: number;
+  avg_navigation_ms?: number;
+  avg_network_idle_wait_ms?: number;
+  avg_interactive_wait_ms?: number;
+  avg_graphql_replay_ms?: number;
+  avg_content_capture_ms?: number;
+  avg_screenshot_capture_ms?: number;
+}
+
+interface IndexLabDynamicFetchDashboardResponse {
+  run_id?: string;
+  category?: string;
+  product_id?: string;
+  generated_at?: string | null;
+  host_count?: number;
+  hosts?: IndexLabDynamicFetchDashboardHostRow[];
+  summary_only?: boolean;
+  key?: string | null;
+  latest_key?: string | null;
+}
+
 type PanelKey = 'overview' | 'runtime' | 'picker' | 'searchProfile' | 'serpExplorer' | 'phase5' | 'phase6b' | 'phase6' | 'phase7' | 'phase8' | 'urlHealth' | 'llmOutput' | 'llmMetrics' | 'eventStream' | 'needset';
 type PanelStateToken = 'live' | 'ready' | 'waiting';
 
@@ -1289,6 +1329,14 @@ export function IndexingPage() {
   const [dynamicFetchRetryBudget, setDynamicFetchRetryBudget] = useState('1');
   const [dynamicFetchRetryBackoffMs, setDynamicFetchRetryBackoffMs] = useState('500');
   const [dynamicFetchPolicyMapJson, setDynamicFetchPolicyMapJson] = useState('');
+  const [scannedPdfOcrEnabled, setScannedPdfOcrEnabled] = useState(true);
+  const [scannedPdfOcrPromoteCandidates, setScannedPdfOcrPromoteCandidates] = useState(true);
+  const [scannedPdfOcrBackend, setScannedPdfOcrBackend] = useState<'auto' | 'tesseract' | 'none'>('auto');
+  const [scannedPdfOcrMaxPages, setScannedPdfOcrMaxPages] = useState('4');
+  const [scannedPdfOcrMaxPairs, setScannedPdfOcrMaxPairs] = useState('800');
+  const [scannedPdfOcrMinCharsPerPage, setScannedPdfOcrMinCharsPerPage] = useState('30');
+  const [scannedPdfOcrMinLinesPerPage, setScannedPdfOcrMinLinesPerPage] = useState('2');
+  const [scannedPdfOcrMinConfidence, setScannedPdfOcrMinConfidence] = useState('0.5');
   const [resumeMode, setResumeMode] = useState<'auto' | 'force_resume' | 'start_over'>('auto');
   const [resumeWindowHours, setResumeWindowHours] = useState('48');
   const [reextractAfterHours, setReextractAfterHours] = useState('24');
@@ -1523,6 +1571,15 @@ export function IndexingPage() {
     queryFn: () =>
       api.get<IndexLabPhase08Response>(
         `/indexlab/run/${encodeURIComponent(selectedIndexLabRunId)}/phase08-extraction`
+      ),
+    enabled: Boolean(selectedIndexLabRunId) && !runViewCleared,
+    refetchInterval: 2000
+  });
+  const { data: indexlabDynamicFetchDashboardResp } = useQuery({
+    queryKey: ['indexlab', 'run', selectedIndexLabRunId, 'dynamic-fetch-dashboard'],
+    queryFn: () =>
+      api.get<IndexLabDynamicFetchDashboardResponse>(
+        `/indexlab/run/${encodeURIComponent(selectedIndexLabRunId)}/dynamic-fetch-dashboard`
       ),
     enabled: Boolean(selectedIndexLabRunId) && !runViewCleared,
     refetchInterval: 2000
@@ -2335,14 +2392,35 @@ export function IndexingPage() {
       fetched_error: 0,
       parse_completed: 0,
       indexed_docs: 0,
-      fields_filled: 0
+      fields_filled: 0,
+      structured_json_ld: 0,
+      structured_microdata: 0,
+      structured_opengraph: 0,
+      structured_candidates: 0,
+      pdf_docs_parsed: 0,
+      pdf_pairs_total: 0,
+      scanned_pdf_docs_detected: 0,
+      scanned_pdf_ocr_docs_succeeded: 0,
+      scanned_pdf_ocr_pairs: 0
     };
     const urlJobs = new Map<string, {
       url: string;
       status: string;
       status_code: number;
+      fetcher_kind: string;
+      fetch_attempts: number;
+      fetch_retry_count: number;
+      fetch_policy_host: string;
+      fetch_policy_override: boolean;
       ms: number;
       parse_ms: number;
+      screenshot_uri: string;
+      dom_snippet_uri: string;
+      static_dom_mode: string;
+      static_dom_accepted: number;
+      static_dom_rejected: number;
+      static_dom_parse_error: number;
+      static_dom_rejected_audit_count: number;
       article_title: string;
       article_excerpt: string;
       article_preview: string;
@@ -2351,10 +2429,90 @@ export function IndexingPage() {
       article_char_count: number;
       article_low_quality: boolean;
       article_fallback_reason: string;
+      article_policy_mode: string;
+      article_policy_host: string;
+      article_policy_override: boolean;
+      structured_json_ld_count: number;
+      structured_microdata_count: number;
+      structured_opengraph_count: number;
+      structured_candidates: number;
+      structured_rejected_candidates: number;
+      structured_error_count: number;
+      pdf_docs_parsed: number;
+      pdf_pairs_total: number;
+      pdf_kv_pairs: number;
+      pdf_table_pairs: number;
+      pdf_backend_selected: string;
+      pdf_error_count: number;
+      scanned_pdf_docs_detected: number;
+      scanned_pdf_ocr_docs_attempted: number;
+      scanned_pdf_ocr_docs_succeeded: number;
+      scanned_pdf_ocr_pairs: number;
+      scanned_pdf_ocr_kv_pairs: number;
+      scanned_pdf_ocr_table_pairs: number;
+      scanned_pdf_ocr_low_conf_pairs: number;
+      scanned_pdf_ocr_error_count: number;
+      scanned_pdf_ocr_backend_selected: string;
+      scanned_pdf_ocr_confidence_avg: number;
       started_at: string;
       finished_at: string;
       last_ts: string;
     }>();
+    const buildEmptyUrlJob = (url: string, ts = '') => ({
+      url,
+      status: 'unknown',
+      status_code: 0,
+      fetcher_kind: '',
+      fetch_attempts: 0,
+      fetch_retry_count: 0,
+      fetch_policy_host: '',
+      fetch_policy_override: false,
+      ms: 0,
+      parse_ms: 0,
+      screenshot_uri: '',
+      dom_snippet_uri: '',
+      static_dom_mode: '',
+      static_dom_accepted: 0,
+      static_dom_rejected: 0,
+      static_dom_parse_error: 0,
+      static_dom_rejected_audit_count: 0,
+      article_title: '',
+      article_excerpt: '',
+      article_preview: '',
+      article_method: '',
+      article_quality_score: 0,
+      article_char_count: 0,
+      article_low_quality: false,
+      article_fallback_reason: '',
+      article_policy_mode: '',
+      article_policy_host: '',
+      article_policy_override: false,
+      structured_json_ld_count: 0,
+      structured_microdata_count: 0,
+      structured_opengraph_count: 0,
+      structured_candidates: 0,
+      structured_rejected_candidates: 0,
+      structured_error_count: 0,
+      pdf_docs_parsed: 0,
+      pdf_pairs_total: 0,
+      pdf_kv_pairs: 0,
+      pdf_table_pairs: 0,
+      pdf_backend_selected: '',
+      pdf_error_count: 0,
+      scanned_pdf_docs_detected: 0,
+      scanned_pdf_ocr_docs_attempted: 0,
+      scanned_pdf_ocr_docs_succeeded: 0,
+      scanned_pdf_ocr_pairs: 0,
+      scanned_pdf_ocr_kv_pairs: 0,
+      scanned_pdf_ocr_table_pairs: 0,
+      scanned_pdf_ocr_low_conf_pairs: 0,
+      scanned_pdf_ocr_error_count: 0,
+      scanned_pdf_ocr_backend_selected: '',
+      scanned_pdf_ocr_confidence_avg: 0,
+      started_at: ts,
+      finished_at: '',
+      last_ts: ts
+    });
 
     for (const evt of indexlabEvents) {
       const payload = evt?.payload && typeof evt.payload === 'object'
@@ -2377,23 +2535,12 @@ export function IndexingPage() {
         const url = String(payload.url || '').trim();
         if (url) {
           counters.pages_checked += 1;
+          const current = urlJobs.get(url) || buildEmptyUrlJob(url, ts);
           urlJobs.set(url, {
-            url,
+            ...current,
             status: 'in_flight',
-            status_code: 0,
-            ms: 0,
-            parse_ms: 0,
-            article_title: '',
-            article_excerpt: '',
-            article_preview: '',
-            article_method: '',
-            article_quality_score: 0,
-            article_char_count: 0,
-            article_low_quality: false,
-            article_fallback_reason: '',
-            started_at: ts,
-            finished_at: '',
-            last_ts: ts
+            started_at: current.started_at || ts,
+            last_ts: ts || current.last_ts
           });
         }
       }
@@ -2403,33 +2550,18 @@ export function IndexingPage() {
         const statusClass = String(payload.status_class || 'error').trim();
         const statusCode = Number.parseInt(String(payload.status || 0), 10) || 0;
         const ms = Number.parseInt(String(payload.ms || 0), 10) || 0;
+        const fetcherKind = String(payload.fetcher_kind || payload.fetcher_mode || payload.fetcher || '').trim();
         if (statusClass === 'ok') counters.fetched_ok += 1;
         else if (statusClass === '404') counters.fetched_404 += 1;
         else if (statusClass === 'blocked') counters.fetched_blocked += 1;
         else counters.fetched_error += 1;
         if (url) {
-          const current = urlJobs.get(url) || {
-            url,
-            status: 'unknown',
-            status_code: 0,
-            ms: 0,
-            parse_ms: 0,
-            article_title: '',
-            article_excerpt: '',
-            article_preview: '',
-            article_method: '',
-            article_quality_score: 0,
-            article_char_count: 0,
-            article_low_quality: false,
-            article_fallback_reason: '',
-            started_at: '',
-            finished_at: '',
-            last_ts: ''
-          };
+          const current = urlJobs.get(url) || buildEmptyUrlJob(url);
           urlJobs.set(url, {
             ...current,
             status: statusClass || 'error',
             status_code: statusCode,
+            fetcher_kind: fetcherKind || current.fetcher_kind,
             ms,
             finished_at: ts,
             last_ts: ts
@@ -2439,8 +2571,42 @@ export function IndexingPage() {
 
       if (stage === 'parse' && eventName === 'parse_finished' && scope === 'url') {
         counters.parse_completed += 1;
-        const url = String(payload.url || '').trim();
+        const url = String(payload.final_url || payload.url || '').trim();
         const parseMs = Number.parseInt(String(payload.parse_ms || payload.ms || 0), 10) || 0;
+        const fetcherKind = String(payload.fetcher_kind || payload.fetcher_mode || payload.fetcher || '').trim();
+        const fetchAttempts = Number.parseInt(String(payload.fetch_attempts || 0), 10) || 0;
+        const fetchRetryCount = Number.parseInt(String(payload.fetch_retry_count || 0), 10) || 0;
+        const fetchPolicyHost = String(payload.fetch_policy_matched_host || '').trim();
+        const fetchPolicyOverride = truthyFlag(payload.fetch_policy_override_applied);
+        const screenshotUri = String(payload.screenshot_uri || '').trim();
+        const domSnippetUri = String(payload.dom_snippet_uri || '').trim();
+        const staticDomMode = String(payload.static_dom_mode || '').trim();
+        const staticDomAccepted = Number.parseInt(String(payload.static_dom_accepted_field_candidates || 0), 10) || 0;
+        const staticDomRejected = Number.parseInt(String(payload.static_dom_rejected_field_candidates || 0), 10) || 0;
+        const staticDomParseError = Number.parseInt(String(payload.static_dom_parse_error_count || 0), 10) || 0;
+        const staticDomRejectedAudit = Number.parseInt(String(payload.static_dom_rejected_field_candidates_audit_count || 0), 10) || 0;
+        const structuredJsonLdCount = Number.parseInt(String(payload.structured_json_ld_count || 0), 10) || 0;
+        const structuredMicrodataCount = Number.parseInt(String(payload.structured_microdata_count || 0), 10) || 0;
+        const structuredOpengraphCount = Number.parseInt(String(payload.structured_opengraph_count || 0), 10) || 0;
+        const structuredCandidates = Number.parseInt(String(payload.structured_candidates || 0), 10) || 0;
+        const structuredRejectedCandidates = Number.parseInt(String(payload.structured_rejected_candidates || 0), 10) || 0;
+        const structuredErrorCount = Number.parseInt(String(payload.structured_error_count || 0), 10) || 0;
+        const pdfDocsParsed = Number.parseInt(String(payload.pdf_docs_parsed || 0), 10) || 0;
+        const pdfPairsTotal = Number.parseInt(String(payload.pdf_pairs_total || 0), 10) || 0;
+        const pdfKvPairs = Number.parseInt(String(payload.pdf_kv_pairs || 0), 10) || 0;
+        const pdfTablePairs = Number.parseInt(String(payload.pdf_table_pairs || 0), 10) || 0;
+        const pdfErrorCount = Number.parseInt(String(payload.pdf_error_count || 0), 10) || 0;
+        const pdfBackendSelected = String(payload.pdf_backend_selected || '').trim();
+        const scannedDocsDetected = Number.parseInt(String(payload.scanned_pdf_docs_detected || 0), 10) || 0;
+        const scannedOcrDocsAttempted = Number.parseInt(String(payload.scanned_pdf_ocr_docs_attempted || 0), 10) || 0;
+        const scannedOcrDocsSucceeded = Number.parseInt(String(payload.scanned_pdf_ocr_docs_succeeded || 0), 10) || 0;
+        const scannedOcrPairs = Number.parseInt(String(payload.scanned_pdf_ocr_pairs || 0), 10) || 0;
+        const scannedOcrKvPairs = Number.parseInt(String(payload.scanned_pdf_ocr_kv_pairs || 0), 10) || 0;
+        const scannedOcrTablePairs = Number.parseInt(String(payload.scanned_pdf_ocr_table_pairs || 0), 10) || 0;
+        const scannedOcrLowConfPairs = Number.parseInt(String(payload.scanned_pdf_ocr_low_conf_pairs || 0), 10) || 0;
+        const scannedOcrErrorCount = Number.parseInt(String(payload.scanned_pdf_ocr_error_count || 0), 10) || 0;
+        const scannedOcrBackendSelected = String(payload.scanned_pdf_ocr_backend_selected || '').trim();
+        const scannedOcrConfidenceAvg = Number.parseFloat(String(payload.scanned_pdf_ocr_confidence_avg || 0)) || 0;
         const articleTitle = String(payload.article_title || '').trim();
         const articleExcerpt = String(payload.article_excerpt || '').trim();
         const articlePreview = String(payload.article_preview || '').trim();
@@ -2449,28 +2615,64 @@ export function IndexingPage() {
         const articleCharCount = Number.parseInt(String(payload.article_char_count ?? 0), 10) || 0;
         const articleLowQuality = truthyFlag(payload.article_low_quality);
         const articleFallbackReason = String(payload.article_fallback_reason || '').trim();
+        const articlePolicyMode = String(payload.article_policy_mode || '').trim();
+        const articlePolicyHost = String(payload.article_policy_matched_host || '').trim();
+        const articlePolicyOverride = truthyFlag(payload.article_policy_override_applied);
+        counters.structured_json_ld += Math.max(0, structuredJsonLdCount);
+        counters.structured_microdata += Math.max(0, structuredMicrodataCount);
+        counters.structured_opengraph += Math.max(0, structuredOpengraphCount);
+        counters.structured_candidates += Math.max(0, structuredCandidates);
+        counters.pdf_docs_parsed += Math.max(0, pdfDocsParsed);
+        counters.pdf_pairs_total += Math.max(0, pdfPairsTotal);
+        counters.scanned_pdf_docs_detected += Math.max(0, scannedDocsDetected);
+        counters.scanned_pdf_ocr_docs_succeeded += Math.max(0, scannedOcrDocsSucceeded);
+        counters.scanned_pdf_ocr_pairs += Math.max(0, scannedOcrPairs);
         if (url) {
-          const current = urlJobs.get(url) || {
-            url,
-            status: 'unknown',
-            status_code: 0,
-            ms: 0,
-            parse_ms: 0,
-            article_title: '',
-            article_excerpt: '',
-            article_preview: '',
-            article_method: '',
-            article_quality_score: 0,
-            article_char_count: 0,
-            article_low_quality: false,
-            article_fallback_reason: '',
-            started_at: '',
-            finished_at: '',
-            last_ts: ''
-          };
+          const current = urlJobs.get(url) || buildEmptyUrlJob(url);
           urlJobs.set(url, {
             ...current,
+            status_code: Number.parseInt(String(payload.status || 0), 10) || current.status_code,
+            fetcher_kind: fetcherKind || current.fetcher_kind,
+            fetch_attempts: fetchAttempts > 0 ? fetchAttempts : current.fetch_attempts,
+            fetch_retry_count: fetchRetryCount > 0 ? fetchRetryCount : current.fetch_retry_count,
+            fetch_policy_host: fetchPolicyHost || current.fetch_policy_host,
+            fetch_policy_override: fetchPolicyOverride || current.fetch_policy_override,
             parse_ms: parseMs > 0 ? parseMs : current.parse_ms,
+            screenshot_uri: screenshotUri || current.screenshot_uri,
+            dom_snippet_uri: domSnippetUri || current.dom_snippet_uri,
+            static_dom_mode: staticDomMode || current.static_dom_mode,
+            static_dom_accepted: staticDomAccepted > 0 ? staticDomAccepted : current.static_dom_accepted,
+            static_dom_rejected: staticDomRejected > 0 ? staticDomRejected : current.static_dom_rejected,
+            static_dom_parse_error: staticDomParseError > 0 ? staticDomParseError : current.static_dom_parse_error,
+            static_dom_rejected_audit_count: staticDomRejectedAudit > 0
+              ? staticDomRejectedAudit
+              : current.static_dom_rejected_audit_count,
+            structured_json_ld_count: structuredJsonLdCount > 0 ? structuredJsonLdCount : current.structured_json_ld_count,
+            structured_microdata_count: structuredMicrodataCount > 0 ? structuredMicrodataCount : current.structured_microdata_count,
+            structured_opengraph_count: structuredOpengraphCount > 0 ? structuredOpengraphCount : current.structured_opengraph_count,
+            structured_candidates: structuredCandidates > 0 ? structuredCandidates : current.structured_candidates,
+            structured_rejected_candidates: structuredRejectedCandidates > 0
+              ? structuredRejectedCandidates
+              : current.structured_rejected_candidates,
+            structured_error_count: structuredErrorCount > 0 ? structuredErrorCount : current.structured_error_count,
+            pdf_docs_parsed: pdfDocsParsed > 0 ? pdfDocsParsed : current.pdf_docs_parsed,
+            pdf_pairs_total: pdfPairsTotal > 0 ? pdfPairsTotal : current.pdf_pairs_total,
+            pdf_kv_pairs: pdfKvPairs > 0 ? pdfKvPairs : current.pdf_kv_pairs,
+            pdf_table_pairs: pdfTablePairs > 0 ? pdfTablePairs : current.pdf_table_pairs,
+            pdf_backend_selected: pdfBackendSelected || current.pdf_backend_selected,
+            pdf_error_count: pdfErrorCount > 0 ? pdfErrorCount : current.pdf_error_count,
+            scanned_pdf_docs_detected: scannedDocsDetected > 0 ? scannedDocsDetected : current.scanned_pdf_docs_detected,
+            scanned_pdf_ocr_docs_attempted: scannedOcrDocsAttempted > 0 ? scannedOcrDocsAttempted : current.scanned_pdf_ocr_docs_attempted,
+            scanned_pdf_ocr_docs_succeeded: scannedOcrDocsSucceeded > 0 ? scannedOcrDocsSucceeded : current.scanned_pdf_ocr_docs_succeeded,
+            scanned_pdf_ocr_pairs: scannedOcrPairs > 0 ? scannedOcrPairs : current.scanned_pdf_ocr_pairs,
+            scanned_pdf_ocr_kv_pairs: scannedOcrKvPairs > 0 ? scannedOcrKvPairs : current.scanned_pdf_ocr_kv_pairs,
+            scanned_pdf_ocr_table_pairs: scannedOcrTablePairs > 0 ? scannedOcrTablePairs : current.scanned_pdf_ocr_table_pairs,
+            scanned_pdf_ocr_low_conf_pairs: scannedOcrLowConfPairs > 0 ? scannedOcrLowConfPairs : current.scanned_pdf_ocr_low_conf_pairs,
+            scanned_pdf_ocr_error_count: scannedOcrErrorCount > 0 ? scannedOcrErrorCount : current.scanned_pdf_ocr_error_count,
+            scanned_pdf_ocr_backend_selected: scannedOcrBackendSelected || current.scanned_pdf_ocr_backend_selected,
+            scanned_pdf_ocr_confidence_avg: scannedOcrConfidenceAvg > 0
+              ? scannedOcrConfidenceAvg
+              : current.scanned_pdf_ocr_confidence_avg,
             article_title: articleTitle || current.article_title,
             article_excerpt: articleExcerpt || current.article_excerpt,
             article_preview: articlePreview || current.article_preview,
@@ -2481,8 +2683,161 @@ export function IndexingPage() {
             article_char_count: articleCharCount > 0 ? articleCharCount : current.article_char_count,
             article_low_quality: articleLowQuality,
             article_fallback_reason: articleFallbackReason || current.article_fallback_reason,
+            article_policy_mode: articlePolicyMode || current.article_policy_mode,
+            article_policy_host: articlePolicyHost || current.article_policy_host,
+            article_policy_override: articlePolicyOverride || current.article_policy_override,
             last_ts: ts || current.last_ts
           });
+        }
+      }
+      const sourceEventName = normalizeToken(payload.event);
+      const isSourceProcessed = eventName === 'source_processed';
+      const isSourceFetchFailed = eventName === 'source_fetch_failed'
+        || (eventName === 'error' && sourceEventName === 'source_fetch_failed');
+      if (isSourceProcessed || isSourceFetchFailed) {
+        const sourceUrl = String(payload.url || payload.source_url || '').trim();
+        const finalUrl = String(payload.final_url || '').trim();
+        const preferredUrl = finalUrl || sourceUrl;
+        if (preferredUrl) {
+          const existingKey =
+            (finalUrl && urlJobs.has(finalUrl) ? finalUrl : '')
+            || (sourceUrl && urlJobs.has(sourceUrl) ? sourceUrl : '')
+            || '';
+          const current = existingKey
+            ? (urlJobs.get(existingKey) || buildEmptyUrlJob(preferredUrl))
+            : buildEmptyUrlJob(preferredUrl);
+          const fetcherKind = String(payload.fetcher_kind || payload.fetcher_mode || payload.fetcher || '').trim();
+          const outcome = normalizeToken(payload.outcome || payload.status_class || '');
+          const statusFromOutcome = outcome === 'ok'
+            ? 'ok'
+            : (outcome === 'not_found' || outcome === '404' ? '404' : 'error');
+          const parsedStatusCode = Number.parseInt(String(payload.status || payload.status_code || 0), 10) || 0;
+          const fetchMs = Number.parseInt(String(payload.fetch_ms || payload.ms || 0), 10) || 0;
+          const parseMs = Number.parseInt(String(payload.parse_ms || 0), 10) || 0;
+          const articleTitle = String(payload.article_title || '').trim();
+          const articleExcerpt = String(payload.article_excerpt || '').trim();
+          const articlePreview = String(payload.article_preview || '').trim();
+          const articleMethod = String(payload.article_extraction_method || payload.article_method || '').trim();
+          const articleScore = Number.parseFloat(String(payload.article_quality_score ?? payload.article_score ?? ''));
+          const articleCharCount = Number.parseInt(String(payload.article_char_count ?? payload.article_chars ?? 0), 10) || 0;
+          const articleLowQuality = truthyFlag(payload.article_low_quality);
+          const articleFallbackReason = String(payload.article_fallback_reason || '').trim();
+          const articlePolicyMode = String(payload.article_policy_mode || '').trim();
+          const articlePolicyHost = String(payload.article_policy_matched_host || '').trim();
+          const articlePolicyOverride = truthyFlag(payload.article_policy_override_applied);
+          const fetchAttempts = Number.parseInt(String(payload.fetch_attempts || 0), 10) || 0;
+          const fetchRetryCount = Number.parseInt(String(payload.fetch_retry_count || 0), 10) || 0;
+          const fetchPolicyHost = String(payload.fetch_policy_matched_host || '').trim();
+          const fetchPolicyOverride = truthyFlag(payload.fetch_policy_override_applied);
+          const screenshotUri = String(payload.screenshot_uri || '').trim();
+          const domSnippetUri = String(payload.dom_snippet_uri || '').trim();
+          const staticDomMode = String(payload.static_dom_mode || '').trim();
+          const staticDomAccepted = Number.parseInt(String(payload.static_dom_accepted_field_candidates || 0), 10) || 0;
+          const staticDomRejected = Number.parseInt(String(payload.static_dom_rejected_field_candidates || 0), 10) || 0;
+          const staticDomParseError = Number.parseInt(String(payload.static_dom_parse_error_count || 0), 10) || 0;
+          const staticDomRejectedAudit = Number.parseInt(String(payload.static_dom_rejected_field_candidates_audit_count || 0), 10) || 0;
+          const structuredJsonLdCount = Number.parseInt(String(payload.structured_json_ld_count || 0), 10) || 0;
+          const structuredMicrodataCount = Number.parseInt(String(payload.structured_microdata_count || 0), 10) || 0;
+          const structuredOpengraphCount = Number.parseInt(String(payload.structured_opengraph_count || 0), 10) || 0;
+          const structuredCandidates = Number.parseInt(String(payload.structured_candidates || 0), 10) || 0;
+          const structuredRejectedCandidates = Number.parseInt(String(payload.structured_rejected_candidates || 0), 10) || 0;
+          const structuredErrorCount = Number.parseInt(String(payload.structured_error_count || 0), 10) || 0;
+          const pdfDocsParsed = Number.parseInt(String(payload.pdf_docs_parsed || 0), 10) || 0;
+          const pdfPairsTotal = Number.parseInt(String(payload.pdf_pairs_total || 0), 10) || 0;
+          const pdfKvPairs = Number.parseInt(String(payload.pdf_kv_pairs || 0), 10) || 0;
+          const pdfTablePairs = Number.parseInt(String(payload.pdf_table_pairs || 0), 10) || 0;
+          const pdfErrorCount = Number.parseInt(String(payload.pdf_error_count || 0), 10) || 0;
+          const pdfBackendSelected = String(payload.pdf_backend_selected || '').trim();
+          const scannedDocsDetected = Number.parseInt(String(payload.scanned_pdf_docs_detected || 0), 10) || 0;
+          const scannedOcrDocsAttempted = Number.parseInt(String(payload.scanned_pdf_ocr_docs_attempted || 0), 10) || 0;
+          const scannedOcrDocsSucceeded = Number.parseInt(String(payload.scanned_pdf_ocr_docs_succeeded || 0), 10) || 0;
+          const scannedOcrPairs = Number.parseInt(String(payload.scanned_pdf_ocr_pairs || 0), 10) || 0;
+          const scannedOcrKvPairs = Number.parseInt(String(payload.scanned_pdf_ocr_kv_pairs || 0), 10) || 0;
+          const scannedOcrTablePairs = Number.parseInt(String(payload.scanned_pdf_ocr_table_pairs || 0), 10) || 0;
+          const scannedOcrLowConfPairs = Number.parseInt(String(payload.scanned_pdf_ocr_low_conf_pairs || 0), 10) || 0;
+          const scannedOcrErrorCount = Number.parseInt(String(payload.scanned_pdf_ocr_error_count || 0), 10) || 0;
+          const scannedOcrBackendSelected = String(payload.scanned_pdf_ocr_backend_selected || '').trim();
+          const scannedOcrConfidenceAvg = Number.parseFloat(String(payload.scanned_pdf_ocr_confidence_avg || 0)) || 0;
+          if (isSourceProcessed && stage !== 'parse') {
+            counters.structured_json_ld += Math.max(0, structuredJsonLdCount);
+            counters.structured_microdata += Math.max(0, structuredMicrodataCount);
+            counters.structured_opengraph += Math.max(0, structuredOpengraphCount);
+            counters.structured_candidates += Math.max(0, structuredCandidates);
+            counters.pdf_docs_parsed += Math.max(0, pdfDocsParsed);
+            counters.pdf_pairs_total += Math.max(0, pdfPairsTotal);
+            counters.scanned_pdf_docs_detected += Math.max(0, scannedDocsDetected);
+            counters.scanned_pdf_ocr_docs_succeeded += Math.max(0, scannedOcrDocsSucceeded);
+            counters.scanned_pdf_ocr_pairs += Math.max(0, scannedOcrPairs);
+          }
+          const nextStatus = isSourceFetchFailed
+            ? 'error'
+            : (statusFromOutcome || current.status || 'ok');
+          urlJobs.set(preferredUrl, {
+            ...current,
+            url: preferredUrl,
+            status: nextStatus,
+            status_code: parsedStatusCode || current.status_code,
+            fetcher_kind: fetcherKind || current.fetcher_kind,
+            fetch_attempts: fetchAttempts > 0 ? fetchAttempts : current.fetch_attempts,
+            fetch_retry_count: fetchRetryCount > 0 ? fetchRetryCount : current.fetch_retry_count,
+            fetch_policy_host: fetchPolicyHost || current.fetch_policy_host,
+            fetch_policy_override: fetchPolicyOverride || current.fetch_policy_override,
+            ms: fetchMs > 0 ? fetchMs : current.ms,
+            parse_ms: parseMs > 0 ? parseMs : current.parse_ms,
+            screenshot_uri: screenshotUri || current.screenshot_uri,
+            dom_snippet_uri: domSnippetUri || current.dom_snippet_uri,
+            static_dom_mode: staticDomMode || current.static_dom_mode,
+            static_dom_accepted: staticDomAccepted > 0 ? staticDomAccepted : current.static_dom_accepted,
+            static_dom_rejected: staticDomRejected > 0 ? staticDomRejected : current.static_dom_rejected,
+            static_dom_parse_error: staticDomParseError > 0 ? staticDomParseError : current.static_dom_parse_error,
+            static_dom_rejected_audit_count: staticDomRejectedAudit > 0
+              ? staticDomRejectedAudit
+              : current.static_dom_rejected_audit_count,
+            article_title: articleTitle || current.article_title,
+            article_excerpt: articleExcerpt || current.article_excerpt,
+            article_preview: articlePreview || current.article_preview,
+            article_method: articleMethod || current.article_method,
+            article_quality_score: Number.isFinite(articleScore)
+              ? articleScore
+              : current.article_quality_score,
+            article_char_count: articleCharCount > 0 ? articleCharCount : current.article_char_count,
+            article_low_quality: articleLowQuality || current.article_low_quality,
+            article_fallback_reason: articleFallbackReason || current.article_fallback_reason,
+            article_policy_mode: articlePolicyMode || current.article_policy_mode,
+            article_policy_host: articlePolicyHost || current.article_policy_host,
+            article_policy_override: articlePolicyOverride || current.article_policy_override,
+            structured_json_ld_count: structuredJsonLdCount > 0 ? structuredJsonLdCount : current.structured_json_ld_count,
+            structured_microdata_count: structuredMicrodataCount > 0 ? structuredMicrodataCount : current.structured_microdata_count,
+            structured_opengraph_count: structuredOpengraphCount > 0 ? structuredOpengraphCount : current.structured_opengraph_count,
+            structured_candidates: structuredCandidates > 0 ? structuredCandidates : current.structured_candidates,
+            structured_rejected_candidates: structuredRejectedCandidates > 0
+              ? structuredRejectedCandidates
+              : current.structured_rejected_candidates,
+            structured_error_count: structuredErrorCount > 0 ? structuredErrorCount : current.structured_error_count,
+            pdf_docs_parsed: pdfDocsParsed > 0 ? pdfDocsParsed : current.pdf_docs_parsed,
+            pdf_pairs_total: pdfPairsTotal > 0 ? pdfPairsTotal : current.pdf_pairs_total,
+            pdf_kv_pairs: pdfKvPairs > 0 ? pdfKvPairs : current.pdf_kv_pairs,
+            pdf_table_pairs: pdfTablePairs > 0 ? pdfTablePairs : current.pdf_table_pairs,
+            pdf_backend_selected: pdfBackendSelected || current.pdf_backend_selected,
+            pdf_error_count: pdfErrorCount > 0 ? pdfErrorCount : current.pdf_error_count,
+            scanned_pdf_docs_detected: scannedDocsDetected > 0 ? scannedDocsDetected : current.scanned_pdf_docs_detected,
+            scanned_pdf_ocr_docs_attempted: scannedOcrDocsAttempted > 0 ? scannedOcrDocsAttempted : current.scanned_pdf_ocr_docs_attempted,
+            scanned_pdf_ocr_docs_succeeded: scannedOcrDocsSucceeded > 0 ? scannedOcrDocsSucceeded : current.scanned_pdf_ocr_docs_succeeded,
+            scanned_pdf_ocr_pairs: scannedOcrPairs > 0 ? scannedOcrPairs : current.scanned_pdf_ocr_pairs,
+            scanned_pdf_ocr_kv_pairs: scannedOcrKvPairs > 0 ? scannedOcrKvPairs : current.scanned_pdf_ocr_kv_pairs,
+            scanned_pdf_ocr_table_pairs: scannedOcrTablePairs > 0 ? scannedOcrTablePairs : current.scanned_pdf_ocr_table_pairs,
+            scanned_pdf_ocr_low_conf_pairs: scannedOcrLowConfPairs > 0 ? scannedOcrLowConfPairs : current.scanned_pdf_ocr_low_conf_pairs,
+            scanned_pdf_ocr_error_count: scannedOcrErrorCount > 0 ? scannedOcrErrorCount : current.scanned_pdf_ocr_error_count,
+            scanned_pdf_ocr_backend_selected: scannedOcrBackendSelected || current.scanned_pdf_ocr_backend_selected,
+            scanned_pdf_ocr_confidence_avg: scannedOcrConfidenceAvg > 0
+              ? scannedOcrConfidenceAvg
+              : current.scanned_pdf_ocr_confidence_avg,
+            finished_at: ts || current.finished_at,
+            last_ts: ts || current.last_ts
+          });
+          if (existingKey && existingKey !== preferredUrl) {
+            urlJobs.delete(existingKey);
+          }
         }
       }
       if (stage === 'index' && eventName === 'index_finished' && scope === 'url') {
@@ -2519,6 +2874,89 @@ export function IndexingPage() {
       ) || phase5LatestParsedJob,
     [indexlabSummary.allJobs, phase5LatestParsedJob]
   );
+  const phase5ArticleDomainLeaderboard = useMemo(() => {
+    const byHost = new Map<string, {
+      host: string;
+      samples: number;
+      readabilityHits: number;
+      fallbackHits: number;
+      lowQualityCount: number;
+      scoreTotal: number;
+      charsTotal: number;
+      parseMs: number[];
+      policyOverrideCount: number;
+      policyModes: Record<string, number>;
+      policyHosts: Record<string, number>;
+    }>();
+
+    for (const row of indexlabSummary.allJobs) {
+      const host = hostFromUrl(String(row.url || '')) || '';
+      if (!host) continue;
+      const hasSample = Boolean(row.article_method) || Number(row.article_char_count || 0) > 0;
+      if (!hasSample) continue;
+      const state = byHost.get(host) || {
+        host,
+        samples: 0,
+        readabilityHits: 0,
+        fallbackHits: 0,
+        lowQualityCount: 0,
+        scoreTotal: 0,
+        charsTotal: 0,
+        parseMs: [],
+        policyOverrideCount: 0,
+        policyModes: {},
+        policyHosts: {}
+      };
+      state.samples += 1;
+      const method = normalizeToken(row.article_method || '');
+      if (method.includes('readability')) state.readabilityHits += 1;
+      if (method.includes('fallback') || method.includes('heuristic')) state.fallbackHits += 1;
+      if (row.article_low_quality) state.lowQualityCount += 1;
+      state.scoreTotal += Number(row.article_quality_score || 0);
+      state.charsTotal += Number(row.article_char_count || 0);
+      const parseMs = Number(row.parse_ms || 0);
+      if (Number.isFinite(parseMs) && parseMs > 0) state.parseMs.push(parseMs);
+
+      if (row.article_policy_override) {
+        state.policyOverrideCount += 1;
+      }
+      const mode = normalizeToken(row.article_policy_mode || '');
+      if (mode) {
+        state.policyModes[mode] = (state.policyModes[mode] || 0) + 1;
+      }
+      const policyHost = normalizeToken(row.article_policy_host || '');
+      if (policyHost) {
+        state.policyHosts[policyHost] = (state.policyHosts[policyHost] || 0) + 1;
+      }
+      byHost.set(host, state);
+    }
+
+    return [...byHost.values()]
+      .map((row) => {
+        const samples = Math.max(1, row.samples);
+        const topMode = Object.entries(row.policyModes).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+        const topPolicyHost = Object.entries(row.policyHosts).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+        return {
+          host: row.host,
+          samples: row.samples,
+          readabilityHits: row.readabilityHits,
+          fallbackHits: row.fallbackHits,
+          lowQualityCount: row.lowQualityCount,
+          avgScore: row.scoreTotal / samples,
+          avgChars: row.charsTotal / samples,
+          parseP95Ms: percentileMs(row.parseMs, 95),
+          policyOverrideCount: row.policyOverrideCount,
+          topMode,
+          topPolicyHost
+        };
+      })
+      .sort((a, b) => (
+        b.samples - a.samples
+        || b.readabilityHits - a.readabilityHits
+        || b.avgScore - a.avgScore
+      ))
+      .slice(0, 24);
+  }, [indexlabSummary.allJobs]);
 
   const indexlabNeedsetFromEvents = useMemo(() => {
     const snapshots: IndexLabNeedSetSnapshot[] = [];
@@ -3081,8 +3519,39 @@ export function IndexingPage() {
     let articleReadability = 0;
     let articleFallback = 0;
     let articleLowQuality = 0;
+    let structuredJsonLd = 0;
+    let structuredMicrodata = 0;
+    let structuredOpengraph = 0;
+    let structuredCandidates = 0;
+    let structuredRejected = 0;
+    let structuredErrors = 0;
+    let pdfDocsParsed = 0;
+    let pdfPairsTotal = 0;
+    let pdfKvPairs = 0;
+    let pdfTablePairs = 0;
+    let pdfPagesScanned = 0;
+    let pdfErrors = 0;
+    let scannedPdfDocsDetected = 0;
+    let scannedPdfOcrDocsAttempted = 0;
+    let scannedPdfOcrDocsSucceeded = 0;
+    let scannedPdfOcrPairs = 0;
+    let scannedPdfOcrKvPairs = 0;
+    let scannedPdfOcrTablePairs = 0;
+    let scannedPdfOcrLowConfPairs = 0;
+    let scannedPdfOcrErrors = 0;
+    let scannedPdfOcrConfidenceSum = 0;
+    let scannedPdfOcrConfidenceCount = 0;
     const articleScores: number[] = [];
     const articleChars: number[] = [];
+    const structuredSnippetRows: Array<{
+      ts: string;
+      url: string;
+      source_surface: string;
+      key_path: string;
+      value_preview: string;
+      target_match_score: number;
+      target_match_passed: boolean;
+    }> = [];
     const fetchDurationsMs: number[] = [];
     const parseDurationsMs: number[] = [];
 
@@ -3101,6 +3570,27 @@ export function IndexingPage() {
       const articleScore = Number.parseFloat(String(payload.article_quality_score ?? payload.article_score ?? ''));
       const articleCharCount = Number.parseInt(String(payload.article_char_count ?? payload.article_chars ?? 0), 10) || 0;
       const articleLow = truthyFlag(payload.article_low_quality);
+      const structuredJsonLdCount = Number.parseInt(String(payload.structured_json_ld_count || 0), 10) || 0;
+      const structuredMicrodataCount = Number.parseInt(String(payload.structured_microdata_count || 0), 10) || 0;
+      const structuredOpengraphCount = Number.parseInt(String(payload.structured_opengraph_count || 0), 10) || 0;
+      const structuredCandidateCount = Number.parseInt(String(payload.structured_candidates || 0), 10) || 0;
+      const structuredRejectedCount = Number.parseInt(String(payload.structured_rejected_candidates || 0), 10) || 0;
+      const structuredErrorCount = Number.parseInt(String(payload.structured_error_count || 0), 10) || 0;
+      const pdfDocsParsedCount = Number.parseInt(String(payload.pdf_docs_parsed || 0), 10) || 0;
+      const pdfPairsCount = Number.parseInt(String(payload.pdf_pairs_total || 0), 10) || 0;
+      const pdfKvPairsCount = Number.parseInt(String(payload.pdf_kv_pairs || 0), 10) || 0;
+      const pdfTablePairsCount = Number.parseInt(String(payload.pdf_table_pairs || 0), 10) || 0;
+      const pdfPagesScannedCount = Number.parseInt(String(payload.pdf_pages_scanned || 0), 10) || 0;
+      const pdfErrorCount = Number.parseInt(String(payload.pdf_error_count || 0), 10) || 0;
+      const scannedDocsDetectedCount = Number.parseInt(String(payload.scanned_pdf_docs_detected || 0), 10) || 0;
+      const scannedOcrDocsAttemptedCount = Number.parseInt(String(payload.scanned_pdf_ocr_docs_attempted || 0), 10) || 0;
+      const scannedOcrDocsSucceededCount = Number.parseInt(String(payload.scanned_pdf_ocr_docs_succeeded || 0), 10) || 0;
+      const scannedOcrPairsCount = Number.parseInt(String(payload.scanned_pdf_ocr_pairs || 0), 10) || 0;
+      const scannedOcrKvPairsCount = Number.parseInt(String(payload.scanned_pdf_ocr_kv_pairs || 0), 10) || 0;
+      const scannedOcrTablePairsCount = Number.parseInt(String(payload.scanned_pdf_ocr_table_pairs || 0), 10) || 0;
+      const scannedOcrLowConfPairsCount = Number.parseInt(String(payload.scanned_pdf_ocr_low_conf_pairs || 0), 10) || 0;
+      const scannedOcrErrorCount = Number.parseInt(String(payload.scanned_pdf_ocr_error_count || 0), 10) || 0;
+      const scannedOcrConfidenceAvg = Number.parseFloat(String(payload.scanned_pdf_ocr_confidence_avg || 0)) || 0;
       const skipReason = normalizeToken(String(payload.skip_reason || payload.reason || ''));
       const statusClass = normalizeToken(String(payload.status_class || ''));
       const isFetchStarted = (
@@ -3166,7 +3656,51 @@ export function IndexingPage() {
       if (isParseFinished && Number.isFinite(parseMs) && parseMs > 0) {
         parseDurationsMs.push(parseMs);
       }
+      const isCanonicalParseTelemetry = (
+        (stageName === 'parse' && eventName === 'parse_finished')
+        || (eventName === 'source_processed' && stageName !== 'parse')
+      );
       if (isParseFinished) {
+        if (isCanonicalParseTelemetry) {
+          structuredJsonLd += Math.max(0, structuredJsonLdCount);
+          structuredMicrodata += Math.max(0, structuredMicrodataCount);
+          structuredOpengraph += Math.max(0, structuredOpengraphCount);
+          structuredCandidates += Math.max(0, structuredCandidateCount);
+          structuredRejected += Math.max(0, structuredRejectedCount);
+          structuredErrors += Math.max(0, structuredErrorCount);
+          pdfDocsParsed += Math.max(0, pdfDocsParsedCount);
+          pdfPairsTotal += Math.max(0, pdfPairsCount);
+          pdfKvPairs += Math.max(0, pdfKvPairsCount);
+          pdfTablePairs += Math.max(0, pdfTablePairsCount);
+          pdfPagesScanned += Math.max(0, pdfPagesScannedCount);
+          pdfErrors += Math.max(0, pdfErrorCount);
+          scannedPdfDocsDetected += Math.max(0, scannedDocsDetectedCount);
+          scannedPdfOcrDocsAttempted += Math.max(0, scannedOcrDocsAttemptedCount);
+          scannedPdfOcrDocsSucceeded += Math.max(0, scannedOcrDocsSucceededCount);
+          scannedPdfOcrPairs += Math.max(0, scannedOcrPairsCount);
+          scannedPdfOcrKvPairs += Math.max(0, scannedOcrKvPairsCount);
+          scannedPdfOcrTablePairs += Math.max(0, scannedOcrTablePairsCount);
+          scannedPdfOcrLowConfPairs += Math.max(0, scannedOcrLowConfPairsCount);
+          scannedPdfOcrErrors += Math.max(0, scannedOcrErrorCount);
+          if (scannedOcrConfidenceAvg > 0) {
+            scannedPdfOcrConfidenceSum += scannedOcrConfidenceAvg;
+            scannedPdfOcrConfidenceCount += 1;
+          }
+          if (Array.isArray(payload.structured_snippet_rows)) {
+            for (const row of payload.structured_snippet_rows.slice(0, 20)) {
+              if (!row || typeof row !== 'object') continue;
+              structuredSnippetRows.push({
+                ts: String(evt.ts || '').trim(),
+                url,
+                source_surface: String((row as Record<string, unknown>).source_surface || (row as Record<string, unknown>).method || '').trim(),
+                key_path: String((row as Record<string, unknown>).key_path || '').trim(),
+                value_preview: String((row as Record<string, unknown>).value_preview || '').trim(),
+                target_match_score: Number((row as Record<string, unknown>).target_match_score || 0) || 0,
+                target_match_passed: truthyFlag((row as Record<string, unknown>).target_match_passed)
+              });
+            }
+          }
+        }
         const hasArticleSignal = (
           Boolean(articleMethod)
           || Number.isFinite(articleScore)
@@ -3205,6 +3739,33 @@ export function IndexingPage() {
       articleReadability,
       articleFallback,
       articleLowQuality,
+      structuredJsonLd,
+      structuredMicrodata,
+      structuredOpengraph,
+      structuredCandidates,
+      structuredRejected,
+      structuredErrors,
+      pdfDocsParsed,
+      pdfPairsTotal,
+      pdfKvPairs,
+      pdfTablePairs,
+      pdfPagesScanned,
+      pdfErrors,
+      scannedPdfDocsDetected,
+      scannedPdfOcrDocsAttempted,
+      scannedPdfOcrDocsSucceeded,
+      scannedPdfOcrPairs,
+      scannedPdfOcrKvPairs,
+      scannedPdfOcrTablePairs,
+      scannedPdfOcrLowConfPairs,
+      scannedPdfOcrErrors,
+      scannedPdfOcrConfidenceAvg: scannedPdfOcrConfidenceCount > 0
+        ? (scannedPdfOcrConfidenceSum / scannedPdfOcrConfidenceCount)
+        : 0,
+      structuredSnippetRows: structuredSnippetRows
+        .slice(-80)
+        .sort((a, b) => Date.parse(b.ts || '') - Date.parse(a.ts || ''))
+        .slice(0, 40),
       articleAvgScore: articleScores.length > 0
         ? (articleScores.reduce((sum, value) => sum + value, 0) / articleScores.length)
         : 0,
@@ -3265,6 +3826,37 @@ export function IndexingPage() {
       label: 'no phase 05 payload'
     };
   }, [selectedIndexLabRunId, processRunning, phase5Runtime]);
+  const dynamicFetchDashboardHosts = useMemo(() => {
+    const rows = Array.isArray(indexlabDynamicFetchDashboardResp?.hosts)
+      ? indexlabDynamicFetchDashboardResp.hosts
+      : [];
+    return [...rows]
+      .map((row) => ({
+        ...row,
+        host: String(row.host || '').trim()
+      }))
+      .filter((row) => Boolean(row.host))
+      .sort((a, b) => (
+        Number(b.request_count || 0) - Number(a.request_count || 0)
+        || Number(b.retry_count_total || 0) - Number(a.retry_count_total || 0)
+        || String(a.host || '').localeCompare(String(b.host || ''))
+      ));
+  }, [indexlabDynamicFetchDashboardResp]);
+  const dynamicFetchDashboardSummary = useMemo(() => {
+    const rows = dynamicFetchDashboardHosts;
+    const sum = (getter: (row: IndexLabDynamicFetchDashboardHostRow) => number) =>
+      rows.reduce((total, row) => total + getter(row), 0);
+    return {
+      hostCount: Number(indexlabDynamicFetchDashboardResp?.host_count || rows.length || 0),
+      requests: sum((row) => Number(row.request_count || 0)),
+      retries: sum((row) => Number(row.retry_count_total || 0)),
+      screenshots: sum((row) => Number(row.screenshot_count || 0)),
+      networkRows: sum((row) => Number(row.network_payload_rows_total || 0)),
+      graphqlRows: sum((row) => Number(row.graphql_replay_rows_total || 0)),
+      summaryOnly: Boolean(indexlabDynamicFetchDashboardResp?.summary_only),
+      generatedAt: String(indexlabDynamicFetchDashboardResp?.generated_at || '').trim() || null
+    };
+  }, [dynamicFetchDashboardHosts, indexlabDynamicFetchDashboardResp]);
   const phase6bJobs = useMemo(
     () => Array.isArray(indexlabAutomationQueueResp?.jobs) ? indexlabAutomationQueueResp.jobs : [],
     [indexlabAutomationQueueResp]
@@ -4050,18 +4642,18 @@ export function IndexingPage() {
       ? 'live'
       : (phase6bStatus.state === 'ready' ? 'ready' : 'waiting');
     return [
-      { label: 'search', state: stageToken('search') },
-      { label: 'fetch', state: stageToken('fetch') },
-      { label: 'parse', state: stageToken('parse') },
-      { label: 'index', state: stageToken('index') },
-      { label: 'phase 02', state: phase2Token },
-      { label: 'phase 03', state: phase3Token },
-      { label: 'phase 04', state: phase4Token },
-      { label: 'phase 05', state: phase5Token },
-      { label: 'phase 06a', state: phase6Token },
-      { label: 'phase 07', state: phase7Token },
-      { label: 'phase 08', state: phase8Token },
-      { label: 'phase 06b', state: phase6bToken }
+      { label: 'Search', state: stageToken('search') },
+      { label: 'Fetch', state: stageToken('fetch') },
+      { label: 'Parse', state: stageToken('parse') },
+      { label: 'Index', state: stageToken('index') },
+      { label: 'Search Planning', state: phase2Token },
+      { label: 'SERP Triage', state: phase3Token },
+      { label: 'URL Health & Repair', state: phase4Token },
+      { label: 'Parallel Fetch & Parse', state: phase5Token },
+      { label: 'Evidence Index & Dedupe', state: phase6Token },
+      { label: 'Tier Retrieval & Prime Sources', state: phase7Token },
+      { label: 'Extraction Context Matrix', state: phase8Token },
+      { label: 'Automation Queue', state: phase6bToken }
     ];
   }, [indexlabSummary, processRunning, indexlabSearchProfile, phase3Status, phase4Status, phase5Status, phase6bStatus, phase6Status, phase7Status, phase8Status]);
 
@@ -4086,6 +4678,7 @@ export function IndexingPage() {
         queryClient.invalidateQueries({ queryKey: ['indexlab', 'run', selectedIndexLabRunId, 'llm-traces'], exact: true }),
         queryClient.invalidateQueries({ queryKey: ['indexlab', 'run', selectedIndexLabRunId, 'phase07-retrieval'], exact: true }),
         queryClient.invalidateQueries({ queryKey: ['indexlab', 'run', selectedIndexLabRunId, 'phase08-extraction'], exact: true }),
+        queryClient.invalidateQueries({ queryKey: ['indexlab', 'run', selectedIndexLabRunId, 'dynamic-fetch-dashboard'], exact: true }),
         queryClient.invalidateQueries({ queryKey: ['indexlab', 'run', selectedIndexLabRunId, 'evidence-index'] })
       );
     }
@@ -4112,6 +4705,7 @@ export function IndexingPage() {
     queryClient.removeQueries({ queryKey: ['indexlab', 'run', runId, 'llm-traces'], exact: true });
     queryClient.removeQueries({ queryKey: ['indexlab', 'run', runId, 'phase07-retrieval'], exact: true });
     queryClient.removeQueries({ queryKey: ['indexlab', 'run', runId, 'phase08-extraction'], exact: true });
+    queryClient.removeQueries({ queryKey: ['indexlab', 'run', runId, 'dynamic-fetch-dashboard'], exact: true });
     queryClient.removeQueries({ queryKey: ['indexing', 'domain-checklist'] });
     setClearedRunViewId(runId);
     setSelectedLlmTraceId('');
@@ -4131,6 +4725,7 @@ export function IndexingPage() {
         queryClient.invalidateQueries({ queryKey: ['indexlab', 'run', runId, 'llm-traces'], exact: true }),
         queryClient.invalidateQueries({ queryKey: ['indexlab', 'run', runId, 'phase07-retrieval'], exact: true }),
         queryClient.invalidateQueries({ queryKey: ['indexlab', 'run', runId, 'phase08-extraction'], exact: true }),
+        queryClient.invalidateQueries({ queryKey: ['indexlab', 'run', runId, 'dynamic-fetch-dashboard'], exact: true }),
         queryClient.invalidateQueries({ queryKey: ['indexing', 'domain-checklist'] })
       ]);
       await queryClient.refetchQueries({
@@ -4162,6 +4757,11 @@ export function IndexingPage() {
       const parsedCrawleeTimeout = Number.parseInt(crawleeRequestHandlerTimeoutSecs, 10);
       const parsedRetryBudget = Number.parseInt(dynamicFetchRetryBudget, 10);
       const parsedRetryBackoff = Number.parseInt(dynamicFetchRetryBackoffMs, 10);
+      const parsedScannedPdfOcrMaxPages = Number.parseInt(scannedPdfOcrMaxPages, 10);
+      const parsedScannedPdfOcrMaxPairs = Number.parseInt(scannedPdfOcrMaxPairs, 10);
+      const parsedScannedPdfOcrMinChars = Number.parseInt(scannedPdfOcrMinCharsPerPage, 10);
+      const parsedScannedPdfOcrMinLines = Number.parseInt(scannedPdfOcrMinLinesPerPage, 10);
+      const parsedScannedPdfOcrMinConfidence = Number.parseFloat(scannedPdfOcrMinConfidence);
       return api.post<ProcessStatus>('/process/start', {
         category,
         mode: 'indexlab',
@@ -4176,6 +4776,16 @@ export function IndexingPage() {
         crawleeRequestHandlerTimeoutSecs: Number.isFinite(parsedCrawleeTimeout) ? Math.max(0, parsedCrawleeTimeout) : 45,
         dynamicFetchRetryBudget: Number.isFinite(parsedRetryBudget) ? Math.max(0, parsedRetryBudget) : 1,
         dynamicFetchRetryBackoffMs: Number.isFinite(parsedRetryBackoff) ? Math.max(0, parsedRetryBackoff) : 500,
+        scannedPdfOcrEnabled,
+        scannedPdfOcrPromoteCandidates,
+        scannedPdfOcrBackend,
+        scannedPdfOcrMaxPages: Number.isFinite(parsedScannedPdfOcrMaxPages) ? Math.max(1, parsedScannedPdfOcrMaxPages) : 4,
+        scannedPdfOcrMaxPairs: Number.isFinite(parsedScannedPdfOcrMaxPairs) ? Math.max(50, parsedScannedPdfOcrMaxPairs) : 800,
+        scannedPdfOcrMinCharsPerPage: Number.isFinite(parsedScannedPdfOcrMinChars) ? Math.max(1, parsedScannedPdfOcrMinChars) : 30,
+        scannedPdfOcrMinLinesPerPage: Number.isFinite(parsedScannedPdfOcrMinLines) ? Math.max(1, parsedScannedPdfOcrMinLines) : 2,
+        scannedPdfOcrMinConfidence: Number.isFinite(parsedScannedPdfOcrMinConfidence)
+          ? Math.max(0, Math.min(1, parsedScannedPdfOcrMinConfidence))
+          : 0.5,
         ...(String(dynamicFetchPolicyMapJson || '').trim()
           ? { dynamicFetchPolicyMapJson: String(dynamicFetchPolicyMapJson || '').trim() }
           : {}),
@@ -4439,7 +5049,7 @@ export function IndexingPage() {
             <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2 text-xs">
               {pipelineSteps.map((step) => (
                 <div key={`pipeline-step:${step.label}`} className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1 flex items-center justify-between gap-2">
-                  <span className="text-gray-600 dark:text-gray-300">{step.label}</span>
+                  <span className="text-gray-600 dark:text-gray-300 truncate" title={step.label}>{step.label}</span>
                   <span className={`px-1.5 py-0.5 rounded ${panelStateChipClasses(step.state)}`}>
                     {step.state}
                   </span>
@@ -4450,54 +5060,68 @@ export function IndexingPage() {
         ) : null}
       </div>
 
-      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-2 space-y-2" style={{ order: 15 }}>
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-          <div className="text-gray-600 dark:text-gray-300">
+      <details open className="group rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-2" style={{ order: 15 }}>
+        <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 text-xs text-gray-700 dark:text-gray-200">
+          <span className="inline-flex items-center font-semibold">
+            <span className="inline-flex h-4 w-4 items-center justify-center rounded border border-gray-300 text-[10px] leading-none text-gray-700 dark:border-gray-600 dark:text-gray-200 mr-1">
+              <span className="group-open:hidden">+</span>
+              <span className="hidden group-open:inline">-</span>
+            </span>
             Panel Controls
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setAllPanels(false)}
-              className="px-2 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
-              title="Open all containers."
-            >
-              Open all
-            </button>
-            <button
-              onClick={() => setAllPanels(true)}
-              className="px-2 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
-              title="Close all containers."
-            >
-              Close all
-            </button>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 text-xs">
-          {containerStatuses.map((row) => (
-            <div key={`container-status:${row.label}`} className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1 flex items-center justify-between gap-2">
-              <div className="text-gray-600 dark:text-gray-300">{row.label}</div>
-              <div className="flex items-center gap-2">
-                <span className={`px-1.5 py-0.5 rounded ${panelStateChipClasses(row.state)}`}>
-                  {row.state}
-                </span>
-                <span className="text-gray-500 dark:text-gray-400">{row.detail}</span>
-              </div>
+            <Tip text="Open or close major dashboard containers and inspect each panel state." />
+          </span>
+        </summary>
+        <div className="mt-2 space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="text-gray-600 dark:text-gray-300">Container visibility shortcuts</div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setAllPanels(false)}
+                className="px-2 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
+                title="Open all containers."
+              >
+                Open all
+              </button>
+              <button
+                onClick={() => setAllPanels(true)}
+                className="px-2 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
+                title="Close all containers."
+              >
+                Close all
+              </button>
             </div>
-          ))}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 text-xs">
+            {containerStatuses.map((row) => (
+              <div key={`container-status:${row.label}`} className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1 flex items-center justify-between gap-2">
+                <div className="text-gray-600 dark:text-gray-300">{row.label}</div>
+                <div className="flex items-center gap-2">
+                  <span className={`px-1.5 py-0.5 rounded ${panelStateChipClasses(row.state)}`}>
+                    {row.state}
+                  </span>
+                  <span className="text-gray-500 dark:text-gray-400">{row.detail}</span>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      </details>
 
-      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 space-y-2" style={{ order: 16 }}>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center text-sm font-semibold text-gray-900 dark:text-gray-100">
-            <span>Session Data</span>
+      <details open className="group rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3" style={{ order: 16 }}>
+        <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2">
+          <span className="inline-flex items-center text-sm font-semibold text-gray-900 dark:text-gray-100">
+            <span className="inline-flex h-4 w-4 items-center justify-center rounded border border-gray-300 text-[10px] leading-none text-gray-700 dark:border-gray-600 dark:text-gray-200 mr-1">
+              <span className="group-open:hidden">+</span>
+              <span className="hidden group-open:inline">-</span>
+            </span>
+            Session Data
             <Tip text="High-level run summary for crawl/fetch coverage and phase progression signals." />
-          </div>
-          <div className="text-xs text-gray-500 dark:text-gray-400">
+          </span>
+          <span className="text-xs text-gray-500 dark:text-gray-400">
             run {selectedIndexLabRunId || '-'}
-          </div>
-        </div>
-        <div className="grid grid-cols-1 xl:grid-cols-1 gap-2 text-xs">
+          </span>
+        </summary>
+        <div className="mt-2 grid grid-cols-1 xl:grid-cols-1 gap-2 text-xs">
           <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
             {sessionCrawledCells.slice(0, 5).map((cell) => (
               <div key={`session-craweds:top:${cell.key}`} className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
@@ -4525,7 +5149,7 @@ export function IndexingPage() {
             ))}
           </div>
         </div>
-      </div>
+      </details>
 
       <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 space-y-3" style={{ order: 80 }}>
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -5248,6 +5872,88 @@ export function IndexingPage() {
                 <div className="text-gray-500 dark:text-gray-400 flex items-center">low-quality article<Tip text="Article extraction rows flagged as low quality by score/length guard." /></div>
                 <div className="font-semibold">{formatNumber(phase5Runtime.articleLowQuality)}</div>
               </div>
+              <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                <div className="text-gray-500 dark:text-gray-400 flex items-center">json-ld rows<Tip text="Phase 05 structured metadata rows detected in JSON-LD blocks across processed URLs." /></div>
+                <div className="font-semibold">{formatNumber(phase5Runtime.structuredJsonLd)}</div>
+              </div>
+              <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                <div className="text-gray-500 dark:text-gray-400 flex items-center">microdata rows<Tip text="Phase 05 structured metadata rows detected in Microdata surfaces." /></div>
+                <div className="font-semibold">{formatNumber(phase5Runtime.structuredMicrodata)}</div>
+              </div>
+              <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                <div className="text-gray-500 dark:text-gray-400 flex items-center">opengraph keys<Tip text="Phase 05 OpenGraph key count from structured sidecar extraction." /></div>
+                <div className="font-semibold">{formatNumber(phase5Runtime.structuredOpengraph)}</div>
+              </div>
+              <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                <div className="text-gray-500 dark:text-gray-400 flex items-center">structured cands<Tip text="Structured candidates accepted by identity gate and forwarded into deterministic extraction lane." /></div>
+                <div className="font-semibold">{formatNumber(phase5Runtime.structuredCandidates)}</div>
+              </div>
+              <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                <div className="text-gray-500 dark:text-gray-400 flex items-center">structured rejected<Tip text="Structured candidates rejected by target identity gate (multi-product or mismatch)." /></div>
+                <div className="font-semibold">{formatNumber(phase5Runtime.structuredRejected)}</div>
+              </div>
+              <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                <div className="text-gray-500 dark:text-gray-400 flex items-center">structured errors<Tip text="Sidecar extraction errors captured fail-open; parsing continues without blocking run." /></div>
+                <div className="font-semibold">{formatNumber(phase5Runtime.structuredErrors)}</div>
+              </div>
+              <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                <div className="text-gray-500 dark:text-gray-400 flex items-center">pdf docs parsed<Tip text="Phase 06 text-PDF docs successfully parsed from manufacturer/manual links." /></div>
+                <div className="font-semibold">{formatNumber(phase5Runtime.pdfDocsParsed)}</div>
+              </div>
+              <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                <div className="text-gray-500 dark:text-gray-400 flex items-center">pdf pairs<Tip text="Total normalized PDF key/value assertions extracted (kv + table)." /></div>
+                <div className="font-semibold">{formatNumber(phase5Runtime.pdfPairsTotal)}</div>
+              </div>
+              <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                <div className="text-gray-500 dark:text-gray-400 flex items-center">pdf kv pairs<Tip text="Line/key-value style assertions extracted from text PDF surfaces." /></div>
+                <div className="font-semibold">{formatNumber(phase5Runtime.pdfKvPairs)}</div>
+              </div>
+              <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                <div className="text-gray-500 dark:text-gray-400 flex items-center">pdf table pairs<Tip text="Table-grid assertions extracted from structured PDF tables." /></div>
+                <div className="font-semibold">{formatNumber(phase5Runtime.pdfTablePairs)}</div>
+              </div>
+              <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                <div className="text-gray-500 dark:text-gray-400 flex items-center">pdf pages scanned<Tip text="Total PDF pages scanned by parser backends for processed docs." /></div>
+                <div className="font-semibold">{formatNumber(phase5Runtime.pdfPagesScanned)}</div>
+              </div>
+              <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                <div className="text-gray-500 dark:text-gray-400 flex items-center">pdf errors<Tip text="PDF parser/router errors emitted while keeping runtime fail-open." /></div>
+                <div className="font-semibold">{formatNumber(phase5Runtime.pdfErrors)}</div>
+              </div>
+              <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                <div className="text-gray-500 dark:text-gray-400 flex items-center">scanned docs<Tip text="Phase 07 scanned/image-only PDFs detected during parse routing." /></div>
+                <div className="font-semibold">{formatNumber(phase5Runtime.scannedPdfDocsDetected)}</div>
+              </div>
+              <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                <div className="text-gray-500 dark:text-gray-400 flex items-center">ocr attempted<Tip text="Scanned PDFs where OCR worker path was attempted." /></div>
+                <div className="font-semibold">{formatNumber(phase5Runtime.scannedPdfOcrDocsAttempted)}</div>
+              </div>
+              <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                <div className="text-gray-500 dark:text-gray-400 flex items-center">ocr succeeded<Tip text="Scanned PDFs that produced at least one OCR key/value pair." /></div>
+                <div className="font-semibold">{formatNumber(phase5Runtime.scannedPdfOcrDocsSucceeded)}</div>
+              </div>
+              <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                <div className="text-gray-500 dark:text-gray-400 flex items-center">ocr pairs<Tip text="Total OCR-derived pairs from scanned PDF surfaces (kv + table)." /></div>
+                <div className="font-semibold">{formatNumber(phase5Runtime.scannedPdfOcrPairs)}</div>
+              </div>
+              <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                <div className="text-gray-500 dark:text-gray-400 flex items-center">ocr kv/table<Tip text="OCR pair split by key-value and table-derived rows." /></div>
+                <div className="font-semibold">
+                  {formatNumber(phase5Runtime.scannedPdfOcrKvPairs)}/{formatNumber(phase5Runtime.scannedPdfOcrTablePairs)}
+                </div>
+              </div>
+              <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                <div className="text-gray-500 dark:text-gray-400 flex items-center">ocr low conf<Tip text="OCR pairs flagged below confidence threshold for caution/review." /></div>
+                <div className="font-semibold">{formatNumber(phase5Runtime.scannedPdfOcrLowConfPairs)}</div>
+              </div>
+              <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                <div className="text-gray-500 dark:text-gray-400 flex items-center">ocr conf avg<Tip text="Average OCR confidence reported across scanned PDF OCR attempts." /></div>
+                <div className="font-semibold">{formatNumber(phase5Runtime.scannedPdfOcrConfidenceAvg, 3)}</div>
+              </div>
+              <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                <div className="text-gray-500 dark:text-gray-400 flex items-center">ocr errors<Tip text="Scanned PDF OCR errors captured fail-open while extraction continues." /></div>
+                <div className="font-semibold">{formatNumber(phase5Runtime.scannedPdfOcrErrors)}</div>
+              </div>
             </div>
             <div className="rounded border border-gray-200 dark:border-gray-700 p-2 overflow-x-auto">
               <div className="text-xs font-semibold text-gray-800 dark:text-gray-200 flex items-center">
@@ -5271,6 +5977,270 @@ export function IndexingPage() {
                       <tr key={`phase5-host:${row.host}`} className="border-b border-gray-100 dark:border-gray-800">
                         <td className="py-1 pr-3 font-mono">{row.host}</td>
                         <td className="py-1 pr-3">{formatNumber(row.inflight)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="rounded border border-gray-200 dark:border-gray-700 p-2 overflow-x-auto">
+              <div className="text-xs font-semibold text-gray-800 dark:text-gray-200 flex items-center">
+                Dynamic Fetch Dashboard ({formatNumber(dynamicFetchDashboardSummary.hostCount)} hosts)
+                <Tip text="Persisted `analysis/dynamic_fetch_dashboard.json` proof with per-host attempts/retries/network/screenshot telemetry." />
+              </div>
+              <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                generated {formatDateTime(dynamicFetchDashboardSummary.generatedAt)}
+                {' '}| requests {formatNumber(dynamicFetchDashboardSummary.requests)}
+                {' '}| retries {formatNumber(dynamicFetchDashboardSummary.retries)}
+                {' '}| screenshots {formatNumber(dynamicFetchDashboardSummary.screenshots)}
+                {' '}| network rows {formatNumber(dynamicFetchDashboardSummary.networkRows)}
+                {' '}| graphql rows {formatNumber(dynamicFetchDashboardSummary.graphqlRows)}
+                {dynamicFetchDashboardSummary.summaryOnly ? ' | summary-only fallback' : ''}
+              </div>
+              {indexlabDynamicFetchDashboardResp?.key ? (
+                <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400 font-mono truncate" title={String(indexlabDynamicFetchDashboardResp.key || '')}>
+                  key {String(indexlabDynamicFetchDashboardResp.key || '')}
+                </div>
+              ) : null}
+              <table className="mt-2 min-w-full text-xs">
+                <thead>
+                  <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        host
+                        <Tip text="Hostname aggregated in dynamic_fetch_dashboard for this run." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        req
+                        <Tip text="Total fetch requests attempted for this host." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        ok
+                        <Tip text="Host requests that completed with successful outcomes." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        fail
+                        <Tip text="Host requests that ended in failed outcomes." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        retry
+                        <Tip text="Total retries consumed for this host across all requests." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        avg fetch
+                        <Tip text="Average fetch/network duration per request for this host." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        avg parse
+                        <Tip text="Average parse/extraction duration per request for this host." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        net rows
+                        <Tip text="Captured network payload rows attributed to this host." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        graphql
+                        <Tip text="Captured/replayed GraphQL payload rows for this host." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        screens
+                        <Tip text="Screenshot captures successfully recorded for this host." />
+                      </span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dynamicFetchDashboardHosts.length === 0 ? (
+                    <tr>
+                      <td className="py-2 text-gray-500 dark:text-gray-400" colSpan={10}>
+                        no dynamic dashboard rows yet
+                      </td>
+                    </tr>
+                  ) : (
+                    dynamicFetchDashboardHosts.slice(0, 24).map((row) => (
+                      <tr key={`dyn-host:${row.host || 'unknown'}`} className="border-b border-gray-100 dark:border-gray-800">
+                        <td className="py-1 pr-3 font-mono">{row.host || '-'}</td>
+                        <td className="py-1 pr-3">{formatNumber(Number(row.request_count || 0))}</td>
+                        <td className="py-1 pr-3">{formatNumber(Number(row.success_count || 0))}</td>
+                        <td className="py-1 pr-3">{formatNumber(Number(row.failure_count || 0))}</td>
+                        <td className="py-1 pr-3">{formatNumber(Number(row.retry_count_total || 0))}</td>
+                        <td className="py-1 pr-3">{formatLatencyMs(Number(row.avg_fetch_ms || 0))}</td>
+                        <td className="py-1 pr-3">{formatLatencyMs(Number(row.avg_parse_ms || 0))}</td>
+                        <td className="py-1 pr-3">{formatNumber(Number(row.network_payload_rows_total || 0))}</td>
+                        <td className="py-1 pr-3">{formatNumber(Number(row.graphql_replay_rows_total || 0))}</td>
+                        <td className="py-1 pr-3">{formatNumber(Number(row.screenshot_count || 0))}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="rounded border border-gray-200 dark:border-gray-700 p-2 space-y-2">
+              <div className="text-xs font-semibold text-gray-800 dark:text-gray-200 flex items-center">
+                Structured Snippet Preview
+                <Tip text="Recent structured metadata assertions forwarded from Phase 05 into extraction, with identity gate match signals." />
+              </div>
+              <table className="mt-1 min-w-full text-xs">
+                <thead>
+                  <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        surface
+                        <Tip text="Structured surface origin (microdata/opengraph/rdfa/microformat/json-ld)." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        key path
+                        <Tip text="Flattened structured path used to derive a candidate field key." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        value
+                        <Tip text="Preview of normalized assertion value from the structured node." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        match
+                        <Tip text="Identity target-match score and pass/fail state for this structured node." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        url
+                        <Tip text="Source URL where this structured assertion was captured." />
+                      </span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {phase5Runtime.structuredSnippetRows.length === 0 ? (
+                    <tr>
+                      <td className="py-2 text-gray-500 dark:text-gray-400" colSpan={5}>no structured snippet rows yet</td>
+                    </tr>
+                  ) : (
+                    phase5Runtime.structuredSnippetRows.slice(0, 24).map((row, idx) => (
+                      <tr key={`structured-snippet:${row.ts}:${row.key_path}:${idx}`} className="border-b border-gray-100 dark:border-gray-800">
+                        <td className="py-1 pr-3">{row.source_surface || '-'}</td>
+                        <td className="py-1 pr-3 font-mono">{row.key_path || '-'}</td>
+                        <td className="py-1 pr-3" title={row.value_preview || ''}>{row.value_preview || '-'}</td>
+                        <td className="py-1 pr-3">
+                          {formatNumber(Number(row.target_match_score || 0), 2)}
+                          {' '}
+                          {row.target_match_passed ? 'pass' : 'fail'}
+                        </td>
+                        <td className="py-1 pr-3 font-mono truncate max-w-[28rem]" title={row.url || ''}>{row.url || '-'}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="rounded border border-gray-200 dark:border-gray-700 p-2 space-y-2">
+              <div className="text-xs font-semibold text-gray-800 dark:text-gray-200 flex items-center">
+                Article Domain Quality Leaderboard
+                <Tip text="Per-host article extraction quality (readability/fallback mix, low-quality rate, parse latency) for Phase 03 tuning." />
+              </div>
+              <table className="mt-1 min-w-full text-xs">
+                <thead>
+                  <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        host
+                        <Tip text="Hostname of article extraction rows in this run." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        samples
+                        <Tip text="Number of URL rows with article extraction telemetry for this host." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        readability
+                        <Tip text="Share of article rows using Readability extraction method." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        fallback
+                        <Tip text="Share of article rows using heuristic fallback extraction." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        low q
+                        <Tip text="Share of article rows flagged low-quality by score/length gates." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        avg score
+                        <Tip text="Average article quality score (0-100) for this host." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        avg chars
+                        <Tip text="Average extracted article character count for this host." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        p95 parse
+                        <Tip text="95th percentile parse duration across this host's sampled rows." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        policy
+                        <Tip text="Most common article-extractor policy mode and matched host override token." />
+                      </span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {phase5ArticleDomainLeaderboard.length === 0 ? (
+                    <tr>
+                      <td className="py-2 text-gray-500 dark:text-gray-400" colSpan={9}>no article-domain rows yet</td>
+                    </tr>
+                  ) : (
+                    phase5ArticleDomainLeaderboard.map((row) => (
+                      <tr key={`article-host:${row.host}`} className="border-b border-gray-100 dark:border-gray-800">
+                        <td className="py-1 pr-3 font-mono">{row.host}</td>
+                        <td className="py-1 pr-3">{formatNumber(row.samples)}</td>
+                        <td className="py-1 pr-3">{formatNumber((row.readabilityHits / Math.max(1, row.samples)) * 100, 0)}%</td>
+                        <td className="py-1 pr-3">{formatNumber((row.fallbackHits / Math.max(1, row.samples)) * 100, 0)}%</td>
+                        <td className="py-1 pr-3">{formatNumber((row.lowQualityCount / Math.max(1, row.samples)) * 100, 0)}%</td>
+                        <td className="py-1 pr-3">{formatNumber(row.avgScore, 1)}</td>
+                        <td className="py-1 pr-3">{formatNumber(row.avgChars, 0)}</td>
+                        <td className="py-1 pr-3">{formatLatencyMs(row.parseP95Ms)}</td>
+                        <td className="py-1 pr-3">
+                          {row.topMode
+                            ? `${row.topMode}${row.topPolicyHost ? ` @ ${row.topPolicyHost}` : ''}${row.policyOverrideCount > 0 ? ` (${row.policyOverrideCount})` : ''}`
+                            : '-'}
+                        </td>
                       </tr>
                     ))
                   )}
@@ -5333,10 +6303,22 @@ export function IndexingPage() {
               phase 05 runtime knobs: concurrency {fetchConcurrency || '2'} | per-host delay {perHostMinDelayMs || '900'} ms | crawlee {dynamicCrawleeEnabled ? 'on' : 'off'} | retry {dynamicFetchRetryBudget || '1'} | backoff {dynamicFetchRetryBackoffMs || '500'} ms
             </div>
             <div className="text-xs text-gray-500 dark:text-gray-400">
+              phase 07 runtime knobs: ocr {scannedPdfOcrEnabled ? 'on' : 'off'} | promote {scannedPdfOcrPromoteCandidates ? 'on' : 'off'} | backend {scannedPdfOcrBackend} | max pages {scannedPdfOcrMaxPages || '4'} | max pairs {scannedPdfOcrMaxPairs || '800'} | min chars {scannedPdfOcrMinCharsPerPage || '30'} | min lines {scannedPdfOcrMinLinesPerPage || '2'} | min conf {scannedPdfOcrMinConfidence || '0.5'}
+            </div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">
               phase 05 skip reasons: cooldown {formatNumber(phase5Runtime.skippedCooldown)} | blocked budget {formatNumber(phase5Runtime.skippedBlockedBudget)} | retry later {formatNumber(phase5Runtime.skippedRetryLater)}
             </div>
             <div className="text-xs text-gray-500 dark:text-gray-400">
               article extraction: sampled {formatNumber(phase5Runtime.articleSamples)} | avg score {formatNumber(phase5Runtime.articleAvgScore, 1)} | avg chars {formatNumber(phase5Runtime.articleAvgChars, 0)} | low-quality {formatNumber(phase5Runtime.articleLowQuality)}
+            </div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">
+              structured extraction: json-ld {formatNumber(phase5Runtime.structuredJsonLd)} | microdata {formatNumber(phase5Runtime.structuredMicrodata)} | opengraph {formatNumber(phase5Runtime.structuredOpengraph)} | accepted {formatNumber(phase5Runtime.structuredCandidates)} | rejected {formatNumber(phase5Runtime.structuredRejected)} | errors {formatNumber(phase5Runtime.structuredErrors)}
+            </div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">
+              pdf extraction: docs {formatNumber(phase5Runtime.pdfDocsParsed)} | pairs {formatNumber(phase5Runtime.pdfPairsTotal)} | kv {formatNumber(phase5Runtime.pdfKvPairs)} | table {formatNumber(phase5Runtime.pdfTablePairs)} | pages {formatNumber(phase5Runtime.pdfPagesScanned)} | errors {formatNumber(phase5Runtime.pdfErrors)}
+            </div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">
+              scanned pdf ocr: detected {formatNumber(phase5Runtime.scannedPdfDocsDetected)} | attempted {formatNumber(phase5Runtime.scannedPdfOcrDocsAttempted)} | succeeded {formatNumber(phase5Runtime.scannedPdfOcrDocsSucceeded)} | pairs {formatNumber(phase5Runtime.scannedPdfOcrPairs)} ({formatNumber(phase5Runtime.scannedPdfOcrKvPairs)}/{formatNumber(phase5Runtime.scannedPdfOcrTablePairs)}) | low-conf {formatNumber(phase5Runtime.scannedPdfOcrLowConfPairs)} | avg conf {formatNumber(phase5Runtime.scannedPdfOcrConfidenceAvg, 3)} | errors {formatNumber(phase5Runtime.scannedPdfOcrErrors)}
             </div>
           </>
         ) : null}
@@ -6431,31 +7413,35 @@ export function IndexingPage() {
         {!panelCollapsed.runtime ? (
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-          <div className="md:col-span-2 rounded border border-slate-200 dark:border-slate-600 bg-slate-100 dark:bg-slate-700/40 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200">
-            Run and discovery knobs
+          <details className="group md:col-span-2 rounded border border-slate-200 dark:border-slate-600">
+            <summary className="flex w-full cursor-pointer list-none items-center rounded bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:bg-slate-700/40 dark:text-slate-200 [&::-webkit-details-marker]:hidden">
+              <span className="inline-flex items-center">
+                <span className="mr-1 inline-flex h-4 w-4 items-center justify-center rounded border border-slate-300 text-[10px] leading-none text-slate-600 dark:border-slate-500 dark:text-slate-200">
+                  <span className="group-open:hidden">+</span>
+                  <span className="hidden group-open:inline">-</span>
+                </span>
+                <span>Run Setup and Discovery</span>
+                <Tip text="Core run profile and provider-discovery toggles for this run." />
+              </span>
+            </summary>
+            <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 px-2 pb-2">
+          <div className="rounded border border-gray-300 dark:border-gray-600 px-2 py-2">
+            <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+              run profile
+              <Tip text="Run intensity profile: fast for speed, standard balanced, thorough for maximum coverage." />
+            </div>
+            <select
+              value={profile}
+              onChange={(e) => setProfile(e.target.value as 'fast' | 'standard' | 'thorough')}
+              disabled={isAll || busy}
+              className="mt-1 w-full px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
+              title="Run intensity profile."
+            >
+              <option value="fast">run profile: fast</option>
+              <option value="standard">run profile: standard</option>
+              <option value="thorough">run profile: thorough</option>
+            </select>
           </div>
-          <select
-            value={profile}
-            onChange={(e) => setProfile(e.target.value as 'fast' | 'standard' | 'thorough')}
-            disabled={isAll || busy}
-            className="px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
-            title="Run intensity profile."
-          >
-            <option value="fast">profile: fast</option>
-            <option value="standard">profile: standard</option>
-            <option value="thorough">profile: thorough</option>
-          </select>
-          <select
-            value={resumeMode}
-            onChange={(e) => setResumeMode(e.target.value as 'auto' | 'force_resume' | 'start_over')}
-            disabled={isAll || busy}
-            className="px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
-            title="Resume policy."
-          >
-            <option value="auto">resume mode: auto</option>
-            <option value="force_resume">resume mode: force resume</option>
-            <option value="start_over">resume mode: start over</option>
-          </select>
           <label className="flex items-center gap-2 rounded border border-gray-300 dark:border-gray-600 px-2 py-2 text-xs text-gray-700 dark:text-gray-200">
             <input
               type="checkbox"
@@ -6472,50 +7458,197 @@ export function IndexingPage() {
               disabled={isAll || busy}
             />
             provider discovery
+            <Tip text="Enable search-provider discovery for this run. Disable to skip provider search expansion." />
           </label>
-          <select
-            value={searchProvider}
-            onChange={(e) => setSearchProvider(e.target.value as 'none' | 'google' | 'bing' | 'searxng' | 'duckduckgo' | 'dual')}
-            disabled={isAll || busy || !discoveryEnabled}
-            className="px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
-            title="Search provider used when discovery is enabled."
-          >
-            <option value="none">search provider: none</option>
-            <option value="duckduckgo">search provider: duckduckgo</option>
-            <option value="searxng">search provider: searxng</option>
-            <option value="bing">search provider: bing</option>
-            <option value="google">search provider: google</option>
-            <option value="dual">search provider: dual</option>
-          </select>
-          <div className="md:col-span-2 rounded border border-slate-200 dark:border-slate-600 bg-slate-100 dark:bg-slate-700/40 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200">
-            Phase 05 fetch parallelism knobs
+          <div className="rounded border border-gray-300 dark:border-gray-600 px-2 py-2">
+            <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+              search provider
+              <Tip text="Search engine used for discovery when provider discovery is enabled." />
+            </div>
+            <select
+              value={searchProvider}
+              onChange={(e) => setSearchProvider(e.target.value as 'none' | 'google' | 'bing' | 'searxng' | 'duckduckgo' | 'dual')}
+              disabled={isAll || busy || !discoveryEnabled}
+              className="mt-1 w-full px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
+              title="Search provider used when discovery is enabled."
+            >
+              <option value="none">search provider: none</option>
+              <option value="duckduckgo">search provider: duckduckgo</option>
+              <option value="searxng">search provider: searxng</option>
+              <option value="bing">search provider: bing</option>
+              <option value="google">search provider: google</option>
+              <option value="dual">search provider: dual</option>
+            </select>
           </div>
-          <input
-            type="number"
-            min={1}
-            max={64}
-            value={fetchConcurrency}
-            onChange={(e) => setFetchConcurrency(e.target.value)}
-            disabled={isAll || busy}
-            className="px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
-            title="Global fetch concurrency target (CONCURRENCY env override for this run)."
-            placeholder="fetch concurrency"
-          />
-          <input
-            type="number"
-            min={0}
-            max={120000}
-            step={50}
-            value={perHostMinDelayMs}
-            onChange={(e) => setPerHostMinDelayMs(e.target.value)}
-            disabled={isAll || busy}
-            className="px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
-            title="Minimum delay per host in milliseconds (PER_HOST_MIN_DELAY_MS override for this run)."
-            placeholder="per-host delay ms"
-          />
-          <div className="md:col-span-2 rounded border border-slate-200 dark:border-slate-600 bg-slate-100 dark:bg-slate-700/40 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200">
-            Phase 02 dynamic parsing knobs
+            </div>
+          </details>
+          <details className="group md:col-span-2 rounded border border-slate-200 dark:border-slate-600">
+            <summary className="flex w-full cursor-pointer list-none items-center rounded bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:bg-slate-700/40 dark:text-slate-200 [&::-webkit-details-marker]:hidden">
+              <span className="inline-flex items-center">
+                <span className="mr-1 inline-flex h-4 w-4 items-center justify-center rounded border border-slate-300 text-[10px] leading-none text-slate-600 dark:border-slate-500 dark:text-slate-200">
+                  <span className="group-open:hidden">+</span>
+                  <span className="hidden group-open:inline">-</span>
+                </span>
+                <span>Fetch Throughput</span>
+                <Tip text="Controls how many URLs run in parallel and how quickly each host is revisited." />
+              </span>
+            </summary>
+            <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 px-2 pb-2">
+          <div className="rounded border border-gray-300 dark:border-gray-600 px-2 py-2">
+            <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+              fetch concurrency
+              <Tip text="Global fetch concurrency target. Higher values increase throughput but can raise block/error rates." />
+            </div>
+            <input
+              type="number"
+              min={1}
+              max={64}
+              value={fetchConcurrency}
+              onChange={(e) => setFetchConcurrency(e.target.value)}
+              disabled={isAll || busy}
+              className="mt-1 w-full px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
+              title="Global fetch concurrency target (CONCURRENCY env override for this run)."
+              placeholder="fetch concurrency"
+            />
           </div>
+          <div className="rounded border border-gray-300 dark:border-gray-600 px-2 py-2">
+            <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+              per-host delay (ms)
+              <Tip text="Minimum delay between requests to the same host. Higher values reduce host pressure and anti-bot risk." />
+            </div>
+            <input
+              type="number"
+              min={0}
+              max={120000}
+              step={50}
+              value={perHostMinDelayMs}
+              onChange={(e) => setPerHostMinDelayMs(e.target.value)}
+              disabled={isAll || busy}
+              className="mt-1 w-full px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
+              title="Minimum delay per host in milliseconds (PER_HOST_MIN_DELAY_MS override for this run)."
+              placeholder="per-host delay ms"
+            />
+          </div>
+            </div>
+          </details>
+          <details className="group md:col-span-2 rounded border border-slate-200 dark:border-slate-600">
+            <summary className="flex w-full cursor-pointer list-none items-center rounded bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:bg-slate-700/40 dark:text-slate-200 [&::-webkit-details-marker]:hidden">
+              <span className="inline-flex items-center">
+                <span className="mr-1 inline-flex h-4 w-4 items-center justify-center rounded border border-slate-300 text-[10px] leading-none text-slate-600 dark:border-slate-500 dark:text-slate-200">
+                  <span className="group-open:hidden">+</span>
+                  <span className="hidden group-open:inline">-</span>
+                </span>
+                <span>Dynamic Rendering and Scanned PDF OCR</span>
+                <Tip text="Dynamic JS-render controls plus OCR fallback controls for scanned PDF sources." />
+              </span>
+            </summary>
+            <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 px-2 pb-2">
+          <label className="flex items-center gap-2 rounded border border-gray-300 dark:border-gray-600 px-2 py-2 text-xs text-gray-700 dark:text-gray-200">
+            <input
+              type="checkbox"
+              checked={scannedPdfOcrEnabled}
+              onChange={(e) => setScannedPdfOcrEnabled(e.target.checked)}
+              disabled={isAll || busy}
+            />
+            scanned pdf ocr enabled
+            <Tip text="Enable OCR fallback for scanned/image-only PDFs. Recommended on for broad coverage." />
+          </label>
+          <label className="flex items-center gap-2 rounded border border-gray-300 dark:border-gray-600 px-2 py-2 text-xs text-gray-700 dark:text-gray-200">
+            <input
+              type="checkbox"
+              checked={scannedPdfOcrPromoteCandidates}
+              onChange={(e) => setScannedPdfOcrPromoteCandidates(e.target.checked)}
+              disabled={isAll || busy || !scannedPdfOcrEnabled}
+            />
+            promote ocr candidates
+            <Tip text="When enabled, OCR rows become field candidates and can win scoring/consensus lanes." />
+          </label>
+          <label className="flex items-center gap-2 rounded border border-gray-300 dark:border-gray-600 px-2 py-2 text-xs text-gray-700 dark:text-gray-200">
+            <span>ocr backend</span>
+            <Tip text="OCR engine selection. auto uses best available backend, tesseract forces deterministic fallback path." />
+            <select
+              value={scannedPdfOcrBackend}
+              onChange={(e) => setScannedPdfOcrBackend(e.target.value as 'auto' | 'tesseract' | 'none')}
+              disabled={isAll || busy || !scannedPdfOcrEnabled}
+              className="ml-auto w-32 px-2 py-1 text-xs border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
+              title="SCANNED_PDF_OCR_BACKEND for this run."
+            >
+              <option value="auto">auto</option>
+              <option value="tesseract">tesseract</option>
+              <option value="none">none</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-2 rounded border border-gray-300 dark:border-gray-600 px-2 py-2 text-xs text-gray-700 dark:text-gray-200">
+            <span>ocr max pages</span>
+            <Tip text="Maximum PDF pages scanned by OCR per document. Lower values improve throughput." />
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={scannedPdfOcrMaxPages}
+              onChange={(e) => setScannedPdfOcrMaxPages(e.target.value)}
+              disabled={isAll || busy || !scannedPdfOcrEnabled}
+              className="ml-auto w-24 px-2 py-1 text-xs border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
+              title="SCANNED_PDF_OCR_MAX_PAGES for this run."
+            />
+          </label>
+          <label className="flex items-center gap-2 rounded border border-gray-300 dark:border-gray-600 px-2 py-2 text-xs text-gray-700 dark:text-gray-200">
+            <span>ocr max pairs</span>
+            <Tip text="Cap on OCR-emitted key/value rows per PDF. Keeps downstream payloads bounded." />
+            <input
+              type="number"
+              min={50}
+              max={20000}
+              value={scannedPdfOcrMaxPairs}
+              onChange={(e) => setScannedPdfOcrMaxPairs(e.target.value)}
+              disabled={isAll || busy || !scannedPdfOcrEnabled}
+              className="ml-auto w-24 px-2 py-1 text-xs border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
+              title="SCANNED_PDF_OCR_MAX_PAIRS for this run."
+            />
+          </label>
+          <label className="flex items-center gap-2 rounded border border-gray-300 dark:border-gray-600 px-2 py-2 text-xs text-gray-700 dark:text-gray-200">
+            <span>min chars/page</span>
+            <Tip text="Scan detection threshold: lower values route fewer PDFs to OCR (higher throughput)." />
+            <input
+              type="number"
+              min={1}
+              max={500}
+              value={scannedPdfOcrMinCharsPerPage}
+              onChange={(e) => setScannedPdfOcrMinCharsPerPage(e.target.value)}
+              disabled={isAll || busy || !scannedPdfOcrEnabled}
+              className="ml-auto w-24 px-2 py-1 text-xs border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
+              title="SCANNED_PDF_OCR_MIN_CHARS_PER_PAGE for this run."
+            />
+          </label>
+          <label className="flex items-center gap-2 rounded border border-gray-300 dark:border-gray-600 px-2 py-2 text-xs text-gray-700 dark:text-gray-200">
+            <span>min lines/page</span>
+            <Tip text="Scan detection threshold by text lines per page. Lower values reduce OCR routing volume." />
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={scannedPdfOcrMinLinesPerPage}
+              onChange={(e) => setScannedPdfOcrMinLinesPerPage(e.target.value)}
+              disabled={isAll || busy || !scannedPdfOcrEnabled}
+              className="ml-auto w-24 px-2 py-1 text-xs border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
+              title="SCANNED_PDF_OCR_MIN_LINES_PER_PAGE for this run."
+            />
+          </label>
+          <label className="flex items-center gap-2 rounded border border-gray-300 dark:border-gray-600 px-2 py-2 text-xs text-gray-700 dark:text-gray-200">
+            <span>min confidence</span>
+            <Tip text="OCR confidence cutoff for low-confidence flags. Lower values increase recall; higher values increase precision." />
+            <input
+              type="number"
+              min={0}
+              max={1}
+              step={0.01}
+              value={scannedPdfOcrMinConfidence}
+              onChange={(e) => setScannedPdfOcrMinConfidence(e.target.value)}
+              disabled={isAll || busy || !scannedPdfOcrEnabled}
+              className="ml-auto w-24 px-2 py-1 text-xs border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
+              title="SCANNED_PDF_OCR_MIN_CONFIDENCE for this run."
+            />
+          </label>
           <label className="flex items-center gap-2 rounded border border-gray-300 dark:border-gray-600 px-2 py-2 text-xs text-gray-700 dark:text-gray-200">
             <input
               type="checkbox"
@@ -6593,9 +7726,20 @@ export function IndexingPage() {
               title="DYNAMIC_FETCH_POLICY_MAP_JSON override for this run."
             />
           </label>
-          <div className="md:col-span-2 rounded border border-slate-200 dark:border-slate-600 bg-slate-100 dark:bg-slate-700/40 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200">
-            Phase-level LLM controls
-          </div>
+            </div>
+          </details>
+          <details className="group md:col-span-2 rounded border border-slate-200 dark:border-slate-600">
+            <summary className="flex w-full cursor-pointer list-none items-center rounded bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:bg-slate-700/40 dark:text-slate-200 [&::-webkit-details-marker]:hidden">
+              <span className="inline-flex items-center">
+                <span className="mr-1 inline-flex h-4 w-4 items-center justify-center rounded border border-slate-300 text-[10px] leading-none text-slate-600 dark:border-slate-500 dark:text-slate-200">
+                  <span className="group-open:hidden">+</span>
+                  <span className="hidden group-open:inline">-</span>
+                </span>
+                <span>Planner and Triage LLM</span>
+                <Tip text="Model and token controls for planner and triage lanes." />
+              </span>
+            </summary>
+            <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 px-2 pb-2">
           <label className="md:col-span-2 flex items-center gap-2 rounded border border-gray-300 dark:border-gray-600 px-2 py-1.5 text-xs text-gray-700 dark:text-gray-200">
             <input
               type="checkbox"
@@ -6603,43 +7747,55 @@ export function IndexingPage() {
               onChange={(e) => setPhase2LlmEnabled(e.target.checked)}
               disabled={isAll || busy || !discoveryEnabled}
             />
-            phase 02 llm searchprofile
+            planner llm enabled
             <Tip text={`Force LLM query planning for SearchProfile generation. ${roleHelpText('plan')}`} />
           </label>
-          <select
-            value={phase2LlmModel}
-            onChange={(e) => {
-              const nextModel = e.target.value;
-              setPhase2LlmModel(nextModel);
-              setLlmTokensPlan(resolveModelTokenDefaults(nextModel).default_output_tokens);
-            }}
-            disabled={isAll || busy || !discoveryEnabled || !phase2LlmEnabled}
-            className="px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
-            title="Model used for Phase 02 SearchProfile planning."
-          >
-            {llmModelOptions.map((model) => (
-              <option key={`phase2:${model}`} value={model}>
-                phase 02 model: {model}
-              </option>
-            ))}
-          </select>
-          <select
-            value={llmTokensPlan}
-            onChange={(e) => setLlmTokensPlan(clampTokenForModel(phase2LlmModel, Number.parseInt(e.target.value, 10) || llmTokensPlan))}
-            disabled={isAll || busy || !discoveryEnabled || !phase2LlmEnabled}
-            className="px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
-            title="Max output tokens for Phase 02 planner calls."
-          >
-            {llmTokenPresetOptions.map((token) => {
-              const cap = resolveModelTokenDefaults(phase2LlmModel).max_output_tokens;
-              const disabled = token > cap;
-              return (
-                <option key={`phase2-token:${token}`} value={token} disabled={disabled}>
-                  phase 02 tokens: {token}{disabled ? ' (model max)' : ''}
+          <div className="rounded border border-gray-300 dark:border-gray-600 px-2 py-2">
+            <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+              planner model
+              <Tip text="Model used for SearchProfile planning." />
+            </div>
+            <select
+              value={phase2LlmModel}
+              onChange={(e) => {
+                const nextModel = e.target.value;
+                setPhase2LlmModel(nextModel);
+                setLlmTokensPlan(resolveModelTokenDefaults(nextModel).default_output_tokens);
+              }}
+              disabled={isAll || busy || !discoveryEnabled || !phase2LlmEnabled}
+              className="mt-1 w-full px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
+              title="Model used for SearchProfile planning."
+            >
+              {llmModelOptions.map((model) => (
+                <option key={`phase2:${model}`} value={model}>
+                  planner model: {model}
                 </option>
-              );
-            })}
-          </select>
+              ))}
+            </select>
+          </div>
+          <div className="rounded border border-gray-300 dark:border-gray-600 px-2 py-2">
+            <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+              planner max tokens
+              <Tip text="Max output tokens for planner calls." />
+            </div>
+            <select
+              value={llmTokensPlan}
+              onChange={(e) => setLlmTokensPlan(clampTokenForModel(phase2LlmModel, Number.parseInt(e.target.value, 10) || llmTokensPlan))}
+              disabled={isAll || busy || !discoveryEnabled || !phase2LlmEnabled}
+              className="mt-1 w-full px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
+              title="Max output tokens for planner calls."
+            >
+              {llmTokenPresetOptions.map((token) => {
+                const cap = resolveModelTokenDefaults(phase2LlmModel).max_output_tokens;
+                const disabled = token > cap;
+                return (
+                  <option key={`phase2-token:${token}`} value={token} disabled={disabled}>
+                    planner tokens: {token}{disabled ? ' (model max)' : ''}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
           <label className="md:col-span-2 flex items-center gap-2 rounded border border-gray-300 dark:border-gray-600 px-2 py-1.5 text-xs text-gray-700 dark:text-gray-200">
             <input
               type="checkbox"
@@ -6647,115 +7803,162 @@ export function IndexingPage() {
               onChange={(e) => setPhase3LlmTriageEnabled(e.target.checked)}
               disabled={isAll || busy || !discoveryEnabled}
             />
-            phase 03 llm triage
+            triage llm enabled
             <Tip text="Force LLM SERP reranking before URL selection." />
           </label>
-          <select
-            value={phase3LlmModel}
-            onChange={(e) => {
-              const nextModel = e.target.value;
-              setPhase3LlmModel(nextModel);
-              setLlmTokensTriage(resolveModelTokenDefaults(nextModel).default_output_tokens);
-            }}
-            disabled={isAll || busy || !discoveryEnabled || !phase3LlmTriageEnabled}
-            className="px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
-            title="Model used for Phase 03 SERP triage."
-          >
-            {llmModelOptions.map((model) => (
-              <option key={`phase3:${model}`} value={model}>
-                phase 03 model: {model}
-              </option>
-            ))}
-          </select>
-          <select
-            value={llmTokensTriage}
-            onChange={(e) => setLlmTokensTriage(clampTokenForModel(phase3LlmModel, Number.parseInt(e.target.value, 10) || llmTokensTriage))}
-            disabled={isAll || busy || !discoveryEnabled || !phase3LlmTriageEnabled}
-            className="px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
-            title="Max output tokens for Phase 03 triage calls."
-          >
-            {llmTokenPresetOptions.map((token) => {
-              const cap = resolveModelTokenDefaults(phase3LlmModel).max_output_tokens;
-              const disabled = token > cap;
-              return (
-                <option key={`phase3-token:${token}`} value={token} disabled={disabled}>
-                  phase 03 tokens: {token}{disabled ? ' (model max)' : ''}
+          <div className="rounded border border-gray-300 dark:border-gray-600 px-2 py-2">
+            <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+              triage model
+              <Tip text="Model used for SERP triage." />
+            </div>
+            <select
+              value={phase3LlmModel}
+              onChange={(e) => {
+                const nextModel = e.target.value;
+                setPhase3LlmModel(nextModel);
+                setLlmTokensTriage(resolveModelTokenDefaults(nextModel).default_output_tokens);
+              }}
+              disabled={isAll || busy || !discoveryEnabled || !phase3LlmTriageEnabled}
+              className="mt-1 w-full px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
+              title="Model used for SERP triage."
+            >
+              {llmModelOptions.map((model) => (
+                <option key={`phase3:${model}`} value={model}>
+                  triage model: {model}
                 </option>
-              );
-            })}
-          </select>
-          <div className="md:col-span-2 rounded border border-slate-200 dark:border-slate-600 bg-slate-100 dark:bg-slate-700/40 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200">
-            Role routing controls (model + token cap)
+              ))}
+            </select>
           </div>
-          <select
-            value={llmModelFast}
-            onChange={(e) => {
-              const nextModel = e.target.value;
-              setLlmModelFast(nextModel);
-              setLlmTokensFast(resolveModelTokenDefaults(nextModel).default_output_tokens);
-            }}
-            disabled={isAll || busy}
-            className="px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
-            title="Model used by fast LLM passes when enabled."
-          >
-            {llmModelOptions.map((model) => (
-              <option key={`fast:${model}`} value={model}>
-                fast pass model: {model}
-              </option>
-            ))}
-          </select>
-          <select
-            value={llmTokensFast}
-            onChange={(e) => setLlmTokensFast(clampTokenForModel(llmModelFast, Number.parseInt(e.target.value, 10) || llmTokensFast))}
-            disabled={isAll || busy}
-            className="px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
-            title="Max output tokens for fast LLM passes."
-          >
-            {llmTokenPresetOptions.map((token) => {
-              const cap = resolveModelTokenDefaults(llmModelFast).max_output_tokens;
-              const disabled = token > cap;
-              return (
-                <option key={`fast-token:${token}`} value={token} disabled={disabled}>
-                  fast tokens: {token}{disabled ? ' (model max)' : ''}
+          <div className="rounded border border-gray-300 dark:border-gray-600 px-2 py-2">
+            <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+              triage max tokens
+              <Tip text="Max output tokens for triage calls." />
+            </div>
+            <select
+              value={llmTokensTriage}
+              onChange={(e) => setLlmTokensTriage(clampTokenForModel(phase3LlmModel, Number.parseInt(e.target.value, 10) || llmTokensTriage))}
+              disabled={isAll || busy || !discoveryEnabled || !phase3LlmTriageEnabled}
+              className="mt-1 w-full px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
+              title="Max output tokens for triage calls."
+            >
+              {llmTokenPresetOptions.map((token) => {
+                const cap = resolveModelTokenDefaults(phase3LlmModel).max_output_tokens;
+                const disabled = token > cap;
+                return (
+                  <option key={`phase3-token:${token}`} value={token} disabled={disabled}>
+                    triage tokens: {token}{disabled ? ' (model max)' : ''}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+            </div>
+          </details>
+          <details className="group md:col-span-2 rounded border border-slate-200 dark:border-slate-600">
+            <summary className="flex w-full cursor-pointer list-none items-center rounded bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:bg-slate-700/40 dark:text-slate-200 [&::-webkit-details-marker]:hidden">
+              <span className="inline-flex items-center">
+                <span className="mr-1 inline-flex h-4 w-4 items-center justify-center rounded border border-slate-300 text-[10px] leading-none text-slate-600 dark:border-slate-500 dark:text-slate-200">
+                  <span className="group-open:hidden">+</span>
+                  <span className="hidden group-open:inline">-</span>
+                </span>
+                <span>Role Routing</span>
+                <Tip text="Primary route models and token caps used by each runtime role lane." />
+              </span>
+            </summary>
+            <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 px-2 pb-2">
+          <div className="rounded border border-gray-300 dark:border-gray-600 px-2 py-2">
+            <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+              fast pass model
+              <Tip text="Model used by fast LLM passes when enabled." />
+            </div>
+            <select
+              value={llmModelFast}
+              onChange={(e) => {
+                const nextModel = e.target.value;
+                setLlmModelFast(nextModel);
+                setLlmTokensFast(resolveModelTokenDefaults(nextModel).default_output_tokens);
+              }}
+              disabled={isAll || busy}
+              className="mt-1 w-full px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
+              title="Model used by fast LLM passes when enabled."
+            >
+              {llmModelOptions.map((model) => (
+                <option key={`fast:${model}`} value={model}>
+                  fast pass model: {model}
                 </option>
-              );
-            })}
-          </select>
-          <select
-            value={llmModelReasoning}
-            onChange={(e) => {
-              const nextModel = e.target.value;
-              setLlmModelReasoning(nextModel);
-              setLlmTokensReasoning(resolveModelTokenDefaults(nextModel).default_output_tokens);
-            }}
-            disabled={isAll || busy}
-            className="px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
-            title="Model used by deeper reasoning passes."
-          >
-            {llmModelOptions.map((model) => (
-              <option key={`reasoning:${model}`} value={model}>
-                reasoning model: {model}
-              </option>
-            ))}
-          </select>
-          <select
-            value={llmTokensReasoning}
-            onChange={(e) => setLlmTokensReasoning(clampTokenForModel(llmModelReasoning, Number.parseInt(e.target.value, 10) || llmTokensReasoning))}
-            disabled={isAll || busy}
-            className="px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
-            title="Max output tokens for reasoning passes."
-          >
-            {llmTokenPresetOptions.map((token) => {
-              const cap = resolveModelTokenDefaults(llmModelReasoning).max_output_tokens;
-              const disabled = token > cap;
-              return (
-                <option key={`reasoning-token:${token}`} value={token} disabled={disabled}>
-                  reasoning tokens: {token}{disabled ? ' (model max)' : ''}
+              ))}
+            </select>
+          </div>
+          <div className="rounded border border-gray-300 dark:border-gray-600 px-2 py-2">
+            <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+              fast pass max tokens
+              <Tip text="Max output tokens for fast LLM passes." />
+            </div>
+            <select
+              value={llmTokensFast}
+              onChange={(e) => setLlmTokensFast(clampTokenForModel(llmModelFast, Number.parseInt(e.target.value, 10) || llmTokensFast))}
+              disabled={isAll || busy}
+              className="mt-1 w-full px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
+              title="Max output tokens for fast LLM passes."
+            >
+              {llmTokenPresetOptions.map((token) => {
+                const cap = resolveModelTokenDefaults(llmModelFast).max_output_tokens;
+                const disabled = token > cap;
+                return (
+                  <option key={`fast-token:${token}`} value={token} disabled={disabled}>
+                    fast tokens: {token}{disabled ? ' (model max)' : ''}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+          <div className="rounded border border-gray-300 dark:border-gray-600 px-2 py-2">
+            <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+              reasoning model
+              <Tip text="Model used by deeper reasoning passes." />
+            </div>
+            <select
+              value={llmModelReasoning}
+              onChange={(e) => {
+                const nextModel = e.target.value;
+                setLlmModelReasoning(nextModel);
+                setLlmTokensReasoning(resolveModelTokenDefaults(nextModel).default_output_tokens);
+              }}
+              disabled={isAll || busy}
+              className="mt-1 w-full px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
+              title="Model used by deeper reasoning passes."
+            >
+              {llmModelOptions.map((model) => (
+                <option key={`reasoning:${model}`} value={model}>
+                  reasoning model: {model}
                 </option>
-              );
-            })}
-          </select>
-          <div className="md:col-span-2 rounded border border-slate-200 dark:border-slate-600 bg-slate-100 dark:bg-slate-700/40 px-2 py-1 text-[11px] text-slate-700 dark:text-slate-200">
+              ))}
+            </select>
+          </div>
+          <div className="rounded border border-gray-300 dark:border-gray-600 px-2 py-2">
+            <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+              reasoning max tokens
+              <Tip text="Max output tokens for reasoning passes." />
+            </div>
+            <select
+              value={llmTokensReasoning}
+              onChange={(e) => setLlmTokensReasoning(clampTokenForModel(llmModelReasoning, Number.parseInt(e.target.value, 10) || llmTokensReasoning))}
+              disabled={isAll || busy}
+              className="mt-1 w-full px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
+              title="Max output tokens for reasoning passes."
+            >
+              {llmTokenPresetOptions.map((token) => {
+                const cap = resolveModelTokenDefaults(llmModelReasoning).max_output_tokens;
+                const disabled = token > cap;
+                return (
+                  <option key={`reasoning-token:${token}`} value={token} disabled={disabled}>
+                    reasoning tokens: {token}{disabled ? ' (model max)' : ''}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+          <div className="md:col-span-2 px-1 text-[11px] text-gray-700 dark:text-gray-200">
             <span className="inline-flex items-center font-semibold">
               extract role
               <Tip text={roleHelpText('extract')} />
@@ -6795,7 +7998,7 @@ export function IndexingPage() {
               );
             })}
           </select>
-          <div className="md:col-span-2 rounded border border-slate-200 dark:border-slate-600 bg-slate-100 dark:bg-slate-700/40 px-2 py-1 text-[11px] text-slate-700 dark:text-slate-200">
+          <div className="md:col-span-2 px-1 text-[11px] text-gray-700 dark:text-gray-200">
             <span className="inline-flex items-center font-semibold">
               validate role
               <Tip text={roleHelpText('validate')} />
@@ -6835,7 +8038,7 @@ export function IndexingPage() {
               );
             })}
           </select>
-          <div className="md:col-span-2 rounded border border-slate-200 dark:border-slate-600 bg-slate-100 dark:bg-slate-700/40 px-2 py-1 text-[11px] text-slate-700 dark:text-slate-200">
+          <div className="md:col-span-2 px-1 text-[11px] text-gray-700 dark:text-gray-200">
             <span className="inline-flex items-center font-semibold">
               write role
               <Tip text={roleHelpText('write')} />
@@ -6875,10 +8078,21 @@ export function IndexingPage() {
               );
             })}
           </select>
-          <div className="md:col-span-2 rounded border border-slate-200 dark:border-slate-600 bg-slate-100 dark:bg-slate-700/40 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200">
-            Fallback role routing controls
-          </div>
-          <label className="flex items-center gap-2 rounded border border-gray-300 dark:border-gray-600 px-2 py-2 text-xs text-gray-700 dark:text-gray-200">
+            </div>
+          </details>
+          <details className="group md:col-span-2 rounded border border-slate-200 dark:border-slate-600">
+            <summary className="flex w-full cursor-pointer list-none items-center rounded bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:bg-slate-700/40 dark:text-slate-200 [&::-webkit-details-marker]:hidden">
+              <span className="inline-flex items-center">
+                <span className="mr-1 inline-flex h-4 w-4 items-center justify-center rounded border border-slate-300 text-[10px] leading-none text-slate-600 dark:border-slate-500 dark:text-slate-200">
+                  <span className="group-open:hidden">+</span>
+                  <span className="hidden group-open:inline">-</span>
+                </span>
+                <span>Fallback Routing</span>
+                <Tip text="Fallback models used when primary role routes are unavailable or intentionally disabled." />
+              </span>
+            </summary>
+            <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 px-2 pb-2">
+          <label className="md:col-span-2 w-full flex items-center gap-2 rounded border border-gray-300 dark:border-gray-600 px-2 py-2 text-xs text-gray-700 dark:text-gray-200">
             <input
               type="checkbox"
               checked={llmFallbackEnabled}
@@ -6888,6 +8102,13 @@ export function IndexingPage() {
             role fallbacks enabled
             <Tip text="When off, fallback model routes are disabled for this run." />
           </label>
+          <div className="md:col-span-2 px-1 text-[11px] text-gray-700 dark:text-gray-200">
+            <span className="inline-flex items-center font-semibold">
+              plan fallback
+              <Tip text="Fallback route for plan role when primary planner route is unavailable." />
+            </span>
+          </div>
+          <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-2">
           <select
             value={llmFallbackPlanModel}
             onChange={(e) => {
@@ -6925,6 +8146,14 @@ export function IndexingPage() {
               );
             })}
           </select>
+          </div>
+          <div className="md:col-span-2 px-1 text-[11px] text-gray-700 dark:text-gray-200">
+            <span className="inline-flex items-center font-semibold">
+              extract fallback
+              <Tip text="Fallback route for extract role when primary extraction route is unavailable." />
+            </span>
+          </div>
+          <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-2">
           <select
             value={llmFallbackExtractModel}
             onChange={(e) => {
@@ -6962,6 +8191,14 @@ export function IndexingPage() {
               );
             })}
           </select>
+          </div>
+          <div className="md:col-span-2 px-1 text-[11px] text-gray-700 dark:text-gray-200">
+            <span className="inline-flex items-center font-semibold">
+              validate fallback
+              <Tip text="Fallback route for validate role when primary validation route is unavailable." />
+            </span>
+          </div>
+          <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-2">
           <select
             value={llmFallbackValidateModel}
             onChange={(e) => {
@@ -6999,6 +8236,14 @@ export function IndexingPage() {
               );
             })}
           </select>
+          </div>
+          <div className="md:col-span-2 px-1 text-[11px] text-gray-700 dark:text-gray-200">
+            <span className="inline-flex items-center font-semibold">
+              write fallback
+              <Tip text="Fallback route for write role when primary write route is unavailable." />
+            </span>
+          </div>
+          <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-2">
           <select
             value={llmFallbackWriteModel}
             onChange={(e) => {
@@ -7036,17 +8281,45 @@ export function IndexingPage() {
               );
             })}
           </select>
-          <div className="md:col-span-2 text-[11px] text-gray-500 dark:text-gray-400">
-            One run click executes all phases in order. Every LLM call route can be tuned here (plan/fast/triage/reasoning/extract/validate/write + fallbacks).
           </div>
-          <div className="md:col-span-2 rounded border border-gray-300 dark:border-gray-600 p-2 text-xs overflow-x-auto">
-            <div className="font-semibold text-gray-800 dark:text-gray-200">role route snapshot</div>
+          <div className="md:col-span-2 text-[11px] text-gray-500 dark:text-gray-400">
+            One run executes the full pipeline in order. Every LLM route can be tuned here (plan, fast, triage, reasoning, extract, validate, write, and fallbacks).
+          </div>
+            </div>
+          </details>
+          <details className="group md:col-span-2 rounded border border-slate-200 dark:border-slate-600">
+            <summary className="flex w-full cursor-pointer list-none items-center rounded bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:bg-slate-700/40 dark:text-slate-200 [&::-webkit-details-marker]:hidden">
+              <span className="inline-flex items-center">
+                <span className="mr-1 inline-flex h-4 w-4 items-center justify-center rounded border border-slate-300 text-[10px] leading-none text-slate-600 dark:border-slate-500 dark:text-slate-200">
+                  <span className="group-open:hidden">+</span>
+                  <span className="hidden group-open:inline">-</span>
+                </span>
+                <span>Role Route Snapshot</span>
+                <Tip text="Quick matrix of resolved primary and fallback routes by role." />
+              </span>
+            </summary>
+            <div className="mt-2 rounded border border-gray-300 dark:border-gray-600 p-2 text-xs overflow-x-auto">
             <table className="mt-2 min-w-full text-xs">
               <thead>
                 <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
-                  <th className="py-1 pr-3">role</th>
-                  <th className="py-1 pr-3">primary</th>
-                  <th className="py-1 pr-3">fallback</th>
+                  <th className="py-1 pr-3">
+                    <span className="inline-flex items-center">
+                      role
+                      <Tip text="Runtime role lane name." />
+                    </span>
+                  </th>
+                  <th className="py-1 pr-3">
+                    <span className="inline-flex items-center">
+                      primary
+                      <Tip text="Resolved primary provider/model route for the role." />
+                    </span>
+                  </th>
+                  <th className="py-1 pr-3">
+                    <span className="inline-flex items-center">
+                      fallback
+                      <Tip text="Resolved fallback provider/model route for the role." />
+                    </span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -7068,6 +8341,36 @@ export function IndexingPage() {
                 ))}
               </tbody>
             </table>
+            </div>
+          </details>
+          <details className="group md:col-span-2 rounded border border-slate-200 dark:border-slate-600">
+            <summary className="flex w-full cursor-pointer list-none items-center rounded bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:bg-slate-700/40 dark:text-slate-200 [&::-webkit-details-marker]:hidden">
+              <span className="inline-flex items-center">
+                <span className="mr-1 inline-flex h-4 w-4 items-center justify-center rounded border border-slate-300 text-[10px] leading-none text-slate-600 dark:border-slate-500 dark:text-slate-200">
+                  <span className="group-open:hidden">+</span>
+                  <span className="hidden group-open:inline">-</span>
+                </span>
+                <span>Resume and Re-Extract Policy</span>
+                <Tip text="Controls state resume behavior and stale-source refresh timing." />
+              </span>
+            </summary>
+            <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 px-2 pb-2">
+          <div className="rounded border border-gray-300 dark:border-gray-600 px-2 py-2">
+            <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+              resume mode
+              <Tip text="Auto resumes recent state, force resume always reuses prior state, and start over ignores prior run state." />
+            </div>
+            <select
+              value={resumeMode}
+              onChange={(e) => setResumeMode(e.target.value as 'auto' | 'force_resume' | 'start_over')}
+              disabled={isAll || busy}
+              className="mt-1 w-full px-2 py-2 text-sm border rounded bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600"
+              title="Resume policy."
+            >
+              <option value="auto">auto</option>
+              <option value="force_resume">force resume</option>
+              <option value="start_over">start over</option>
+            </select>
           </div>
           <div className="rounded border border-gray-300 dark:border-gray-600 px-2 py-2">
             <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
@@ -7115,55 +8418,59 @@ export function IndexingPage() {
               placeholder="24"
             />
             <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-              this refreshes stale indexed sources; it does not control phase 03 triage.
+              this refreshes stale indexed sources; it does not control search triage behavior.
             </div>
           </div>
+            </div>
+          </details>
         </div>
         <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-2 text-xs">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="text-gray-700 dark:text-gray-200">
-              searxng:
-              <span className={`ml-1 font-semibold ${
-                searxngStatus?.http_ready
-                  ? 'text-emerald-600 dark:text-emerald-300'
-                  : searxngStatus?.running
-                    ? 'text-amber-600 dark:text-amber-300'
-                    : 'text-gray-500 dark:text-gray-400'
-              }`}>
-                {searxngStatus?.http_ready
-                  ? 'ready'
-                  : (searxngStatus?.running ? 'running (api not ready)' : 'stopped')}
-              </span>
-              {searxngStatus?.http_status ? (
-                <span className="ml-1 text-gray-500 dark:text-gray-400">http {searxngStatus.http_status}</span>
+          {searxngStatus?.running ? (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-gray-700 dark:text-gray-200 inline-flex items-center">
+                  searxng:
+                  <Tip text="Local SearXNG service status used when search provider is set to SearXNG." />
+                  <span className={`ml-1 font-semibold ${
+                    searxngStatus?.http_ready
+                      ? 'text-emerald-600 dark:text-emerald-300'
+                      : 'text-amber-600 dark:text-amber-300'
+                  }`}>
+                    {searxngStatus?.http_ready ? 'ready' : 'running (api not ready)'}
+                  </span>
+                  {searxngStatus?.http_status ? (
+                    <span className="ml-1 text-gray-500 dark:text-gray-400">http {searxngStatus.http_status}</span>
+                  ) : null}
+                </div>
+                <div className="text-gray-500 dark:text-gray-400 text-right font-mono">
+                  {searxngStatus?.base_url || 'http://127.0.0.1:8080'}
+                  {searxngStatus?.ports ? ` | ${searxngStatus.ports}` : ''}
+                </div>
+              </div>
+              {searxngStatusErrorMessage && !searxngStatus ? (
+                <div className="mt-1 text-rose-600 dark:text-rose-300">
+                  searxng status error: {searxngStatusErrorMessage}
+                </div>
               ) : null}
-            </div>
-            {!searxngStatus?.running && searxngStatus?.can_start ? (
+              {!searxngStatus?.docker_available ? (
+                <div className="mt-1 text-rose-600 dark:text-rose-300">docker not available</div>
+              ) : null}
+              {searxngStatus?.docker_available && !searxngStatus?.compose_file_exists ? (
+                <div className="mt-1 text-rose-600 dark:text-rose-300">compose file missing: {searxngStatus.compose_path}</div>
+              ) : null}
+            </>
+          ) : (
+            <div className="flex items-center justify-end">
               <button
                 onClick={() => startSearxngMut.mutate()}
-                disabled={busy}
+                disabled={busy || searxngStatus?.can_start === false}
                 className="px-2 py-1 text-xs rounded bg-cyan-700 hover:bg-cyan-800 text-white disabled:opacity-40"
                 title="Start local SearXNG Docker stack."
               >
                 Start SearXNG
               </button>
-            ) : null}
-          </div>
-          <div className="mt-1 text-gray-500 dark:text-gray-400">
-            {searxngStatus?.base_url || 'http://127.0.0.1:8080'}
-            {searxngStatus?.ports ? ` | ${searxngStatus.ports}` : ''}
-          </div>
-          {searxngStatusErrorMessage && !searxngStatus ? (
-            <div className="mt-1 text-rose-600 dark:text-rose-300">
-              searxng status error: {searxngStatusErrorMessage}
             </div>
-          ) : null}
-          {!searxngStatus?.docker_available ? (
-            <div className="mt-1 text-rose-600 dark:text-rose-300">docker not available</div>
-          ) : null}
-          {searxngStatus?.docker_available && !searxngStatus?.compose_file_exists ? (
-            <div className="mt-1 text-rose-600 dark:text-rose-300">compose file missing: {searxngStatus.compose_path}</div>
-          ) : null}
+          )}
         </div>
         <div className="grid grid-cols-3 items-start gap-2">
           <div className="space-y-1">
@@ -7634,7 +8941,7 @@ Variant-empty extraction policy:
           <div className="text-xs text-gray-500 dark:text-gray-400">no indexlab run selected</div>
         )}
 
-        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-2">
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-12 gap-2">
           <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1 text-xs">
             <div className="text-gray-500 dark:text-gray-400">checked</div>
             <div className="font-semibold">{formatNumber(indexlabSummary.counters.pages_checked)}</div>
@@ -7667,6 +8974,38 @@ Variant-empty extraction policy:
             <div className="text-gray-500 dark:text-gray-400">fields filled</div>
             <div className="font-semibold">{formatNumber(indexlabSummary.counters.fields_filled)}</div>
           </div>
+          <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1 text-xs">
+            <div className="text-gray-500 dark:text-gray-400">json-ld</div>
+            <div className="font-semibold">{formatNumber(indexlabSummary.counters.structured_json_ld || 0)}</div>
+          </div>
+          <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1 text-xs">
+            <div className="text-gray-500 dark:text-gray-400">microdata</div>
+            <div className="font-semibold">{formatNumber(indexlabSummary.counters.structured_microdata || 0)}</div>
+          </div>
+          <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1 text-xs">
+            <div className="text-gray-500 dark:text-gray-400">opengraph</div>
+            <div className="font-semibold">{formatNumber(indexlabSummary.counters.structured_opengraph || 0)}</div>
+          </div>
+          <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1 text-xs">
+            <div className="text-gray-500 dark:text-gray-400">struct cands</div>
+            <div className="font-semibold">{formatNumber(indexlabSummary.counters.structured_candidates || 0)}</div>
+          </div>
+          <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1 text-xs">
+            <div className="text-gray-500 dark:text-gray-400">pdf docs</div>
+            <div className="font-semibold">{formatNumber(indexlabSummary.counters.pdf_docs_parsed || 0)}</div>
+          </div>
+          <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1 text-xs">
+            <div className="text-gray-500 dark:text-gray-400">pdf pairs</div>
+            <div className="font-semibold">{formatNumber(indexlabSummary.counters.pdf_pairs_total || 0)}</div>
+          </div>
+          <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1 text-xs">
+            <div className="text-gray-500 dark:text-gray-400">scanned docs</div>
+            <div className="font-semibold">{formatNumber(indexlabSummary.counters.scanned_pdf_docs_detected || 0)}</div>
+          </div>
+          <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1 text-xs">
+            <div className="text-gray-500 dark:text-gray-400">scanned ocr pairs</div>
+            <div className="font-semibold">{formatNumber(indexlabSummary.counters.scanned_pdf_ocr_pairs || 0)}</div>
+          </div>
         </div>
 
         <div className="rounded border border-gray-200 dark:border-gray-700 p-2">
@@ -7698,9 +9037,120 @@ Variant-empty extraction policy:
           <table className="mt-2 min-w-full text-xs">
             <thead>
               <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
-                <th className="py-1 pr-3">url</th>
-                <th className="py-1 pr-3">status</th>
-                <th className="py-1 pr-3">http</th>
+                <th className="py-1 pr-3">
+                  <span className="inline-flex items-center gap-1">
+                    url
+                    <Tip text="Source URL represented by this job row." />
+                  </span>
+                </th>
+                <th className="py-1 pr-3">
+                  <span className="inline-flex items-center gap-1">
+                    status
+                    <Tip text="Final fetch outcome class for this URL row (ok/404/blocked/error)." />
+                  </span>
+                </th>
+                <th className="py-1 pr-3">
+                  <span className="inline-flex items-center gap-1">
+                    fetcher
+                    <Tip text="Transport/execution path used for fetch (http/playwright/crawlee/etc)." />
+                  </span>
+                </th>
+                <th className="py-1 pr-3">
+                  <span className="inline-flex items-center gap-1">
+                    tries
+                    <Tip text="Total attempts used to fetch this URL (initial + retries)." />
+                  </span>
+                </th>
+                <th className="py-1 pr-3">
+                  <span className="inline-flex items-center gap-1">
+                    retry
+                    <Tip text="Retry count used after the initial fetch attempt." />
+                  </span>
+                </th>
+                <th className="py-1 pr-3">
+                  <span className="inline-flex items-center gap-1">
+                    policy
+                    <Tip text="Matched dynamic fetch policy host and whether an override was applied." />
+                  </span>
+                </th>
+                <th className="py-1 pr-3">
+                  <span className="inline-flex items-center gap-1">
+                    static dom
+                    <Tip text="Static DOM parser mode and accepted/rejected candidate counts for this URL." />
+                  </span>
+                </th>
+                <th className="py-1 pr-3">
+                  <span className="inline-flex items-center gap-1">
+                    json-ld
+                    <Tip text="Structured JSON-LD nodes detected for this URL during parse." />
+                  </span>
+                </th>
+                <th className="py-1 pr-3">
+                  <span className="inline-flex items-center gap-1">
+                    microdata
+                    <Tip text="Structured Microdata nodes detected for this URL during parse." />
+                  </span>
+                </th>
+                <th className="py-1 pr-3">
+                  <span className="inline-flex items-center gap-1">
+                    opengraph
+                    <Tip text="OpenGraph key count detected for this URL during parse." />
+                  </span>
+                </th>
+                <th className="py-1 pr-3">
+                  <span className="inline-flex items-center gap-1">
+                    struct cands
+                    <Tip text="Structured candidates accepted by identity gate for this URL." />
+                  </span>
+                </th>
+                <th className="py-1 pr-3">
+                  <span className="inline-flex items-center gap-1">
+                    pdf docs
+                    <Tip text="Phase 06 text-PDF documents parsed for this URL row." />
+                  </span>
+                </th>
+                <th className="py-1 pr-3">
+                  <span className="inline-flex items-center gap-1">
+                    pdf backend
+                    <Tip text="Selected PDF parser backend for this URL (pdfplumber/pymupdf/camelot)." />
+                  </span>
+                </th>
+                <th className="py-1 pr-3">
+                  <span className="inline-flex items-center gap-1">
+                    pdf pairs
+                    <Tip text="Extracted normalized PDF pairs for this URL (kv + table)." />
+                  </span>
+                </th>
+                <th className="py-1 pr-3">
+                  <span className="inline-flex items-center gap-1">
+                    scanned docs
+                    <Tip text="Scanned/image-only PDF docs detected and OCR attempted/succeeded for this URL." />
+                  </span>
+                </th>
+                <th className="py-1 pr-3">
+                  <span className="inline-flex items-center gap-1">
+                    scanned backend
+                    <Tip text="OCR backend selected for scanned PDF handling on this URL." />
+                  </span>
+                </th>
+                <th className="py-1 pr-3">
+                  <span className="inline-flex items-center gap-1">
+                    scanned pairs
+                    <Tip text="OCR-derived pairs for scanned PDFs (total with kv/table split, low-confidence and error counts)." />
+                  </span>
+                </th>
+                <th className="py-1 pr-3">
+                  <span className="inline-flex items-center gap-1">
+                    article policy
+                    <Tip text="Article extractor policy mode and matched domain override used for this URL." />
+                  </span>
+                </th>
+                <th className="py-1 pr-3">
+                  <span className="inline-flex items-center gap-1">
+                    http
+                    <Tip text="HTTP status code observed for this URL fetch." />
+                  </span>
+                </th>
                 <th className="py-1 pr-3">
                   <span className="inline-flex items-center gap-1">
                     fetch ms
@@ -7731,20 +9181,79 @@ Variant-empty extraction policy:
                     <Tip text="Whether article extraction marked this URL as low quality." />
                   </span>
                 </th>
-                <th className="py-1 pr-3">started</th>
-                <th className="py-1 pr-3">finished</th>
+                <th className="py-1 pr-3">
+                  <span className="inline-flex items-center gap-1">
+                    started
+                    <Tip text="Timestamp when fetch for this URL started." />
+                  </span>
+                </th>
+                <th className="py-1 pr-3">
+                  <span className="inline-flex items-center gap-1">
+                    finished
+                    <Tip text="Timestamp when this URL job reached its latest completion state." />
+                  </span>
+                </th>
               </tr>
             </thead>
             <tbody>
               {indexlabSummary.recentJobs.length === 0 && (
                 <tr>
-                  <td className="py-2 text-gray-500 dark:text-gray-400" colSpan={10}>no url jobs yet</td>
+                  <td className="py-2 text-gray-500 dark:text-gray-400" colSpan={26}>no url jobs yet</td>
                 </tr>
               )}
               {indexlabSummary.recentJobs.map((row) => (
                 <tr key={row.url} className="border-b border-gray-100 dark:border-gray-800">
                   <td className="py-1 pr-3 font-mono truncate max-w-[32rem]" title={row.url}>{row.url}</td>
                   <td className="py-1 pr-3">{row.status}</td>
+                  <td className="py-1 pr-3">{row.fetcher_kind || '-'}</td>
+                  <td className="py-1 pr-3">{row.fetch_attempts > 0 ? row.fetch_attempts : '-'}</td>
+                  <td className="py-1 pr-3">{row.fetch_retry_count > 0 ? row.fetch_retry_count : '0'}</td>
+                  <td className="py-1 pr-3">
+                    {row.fetch_policy_host
+                      ? `${row.fetch_policy_host}${row.fetch_policy_override ? ' (override)' : ''}`
+                      : (row.fetch_policy_override ? 'override' : '-')}
+                  </td>
+                  <td className="py-1 pr-3">
+                    {row.static_dom_mode
+                      ? `${row.static_dom_mode} ${row.static_dom_accepted}/${row.static_dom_rejected}`
+                      : '-'}
+                  </td>
+                  <td className="py-1 pr-3">{formatNumber(Number(row.structured_json_ld_count || 0))}</td>
+                  <td className="py-1 pr-3">{formatNumber(Number(row.structured_microdata_count || 0))}</td>
+                  <td className="py-1 pr-3">{formatNumber(Number(row.structured_opengraph_count || 0))}</td>
+                  <td className="py-1 pr-3">
+                    {formatNumber(Number(row.structured_candidates || 0))}
+                    {Number(row.structured_rejected_candidates || 0) > 0 ? ` / ${formatNumber(Number(row.structured_rejected_candidates || 0))} rej` : ''}
+                  </td>
+                  <td className="py-1 pr-3">{formatNumber(Number(row.pdf_docs_parsed || 0))}</td>
+                  <td className="py-1 pr-3 font-mono">{row.pdf_backend_selected || '-'}</td>
+                  <td className="py-1 pr-3">
+                    {formatNumber(Number(row.pdf_pairs_total || 0))}
+                    {Number(row.pdf_kv_pairs || 0) > 0 || Number(row.pdf_table_pairs || 0) > 0
+                      ? ` (${formatNumber(Number(row.pdf_kv_pairs || 0))}/${formatNumber(Number(row.pdf_table_pairs || 0))})`
+                      : ''}
+                    {Number(row.pdf_error_count || 0) > 0 ? ` !${formatNumber(Number(row.pdf_error_count || 0))}` : ''}
+                  </td>
+                  <td className="py-1 pr-3">
+                    {formatNumber(Number(row.scanned_pdf_docs_detected || 0))}
+                    {Number(row.scanned_pdf_ocr_docs_attempted || 0) > 0 || Number(row.scanned_pdf_ocr_docs_succeeded || 0) > 0
+                      ? ` (${formatNumber(Number(row.scanned_pdf_ocr_docs_attempted || 0))}/${formatNumber(Number(row.scanned_pdf_ocr_docs_succeeded || 0))})`
+                      : ''}
+                  </td>
+                  <td className="py-1 pr-3 font-mono">{row.scanned_pdf_ocr_backend_selected || '-'}</td>
+                  <td className="py-1 pr-3">
+                    {formatNumber(Number(row.scanned_pdf_ocr_pairs || 0))}
+                    {Number(row.scanned_pdf_ocr_kv_pairs || 0) > 0 || Number(row.scanned_pdf_ocr_table_pairs || 0) > 0
+                      ? ` (${formatNumber(Number(row.scanned_pdf_ocr_kv_pairs || 0))}/${formatNumber(Number(row.scanned_pdf_ocr_table_pairs || 0))})`
+                      : ''}
+                    {Number(row.scanned_pdf_ocr_low_conf_pairs || 0) > 0 ? ` low:${formatNumber(Number(row.scanned_pdf_ocr_low_conf_pairs || 0))}` : ''}
+                    {Number(row.scanned_pdf_ocr_error_count || 0) > 0 ? ` !${formatNumber(Number(row.scanned_pdf_ocr_error_count || 0))}` : ''}
+                  </td>
+                  <td className="py-1 pr-3">
+                    {row.article_policy_mode
+                      ? `${row.article_policy_mode}${row.article_policy_host ? ` @ ${row.article_policy_host}` : ''}${row.article_policy_override ? ' (override)' : ''}`
+                      : '-'}
+                  </td>
                   <td className="py-1 pr-3">{row.status_code || '-'}</td>
                   <td className="py-1 pr-3">{row.ms || '-'}</td>
                   <td className="py-1 pr-3">{row.parse_ms || '-'}</td>

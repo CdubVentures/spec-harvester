@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { normalizeWhitespace } from '../utils/common.js';
 import { filterReadableHtml } from '../extract/readabilityFilter.js';
 import { extractMainArticle } from '../extract/articleExtractor.js';
+import { resolveArticleExtractionPolicy } from '../extract/articleExtractorPolicy.js';
 
 function toText(value, maxChars = 5000) {
   const text = typeof value === 'string' ? value : JSON.stringify(value || {});
@@ -47,11 +48,41 @@ function extractionMethodForType(type) {
   if (token === 'json_ld_product') {
     return 'json_ld';
   }
+  if (token === 'microdata_product') {
+    return 'microdata';
+  }
+  if (token === 'opengraph_product') {
+    return 'opengraph';
+  }
+  if (token === 'microformat_product') {
+    return 'microformat';
+  }
+  if (token === 'rdfa_product') {
+    return 'rdfa';
+  }
+  if (token === 'twitter_card_product') {
+    return 'twitter_card';
+  }
   if (token === 'json') {
     return 'api_fetch';
   }
-  if (token === 'pdf') {
-    return 'parse_template';
+  if (token === 'pdf_doc_meta' || token === 'pdf') {
+    return 'pdf';
+  }
+  if (token === 'pdf_kv_row') {
+    return 'pdf_kv';
+  }
+  if (token === 'pdf_table_row') {
+    return 'pdf_table';
+  }
+  if (token === 'scanned_pdf_ocr_text' || token === 'scanned_pdf_ocr_meta') {
+    return 'scanned_pdf_ocr_text';
+  }
+  if (token === 'scanned_pdf_ocr_kv_row') {
+    return 'scanned_pdf_ocr_kv';
+  }
+  if (token === 'scanned_pdf_ocr_table_row') {
+    return 'scanned_pdf_ocr_table';
   }
   return 'parse_template';
 }
@@ -285,6 +316,35 @@ function unpackJsonLdProducts(block) {
   return products;
 }
 
+function asStructuredNodes(surfaceValue, { objectToSingleNode = false } = {}) {
+  if (Array.isArray(surfaceValue)) {
+    return surfaceValue.filter((row) => row !== null && row !== undefined);
+  }
+  if (objectToSingleNode && surfaceValue && typeof surfaceValue === 'object') {
+    return [surfaceValue];
+  }
+  return [];
+}
+
+function normalizePdfPreviewRows(rows = []) {
+  const out = [];
+  for (const row of rows || []) {
+    const key = normalizeWhitespace(String(row?.key || '')).trim();
+    const value = normalizeWhitespace(String(row?.value || '')).trim();
+    if (!key || !value) {
+      continue;
+    }
+    out.push({
+      key,
+      value,
+      path: String(row?.path || '').trim(),
+      surface: String(row?.surface || '').trim(),
+      page: Number.parseInt(String(row?.page || 0), 10) || 0
+    });
+  }
+  return out;
+}
+
 function pushReference(state, item, targetFields = []) {
   const text = String(item.content || '');
   if (!text) {
@@ -456,13 +516,18 @@ export function buildEvidencePackV2({
     || (domSnippetText ? sha256(domSnippetText) : '');
   const tokens = fieldTokens(targetFields);
   const visualAssets = [];
+  const articlePolicy = resolveArticleExtractionPolicy(config, {
+    host: source?.host || host,
+    url: normalizedUrl || source?.url || ''
+  });
   const articleExtraction = extractMainArticle(html, {
     url: normalizedUrl || source?.url || '',
     title: pageData?.title || '',
-    enabled: config?.articleExtractorV2Enabled !== false,
-    minChars: Number(config?.articleExtractorMinChars || 700),
-    minScore: Number(config?.articleExtractorMinScore || 45),
-    maxChars: Math.min(maxChars, Number(config?.articleExtractorMaxChars || 24_000))
+    enabled: articlePolicy.enabled,
+    mode: articlePolicy.mode,
+    minChars: Number(articlePolicy.minChars || 700),
+    minScore: Number(articlePolicy.minScore || 45),
+    maxChars: Math.min(maxChars, Number(articlePolicy.maxChars || 24_000))
   });
 
   if (articleExtraction?.text) {
@@ -602,6 +667,78 @@ export function buildEvidencePackV2({
     }, targetFields);
   });
 
+  const structuredMetadata = pageData?.structuredMetadata && typeof pageData.structuredMetadata === 'object'
+    ? pageData.structuredMetadata
+    : null;
+  const structuredSurfaces = structuredMetadata?.surfaces && typeof structuredMetadata.surfaces === 'object'
+    ? structuredMetadata.surfaces
+    : {};
+
+  const microdataNodes = asStructuredNodes(structuredSurfaces.microdata).slice(0, 12);
+  microdataNodes.forEach((node, index) => {
+    pushReference(state, {
+      id: toStableId('m', index),
+      url: normalizedUrl || source.url,
+      type: 'microdata_product',
+      content: toText(node, 2800),
+      extractionMethod: 'microdata',
+      keyPath: `structured.microdata[${index}]`,
+      surface: 'microdata'
+    }, targetFields);
+  });
+
+  const rdfaNodes = asStructuredNodes(structuredSurfaces.rdfa).slice(0, 10);
+  rdfaNodes.forEach((node, index) => {
+    pushReference(state, {
+      id: toStableId('r', index),
+      url: normalizedUrl || source.url,
+      type: 'rdfa_product',
+      content: toText(node, 2600),
+      extractionMethod: 'rdfa',
+      keyPath: `structured.rdfa[${index}]`,
+      surface: 'rdfa'
+    }, targetFields);
+  });
+
+  const microformatNodes = asStructuredNodes(structuredSurfaces.microformats).slice(0, 10);
+  microformatNodes.forEach((node, index) => {
+    pushReference(state, {
+      id: toStableId('f', index),
+      url: normalizedUrl || source.url,
+      type: 'microformat_product',
+      content: toText(node, 2600),
+      extractionMethod: 'microformat',
+      keyPath: `structured.microformats[${index}]`,
+      surface: 'microformat'
+    }, targetFields);
+  });
+
+  const opengraphNodes = asStructuredNodes(structuredSurfaces.opengraph, { objectToSingleNode: true }).slice(0, 1);
+  opengraphNodes.forEach((node, index) => {
+    pushReference(state, {
+      id: toStableId('o', index),
+      url: normalizedUrl || source.url,
+      type: 'opengraph_product',
+      content: toText(node, 2200),
+      extractionMethod: 'opengraph',
+      keyPath: `structured.opengraph[${index}]`,
+      surface: 'opengraph'
+    }, targetFields);
+  });
+
+  const twitterNodes = asStructuredNodes(structuredSurfaces.twitter, { objectToSingleNode: true }).slice(0, 1);
+  twitterNodes.forEach((node, index) => {
+    pushReference(state, {
+      id: toStableId('u', index),
+      url: normalizedUrl || source.url,
+      type: 'twitter_card_product',
+      content: toText(node, 2200),
+      extractionMethod: 'twitter_card',
+      keyPath: `structured.twitter[${index}]`,
+      surface: 'twitter_card'
+    }, targetFields);
+  });
+
   const embeddedPayloads = [
     pageData?.embeddedState?.nextData?.props?.pageProps,
     pageData?.embeddedState?.nextData,
@@ -617,13 +754,151 @@ export function buildEvidencePackV2({
     }, targetFields);
   });
 
-  (adapterExtra?.pdfDocs || []).slice(0, 10).forEach((pdf, index) => {
+  const pdfDocs = Array.isArray(adapterExtra?.pdfDocs) ? adapterExtra.pdfDocs.slice(0, 10) : [];
+  let pdfTextIndex = 0;
+  let pdfKvRowIndex = 0;
+  let pdfTableRowIndex = 0;
+  let scannedPdfTextIndex = 0;
+  let scannedPdfKvRowIndex = 0;
+  let scannedPdfTableRowIndex = 0;
+  pdfDocs.forEach((pdf, index) => {
+    const pdfUrl = String(pdf?.url || normalizedUrl || source.url).trim();
+    const backendSelected = String(pdf?.backend_selected || '').trim() || 'unknown';
+    const pairCount = Number(pdf?.pair_count || 0);
+    const kvPairCount = Number(pdf?.kv_pair_count || 0);
+    const tablePairCount = Number(pdf?.table_pair_count || 0);
+    const pagesScanned = Number(pdf?.pages_scanned || 0);
+    const tablesFound = Number(pdf?.tables_found || 0);
+    const scannedDetected = Boolean(pdf?.scanned_pdf_detected);
+    const scannedOcrAttempted = Boolean(pdf?.scanned_pdf_ocr_attempted);
+    const scannedOcrPairCount = Number(pdf?.scanned_pdf_ocr_pair_count || 0);
+    const scannedOcrKvPairCount = Number(pdf?.scanned_pdf_ocr_kv_pair_count || 0);
+    const scannedOcrTablePairCount = Number(pdf?.scanned_pdf_ocr_table_pair_count || 0);
+    const scannedOcrConfidenceAvg = Number(pdf?.scanned_pdf_ocr_confidence_avg || 0);
+    const scannedOcrLowConfidencePairs = Number(pdf?.scanned_pdf_ocr_low_confidence_pairs || 0);
+    const scannedOcrBackendSelected = String(pdf?.scanned_pdf_ocr_backend_selected || '').trim() || 'none';
+    const summaryText = [
+      `PDF doc backend=${backendSelected}`,
+      `pairs=${pairCount}`,
+      `kv=${kvPairCount}`,
+      `table=${tablePairCount}`,
+      `pages=${pagesScanned}`,
+      `tables=${tablesFound}`,
+      `scanned_detected=${scannedDetected ? 'yes' : 'no'}`,
+      `scanned_ocr_attempted=${scannedOcrAttempted ? 'yes' : 'no'}`,
+      `scanned_ocr_backend=${scannedOcrBackendSelected}`,
+      `scanned_ocr_pairs=${scannedOcrPairCount}`,
+      `name=${String(pdf?.filename || '').trim() || 'doc.pdf'}`
+    ].join(' | ');
     pushReference(state, {
       id: toStableId('p', index),
-      url: pdf.url || normalizedUrl || source.url,
-      type: 'pdf',
-      content: normalizeWhitespace(String(pdf.textPreview || '')).slice(0, 3000)
+      url: pdfUrl,
+      type: 'pdf_doc_meta',
+      content: summaryText,
+      extractionMethod: 'pdf',
+      surface: 'pdf_text'
     }, targetFields);
+
+    const textPreview = normalizeWhitespace(String(pdf?.textPreview || '')).slice(0, 3000);
+    if (textPreview) {
+      pushReference(state, {
+        id: toStableId('x', pdfTextIndex),
+        url: pdfUrl,
+        type: 'pdf',
+        content: textPreview,
+        extractionMethod: 'pdf',
+        surface: 'pdf_text'
+      }, targetFields);
+      pdfTextIndex += 1;
+    }
+
+    const kvRows = normalizePdfPreviewRows(pdf?.kv_preview_rows || []).slice(0, 12);
+    kvRows.forEach((row) => {
+      pushReference(state, {
+        id: toStableId('q', pdfKvRowIndex),
+        url: pdfUrl,
+        type: 'pdf_kv_row',
+        content: `${row.key}: ${row.value}`,
+        extractionMethod: 'pdf_kv',
+        keyPath: row.path || '',
+        surface: row.surface || 'pdf_kv'
+      }, targetFields);
+      pdfKvRowIndex += 1;
+    });
+
+    const tableRows = normalizePdfPreviewRows(pdf?.table_preview_rows || []).slice(0, 12);
+    tableRows.forEach((row) => {
+      pushReference(state, {
+        id: toStableId('z', pdfTableRowIndex),
+        url: pdfUrl,
+        type: 'pdf_table_row',
+        content: `${row.key}: ${row.value}`,
+        extractionMethod: 'pdf_table',
+        keyPath: row.path || '',
+        surface: row.surface || 'pdf_table'
+      }, targetFields);
+      pdfTableRowIndex += 1;
+    });
+
+    const ocrTextPreview = normalizeWhitespace(String(pdf?.ocr_text_preview || '')).slice(0, 3000);
+    if (ocrTextPreview) {
+      pushReference(state, {
+        id: toStableId('y', scannedPdfTextIndex),
+        url: pdfUrl,
+        type: 'scanned_pdf_ocr_text',
+        content: ocrTextPreview,
+        extractionMethod: 'scanned_pdf_ocr_text',
+        surface: 'scanned_pdf_ocr_text'
+      }, targetFields);
+      scannedPdfTextIndex += 1;
+    }
+
+    const ocrSummaryText = [
+      `OCR backend=${scannedOcrBackendSelected}`,
+      `pairs=${scannedOcrPairCount}`,
+      `kv=${scannedOcrKvPairCount}`,
+      `table=${scannedOcrTablePairCount}`,
+      `confidence=${Number.isFinite(scannedOcrConfidenceAvg) ? scannedOcrConfidenceAvg.toFixed(3) : '0.000'}`,
+      `low_conf_pairs=${scannedOcrLowConfidencePairs}`
+    ].join(' | ');
+    if (scannedDetected || scannedOcrAttempted || scannedOcrPairCount > 0) {
+      pushReference(state, {
+        id: toStableId('w', index),
+        url: pdfUrl,
+        type: 'scanned_pdf_ocr_meta',
+        content: ocrSummaryText,
+        extractionMethod: 'scanned_pdf_ocr_text',
+        surface: 'scanned_pdf_ocr_text'
+      }, targetFields);
+    }
+
+    const ocrKvRows = normalizePdfPreviewRows(pdf?.ocr_kv_preview_rows || []).slice(0, 12);
+    ocrKvRows.forEach((row) => {
+      pushReference(state, {
+        id: toStableId('v', scannedPdfKvRowIndex),
+        url: pdfUrl,
+        type: 'scanned_pdf_ocr_kv_row',
+        content: `${row.key}: ${row.value}`,
+        extractionMethod: 'scanned_pdf_ocr_kv',
+        keyPath: row.path || '',
+        surface: row.surface || 'scanned_pdf_ocr_kv'
+      }, targetFields);
+      scannedPdfKvRowIndex += 1;
+    });
+
+    const ocrTableRows = normalizePdfPreviewRows(pdf?.ocr_table_preview_rows || []).slice(0, 12);
+    ocrTableRows.forEach((row) => {
+      pushReference(state, {
+        id: toStableId('r', scannedPdfTableRowIndex),
+        url: pdfUrl,
+        type: 'scanned_pdf_ocr_table_row',
+        content: `${row.key}: ${row.value}`,
+        extractionMethod: 'scanned_pdf_ocr_table',
+        keyPath: row.path || '',
+        surface: row.surface || 'scanned_pdf_ocr_table'
+      }, targetFields);
+      scannedPdfTableRowIndex += 1;
+    });
   });
 
   const candidateSeen = new Set();
@@ -644,13 +919,33 @@ export function buildEvidencePackV2({
     const field = String(candidate?.field || '').trim();
     const quote = field ? `${field}: ${value}` : value;
     const methodToken = String(candidate?.method || '').toLowerCase();
-    const extractionMethod = methodToken === 'ldjson'
+    const extractionMethod = methodToken === 'ldjson' || methodToken === 'json_ld'
       ? 'json_ld'
-      : (methodToken === 'network_json' || methodToken === 'embedded_state' || methodToken === 'adapter_api')
-        ? 'api_fetch'
-        : methodToken === 'pdf_table'
-          ? 'parse_template'
-          : 'spec_table_match';
+      : methodToken === 'microdata'
+        ? 'microdata'
+        : methodToken === 'opengraph'
+          ? 'opengraph'
+          : methodToken === 'microformat'
+            ? 'microformat'
+            : methodToken === 'rdfa'
+              ? 'rdfa'
+              : methodToken === 'twitter_card'
+                ? 'twitter_card'
+                : (methodToken === 'network_json' || methodToken === 'embedded_state' || methodToken === 'adapter_api')
+                  ? 'api_fetch'
+                  : methodToken === 'pdf_table'
+                    ? 'pdf_table'
+                    : methodToken === 'pdf_kv'
+                      ? 'pdf_kv'
+                      : methodToken === 'scanned_pdf_ocr_table'
+                        ? 'scanned_pdf_ocr_table'
+                        : methodToken === 'scanned_pdf_ocr_kv'
+                          ? 'scanned_pdf_ocr_kv'
+                          : methodToken === 'scanned_pdf_ocr_text'
+                            ? 'scanned_pdf_ocr_text'
+                      : methodToken === 'pdf'
+                        ? 'pdf'
+                        : 'spec_table_match';
 
     pushReference(state, {
       id: snippetId,
@@ -674,6 +969,15 @@ export function buildEvidencePackV2({
       content: stripHtml(pageData?.html || '').slice(0, 3000)
     }, targetFields);
   }
+  const structuredStats = structuredMetadata?.stats && typeof structuredMetadata.stats === 'object'
+    ? structuredMetadata.stats
+    : {};
+  const structuredErrors = Array.isArray(structuredMetadata?.errors)
+    ? structuredMetadata.errors.map((row) => String(row || '').trim()).filter(Boolean)
+    : [];
+  const pdfStats = adapterExtra?.pdfStats && typeof adapterExtra.pdfStats === 'object'
+    ? adapterExtra.pdfStats
+    : {};
 
   return {
     product_id: String(source?.productId || ''),
@@ -714,8 +1018,51 @@ export function buildEvidencePackV2({
         dom_snippet_content_hash: domSnippetHash || '',
         visual_asset_count: visualAssets.length
       },
+      structured_metadata: {
+        available: Boolean(structuredMetadata),
+        sidecar_ok: Boolean(structuredMetadata?.ok),
+        sidecar_errors: structuredErrors.slice(0, 12),
+        json_ld_count: Number(structuredStats?.json_ld_count || 0),
+        microdata_count: Number(structuredStats?.microdata_count || 0),
+        rdfa_count: Number(structuredStats?.rdfa_count || 0),
+        microformats_count: Number(structuredStats?.microformats_count || 0),
+        opengraph_count: Number(structuredStats?.opengraph_count || 0),
+        twitter_count: Number(structuredStats?.twitter_count || 0),
+        structured_candidates: Number(structuredStats?.structured_candidates || 0),
+        structured_rejected_candidates: Number(structuredStats?.structured_rejected_candidates || 0)
+      },
+      pdf_extraction: {
+        doc_count: pdfDocs.length,
+        docs_discovered: Number(pdfStats?.docs_discovered || 0),
+        docs_fetched: Number(pdfStats?.docs_fetched || 0),
+        docs_parsed: Number(pdfStats?.docs_parsed || 0),
+        docs_failed: Number(pdfStats?.docs_failed || 0),
+        backend_requested: String(pdfStats?.requested_backend || ''),
+        backend_selected: String(pdfStats?.backend_selected || ''),
+        backend_fallback_count: Number(pdfStats?.backend_fallback_count || 0),
+        pair_count: Number(pdfStats?.pair_count || 0),
+        kv_pair_count: Number(pdfStats?.kv_pair_count || 0),
+        table_pair_count: Number(pdfStats?.table_pair_count || 0),
+        pages_scanned: Number(pdfStats?.pages_scanned || 0),
+        tables_found: Number(pdfStats?.tables_found || 0),
+        scanned_docs_detected: Number(pdfStats?.scanned_docs_detected || 0),
+        scanned_docs_ocr_attempted: Number(pdfStats?.scanned_docs_ocr_attempted || 0),
+        scanned_docs_ocr_succeeded: Number(pdfStats?.scanned_docs_ocr_succeeded || 0),
+        scanned_ocr_pair_count: Number(pdfStats?.scanned_ocr_pair_count || 0),
+        scanned_ocr_kv_pair_count: Number(pdfStats?.scanned_ocr_kv_pair_count || 0),
+        scanned_ocr_table_pair_count: Number(pdfStats?.scanned_ocr_table_pair_count || 0),
+        scanned_ocr_low_confidence_pairs: Number(pdfStats?.scanned_ocr_low_confidence_pairs || 0),
+        scanned_ocr_confidence_avg: Number(pdfStats?.scanned_ocr_confidence_avg || 0),
+        scanned_ocr_error_count: Number(pdfStats?.scanned_ocr_error_count || 0),
+        scanned_ocr_backend_selected: String(pdfStats?.scanned_ocr_backend_selected || ''),
+        error_count: Number(pdfStats?.error_count || 0),
+        errors: Array.isArray(pdfStats?.errors) ? pdfStats.errors.slice(0, 12) : []
+      },
       article_extraction: {
         method: String(articleExtraction?.method || ''),
+        policy_mode: String(articlePolicy.mode || 'auto'),
+        policy_matched_host: String(articlePolicy.matchedHost || ''),
+        policy_override_applied: Boolean(articlePolicy.overrideApplied),
         title: normalizeText(String(articleExtraction?.title || '')).slice(0, 220),
         excerpt: normalizeText(String(articleExtraction?.excerpt || '')).slice(0, 360),
         preview: normalizeText(String(articleExtraction?.text || '')).slice(0, 1200),

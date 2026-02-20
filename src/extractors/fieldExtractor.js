@@ -13,6 +13,8 @@ import {
   splitListValue
 } from '../utils/common.js';
 import { extractDomFallback } from './domFallbackExtractor.js';
+import { extractStaticDomCandidates } from './staticDomExtractor.js';
+import { mergeStructuredMetadataCandidates } from '../extract/structuredMetadataMerger.js';
 
 const FIELD_ALIASES = {
   id: ['id', 'productid'],
@@ -373,6 +375,19 @@ function inferVariantFromText(text) {
   return 'unk';
 }
 
+function mergeIdentityCandidates(target = {}, next = {}) {
+  for (const [field, value] of Object.entries(next || {})) {
+    const normalized = normalizeString(value);
+    if (normalized === 'unk') {
+      continue;
+    }
+    const existing = normalizeString(target?.[field]);
+    if (existing === 'unk' || existing.length < normalized.length) {
+      target[field] = normalized;
+    }
+  }
+}
+
 function hostHintPayloads(host, payload) {
   const normalizedHost = String(host || '').toLowerCase();
   const hintEntry = Object.entries(HOST_HINT_PATHS).find(([domain]) => normalizedHost.endsWith(domain));
@@ -485,12 +500,20 @@ function shouldIgnoreDimensionPath(field, path) {
 export function extractCandidatesFromPage({
   host,
   html,
+  canonicalUrl = '',
   title,
   ldjsonBlocks,
   embeddedState,
-  networkResponses
+  networkResponses,
+  structuredMetadata = null,
+  staticDomExtractorEnabled = true,
+  staticDomMode = 'cheerio',
+  htmlTableExtractorV2 = true,
+  staticDomTargetMatchThreshold = 0.55,
+  staticDomMaxEvidenceSnippets = 120,
+  identityTarget = {}
 }) {
-  const candidateRows = [];
+  let candidateRows = [];
   const identity = {};
 
   const buckets = buildPayloadBuckets({
@@ -534,6 +557,47 @@ export function extractCandidatesFromPage({
     }
   }
 
+  const structuredMerge = mergeStructuredMetadataCandidates({
+    baseCandidates: candidateRows,
+    sidecarResult: structuredMetadata,
+    identityTarget,
+    canonicalUrl,
+    pickFieldFromPath,
+    normalizeByField,
+    gatherIdentityCandidates,
+    shouldIgnoreDimensionPath,
+    targetMatchThreshold: staticDomTargetMatchThreshold
+  });
+  candidateRows = structuredMerge.fieldCandidates;
+  mergeIdentityCandidates(identity, structuredMerge.identityCandidates);
+
+  let staticDom = {
+    fieldCandidates: [],
+    identityCandidates: {},
+    evidenceSnippets: [],
+    parserStats: {
+      mode: String(staticDomMode || 'cheerio').trim().toLowerCase() || 'cheerio',
+      cluster_count: 0,
+      accepted_field_candidates: 0,
+      rejected_field_candidates: 0,
+      parse_error_count: 0
+    },
+    auditRejectedFieldCandidates: []
+  };
+  if (staticDomExtractorEnabled !== false) {
+    staticDom = extractStaticDomCandidates({
+      html,
+      title,
+      identityTarget,
+      mode: staticDomMode,
+      htmlTableExtractorV2,
+      targetMatchThreshold: staticDomTargetMatchThreshold,
+      maxEvidenceSnippets: staticDomMaxEvidenceSnippets
+    });
+    candidateRows.push(...(staticDom.fieldCandidates || []));
+    mergeIdentityCandidates(identity, staticDom.identityCandidates);
+  }
+
   const domFallback = extractDomFallback(html);
   for (const [field, value] of Object.entries(domFallback)) {
     const normalizedValue = normalizeByField(field, value);
@@ -556,6 +620,25 @@ export function extractCandidatesFromPage({
 
   return {
     fieldCandidates: candidateRows,
-    identityCandidates: identity
+    identityCandidates: identity,
+    staticDom,
+    structuredMetadata: {
+      stats: structuredMerge.stats || {
+        json_ld_count: 0,
+        microdata_count: 0,
+        rdfa_count: 0,
+        microformats_count: 0,
+        opengraph_count: 0,
+        twitter_count: 0,
+        structured_candidates: 0,
+        structured_rejected_candidates: 0
+      },
+      snippetRows: Array.isArray(structuredMerge.snippetRows)
+        ? structuredMerge.snippetRows.slice(0, 80)
+        : [],
+      errors: Array.isArray(structuredMerge.errors)
+        ? structuredMerge.errors.slice(0, 20)
+        : []
+    }
   };
 }

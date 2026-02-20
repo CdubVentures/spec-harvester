@@ -368,29 +368,40 @@ function normalizeVisualAssetsFromEvidencePack(evidencePack = {}) {
 function shouldSendPrimeSourceVisuals({
   routeMatrixPolicy = null
 } = {}) {
+  const primeSignalFromPolicy = (() => {
+    const token = routeMatrixPolicy?.prime_sources_visual_send;
+    if (typeof token === 'boolean') {
+      return token;
+    }
+    const normalized = String(token ?? '').trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on') return true;
+    if (normalized === 'false' || normalized === '0' || normalized === 'no' || normalized === 'off') return false;
+    return null;
+  })();
   const componentSend = String(routeMatrixPolicy?.component_values_send || '').trim().toLowerCase();
   const scalarSend = String(routeMatrixPolicy?.scalar_linked_send || '').trim().toLowerCase();
   const listSend = String(routeMatrixPolicy?.list_values_send || '').trim().toLowerCase();
+  const derivedPrimeSignal =
+    componentSend.includes('prime') ||
+    scalarSend.includes('prime') ||
+    listSend.includes('prime');
   const explicit = routeMatrixPolicy?.table_linked_send ?? routeMatrixPolicy?.prime_sources_visual_send ?? null;
   if (explicit !== null && explicit !== undefined && String(explicit).trim() !== '') {
     if (typeof explicit === 'boolean') {
-      return explicit;
+      if (explicit) {
+        return true;
+      }
+      return Boolean(primeSignalFromPolicy || derivedPrimeSignal);
     }
     const token = String(explicit).trim().toLowerCase();
     if (token === 'true' || token === '1' || token === 'yes' || token === 'on') return true;
     if (token === 'false' || token === '0' || token === 'no' || token === 'off') return false;
     return token.includes('prime');
   }
-  if (componentSend.includes('prime')) {
-    return true;
+  if (primeSignalFromPolicy !== null) {
+    return Boolean(primeSignalFromPolicy);
   }
-  if (scalarSend.includes('prime')) {
-    return true;
-  }
-  if (listSend.includes('prime')) {
-    return true;
-  }
-  return false;
+  return Boolean(derivedPrimeSignal);
 }
 
 function buildMultimodalUserInput({
@@ -402,13 +413,13 @@ function buildMultimodalUserInput({
 } = {}) {
   const text = JSON.stringify(userPayload);
   const allowImages = shouldSendPrimeSourceVisuals({ routeMatrixPolicy });
+  const visuals = normalizeVisualAssetsFromEvidencePack(scopedEvidencePack);
   if (!allowImages) {
     return {
       text,
       images: []
     };
   }
-  const visuals = normalizeVisualAssetsFromEvidencePack(scopedEvidencePack);
   const rankedVisuals = visuals
     .map((row) => ({
       ...row,
@@ -988,6 +999,25 @@ export async function extractCandidatesLLM({
       scopedEvidencePack,
       routeMatrixPolicy,
       maxImages: Math.max(1, Number.parseInt(String(config.llmExtractMaxImagesPerBatch || 6), 10) || 6)
+    });
+    logger?.info?.('llm_extract_multimodal_profile', {
+      productId: job.productId || '',
+      reason,
+      route_role: routeRole,
+      route_policy_table_linked_send: routeMatrixPolicy?.table_linked_send ?? null,
+      route_policy_prime_sources_visual_send: routeMatrixPolicy?.prime_sources_visual_send ?? null,
+      route_policy_component_values_send: routeMatrixPolicy?.component_values_send ?? null,
+      route_policy_scalar_linked_send: routeMatrixPolicy?.scalar_linked_send ?? null,
+      route_policy_list_values_send: routeMatrixPolicy?.list_values_send ?? null,
+      prompt_reference_count: Array.isArray(promptEvidence?.references) ? promptEvidence.references.length : 0,
+      scoped_visual_asset_count: Array.isArray(scopedEvidencePack?.visual_assets) ? scopedEvidencePack.visual_assets.length : 0,
+      multimodal_image_count: Array.isArray(multimodalUserInput?.images) ? multimodalUserInput.images.length : 0,
+      multimodal_image_uris: Array.isArray(multimodalUserInput?.images)
+        ? multimodalUserInput.images
+          .map((row) => String(row?.file_uri || '').trim())
+          .filter(Boolean)
+          .slice(0, 8)
+        : []
     });
     const result = await callLlmWithRouting({
       config,

@@ -9,6 +9,7 @@ export function applySharedLaneState({
   propertyKey = null,
   itemFieldStateId = null,
   componentValueId = null,
+  componentIdentityId = null,
   listValueId = null,
   enumListId = null,
   selectedCandidateId = null,
@@ -35,6 +36,7 @@ export function applySharedLaneState({
     propertyKey,
     itemFieldStateId,
     componentValueId,
+    componentIdentityId,
     listValueId,
   });
 
@@ -49,6 +51,7 @@ export function applySharedLaneState({
       propertyKey,
       itemFieldStateId,
       componentValueId,
+      componentIdentityId,
       listValueId,
       enumListId,
       selectedValue,

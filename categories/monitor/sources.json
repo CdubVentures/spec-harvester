@@ -1,8 +1,13 @@
 {
   "approved": {
     "database": [],
-    "lab": [],
-    "manufacturer": [],
+    "lab": [
+      "rtings.com",
+      "tomshardware.com"
+    ],
+    "manufacturer": [
+      "dell.com"
+    ],
     "retailer": []
   },
   "denylist": []

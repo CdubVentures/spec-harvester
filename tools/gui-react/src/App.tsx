@@ -1,18 +1,31 @@
+import { lazy, Suspense, type ComponentType } from 'react';
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AppShell } from './components/layout/AppShell';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
-import { OverviewPage } from './pages/overview/OverviewPage';
-import { ProductPage } from './pages/product/ProductPage';
-import { LlmSettingsPage } from './pages/llm-settings/LlmSettingsPage';
-import { BillingPage } from './pages/billing/BillingPage';
-import { StudioPage } from './pages/studio/StudioPage';
-import { CatalogPage } from './pages/catalog/CatalogPage';
-import { CategoryManager } from './pages/catalog/CategoryManager';
-import { ReviewPage } from './pages/review/ReviewPage';
-import { ComponentReviewPage } from './pages/component-review/ComponentReviewPage';
-import { TestModePage } from './pages/test-mode/TestModePage';
-import { IndexingPage } from './pages/indexing/IndexingPage';
+
+function lazyNamedPage(loader: () => Promise<Record<string, unknown>>, exportName: string) {
+  return lazy(async () => {
+    const module = await loader();
+    const component = module[exportName];
+    if (typeof component !== 'function') {
+      throw new Error(`Lazy page export "${exportName}" was not found.`);
+    }
+    return { default: component as ComponentType };
+  });
+}
+
+const OverviewPage = lazyNamedPage(() => import('./pages/overview/OverviewPage'), 'OverviewPage');
+const ProductPage = lazyNamedPage(() => import('./pages/product/ProductPage'), 'ProductPage');
+const LlmSettingsPage = lazyNamedPage(() => import('./pages/llm-settings/LlmSettingsPage'), 'LlmSettingsPage');
+const BillingPage = lazyNamedPage(() => import('./pages/billing/BillingPage'), 'BillingPage');
+const StudioPage = lazyNamedPage(() => import('./pages/studio/StudioPage'), 'StudioPage');
+const CatalogPage = lazyNamedPage(() => import('./pages/catalog/CatalogPage'), 'CatalogPage');
+const CategoryManager = lazyNamedPage(() => import('./pages/catalog/CategoryManager'), 'CategoryManager');
+const ReviewPage = lazyNamedPage(() => import('./pages/review/ReviewPage'), 'ReviewPage');
+const ComponentReviewPage = lazyNamedPage(() => import('./pages/component-review/ComponentReviewPage'), 'ComponentReviewPage');
+const TestModePage = lazyNamedPage(() => import('./pages/test-mode/TestModePage'), 'TestModePage');
+const IndexingPage = lazyNamedPage(() => import('./pages/indexing/IndexingPage'), 'IndexingPage');
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -24,10 +37,20 @@ const queryClient = new QueryClient({
   },
 });
 
-function wrap(Component: React.ComponentType) {
+function RouteFallback() {
+  return (
+    <div className="text-sm text-gray-500 dark:text-gray-400">
+      Loading page...
+    </div>
+  );
+}
+
+function wrap(Component: ComponentType) {
   return (
     <ErrorBoundary>
-      <Component />
+      <Suspense fallback={<RouteFallback />}>
+        <Component />
+      </Suspense>
     </ErrorBoundary>
   );
 }

@@ -185,7 +185,17 @@ async function writePageArtifacts({ writes, storage, runBase, host, artifact }) 
         jsonBuffer({
           url: pdf.url,
           filename,
-          textPreview: pdf.textPreview || ''
+          textPreview: pdf.textPreview || '',
+          backend_selected: String(pdf.backend_selected || '').trim() || null,
+          backend_requested: String(pdf.backend_requested || '').trim() || null,
+          backend_fallback_used: Boolean(pdf.backend_fallback_used),
+          pair_count: Number(pdf.pair_count || 0),
+          kv_pair_count: Number(pdf.kv_pair_count || 0),
+          table_pair_count: Number(pdf.table_pair_count || 0),
+          pages_scanned: Number(pdf.pages_scanned || 0),
+          tables_found: Number(pdf.tables_found || 0),
+          kv_preview_rows: Array.isArray(pdf.kv_preview_rows) ? pdf.kv_preview_rows.slice(0, 20) : [],
+          table_preview_rows: Array.isArray(pdf.table_preview_rows) ? pdf.table_preview_rows.slice(0, 20) : []
         }),
         {
           contentType: 'application/json'

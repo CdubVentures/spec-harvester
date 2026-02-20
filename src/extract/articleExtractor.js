@@ -138,6 +138,12 @@ function extractViaFallback(html) {
 
 export function extractMainArticle(html, options = {}) {
   const enabled = options.enabled !== false;
+  const modeToken = String(options.mode || 'auto').trim().toLowerCase().replace(/[-\s]+/g, '_');
+  const mode = modeToken === 'prefer_readability' || modeToken === 'readability'
+    ? 'prefer_readability'
+    : (modeToken === 'prefer_fallback' || modeToken === 'fallback' || modeToken === 'heuristic')
+      ? 'prefer_fallback'
+      : 'auto';
   const minChars = Math.max(100, Number(options.minChars || 700));
   const minScore = Math.max(1, Number(options.minScore || 45));
   const maxChars = Math.max(1000, Number(options.maxChars || 60_000));
@@ -168,7 +174,7 @@ export function extractMainArticle(html, options = {}) {
     titleMatch: titleInText(pageTitle, fallback.text)
   });
 
-  if (!enabled) {
+  if (!enabled || mode === 'prefer_fallback') {
     return {
       method: 'heuristic_fallback',
       text: truncateForTokenBudget(fallback.text, maxChars),
@@ -177,7 +183,7 @@ export function extractMainArticle(html, options = {}) {
       excerpt: fallback.excerpt,
       quality: fallbackQuality,
       low_quality: fallbackQuality.score < minScore || fallbackQuality.char_count < minChars,
-      fallback_reason: 'disabled'
+      fallback_reason: enabled ? 'policy_prefer_fallback' : 'disabled'
     };
   }
 
@@ -210,6 +216,19 @@ export function extractMainArticle(html, options = {}) {
 
   const readabilityPasses =
     readabilityQuality.score >= minScore && readabilityQuality.char_count >= minChars;
+
+  if (mode === 'prefer_readability') {
+    return {
+      method: 'readability',
+      text: truncateForTokenBudget(readabilityText, maxChars),
+      title: readability.title || pageTitle,
+      byline: readability.byline,
+      excerpt: readability.excerpt,
+      quality: readabilityQuality,
+      low_quality: !readabilityPasses,
+      fallback_reason: readabilityPasses ? '' : 'readability_low_quality'
+    };
+  }
 
   if (readabilityPasses || readabilityQuality.score >= fallbackQuality.score) {
     return {

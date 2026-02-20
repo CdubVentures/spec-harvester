@@ -15,6 +15,15 @@ import { buildReviewLayout, buildProductReviewPayload, buildReviewQueue, readLat
 import { buildComponentReviewLayout, buildComponentReviewPayloads, buildEnumReviewPayloads } from '../review/componentReviewData.js';
 import { setOverrideFromCandidate, setManualOverride, buildReviewMetrics } from '../review/overrideWorkflow.js';
 import { applySharedLaneState } from '../review/keyReviewState.js';
+import {
+  resolveExplicitPositiveId,
+  resolveGridFieldStateForMutation,
+  resolveComponentMutationContext,
+  resolveEnumMutationContext,
+} from './reviewMutationResolvers.js';
+import { handleReviewItemMutationRoute } from './reviewItemRoutes.js';
+import { handleReviewComponentMutationRoute } from './reviewComponentMutationRoutes.js';
+import { handleReviewEnumMutationRoute } from './reviewEnumMutationRoutes.js';
 import { buildLlmMetrics } from '../publish/publishingPipeline.js';
 import { SpecDb } from '../db/specDb.js';
 import { findProductsReferencingComponent, cascadeComponentChange, cascadeEnumChange } from '../review/componentImpact.js';
@@ -53,7 +62,7 @@ import {
 } from '../catalog/productCatalog.js';
 import { reconcileOrphans } from '../catalog/reconciler.js';
 
-// ── Helpers ──────────────────────────────────────────────────────────
+// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function toInt(v, fallback = 0) {
   const n = Number.parseInt(String(v ?? ''), 10);
   return Number.isFinite(n) ? n : fallback;
@@ -1147,6 +1156,59 @@ async function readIndexLabRunPhase08Extraction(runId) {
       field_contexts: {},
       prime_sources: { rows: [] },
       summary_only: true
+    };
+  }
+
+  return null;
+}
+
+async function readIndexLabRunDynamicFetchDashboard(runId) {
+  const token = String(runId || '').trim();
+  if (!token) return null;
+  const runDir = safeJoin(INDEXLAB_ROOT, token);
+  if (!runDir) return null;
+
+  const directPath = path.join(runDir, 'dynamic_fetch_dashboard.json');
+  const direct = await safeReadJson(directPath);
+  if (direct && typeof direct === 'object') {
+    return direct;
+  }
+
+  const meta = await safeReadJson(path.join(runDir, 'run.json'));
+  const category = String(meta?.category || '').trim();
+  const resolvedRunId = String(meta?.run_id || token).trim();
+  if (!category || !resolvedRunId) {
+    return null;
+  }
+  const eventRows = await readIndexLabRunEvents(token, 3000);
+  const productId = resolveRunProductId(meta, eventRows);
+  if (!productId) return null;
+
+  const runKey = storage.resolveOutputKey(category, productId, 'runs', resolvedRunId, 'analysis', 'dynamic_fetch_dashboard.json');
+  const runPayload = await storage.readJsonOrNull(runKey);
+  if (runPayload && typeof runPayload === 'object') {
+    return runPayload;
+  }
+
+  const latestKey = storage.resolveOutputKey(category, productId, 'latest', 'dynamic_fetch_dashboard.json');
+  const latestPayload = await storage.readJsonOrNull(latestKey);
+  if (latestPayload && typeof latestPayload === 'object') {
+    return latestPayload;
+  }
+
+  const runSummaryKey = storage.resolveOutputKey(category, productId, 'runs', resolvedRunId, 'logs', 'summary.json');
+  const runSummary = await storage.readJsonOrNull(runSummaryKey);
+  if (runSummary?.dynamic_fetch_dashboard && typeof runSummary.dynamic_fetch_dashboard === 'object') {
+    return {
+      run_id: resolvedRunId,
+      category,
+      product_id: productId,
+      generated_at: String(runSummary.generated_at || '').trim() || null,
+      host_count: Number(runSummary.dynamic_fetch_dashboard.host_count || 0),
+      hosts: [],
+      summary_only: true,
+      key: String(runSummary.dynamic_fetch_dashboard.key || '').trim() || null,
+      latest_key: String(runSummary.dynamic_fetch_dashboard.latest_key || '').trim() || null
     };
   }
 
@@ -3280,7 +3342,7 @@ function mimeType(ext) {
   return map[ext] || 'application/octet-stream';
 }
 
-// ── Catalog helpers ─────────────────────────────────────────────────
+// â”€â”€ Catalog helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function cleanVariant(v) {
   return canonicalCleanVariant(v);
 }
@@ -3304,7 +3366,7 @@ function buildProductIdFromParts(category, brand, model, variant) {
 }
 
 
-// ── Args ─────────────────────────────────────────────────────────────
+// â”€â”€ Args â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const args = process.argv.slice(2);
 function argVal(name, fallback) {
   const idx = args.indexOf(`--${name}`);
@@ -3313,7 +3375,7 @@ function argVal(name, fallback) {
 const PORT = toInt(argVal('port', '8788'), 8788);
 const isLocal = args.includes('--local');
 
-// ── Config + Storage ─────────────────────────────────────────────────
+// â”€â”€ Config + Storage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 loadDotEnvFile();
 const config = loadConfig({ localMode: isLocal || true, outputMode: 'local' });
 const storage = createStorage(config);
@@ -3321,75 +3383,98 @@ const OUTPUT_ROOT = path.resolve(config.localOutputRoot || 'out');
 const HELPER_ROOT = path.resolve(config.helperFilesRoot || 'helper_files');
 const INDEXLAB_ROOT = path.resolve(argVal('indexlab-root', 'artifacts/indexlab'));
 
-// ── Lazy SpecDb Cache ────────────────────────────────────────────────
+function normalizeCategoryToken(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/_+$/g, '');
+}
+
+function categoryExists(category) {
+  if (!category) return false;
+  const categoryPath = path.join(HELPER_ROOT, category);
+  return fsSync.existsSync(categoryPath);
+}
+
+function resolveCategoryAlias(category) {
+  const normalized = normalizeCategoryToken(category);
+  if (!normalized) return normalized;
+  if (normalized.startsWith('_test_')) return normalized;
+  if (!normalized.startsWith('test_')) return normalized;
+
+  if (categoryExists(normalized)) return normalized;
+  const canonicalTestCategory = `_${normalized}`;
+  if (categoryExists(canonicalTestCategory)) return canonicalTestCategory;
+  return normalized;
+}
+
+// â”€â”€ Lazy SpecDb Cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const specDbCache = new Map();
 const specDbSeedPromises = new Map();
 const reviewLayoutByCategory = new Map();
 
 function getSpecDb(category) {
-  if (specDbCache.has(category)) return specDbCache.get(category);
-  // Primary: the seeded spec.sqlite for this category
-  const primaryPath = path.join('.specfactory_tmp', category, 'spec.sqlite');
-  // Fallback: phase9 database (may not have SpecDb tables)
-  const fallbackPath = path.join('.specfactory_tmp', 'phase9', `${category}_all_products.sqlite`);
+  const resolvedCategory = resolveCategoryAlias(category);
+  if (!resolvedCategory) return null;
+  if (specDbCache.has(resolvedCategory)) return specDbCache.get(resolvedCategory);
 
-  // Try primary first
-  for (const dbPath of [primaryPath, fallbackPath]) {
-    try {
-      fsSync.accessSync(dbPath);
-      const db = new SpecDb({ dbPath, category });
-      // Check if this DB actually has seeded data
-      if (db.isSeeded()) {
-        specDbCache.set(category, db);
-        return db;
-      }
-      // DB exists but empty — close and try next, unless it's the primary
-      if (dbPath === primaryPath) {
-        // Primary DB exists but not seeded — trigger background seed and return it
-        specDbCache.set(category, db);
-        triggerAutoSeed(category, db);
-        return db;
-      }
-      db.close();
-    } catch { /* next */ }
-  }
+  // Strict ID-driven runtime: use only the category-local SpecDb.
+  const primaryPath = path.join('.specfactory_tmp', resolvedCategory, 'spec.sqlite');
 
-  // No DB found — create at the primary path and trigger seed
+  try {
+    fsSync.accessSync(primaryPath);
+    const db = new SpecDb({ dbPath: primaryPath, category: resolvedCategory });
+    // Check if this DB actually has seeded data
+    if (db.isSeeded()) {
+      specDbCache.set(resolvedCategory, db);
+      return db;
+    }
+    // DB exists but is not seeded yet - trigger background seed and return it
+    specDbCache.set(resolvedCategory, db);
+    triggerAutoSeed(resolvedCategory, db);
+    return db;
+  } catch { /* create */ }
+
+  // No DB found - create at the primary path and trigger seed
   try {
     fsSync.mkdirSync(path.dirname(primaryPath), { recursive: true });
-    const db = new SpecDb({ dbPath: primaryPath, category });
-    specDbCache.set(category, db);
-    triggerAutoSeed(category, db);
+    const db = new SpecDb({ dbPath: primaryPath, category: resolvedCategory });
+    specDbCache.set(resolvedCategory, db);
+    triggerAutoSeed(resolvedCategory, db);
     return db;
   } catch {
-    specDbCache.set(category, null);
+    specDbCache.set(resolvedCategory, null);
     return null;
   }
 }
 
 /** Background auto-seed: loads field rules and seeds the SpecDb */
 function triggerAutoSeed(category, db) {
-  if (specDbSeedPromises.has(category)) return;
+  const resolvedCategory = resolveCategoryAlias(category);
+  if (!resolvedCategory) return;
+  if (specDbSeedPromises.has(resolvedCategory)) return;
   const promise = (async () => {
     try {
       const { loadFieldRules } = await import('../field-rules/loader.js');
       const { seedSpecDb } = await import('../db/seed.js');
-      const fieldRules = await loadFieldRules(category, { config });
-      const result = await seedSpecDb({ db, config, category, fieldRules });
-      console.log(`[auto-seed] ${category}: ${result.components_seeded} components, ${result.list_values_seeded} list values, ${result.products_seeded} products (${result.duration_ms}ms)`);
+      const fieldRules = await loadFieldRules(resolvedCategory, { config });
+      const result = await seedSpecDb({ db, config, category: resolvedCategory, fieldRules });
+      console.log(`[auto-seed] ${resolvedCategory}: ${result.components_seeded} components, ${result.list_values_seeded} list values, ${result.products_seeded} products (${result.duration_ms}ms)`);
     } catch (err) {
-      console.error(`[auto-seed] ${category} failed:`, err.message);
+      console.error(`[auto-seed] ${resolvedCategory} failed:`, err.message);
     } finally {
-      specDbSeedPromises.delete(category);
+      specDbSeedPromises.delete(resolvedCategory);
     }
   })();
-  specDbSeedPromises.set(category, promise);
+  specDbSeedPromises.set(resolvedCategory, promise);
 }
 
 async function getSpecDbReady(category) {
-  const db = getSpecDb(category);
+  const resolvedCategory = resolveCategoryAlias(category);
+  const db = getSpecDb(resolvedCategory);
   if (!db) return null;
-  const pending = specDbSeedPromises.get(category);
+  const pending = specDbSeedPromises.get(resolvedCategory);
   if (pending) {
     try {
       await pending;
@@ -3397,7 +3482,7 @@ async function getSpecDbReady(category) {
       // keep best available DB handle; caller validates seeded content.
     }
   }
-  return getSpecDb(category);
+  return getSpecDb(resolvedCategory);
 }
 
 function ensureGridKeyReviewState(specDb, category, productId, fieldKey, itemFieldStateId = null) {
@@ -3443,227 +3528,7 @@ function ensureGridKeyReviewState(specDb, category, productId, fieldKey, itemFie
   }
 }
 
-function toPositiveId(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return null;
-  const id = Math.trunc(n);
-  return id > 0 ? id : null;
-}
-
-function resolveExplicitPositiveId(body, keys = []) {
-  if (!body || !Array.isArray(keys) || keys.length === 0) {
-    return { provided: false, id: null, raw: null, key: null };
-  }
-  for (const key of keys) {
-    if (!Object.prototype.hasOwnProperty.call(body, key)) continue;
-    const raw = body?.[key];
-    const token = String(raw ?? '').trim();
-    if (!token) continue;
-    return {
-      provided: true,
-      id: toPositiveId(raw),
-      raw: token,
-      key,
-    };
-  }
-  return { provided: false, id: null, raw: null, key: null };
-}
-
-function resolveGridFieldStateForMutation(specDb, category, body, options = {}) {
-  if (!specDb) {
-    return {
-      row: null,
-      error: 'specdb_not_ready',
-      errorMessage: 'SpecDb is not available for this category.',
-    };
-  }
-  const requireExplicitId = Boolean(options?.requireExplicitId);
-
-  const idReq = resolveExplicitPositiveId(body, [
-    'itemFieldStateId',
-    'item_field_state_id',
-    'slotId',
-    'slot_id',
-  ]);
-  if (idReq.provided) {
-    const byId = idReq.id ? specDb.getItemFieldStateById(idReq.id) : null;
-    if (byId && String(byId.category || '').trim() === String(category || '').trim()) {
-      return { row: byId, error: null };
-    }
-    return {
-      row: null,
-      error: 'item_field_state_id_not_found',
-      errorMessage: `itemFieldStateId '${idReq.raw}' does not resolve in category '${category}'.`,
-    };
-  }
-  if (requireExplicitId) {
-    return {
-      row: null,
-      error: 'item_field_state_id_required',
-      errorMessage: 'itemFieldStateId is required for this mutation.',
-    };
-  }
-  return { row: null, error: null };
-}
-
-function resolveComponentMutationContext(specDb, category, body, options = {}) {
-  if (!specDb) {
-    return {
-      error: 'specdb_not_ready',
-      errorMessage: 'SpecDb is not available for this category.',
-    };
-  }
-  const requireComponentValueId = Boolean(options?.requireComponentValueId);
-  const requireComponentIdentityId = Boolean(options?.requireComponentIdentityId);
-
-  const componentValueReq = resolveExplicitPositiveId(body, [
-    'componentValueId',
-    'component_value_id',
-    'slotId',
-    'slot_id',
-  ]);
-  let componentValueRow = componentValueReq.id ? specDb.getComponentValueById(componentValueReq.id) : null;
-  if (componentValueRow && String(componentValueRow.category || '').trim() !== String(category || '').trim()) {
-    componentValueRow = null;
-  }
-  if (componentValueReq.provided && !componentValueRow) {
-    return {
-      error: 'component_value_id_not_found',
-      errorMessage: `componentValueId '${componentValueReq.raw}' does not resolve in category '${category}'.`,
-    };
-  }
-  if (requireComponentValueId && !componentValueReq.provided) {
-    return {
-      error: 'component_value_id_required',
-      errorMessage: 'componentValueId is required for component property mutations.',
-    };
-  }
-
-  let componentType = '';
-  let componentName = '';
-  let componentMaker = '';
-  let property = String(body?.property || body?.propertyKey || '').trim();
-
-  if (componentValueRow) {
-    componentType = String(componentValueRow.component_type || '').trim();
-    componentName = String(componentValueRow.component_name || '').trim();
-    componentMaker = String(componentValueRow.component_maker || '').trim();
-    property = String(componentValueRow.property_key || '').trim();
-  }
-
-  const componentIdentityReq = resolveExplicitPositiveId(body, [
-    'componentIdentityId',
-    'component_identity_id',
-    'identityId',
-    'identity_id',
-  ]);
-  let identityRow = componentIdentityReq.id ? specDb.getComponentIdentityById(componentIdentityReq.id) : null;
-  if (identityRow && String(identityRow.category || '').trim() !== String(category || '').trim()) {
-    identityRow = null;
-  }
-  if (componentIdentityReq.provided && !identityRow) {
-    return {
-      error: 'component_identity_id_not_found',
-      errorMessage: `componentIdentityId '${componentIdentityReq.raw}' does not resolve in category '${category}'.`,
-    };
-  }
-  if (requireComponentIdentityId && !componentIdentityReq.provided) {
-    return {
-      error: 'component_identity_id_required',
-      errorMessage: 'componentIdentityId is required for component identity mutations.',
-    };
-  }
-  if (identityRow) {
-    componentType = String(identityRow.component_type || componentType || '').trim();
-    componentName = String(identityRow.canonical_name || componentName || '').trim();
-    componentMaker = String(identityRow.maker || componentMaker || '').trim();
-  }
-
-  return {
-    componentType,
-    componentName,
-    componentMaker,
-    property,
-    componentIdentityId: identityRow?.id ?? componentIdentityReq.id ?? null,
-    componentIdentityRow: identityRow || null,
-    componentValueId: componentValueRow?.id ?? componentValueReq.id ?? null,
-    componentValueRow: componentValueRow || null,
-    error: null,
-  };
-}
-
-function resolveEnumMutationContext(specDb, category, body, options = {}) {
-  if (!specDb) {
-    return {
-      error: 'specdb_not_ready',
-      errorMessage: 'SpecDb is not available for this category.',
-    };
-  }
-  const requireListValueId = Boolean(options?.requireListValueId);
-  const requireEnumListId = Boolean(options?.requireEnumListId);
-  const listValueReq = resolveExplicitPositiveId(body, ['listValueId', 'list_value_id', 'valueId', 'value_id']);
-  const enumListReq = resolveExplicitPositiveId(body, ['enumListId', 'enum_list_id', 'listId', 'list_id']);
-
-  let listValueRow = listValueReq.id ? specDb.getListValueById(listValueReq.id) : null;
-  if (listValueRow && String(listValueRow.category || '').trim() !== String(category || '').trim()) {
-    listValueRow = null;
-  }
-  if (listValueReq.provided && !listValueRow) {
-    return {
-      error: 'list_value_id_not_found',
-      errorMessage: `listValueId '${listValueReq.raw}' does not resolve in category '${category}'.`,
-    };
-  }
-  if (requireListValueId && !listValueReq.provided) {
-    return {
-      error: 'list_value_id_required',
-      errorMessage: 'listValueId is required for enum value mutations.',
-    };
-  }
-
-  let enumListRow = enumListReq.id ? specDb.getEnumListById(enumListReq.id) : null;
-  if (enumListRow && String(enumListRow.category || '').trim() !== String(category || '').trim()) {
-    enumListRow = null;
-  }
-  if (enumListReq.provided && !enumListRow) {
-    return {
-      error: 'enum_list_id_not_found',
-      errorMessage: `enumListId '${enumListReq.raw}' does not resolve in category '${category}'.`,
-    };
-  }
-  if (requireEnumListId && !enumListReq.provided) {
-    return {
-      error: 'enum_list_id_required',
-      errorMessage: 'enumListId is required for enum list mutations.',
-    };
-  }
-  if (!enumListRow && listValueRow?.list_id) {
-    enumListRow = specDb.getEnumListById(listValueRow.list_id);
-  }
-
-  const field = String(listValueRow?.field_key || enumListRow?.field_key || '').trim();
-  const value = body?.value !== undefined && body?.value !== null
-    ? String(body.value).trim()
-    : String(listValueRow?.value || '').trim();
-  const oldValue = body?.oldValue !== undefined
-    ? String(body.oldValue || '').trim()
-    : (body?.old_value !== undefined
-      ? String(body.old_value || '').trim()
-      : String(listValueRow?.value || '').trim());
-
-  return {
-    field,
-    value,
-    oldValue,
-    listValueId: listValueRow?.id ?? listValueReq.id ?? null,
-    listValueRow: listValueRow || null,
-    enumListId: enumListRow?.id ?? enumListReq.id ?? null,
-    enumListRow: enumListRow || null,
-    error: null,
-  };
-}
-
-function resolveKeyReviewForLaneMutation(specDb, category, body, options = {}) {
+function resolveKeyReviewForLaneMutation(specDb, category, body) {
   if (!specDb) {
     return {
       stateRow: null,
@@ -3671,7 +3536,6 @@ function resolveKeyReviewForLaneMutation(specDb, category, body, options = {}) {
       errorMessage: 'SpecDb is not available for this category.',
     };
   }
-  const requireIdOrSlotId = Boolean(options?.requireIdOrSlotId);
   const idReq = resolveExplicitPositiveId(body, ['id']);
   if (idReq.provided) {
     const byId = idReq.id ? specDb.db.prepare('SELECT * FROM key_review_state WHERE id = ?').get(idReq.id) : null;
@@ -3682,26 +3546,15 @@ function resolveKeyReviewForLaneMutation(specDb, category, body, options = {}) {
       errorMessage: `key_review_state id '${idReq.raw}' was not found.`,
     };
   }
-  if (requireIdOrSlotId) {
-    const slotReq = resolveExplicitPositiveId(body, [
-      'itemFieldStateId',
-      'item_field_state_id',
-      'slotId',
-      'slot_id',
-    ]);
-    if (!slotReq.provided) {
+  const fieldStateCtx = resolveGridFieldStateForMutation(specDb, category, body);
+  if (fieldStateCtx?.error) {
+    if (fieldStateCtx.error === 'item_field_state_id_required') {
       return {
         stateRow: null,
         error: 'id_or_item_field_state_id_required',
         errorMessage: 'Provide key_review_state id or itemFieldStateId for this lane mutation.',
       };
     }
-  }
-
-  const fieldStateCtx = resolveGridFieldStateForMutation(specDb, category, body, {
-    requireExplicitId: requireIdOrSlotId,
-  });
-  if (fieldStateCtx?.error) {
     return {
       stateRow: null,
       error: fieldStateCtx.error,
@@ -4070,11 +3923,27 @@ function parseReviewItemAttributes(reviewItem) {
   return {};
 }
 
-function isResolvedCandidateReview(reviewRow) {
+function isResolvedCandidateReview(
+  reviewRow,
+  {
+    includeHumanAccepted = true,
+    treatSharedAcceptAsPending = false,
+  } = {},
+) {
   if (!reviewRow) return false;
-  if (Number(reviewRow.human_accepted) === 1) return true;
   const aiStatus = normalizeLower(reviewRow.ai_review_status || '');
-  return aiStatus === 'accepted' || aiStatus === 'rejected';
+  const aiReason = normalizeLower(reviewRow.ai_reason || '');
+  if (aiStatus === 'rejected') return true;
+  if (aiStatus === 'accepted') {
+    if (treatSharedAcceptAsPending && aiReason === 'shared_accept') {
+      return false;
+    }
+    return true;
+  }
+  if (includeHumanAccepted && Number(reviewRow.human_accepted) === 1) {
+    return true;
+  }
+  return false;
 }
 
 function buildCandidateReviewLookup(reviewRows) {
@@ -4098,6 +3967,8 @@ function getReviewForCandidateId(lookup, candidateId) {
 function collectPendingCandidateIds({
   candidateRows,
   reviewLookup = null,
+  includeHumanAccepted = true,
+  treatSharedAcceptAsPending = false,
 }) {
   const actionableIds = [];
   const seen = new Set();
@@ -4112,7 +3983,12 @@ function collectPendingCandidateIds({
   const pending = [];
   for (const cid of actionableIds) {
     const reviewRow = getReviewForCandidateId(reviewLookup, cid);
-    if (!isResolvedCandidateReview(reviewRow)) pending.push(cid);
+    if (!isResolvedCandidateReview(reviewRow, {
+      includeHumanAccepted,
+      treatSharedAcceptAsPending,
+    })) {
+      pending.push(cid);
+    }
   }
   return pending;
 }
@@ -4241,6 +4117,8 @@ function getPendingComponentSharedCandidateIds(specDb, {
   return collectPendingCandidateIds({
     candidateRows: candidateRows,
     reviewLookup,
+    includeHumanAccepted: false,
+    treatSharedAcceptAsPending: true,
   });
 }
 
@@ -4270,6 +4148,8 @@ async function getPendingComponentSharedCandidateIdsAsync(specDb, {
   return collectPendingCandidateIds({
     candidateRows: [...candidateRows, ...syntheticRows],
     reviewLookup,
+    includeHumanAccepted: false,
+    treatSharedAcceptAsPending: true,
   });
 }
 
@@ -4278,19 +4158,14 @@ function getPendingEnumSharedCandidateIds(specDb, {
   listValueId,
 }) {
   if (!specDb || !fieldKey || !listValueId) return [];
-  let candidateRows = specDb.getCandidatesByListValue(fieldKey, listValueId) || [];
-  if (!candidateRows.length) {
-    const lvRow = specDb.getListValueById(listValueId);
-    const fallbackValue = String(lvRow?.value || '').trim();
-    if (isMeaningfulValue(fallbackValue)) {
-      candidateRows = specDb.getCandidatesForFieldValue(fieldKey, fallbackValue) || [];
-    }
-  }
+  const candidateRows = specDb.getCandidatesByListValue(fieldKey, listValueId) || [];
   const reviewRows = specDb.getReviewsForContext('list', String(listValueId)) || [];
   const reviewLookup = buildCandidateReviewLookup(reviewRows);
   return collectPendingCandidateIds({
     candidateRows,
     reviewLookup,
+    includeHumanAccepted: false,
+    treatSharedAcceptAsPending: true,
   });
 }
 
@@ -4609,7 +4484,7 @@ async function propagateSharedLaneDecision({
   return { propagated: false };
 }
 
-// ── Process Manager ──────────────────────────────────────────────────
+// â”€â”€ Process Manager â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let childProc = null;
 let childLog = [];
 const MAX_LOG = 2000;
@@ -5101,7 +4976,30 @@ async function stopProcess(timeoutMs = 8000, options = {}) {
   };
 }
 
-// ── Route Helpers ────────────────────────────────────────────────────
+// â”€â”€ Route Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const CATEGORY_SEGMENT_SCOPES = new Set([
+  'catalog',
+  'product',
+  'events',
+  'llm-settings',
+  'queue',
+  'billing',
+  'learning',
+  'studio',
+  'workbook',
+  'review',
+  'review-components',
+]);
+
+const TEST_MODE_ACTION_SEGMENTS = new Set([
+  'create',
+  'contract-summary',
+  'status',
+  'generate-products',
+  'run',
+  'validate',
+]);
+
 function parsePath(url) {
   const [pathname, qs] = (url || '/').split('?');
   const params = new URLSearchParams(qs || '');
@@ -5112,10 +5010,25 @@ function parsePath(url) {
     .map((part) => {
       try { return decodeURIComponent(part); } catch { return part; }
     });
+
+  if (parts[1] && CATEGORY_SEGMENT_SCOPES.has(parts[0])) {
+    parts[1] = resolveCategoryAlias(parts[1]);
+  }
+  if (parts[0] === 'test-mode' && parts[1] && !TEST_MODE_ACTION_SEGMENTS.has(parts[1])) {
+    parts[1] = resolveCategoryAlias(parts[1]);
+  }
+  if (
+    parts[0] === 'indexing'
+    && (parts[1] === 'domain-checklist' || parts[1] === 'review-metrics')
+    && parts[2]
+  ) {
+    parts[2] = resolveCategoryAlias(parts[2]);
+  }
+
   return { parts, params, pathname };
 }
 
-// ── Catalog builder ──────────────────────────────────────────────────
+// â”€â”€ Catalog builder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function buildCatalog(category) {
   const catalog = await loadProductCatalog(config, category);
   const inputKeys = await storage.listInputKeys(category);
@@ -5123,7 +5036,7 @@ async function buildCatalog(category) {
   const queue = await loadQueueState({ storage, category, specDb }).catch(() => ({ state: { products: {} } }));
   const queueProducts = queue.state?.products || {};
 
-  // Map: normKey → row (for dedup)
+  // Map: normKey â†’ row (for dedup)
   const seen = new Map();
 
   // 1. Seed from product_catalog.json (authoritative product list, populated by workbook import)
@@ -5187,7 +5100,7 @@ async function buildCatalog(category) {
       }
     }
 
-    // Only enrich products already in the catalog — skip orphaned storage inputs
+    // Only enrich products already in the catalog â€” skip orphaned storage inputs
     if (!seen.has(key)) continue;
 
     const existing = seen.get(key);
@@ -5215,7 +5128,7 @@ async function buildCatalog(category) {
   return rows;
 }
 
-// ── Compiled component DB dual-write ─────────────────────────────────
+// â”€â”€ Compiled component DB dual-write â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function patchCompiledComponentDb(category, componentType, entityName, propertyPatch, identityPatch) {
   const dbDir = path.join(HELPER_ROOT, category, '_generated', 'component_db');
   const files = await listFiles(dbDir, '.json');
@@ -5240,7 +5153,7 @@ async function patchCompiledComponentDb(category, componentType, entityName, pro
   }
 }
 
-// ── Route Handler ────────────────────────────────────────────────────
+// â”€â”€ Route Handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function handleApi(req, res) {
   const { parts, params } = parsePath(req.url);
   const method = req.method;
@@ -5294,7 +5207,7 @@ async function handleApi(req, res) {
     return jsonRes(res, 200, result);
   }
 
-  // Product Catalog CRUD — /api/v1/catalog/{cat}/products[/{pid}]
+  // Product Catalog CRUD â€” /api/v1/catalog/{cat}/products[/{pid}]
   if (parts[0] === 'catalog' && parts[1] && parts[2] === 'products') {
     const category = parts[1];
 
@@ -5350,7 +5263,7 @@ async function handleApi(req, res) {
     }
   }
 
-  // Catalog overview — /api/v1/catalog/{cat}  ("all" merges every category)
+  // Catalog overview â€” /api/v1/catalog/{cat}  ("all" merges every category)
   if (parts[0] === 'catalog' && parts[1] && !parts[2] && method === 'GET') {
     if (parts[1] === 'all') {
       const cats = (await listDirs(HELPER_ROOT)).filter(c => !c.startsWith('_'));
@@ -5489,6 +5402,18 @@ async function handleApi(req, res) {
     const payload = await readIndexLabRunPhase08Extraction(runId);
     if (!payload) {
       return jsonRes(res, 404, { error: 'phase08_extraction_not_found', run_id: runId });
+    }
+    return jsonRes(res, 200, {
+      run_id: runId,
+      ...payload
+    });
+  }
+
+  if (parts[0] === 'indexlab' && parts[1] === 'run' && parts[2] && parts[3] === 'dynamic-fetch-dashboard' && method === 'GET') {
+    const runId = String(parts[2] || '').trim();
+    const payload = await readIndexLabRunDynamicFetchDashboard(runId);
+    if (!payload) {
+      return jsonRes(res, 404, { error: 'dynamic_fetch_dashboard_not_found', run_id: runId });
     }
     return jsonRes(res, 200, {
       run_id: runId,
@@ -5746,7 +5671,7 @@ async function handleApi(req, res) {
       const status = params.get('status') || 'needs_review';
       const limit = toInt(params.get('limit'), 200);
       const items = await buildReviewQueue({ storage, config, category, status, limit, specDb });
-      // Filter review queue against catalog — don't surface phantom products
+      // Filter review queue against catalog â€” don't surface phantom products
       const cat = await loadProductCatalog(config, category);
       const catPids = new Set(Object.keys(cat.products || {}));
       const filtered = items.filter(item => catPids.has(item.product_id));
@@ -6151,7 +6076,7 @@ async function handleApi(req, res) {
     return jsonRes(res, 200, layout);
   }
 
-  // Review product payload (single) — only serve if product exists in catalog
+  // Review product payload (single) â€” only serve if product exists in catalog
   if (parts[0] === 'review' && parts[1] && parts[2] === 'product' && parts[3] && method === 'GET') {
     const [, category, , productId] = parts;
     const specDb = getSpecDb(category);
@@ -6197,7 +6122,7 @@ async function handleApi(req, res) {
       } catch { /* fall through */ }
     }
     productIds = productIds.filter(pid => catalogPids.has(pid));
-    // Brand filter — if brands param is provided, only include matching products
+    // Brand filter â€” if brands param is provided, only include matching products
     const brandsFilter = brandsParam ? new Set(brandsParam.split(',').map(b => b.trim().toLowerCase()).filter(Boolean)) : null;
     const payloads = [];
     for (const pid of productIds) {
@@ -6220,7 +6145,7 @@ async function handleApi(req, res) {
     return jsonRes(res, 200, payloads);
   }
 
-  // Review products index — ALL products, lightweight (no candidates), sorted by brand
+  // Review products index â€” ALL products, lightweight (no candidates), sorted by brand
   if (parts[0] === 'review' && parts[1] && parts[2] === 'products-index' && method === 'GET') {
     const category = parts[1];
     const specDb = getSpecDb(category);
@@ -6317,11 +6242,11 @@ async function handleApi(req, res) {
     return jsonRes(res, 200, { products: payloads, brands, total: payloads.length, metrics_run: metricsRun });
   }
 
-  // Review candidates for a single field — lazy loading for drawer
+  // Review candidates for a single field â€” lazy loading for drawer
   if (parts[0] === 'review' && parts[1] && parts[2] === 'candidates' && parts[3] && parts[4] && method === 'GET') {
     const [, category, , productId, field] = parts;
     const specDb = getSpecDb(category);
-    // Check product exists — catalog OR SpecDb products table
+    // Check product exists â€” catalog OR SpecDb products table
     const catalog = await loadProductCatalog(config, category);
     const catalogPids = new Set(Object.keys(catalog.products || {}));
     if (catalogPids.size > 0 && !catalogPids.has(productId)) {
@@ -6345,7 +6270,7 @@ async function handleApi(req, res) {
       ? requestedField
       : (availableFields.find((key) => key.toLowerCase() === requestedField.toLowerCase()) || requestedField);
     const fieldState = payload.fields?.[resolvedField] || { candidates: [] };
-    const itemFieldStateId = (() => {
+    let itemFieldStateId = (() => {
       const n = Number(fieldState?.slot_id ?? fieldState?.id ?? null);
       if (!Number.isFinite(n)) return null;
       const id = Math.trunc(n);
@@ -6466,502 +6391,32 @@ async function handleApi(req, res) {
     });
   }
 
-  // Review override
-  if (parts[0] === 'review' && parts[1] && parts[2] === 'override' && method === 'POST') {
-    const category = parts[1];
-    const body = await readJsonBody(req);
-    const { candidateId, value, reason, reviewer } = body;
-    const specDb = getSpecDb(category);
-    const fieldStateCtx = resolveGridFieldStateForMutation(specDb, category, body, {
-      requireExplicitId: true,
-    });
-    if (fieldStateCtx?.error) {
-      return jsonRes(res, 400, { error: fieldStateCtx.error, message: fieldStateCtx.errorMessage });
-    }
-    const fieldStateRow = fieldStateCtx?.row;
-    const productId = String(fieldStateRow?.product_id || '').trim();
-    const field = String(fieldStateRow?.field_key || '').trim();
-    if (!productId || !field) {
-      return jsonRes(res, 400, {
-        error: 'item_field_state_id_required',
-        message: 'Valid itemFieldStateId is required for review override.',
-      });
-    }
-    try {
-      const normalizedCandidateId = String(candidateId || '').trim();
-      if (normalizedCandidateId) {
-        const result = await setOverrideFromCandidate({
-          storage,
-          config,
-          category,
-          productId,
-          field,
-          candidateId: normalizedCandidateId,
-          candidateValue: value ?? body?.candidateValue ?? body?.candidate_value ?? null,
-          candidateScore: body?.candidateConfidence ?? body?.candidate_confidence ?? null,
-          candidateSource: body?.candidateSource ?? body?.candidate_source ?? '',
-          candidateMethod: body?.candidateMethod ?? body?.candidate_method ?? '',
-          candidateTier: body?.candidateTier ?? body?.candidate_tier ?? null,
-          candidateEvidence: body?.candidateEvidence ?? body?.candidate_evidence ?? null,
-          reviewer,
-          reason,
-          specDb,
-        });
-        if (specDb) {
-          syncPrimaryLaneAcceptFromItemSelection({
-            specDb,
-            category,
-            productId,
-            fieldKey: field,
-            selectedCandidateId: result?.candidate_id || normalizedCandidateId,
-            selectedValue: result?.value ?? body?.candidateValue ?? body?.candidate_value ?? value ?? null,
-            confidenceScore: body?.candidateConfidence ?? body?.candidate_confidence ?? null,
-            reason: `User accepted primary lane via item override${normalizedCandidateId ? ` (${normalizedCandidateId})` : ''}`,
-          });
-        }
-        broadcastWs('data-change', { type: 'review-override', category, productId, field });
-        return jsonRes(res, 200, { ok: true, result });
-      }
-
-      if (value === undefined || String(value).trim() === '') {
-        return jsonRes(res, 400, { error: 'invalid_override_request', message: 'Provide candidateId or value.' });
-      }
-
-      const result = await setManualOverride({
-        storage,
-        config,
-        category,
-        productId,
-        field,
-        value: String(value),
-        reviewer,
-        reason,
-        evidence: {
-          url: 'gui://manual-entry',
-          quote: `Manually set to "${String(value)}" via GUI`,
-        },
-        specDb,
-      });
-      if (specDb) {
-        syncPrimaryLaneAcceptFromItemSelection({
-          specDb,
-          category,
-          productId,
-          fieldKey: field,
-          selectedCandidateId: null,
-          selectedValue: result?.value ?? value ?? null,
-          confidenceScore: 1.0,
-          reason: 'User manually set item value via review override',
-        });
-      }
-      broadcastWs('data-change', { type: 'review-manual-override', category, productId, field });
-      return jsonRes(res, 200, { ok: true, result });
-    } catch (err) {
-      return jsonRes(res, 500, { error: 'override_failed', message: err.message });
-    }
-  }
-
-  // Review manual override
-  if (parts[0] === 'review' && parts[1] && parts[2] === 'manual-override' && method === 'POST') {
-    const category = parts[1];
-    const body = await readJsonBody(req);
-    const { value, evidenceUrl, evidenceQuote, reason, reviewer } = body;
-    if (value === undefined || String(value).trim() === '') {
-      return jsonRes(res, 400, { error: 'value_required', message: 'manual-override requires value' });
-    }
-    const specDb = getSpecDb(category);
-    const fieldStateCtx = resolveGridFieldStateForMutation(specDb, category, body, {
-      requireExplicitId: true,
-    });
-    if (fieldStateCtx?.error) {
-      return jsonRes(res, 400, { error: fieldStateCtx.error, message: fieldStateCtx.errorMessage });
-    }
-    const fieldStateRow = fieldStateCtx?.row;
-    const productId = String(fieldStateRow?.product_id || '').trim();
-    const field = String(fieldStateRow?.field_key || '').trim();
-    if (!productId || !field) {
-      return jsonRes(res, 400, {
-        error: 'item_field_state_id_required',
-        message: 'Valid itemFieldStateId is required for manual override.',
-      });
-    }
-    try {
-      const effectiveUrl = evidenceUrl || 'gui://manual-entry';
-      const effectiveQuote = evidenceQuote || `Manually set to "${String(value)}" via GUI`;
-      const result = await setManualOverride({
-        storage,
-        config,
-        category,
-        productId,
-        field,
-        value: String(value),
-        reviewer,
-        reason,
-        evidence: {
-          url: String(effectiveUrl),
-          quote: String(effectiveQuote),
-          source_id: null,
-          retrieved_at: new Date().toISOString(),
-        },
-        specDb,
-      });
-      if (specDb) {
-        syncPrimaryLaneAcceptFromItemSelection({
-          specDb,
-          category,
-          productId,
-          fieldKey: field,
-          selectedCandidateId: null,
-          selectedValue: result?.value ?? value ?? null,
-          confidenceScore: 1.0,
-          reason: 'User manually set item value via manual-override endpoint',
-        });
-      }
-      broadcastWs('data-change', { type: 'review-manual-override', category, productId, field });
-      return jsonRes(res, 200, { ok: true, result });
-    } catch (err) {
-      return jsonRes(res, 500, { error: 'manual_override_failed', message: err.message });
-    }
-  }
-
-  // Review finalize
-  if (parts[0] === 'review' && parts[1] && parts[2] === 'finalize' && method === 'POST') {
-    const category = parts[1];
-    const body = await readJsonBody(req);
-    const { productId, apply = true, draft, reviewer } = body;
-    const cliArgs = ['src/cli/spec.js', 'review', 'finalize', '--category', category, '--product-id', productId];
-    if (apply) cliArgs.push('--apply');
-    if (draft) cliArgs.push('--draft');
-    if (reviewer) cliArgs.push('--reviewer', String(reviewer));
-    cliArgs.push('--local');
-    try {
-      const result = await new Promise((resolve, reject) => {
-        const proc = spawn('node', cliArgs, { cwd: path.resolve('.'), stdio: ['ignore', 'pipe', 'pipe'] });
-        let stdout = '', stderr = '';
-        proc.stdout.on('data', d => { stdout += d; });
-        proc.stderr.on('data', d => { stderr += d; });
-        proc.on('exit', code => code === 0 ? resolve(stdout) : reject(new Error(stderr || `exit ${code}`)));
-      });
-      return jsonRes(res, 200, { ok: true, output: result });
-    } catch (err) {
-      return jsonRes(res, 500, { error: 'finalize_failed', message: err.message });
-    }
-  }
-
-  // Review finalize-all — finalize all run products
-  if (parts[0] === 'review' && parts[1] && parts[2] === 'finalize-all' && method === 'POST') {
-    const category = parts[1];
-    const specDb = getSpecDb(category);
-    // Re-use products-index logic to find all run products
-    const catalog = await loadProductCatalog(config, category);
-    const productIds = Object.keys(catalog.products || {});
-    const results = [];
-    const errors = [];
-    for (const pid of productIds) {
-      try {
-        const layout = await buildReviewLayout({ storage, config, category });
-        const payload = await buildProductReviewPayload({ storage, config, category, productId: pid, layout, includeCandidates: false, specDb });
-        if (!payload.metrics.has_run) continue;
-        const cliArgs = ['src/cli/spec.js', 'review', 'finalize', '--category', category, '--product-id', pid, '--apply', '--local'];
-        await new Promise((resolve, reject) => {
-          const proc = spawn('node', cliArgs, { cwd: path.resolve('.'), stdio: ['ignore', 'pipe', 'pipe'] });
-          let stdout = '', stderr = '';
-          proc.stdout.on('data', d => { stdout += d; });
-          proc.stderr.on('data', d => { stderr += d; });
-          proc.on('exit', code => code === 0 ? resolve(stdout) : reject(new Error(stderr || `exit ${code}`)));
-        });
-        results.push(pid);
-      } catch (err) {
-        errors.push({ productId: pid, error: err.message });
-      }
-    }
-    return jsonRes(res, 200, { ok: true, finalized: results.length, errors: errors.length, details: { finalized: results, errors } });
-  }
-
-  // Key review confirm — confirm AI review for a lane (primary or shared)
-  if (parts[0] === 'review' && parts[1] && parts[2] === 'key-review-confirm' && method === 'POST') {
-    const category = parts[1];
-    const body = await readJsonBody(req);
-    const lane = String(body?.lane || '').trim().toLowerCase();
-    const candidateId = String(body?.candidateId || body?.candidate_id || '').trim();
-    if (!['primary', 'shared'].includes(lane)) {
-      return jsonRes(res, 400, { error: 'lane (primary|shared) required' });
-    }
-    const specDb = getSpecDb(category);
-    if (!specDb) return jsonRes(res, 404, { error: 'no_spec_db', message: `No SpecDb for ${category}` });
-    try {
-      const stateCtx = resolveKeyReviewForLaneMutation(specDb, category, body, {
-        requireIdOrSlotId: true,
-      });
-      if (stateCtx?.error) {
-        return jsonRes(res, 400, { error: stateCtx.error, message: stateCtx.errorMessage });
-      }
-      const stateRow = stateCtx?.stateRow;
-      if (!stateRow) {
-        return jsonRes(res, 404, { error: 'key_review_state_not_found', message: 'Provide id or itemFieldStateId.' });
-      }
-      if (String(stateRow.target_kind || '') !== 'grid_key') {
-        return jsonRes(res, 400, {
-          error: 'lane_context_mismatch',
-          message: 'Review lane endpoint only supports grid_key context. Use component/enum lane endpoints for shared review.',
-        });
-      }
-      if (!candidateId) {
-        return jsonRes(res, 400, {
-          error: 'candidate_id_required',
-          message: 'candidateId is required for candidate-scoped AI confirm.',
-        });
-      }
-      const stateProductId = String(stateRow.item_identifier || '').trim();
-      const stateFieldKey = String(stateRow.field_key || '').trim();
-      const stateItemFieldStateId = Number.parseInt(String(
-        stateRow.item_field_state_id
-        ?? stateCtx?.fieldStateRow?.id
-        ?? body?.itemFieldStateId
-        ?? body?.item_field_state_id
-        ?? '',
-      ), 10);
-      if (lane === 'primary') {
-        const candidateRow = specDb.getCandidateById(candidateId);
-        if (!candidateRow) {
-          return jsonRes(res, 404, {
-            error: 'candidate_not_found',
-            message: `candidate_id '${candidateId}' was not found.`,
-          });
-        }
-        const persistedCandidateId = String(candidateRow.candidate_id || candidateId).trim();
-        if (
-          String(candidateRow.product_id || '') !== stateProductId
-          || String(candidateRow.field_key || '') !== stateFieldKey
-        ) {
-          return jsonRes(res, 400, {
-            error: 'candidate_context_mismatch',
-            message: `candidate_id '${candidateId}' does not belong to ${stateRow.item_identifier}/${stateRow.field_key}`,
-          });
-        }
-        if (!Number.isFinite(stateItemFieldStateId) || stateItemFieldStateId <= 0) {
-          return jsonRes(res, 400, {
-            error: 'item_field_state_id_required',
-            message: 'Valid itemFieldStateId is required for candidate-scoped item confirm.',
-          });
-        }
-        const now = new Date().toISOString();
-        specDb.upsertReview({
-          candidateId: persistedCandidateId,
-          contextType: 'item',
-          contextId: String(stateItemFieldStateId),
-          humanAccepted: false,
-          humanAcceptedAt: null,
-          aiReviewStatus: 'accepted',
-          aiConfidence: Number.isFinite(Number(body?.candidateConfidence))
-            ? Number(body.candidateConfidence)
-            : (Number.isFinite(Number(candidateRow.score)) ? Number(candidateRow.score) : 1.0),
-          aiReason: 'primary_confirm',
-          aiReviewedAt: now,
-          aiReviewModel: null,
-          humanOverrideAi: false,
-          humanOverrideAiAt: null,
-        });
-        const pendingCandidateIds = getPendingItemPrimaryCandidateIds(specDb, {
-          productId: stateProductId,
-          fieldKey: stateFieldKey,
-          itemFieldStateId: stateItemFieldStateId,
-        });
-        const nextPrimaryStatus = pendingCandidateIds.length > 0 ? 'pending' : 'confirmed';
-        specDb.updateKeyReviewAiConfirm({
-          id: stateRow.id,
-          lane: 'primary',
-          status: nextPrimaryStatus,
-          confidence: nextPrimaryStatus === 'confirmed' ? 1.0 : null,
-          at: now,
-        });
-        if (nextPrimaryStatus === 'confirmed') {
-          const refreshedState = specDb.db.prepare('SELECT * FROM key_review_state WHERE id = ?').get(stateRow.id) || stateRow;
-          markPrimaryLaneReviewedInItemState(specDb, category, refreshedState);
-        } else {
-          try {
-            specDb.db.prepare(`
-              UPDATE item_field_state
-              SET needs_ai_review = 1,
-                  ai_review_complete = 0,
-                  updated_at = datetime('now')
-              WHERE category = ? AND id = ?
-            `).run(category, stateItemFieldStateId);
-          } catch { /* best-effort */ }
-        }
-        const updated = specDb.db.prepare('SELECT * FROM key_review_state WHERE id = ?').get(stateRow.id);
-        broadcastWs('data-change', { type: 'key-review-confirm', category, id: stateRow.id, lane });
-        return jsonRes(res, 200, {
-          ok: true,
-          keyReviewState: updated,
-          pendingPrimaryCandidateIds: pendingCandidateIds,
-          confirmedCandidateId: persistedCandidateId,
-        });
-      }
-      const candidateRow = specDb.getCandidateById(candidateId);
-      if (!candidateRow) {
-        return jsonRes(res, 404, {
-          error: 'candidate_not_found',
-          message: `candidate_id '${candidateId}' was not found.`,
-        });
-      }
-      if (
-        String(candidateRow.product_id || '') !== String(stateRow.item_identifier || '')
-        || String(candidateRow.field_key || '') !== String(stateRow.field_key || '')
-      ) {
-        return jsonRes(res, 400, {
-          error: 'candidate_context_mismatch',
-          message: `candidate_id '${candidateId}' does not belong to ${stateRow.item_identifier}/${stateRow.field_key}`,
-        });
-      }
-      const selectedValueForConfirm = candidateRow.value ?? null;
-      const selectedScore = Number.isFinite(Number(candidateRow.score)) ? Number(candidateRow.score) : null;
-      specDb.db.prepare(`
-        UPDATE key_review_state
-        SET selected_candidate_id = ?,
-            selected_value = ?,
-            confidence_score = COALESCE(?, confidence_score),
-            updated_at = datetime('now')
-        WHERE id = ?
-      `).run(
-        candidateId,
-        selectedValueForConfirm,
-        selectedScore,
-        stateRow.id
-      );
-      if (!isMeaningfulValue(selectedValueForConfirm)) {
-        return jsonRes(res, 400, {
-          error: 'unknown_value_not_actionable',
-          message: 'Cannot confirm AI review for unknown/empty selected values.',
-        });
-      }
-      const now = new Date().toISOString();
-      specDb.updateKeyReviewAiConfirm({ id: stateRow.id, lane, status: 'confirmed', confidence: 1.0, at: now });
-      specDb.insertKeyReviewAudit({
-        keyReviewStateId: stateRow.id,
-        eventType: 'ai_confirm',
-        actorType: 'user',
-        actorId: null,
-        oldValue: lane === 'shared'
-          ? (stateRow.ai_confirm_shared_status || 'pending')
-          : (stateRow.ai_confirm_primary_status || 'pending'),
-        newValue: 'confirmed',
-        reason: `User confirmed ${lane} lane via GUI`,
-      });
-      const updated = specDb.db.prepare('SELECT * FROM key_review_state WHERE id = ?').get(stateRow.id);
-      if (lane === 'primary') {
-        syncItemFieldStateFromPrimaryLaneAccept(specDb, category, updated);
-      }
-      broadcastWs('data-change', { type: 'key-review-confirm', category, id: stateRow.id, lane });
-      return jsonRes(res, 200, { ok: true, keyReviewState: updated });
-    } catch (err) {
-      return jsonRes(res, 500, { error: 'confirm_failed', message: err.message });
-    }
-  }
-
-  // Key review accept — user accepts a lane (primary or shared)
-  if (parts[0] === 'review' && parts[1] && parts[2] === 'key-review-accept' && method === 'POST') {
-    const category = parts[1];
-    const body = await readJsonBody(req);
-    const lane = String(body?.lane || '').trim().toLowerCase();
-    const candidateId = String(body?.candidateId || body?.candidate_id || '').trim();
-    if (!['primary', 'shared'].includes(lane)) {
-      return jsonRes(res, 400, { error: 'lane (primary|shared) required' });
-    }
-    const specDb = getSpecDb(category);
-    if (!specDb) return jsonRes(res, 404, { error: 'no_spec_db', message: `No SpecDb for ${category}` });
-    try {
-      const stateCtx = resolveKeyReviewForLaneMutation(specDb, category, body, {
-        requireIdOrSlotId: true,
-      });
-      if (stateCtx?.error) {
-        return jsonRes(res, 400, { error: stateCtx.error, message: stateCtx.errorMessage });
-      }
-      const stateRow = stateCtx?.stateRow;
-      if (!stateRow) {
-        return jsonRes(res, 404, { error: 'key_review_state_not_found', message: 'Provide id or itemFieldStateId.' });
-      }
-      if (String(stateRow.target_kind || '') !== 'grid_key') {
-        return jsonRes(res, 400, {
-          error: 'lane_context_mismatch',
-          message: 'Review lane endpoint only supports grid_key context. Use component/enum lane endpoints for shared review.',
-        });
-      }
-      if (!candidateId) {
-        return jsonRes(res, 400, {
-          error: 'candidate_id_required',
-          message: 'candidateId is required for candidate-scoped accept.',
-        });
-      }
-      const candidateRow = specDb.getCandidateById(candidateId);
-      if (!candidateRow) {
-        return jsonRes(res, 404, {
-          error: 'candidate_not_found',
-          message: `candidate_id '${candidateId}' was not found.`,
-        });
-      }
-      if (
-        String(candidateRow.product_id || '') !== String(stateRow.item_identifier || '')
-        || String(candidateRow.field_key || '') !== String(stateRow.field_key || '')
-      ) {
-        return jsonRes(res, 400, {
-          error: 'candidate_context_mismatch',
-          message: `candidate_id '${candidateId}' does not belong to ${stateRow.item_identifier}/${stateRow.field_key}`,
-        });
-      }
-      const selectedValueForAccept = candidateRow.value ?? null;
-      const selectedScore = Number.isFinite(Number(candidateRow.score)) ? Number(candidateRow.score) : null;
-      specDb.db.prepare(`
-        UPDATE key_review_state
-        SET selected_candidate_id = ?,
-            selected_value = ?,
-            confidence_score = COALESCE(?, confidence_score),
-            updated_at = datetime('now')
-        WHERE id = ?
-      `).run(
-        candidateId,
-        selectedValueForAccept,
-        selectedScore,
-        stateRow.id
-      );
-      if (!isMeaningfulValue(selectedValueForAccept)) {
-        return jsonRes(res, 400, {
-          error: 'unknown_value_not_actionable',
-          message: 'Cannot accept unknown/empty selected values.',
-        });
-      }
-      const now = new Date().toISOString();
-      specDb.updateKeyReviewUserAccept({ id: stateRow.id, lane, status: 'accepted', at: now });
-      specDb.insertKeyReviewAudit({
-        keyReviewStateId: stateRow.id,
-        eventType: 'user_accept',
-        actorType: 'user',
-        actorId: null,
-        oldValue: null,
-        newValue: 'accepted',
-        reason: `User accepted ${lane} lane via GUI${candidateId ? ` for candidate ${candidateId}` : ''}`,
-      });
-      const updated = specDb.db.prepare('SELECT * FROM key_review_state WHERE id = ?').get(stateRow.id);
-      if (lane === 'primary') {
-        syncItemFieldStateFromPrimaryLaneAccept(specDb, category, updated);
-      }
-      if (lane === 'shared') {
-        await propagateSharedLaneDecision({
-          category,
-          specDb,
-          keyReviewState: updated,
-          laneAction: 'accept',
-          candidateValue: selectedValueForAccept,
-        });
-      }
-      broadcastWs('data-change', { type: 'key-review-accept', category, id: stateRow.id, lane });
-      return jsonRes(res, 200, { ok: true, keyReviewState: updated });
-    } catch (err) {
-      return jsonRes(res, 500, { error: 'accept_failed', message: err.message });
-    }
-  }
-
-  // Review suggest — submit suggestion feedback
+  const handledReviewItemMutation = await handleReviewItemMutationRoute({
+    parts,
+    method,
+    req,
+    res,
+    context: {
+      storage,
+      config,
+      readJsonBody,
+      jsonRes,
+      getSpecDb,
+      resolveGridFieldStateForMutation,
+      setOverrideFromCandidate,
+      setManualOverride,
+      syncPrimaryLaneAcceptFromItemSelection,
+      resolveKeyReviewForLaneMutation,
+      getPendingItemPrimaryCandidateIds,
+      markPrimaryLaneReviewedInItemState,
+      syncItemFieldStateFromPrimaryLaneAccept,
+      isMeaningfulValue,
+      propagateSharedLaneDecision,
+      broadcastWs,
+    },
+  });
+  if (handledReviewItemMutation) return;
+  // Review suggest â€” submit suggestion feedback
   if (parts[0] === 'review' && parts[1] && parts[2] === 'suggest' && method === 'POST') {
     const category = parts[1];
     const body = await readJsonBody(req);
@@ -6990,9 +6445,9 @@ async function handleApi(req, res) {
     }
   }
 
-  // ── Review Components endpoints ──────────────────────────────────
+  // â”€â”€ Review Components endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-  // Layout — list component types with property columns
+  // Layout â€” list component types with property columns
   if (parts[0] === 'review-components' && parts[1] && parts[2] === 'layout' && method === 'GET') {
     const category = parts[1];
     const runtimeSpecDb = await getSpecDbReady(category);
@@ -7027,1029 +6482,62 @@ async function handleApi(req, res) {
     return jsonRes(res, 200, payload);
   }
 
-  // Component property override
-  if (parts[0] === 'review-components' && parts[1] && parts[2] === 'component-override' && method === 'POST') {
-    const category = parts[1];
-    const body = await readJsonBody(req);
-    const { review_status, candidateId, candidateSource } = body;
-    const value = body?.value;
-    const runtimeSpecDb = await getSpecDbReady(category);
-    if (!runtimeSpecDb || !runtimeSpecDb.isSeeded()) {
-      return jsonRes(res, 503, { error: 'specdb_not_ready', message: `SpecDb not ready for ${category}` });
-    }
-    const requestedProperty = String(body?.property || body?.propertyKey || '').trim();
-    const isIdentityProperty = requestedProperty === '__name'
-      || requestedProperty === '__maker'
-      || requestedProperty === '__links'
-      || requestedProperty === '__aliases';
-    const componentCtx = resolveComponentMutationContext(runtimeSpecDb, category, body, {
-      requireComponentValueId: !isIdentityProperty,
-      requireComponentIdentityId: isIdentityProperty,
-    });
-    if (componentCtx?.error) {
-      return jsonRes(res, 400, { error: componentCtx.error, message: componentCtx.errorMessage });
-    }
-    const componentType = String(componentCtx?.componentType || '').trim();
-    const name = String(componentCtx?.componentName || '').trim();
-    const componentMaker = String(componentCtx?.componentMaker || '').trim();
-    const property = String(componentCtx?.property || body?.property || body?.propertyKey || '').trim();
-    const componentIdentityId = componentCtx?.componentIdentityId ?? null;
-    if (!componentType || !name) {
-      return jsonRes(res, 400, {
-        error: 'component_context_required',
-        message: 'Provide required component slot identifiers.',
-      });
-    }
+  const handledReviewComponentMutation = await handleReviewComponentMutationRoute({
+    parts,
+    method,
+    req,
+    res,
+    context: {
+      readJsonBody,
+      jsonRes,
+      getSpecDbReady,
+      syncSyntheticCandidatesFromComponentReview,
+      resolveComponentMutationContext,
+      isMeaningfulValue,
+      candidateLooksWorkbook,
+      normalizeLower,
+      buildComponentIdentifier,
+      applySharedLaneState,
+      cascadeComponentChange,
+      outputRoot: OUTPUT_ROOT,
+      storage,
+      loadQueueState,
+      saveQueueState,
+      remapPendingComponentReviewItemsForNameChange,
+      specDbCache,
+      broadcastWs,
+      getPendingComponentSharedCandidateIdsAsync,
+    },
+  });
+  if (handledReviewComponentMutation !== false) return;
 
-    // SQL-first runtime path (legacy JSON override files removed from the write path)
-    try {
-      const nowIso = new Date().toISOString();
-      const requestedCandidateId = String(candidateId || '').trim() || null;
-      let acceptedCandidateRow = requestedCandidateId
-        ? runtimeSpecDb.getCandidateById(requestedCandidateId)
-        : null;
-      let acceptedCandidateId = acceptedCandidateRow ? requestedCandidateId : null;
-      const sourceToken = String(candidateSource || '').trim().toLowerCase();
-      const resolveSelectionSource = () => {
-        if (!requestedCandidateId) return 'user';
-        const candidateLooksWorkbookFlag = candidateLooksWorkbook(requestedCandidateId, sourceToken);
-        const candidateLooksUser = sourceToken.includes('manual') || sourceToken.includes('user');
-        if (candidateLooksWorkbookFlag) return 'component_db';
-        if (candidateLooksUser) return 'user';
-        return 'pipeline';
-      };
-      const selectedSource = resolveSelectionSource();
-
-      if (property && value !== undefined) {
-        const isIdentity = property === '__name' || property === '__maker' || property === '__links' || property === '__aliases';
-        const valueToken = String(value ?? '').trim();
-        if (requestedCandidateId && !isMeaningfulValue(valueToken)) {
-          return jsonRes(res, 400, {
-            error: 'unknown_value_not_actionable',
-            message: 'Candidate accept cannot persist unknown/empty values.',
-          });
-        }
-        if (!isIdentity && requestedCandidateId && !acceptedCandidateRow) {
-          return jsonRes(res, 404, {
-            error: 'candidate_not_found',
-            message: `candidate_id '${requestedCandidateId}' was not found.`,
-          });
-        }
-        if (acceptedCandidateId && acceptedCandidateRow && !isIdentity) {
-          if (String(acceptedCandidateRow.field_key || '').trim() !== String(property || '').trim()) {
-            return jsonRes(res, 400, {
-              error: 'candidate_context_mismatch',
-              message: `candidate_id '${acceptedCandidateId}' does not belong to component property '${property}'.`,
-            });
-          }
-          const candidateValueToken = String(acceptedCandidateRow.value ?? '').trim();
-          if (
-            isMeaningfulValue(candidateValueToken)
-            && isMeaningfulValue(valueToken)
-            && normalizeLower(candidateValueToken) !== normalizeLower(valueToken)
-          ) {
-            return jsonRes(res, 400, {
-              error: 'candidate_value_mismatch',
-              message: `candidate_id '${acceptedCandidateId}' value does not match requested property value.`,
-            });
-          }
-        }
-
-        if (!isIdentity) {
-          const existingProperty = (
-            componentCtx?.componentValueRow
-            && String(componentCtx.componentValueRow.property_key || '').trim() === String(property || '').trim()
-          )
-            ? componentCtx.componentValueRow
-            : null;
-          if (!existingProperty?.id) {
-            return jsonRes(res, 400, {
-              error: 'component_value_id_required',
-              message: 'componentValueId is required for component property mutations.',
-            });
-          }
-          const componentIdentifier = buildComponentIdentifier(componentType, name, componentMaker);
-          const existingSharedLaneState = runtimeSpecDb.getKeyReviewState({
-            category,
-            targetKind: 'component_key',
-            fieldKey: String(property),
-            componentIdentifier,
-            propertyKey: String(property),
-            componentValueId: componentCtx?.componentValueId ?? existingProperty.id,
-          });
-          const existingSharedLaneStatus = String(existingSharedLaneState?.ai_confirm_shared_status || '').trim().toLowerCase();
-          const keepNeedsReview = acceptedCandidateId
-            ? (existingSharedLaneStatus === 'pending' || Boolean(existingProperty?.needs_review))
-            : false;
-          let parsedConstraints = [];
-          if (existingProperty?.constraints) {
-            try {
-              parsedConstraints = JSON.parse(existingProperty.constraints);
-            } catch {
-              parsedConstraints = [];
-            }
-          }
-          runtimeSpecDb.upsertComponentValue({
-            componentType,
-            componentName: name,
-            componentMaker,
-            propertyKey: property,
-            value: String(value),
-            confidence: 1.0,
-            variancePolicy: existingProperty?.variance_policy ?? null,
-            source: selectedSource,
-            acceptedCandidateId: acceptedCandidateId || null,
-            overridden: !acceptedCandidateId,
-            needsReview: keepNeedsReview,
-            constraints: parsedConstraints,
-          });
-          const componentSlotId = componentCtx?.componentValueId ?? existingProperty.id;
-          if (acceptedCandidateId && componentSlotId) {
-            runtimeSpecDb.upsertReview({
-              candidateId: acceptedCandidateId,
-              contextType: 'component',
-              contextId: String(componentSlotId),
-              humanAccepted: true,
-              humanAcceptedAt: nowIso,
-              aiReviewStatus: 'accepted',
-              aiReviewedAt: nowIso,
-              aiReviewModel: null,
-              aiConfidence: 1.0,
-              aiReason: 'shared_accept',
-              humanOverrideAi: false,
-            });
-          }
-
-          const sharedCandidate = acceptedCandidateRow
-            || (acceptedCandidateId ? runtimeSpecDb.getCandidateById(acceptedCandidateId) : null);
-          const sharedConfidence = Number.isFinite(Number(sharedCandidate?.score))
-            ? Number(sharedCandidate.score)
-            : 1.0;
-          applySharedLaneState({
-            specDb: runtimeSpecDb,
-            category,
-            targetKind: 'component_key',
-            fieldKey: String(property),
-            componentIdentifier,
-            propertyKey: String(property),
-            componentValueId: componentCtx?.componentValueId ?? existingProperty.id,
-            selectedCandidateId: acceptedCandidateId,
-            selectedValue: String(value),
-            confidenceScore: sharedConfidence,
-            laneAction: 'accept',
-            nowIso,
-          });
-
-          if (!acceptedCandidateId) {
-            runtimeSpecDb.db.prepare(
-              'UPDATE component_values SET accepted_candidate_id = NULL, updated_at = datetime(\'now\') WHERE category = ? AND id = ?'
-            ).run(runtimeSpecDb.category, existingProperty.id);
-          }
-
-          await cascadeComponentChange({
-            storage,
-            outputRoot: OUTPUT_ROOT,
-            category,
-            componentType,
-            componentName: name,
-            componentMaker,
-            changedProperty: property,
-            newValue: value,
-            variancePolicy: existingProperty?.variance_policy ?? null,
-            constraints: parsedConstraints,
-            loadQueueState,
-            saveQueueState,
-            specDb: runtimeSpecDb,
-          });
-        } else if (property === '__aliases') {
-          const aliases = (Array.isArray(value) ? value : [value])
-            .map((entry) => String(entry || '').trim())
-            .filter(Boolean);
-          if (!componentIdentityId) {
-            return jsonRes(res, 400, {
-              error: 'component_identity_id_required',
-              message: 'componentIdentityId is required for component identity mutations.',
-            });
-          }
-          const idRow = { id: componentIdentityId };
-          if (idRow?.id) {
-            runtimeSpecDb.db.prepare('DELETE FROM component_aliases WHERE component_id = ? AND source = ?').run(idRow.id, 'user');
-            for (const alias of aliases) {
-              runtimeSpecDb.insertAlias(idRow.id, alias, 'user');
-            }
-          }
-          runtimeSpecDb.updateAliasesOverridden(componentType, name, componentMaker, aliases.length > 0);
-        } else if (property === '__links') {
-          const links = (Array.isArray(value) ? value : [value])
-            .map((entry) => String(entry || '').trim())
-            .filter(Boolean);
-          if (!componentIdentityId) {
-            return jsonRes(res, 400, {
-              error: 'component_identity_id_required',
-              message: 'componentIdentityId is required for component identity mutations.',
-            });
-          }
-          runtimeSpecDb.db.prepare(`
-            UPDATE component_identity
-            SET links = ?, source = 'user', updated_at = datetime('now')
-            WHERE category = ? AND id = ?
-          `).run(JSON.stringify(links), runtimeSpecDb.category, componentIdentityId);
-        } else if (property === '__name') {
-          const newName = String(value || '').trim();
-          if (!newName || newName.length < 2) {
-            return jsonRes(res, 400, { error: 'name must be at least 2 characters' });
-          }
-          const oldComponentIdentifier = buildComponentIdentifier(componentType, name, componentMaker);
-          const newComponentIdentifier = buildComponentIdentifier(componentType, newName, componentMaker);
-          if (!componentIdentityId) {
-            return jsonRes(res, 400, {
-              error: 'component_identity_id_required',
-              message: 'componentIdentityId is required for component identity mutations.',
-            });
-          }
-          const tx = runtimeSpecDb.db.transaction(() => {
-            runtimeSpecDb.db.prepare(`
-              UPDATE component_identity
-              SET canonical_name = ?, source = ?, updated_at = datetime('now')
-              WHERE category = ? AND id = ?
-            `).run(newName, selectedSource, runtimeSpecDb.category, componentIdentityId);
-            runtimeSpecDb.db.prepare(`
-              UPDATE component_values
-              SET component_name = ?, updated_at = datetime('now')
-              WHERE category = ? AND component_type = ? AND component_name = ? AND component_maker = ?
-            `).run(newName, runtimeSpecDb.category, componentType, name, componentMaker);
-            runtimeSpecDb.db.prepare(`
-              UPDATE item_component_links
-              SET component_name = ?, updated_at = datetime('now')
-              WHERE category = ? AND component_type = ? AND component_name = ? AND component_maker = ?
-            `).run(newName, runtimeSpecDb.category, componentType, name, componentMaker);
-            if (oldComponentIdentifier !== newComponentIdentifier) {
-              runtimeSpecDb.db.prepare(`
-                UPDATE key_review_state
-                SET component_identifier = ?, updated_at = datetime('now')
-                WHERE category = ? AND target_kind = 'component_key' AND component_identifier = ?
-              `).run(newComponentIdentifier, runtimeSpecDb.category, oldComponentIdentifier);
-            }
-          });
-          tx();
-          await remapPendingComponentReviewItemsForNameChange({
-            category,
-            componentType,
-            oldName: name,
-            newName,
-            specDb: runtimeSpecDb,
-          });
-          const sharedCandidate = acceptedCandidateId
-            ? runtimeSpecDb.getCandidateById(acceptedCandidateId)
-            : null;
-          const sharedConfidence = Number.isFinite(Number(sharedCandidate?.score))
-            ? Number(sharedCandidate.score)
-            : 1.0;
-          applySharedLaneState({
-            specDb: runtimeSpecDb,
-            category,
-            targetKind: 'component_key',
-            fieldKey: '__name',
-            componentIdentifier: newComponentIdentifier,
-            propertyKey: '__name',
-            selectedCandidateId: acceptedCandidateId,
-            selectedValue: newName,
-            confidenceScore: sharedConfidence,
-            laneAction: 'accept',
-            nowIso,
-          });
-          await cascadeComponentChange({
-            storage,
-            outputRoot: OUTPUT_ROOT,
-            category,
-            componentType,
-            componentName: newName,
-            componentMaker,
-            changedProperty: componentType,
-            newValue: newName,
-            variancePolicy: 'authoritative',
-            constraints: [],
-            loadQueueState,
-            saveQueueState,
-            specDb: runtimeSpecDb,
-          });
-        } else if (property === '__maker') {
-          const newMaker = String(value || '').trim();
-          if (!newMaker || newMaker.length < 2) {
-            return jsonRes(res, 400, { error: 'maker must be at least 2 characters' });
-          }
-          const oldComponentIdentifier = buildComponentIdentifier(componentType, name, componentMaker);
-          const newComponentIdentifier = buildComponentIdentifier(componentType, name, newMaker);
-          if (!componentIdentityId) {
-            return jsonRes(res, 400, {
-              error: 'component_identity_id_required',
-              message: 'componentIdentityId is required for component identity mutations.',
-            });
-          }
-          const tx = runtimeSpecDb.db.transaction(() => {
-            runtimeSpecDb.db.prepare(`
-              UPDATE component_identity
-              SET maker = ?, source = ?, updated_at = datetime('now')
-              WHERE category = ? AND id = ?
-            `).run(newMaker, selectedSource, runtimeSpecDb.category, componentIdentityId);
-            runtimeSpecDb.db.prepare(`
-              UPDATE component_values
-              SET component_maker = ?, updated_at = datetime('now')
-              WHERE category = ? AND component_type = ? AND component_name = ? AND component_maker = ?
-            `).run(newMaker, runtimeSpecDb.category, componentType, name, componentMaker);
-            runtimeSpecDb.db.prepare(`
-              UPDATE item_component_links
-              SET component_maker = ?, updated_at = datetime('now')
-              WHERE category = ? AND component_type = ? AND component_name = ? AND component_maker = ?
-            `).run(newMaker, runtimeSpecDb.category, componentType, name, componentMaker);
-            if (oldComponentIdentifier !== newComponentIdentifier) {
-              runtimeSpecDb.db.prepare(`
-                UPDATE key_review_state
-                SET component_identifier = ?, updated_at = datetime('now')
-                WHERE category = ? AND target_kind = 'component_key' AND component_identifier = ?
-              `).run(newComponentIdentifier, runtimeSpecDb.category, oldComponentIdentifier);
-            }
-          });
-          tx();
-          const sharedCandidate = acceptedCandidateId
-            ? runtimeSpecDb.getCandidateById(acceptedCandidateId)
-            : null;
-          const sharedConfidence = Number.isFinite(Number(sharedCandidate?.score))
-            ? Number(sharedCandidate.score)
-            : 1.0;
-          applySharedLaneState({
-            specDb: runtimeSpecDb,
-            category,
-            targetKind: 'component_key',
-            fieldKey: '__maker',
-            componentIdentifier: newComponentIdentifier,
-            propertyKey: '__maker',
-            selectedCandidateId: acceptedCandidateId,
-            selectedValue: newMaker,
-            confidenceScore: sharedConfidence,
-            laneAction: 'accept',
-            nowIso,
-          });
-          await cascadeComponentChange({
-            storage,
-            outputRoot: OUTPUT_ROOT,
-            category,
-            componentType,
-            componentName: name,
-            componentMaker: newMaker,
-            changedProperty: `${componentType}_brand`,
-            newValue: newMaker,
-            variancePolicy: 'authoritative',
-            constraints: [],
-            loadQueueState,
-            saveQueueState,
-            specDb: runtimeSpecDb,
-          });
-        }
-      }
-
-      if (review_status) {
-        if (!componentIdentityId) {
-          return jsonRes(res, 400, {
-            error: 'component_identity_id_required',
-            message: 'componentIdentityId is required for review_status updates.',
-          });
-        }
-        runtimeSpecDb.db.prepare(`
-          UPDATE component_identity
-          SET review_status = ?, updated_at = datetime('now')
-          WHERE category = ? AND id = ?
-        `).run(review_status, runtimeSpecDb.category, componentIdentityId);
-      }
-
-      specDbCache.delete(category);
-      broadcastWs('data-change', { type: 'component-override', category });
-      return jsonRes(res, 200, { ok: true, sql_only: true });
-    } catch (sqlErr) {
-      return jsonRes(res, 500, {
-        error: 'component_override_specdb_write_failed',
-        message: sqlErr?.message || 'SpecDb write failed',
-      });
-    }
-
-  }
-
-  // Component shared-lane confirm without overriding value (context-only decision)
-  if (parts[0] === 'review-components' && parts[1] && parts[2] === 'component-key-review-confirm' && method === 'POST') {
-    const category = parts[1];
-    const body = await readJsonBody(req);
-
-    const runtimeSpecDb = await getSpecDbReady(category);
-    if (!runtimeSpecDb || !runtimeSpecDb.isSeeded()) {
-      return jsonRes(res, 503, { error: 'specdb_not_ready', message: `SpecDb not ready for ${category}` });
-    }
-    try { await syncSyntheticCandidatesFromComponentReview({ category, specDb: runtimeSpecDb }); } catch { /* best-effort */ }
-    const requestedProperty = String(body?.property || body?.propertyKey || '').trim();
-    const isIdentityProperty = requestedProperty === '__name'
-      || requestedProperty === '__maker'
-      || requestedProperty === '__links'
-      || requestedProperty === '__aliases';
-    const componentCtx = resolveComponentMutationContext(runtimeSpecDb, category, body, {
-      requireComponentValueId: !isIdentityProperty,
-      requireComponentIdentityId: isIdentityProperty,
-    });
-    if (componentCtx?.error) {
-      return jsonRes(res, 400, { error: componentCtx.error, message: componentCtx.errorMessage });
-    }
-    const componentType = String(componentCtx?.componentType || '').trim();
-    const name = String(componentCtx?.componentName || '').trim();
-    const componentMaker = String(componentCtx?.componentMaker || '').trim();
-    const property = String(componentCtx?.property || body?.property || '').trim();
-    if (!componentType || !name || !property) {
-      return jsonRes(res, 400, {
-        error: 'component_context_required',
-        message: 'component slot identifiers are required',
-      });
-    }
-
-    try {
-      let propertyRow = null;
-      if (property !== '__name' && property !== '__maker') {
-        propertyRow = componentCtx?.componentValueRow || null;
-        if (!propertyRow?.id) {
-          return jsonRes(res, 400, {
-            error: 'component_value_id_required',
-            message: 'componentValueId is required for component property mutations.',
-          });
-        }
-      }
-
-      const componentIdentifier = buildComponentIdentifier(componentType, name, componentMaker);
-      const existingState = runtimeSpecDb.getKeyReviewState({
-        category,
-        targetKind: 'component_key',
-        fieldKey: property,
-        componentIdentifier,
-        propertyKey: property,
-        componentValueId: componentCtx?.componentValueId ?? propertyRow?.id ?? null,
-      });
-      const resolvedValue = String(
-        existingState?.selected_value
-        ?? (property === '__name' ? name : null)
-        ?? (property === '__maker' ? componentMaker : null)
-        ?? propertyRow?.value
-        ?? ''
-      ).trim();
-
-      const requestedCandidateId = String(body?.candidateId || body?.candidate_id || '').trim() || null;
-      if (!requestedCandidateId) {
-        return jsonRes(res, 400, {
-          error: 'candidate_id_required',
-          message: 'candidateId is required for component AI confirm.',
-        });
-      }
-      const requestedCandidateRow = runtimeSpecDb.getCandidateById(requestedCandidateId);
-      if (!requestedCandidateRow) {
-        return jsonRes(res, 404, {
-          error: 'candidate_not_found',
-          message: `candidate_id '${requestedCandidateId}' was not found.`,
-        });
-      }
-      const stateValue = resolvedValue || String(requestedCandidateRow.value ?? '').trim();
-      if (!isMeaningfulValue(stateValue)) {
-        return jsonRes(res, 400, {
-          error: 'confirm_value_required',
-          message: 'No resolved value to confirm for this component property',
-        });
-      }
-      if (property !== '__name' && property !== '__maker') {
-        if (String(requestedCandidateRow.field_key || '').trim() !== String(property || '').trim()) {
-          return jsonRes(res, 400, {
-            error: 'candidate_context_mismatch',
-            message: `candidate_id '${requestedCandidateId}' does not belong to component property '${property}'.`,
-          });
-        }
-        const requestedValueToken = String(requestedCandidateRow.value ?? '').trim();
-        if (
-          isMeaningfulValue(requestedValueToken)
-          && isMeaningfulValue(stateValue)
-          && normalizeLower(requestedValueToken) !== normalizeLower(stateValue)
-        ) {
-          return jsonRes(res, 400, {
-            error: 'candidate_value_mismatch',
-            message: `candidate_id '${requestedCandidateId}' value does not match component property '${property}'.`,
-          });
-        }
-      }
-      const resolvedCandidateId = requestedCandidateId;
-      const resolvedConfidence = Number.isFinite(Number(existingState?.confidence_score))
-        ? Number(existingState.confidence_score)
-        : (Number.isFinite(Number(propertyRow?.confidence))
-          ? Number(propertyRow.confidence)
-          : (Number.isFinite(Number(requestedCandidateRow?.score))
-            ? Number(requestedCandidateRow.score)
-            : (Number.isFinite(Number(body?.candidateConfidence)) ? Number(body.candidateConfidence) : 1.0)));
-      const nowIso = new Date().toISOString();
-      const componentSlotId = componentCtx?.componentValueId ?? propertyRow?.id ?? null;
-      if (componentSlotId) {
-        runtimeSpecDb.upsertReview({
-          candidateId: requestedCandidateId,
-          contextType: 'component',
-          contextId: String(componentSlotId),
-          humanAccepted: false,
-          humanAcceptedAt: null,
-          aiReviewStatus: 'accepted',
-          aiConfidence: Number.isFinite(Number(body?.candidateConfidence))
-            ? Number(body.candidateConfidence)
-            : 1.0,
-          aiReason: 'shared_confirm',
-          aiReviewedAt: nowIso,
-          aiReviewModel: null,
-          humanOverrideAi: false,
-          humanOverrideAiAt: null,
-        });
-      }
-      const pendingCandidateIds = await getPendingComponentSharedCandidateIdsAsync(runtimeSpecDb, {
-        category,
-        componentType,
-        componentName: name,
-        componentMaker,
-        propertyKey: property,
-        componentValueId: componentSlotId,
-      });
-      const confirmStatusOverride = pendingCandidateIds.length > 0 ? 'pending' : 'confirmed';
-      const state = applySharedLaneState({
-        specDb: runtimeSpecDb,
-        category,
-        targetKind: 'component_key',
-        fieldKey: property,
-        componentIdentifier,
-        propertyKey: property,
-        componentValueId: componentSlotId,
-        selectedCandidateId: resolvedCandidateId,
-        selectedValue: stateValue,
-        confidenceScore: resolvedConfidence,
-        laneAction: 'confirm',
-        nowIso,
-        confirmStatusOverride,
-      });
-      if (componentSlotId) {
-        runtimeSpecDb.db.prepare(`
-          UPDATE component_values
-          SET needs_review = ?, updated_at = datetime('now')
-          WHERE category = ? AND id = ?
-        `).run(confirmStatusOverride === 'pending' ? 1 : 0, runtimeSpecDb.category, componentSlotId);
-      }
-
-      specDbCache.delete(category);
-      broadcastWs('data-change', {
-        type: 'component-key-review-confirm',
-        category,
-        componentType,
-        name,
-        property,
-      });
-      return jsonRes(res, 200, { ok: true, keyReviewState: state });
-    } catch (err) {
-      return jsonRes(res, 500, {
-        error: 'component_key_review_confirm_failed',
-        message: err?.message || 'Component key review confirm failed',
-      });
-    }
-  }
-
-  // Enum value override (add/remove/accept/confirm) — SQL-first runtime path
-  if (parts[0] === 'review-components' && parts[1] && parts[2] === 'enum-override' && method === 'POST') {
-    const category = parts[1];
-    const body = await readJsonBody(req);
-    const action = String(body?.action || '').trim().toLowerCase() || 'add'; // 'add' | 'remove' | 'accept' | 'confirm'
-    const { candidateId, candidateSource } = body;
-    const runtimeSpecDb = await getSpecDbReady(category);
-    if (!runtimeSpecDb || !runtimeSpecDb.isSeeded()) {
-      return jsonRes(res, 503, { error: 'specdb_not_ready', message: `SpecDb not ready for ${category}` });
-    }
-    try { await syncSyntheticCandidatesFromComponentReview({ category, specDb: runtimeSpecDb }); } catch { /* best-effort */ }
-    const enumCtx = resolveEnumMutationContext(runtimeSpecDb, category, body, {
-      requireEnumListId: action === 'add',
-      requireListValueId: action === 'remove' || action === 'accept' || action === 'confirm',
-    });
-    if (enumCtx?.error) {
-      return jsonRes(res, 400, { error: enumCtx.error, message: enumCtx.errorMessage });
-    }
-    const field = String(enumCtx?.field || '').trim();
-    const value = String(enumCtx?.value || '').trim();
-    const listValueId = enumCtx?.listValueId ?? null;
-    if (!field) return jsonRes(res, 400, { error: 'field required' });
-    if (!value) return jsonRes(res, 400, { error: 'value required' });
-
-    // SQL-first runtime path (legacy workbook_map/known_values writes removed from write path)
-    try {
-      const normalized = String(value).trim().toLowerCase();
-      const nowIso = new Date().toISOString();
-      const requestedCandidateId = String(candidateId || '').trim() || null;
-      let requestedCandidateRow = requestedCandidateId
-        ? runtimeSpecDb.getCandidateById(requestedCandidateId)
-        : null;
-      const needsCandidateAction = action === 'accept' || action === 'confirm';
-      if (needsCandidateAction && !requestedCandidateId) {
-        return jsonRes(res, 400, {
-          error: 'candidate_id_required',
-          message: `candidateId is required for enum ${action}.`,
-        });
-      }
-      if (needsCandidateAction && !requestedCandidateRow) {
-        return jsonRes(res, 404, {
-          error: 'candidate_not_found',
-          message: `candidate_id '${requestedCandidateId}' was not found.`,
-        });
-      }
-      let acceptedCandidateId = requestedCandidateRow ? requestedCandidateId : null;
-      const sourceToken = String(candidateSource || '').trim().toLowerCase();
-      const priorValue = String(enumCtx?.oldValue || '').trim();
-      const normalizedPrior = priorValue.toLowerCase();
-      let cascadeAction = null;
-      let cascadeValue = String(value).trim();
-      let cascadeNewValue = null;
-      let cascadePreAffectedProductIds = [];
-
-      if (action === 'remove') {
-        try {
-          const preRows = [
-            ...(runtimeSpecDb.getProductsForFieldValue(field, String(value).trim()) || []),
-            ...(runtimeSpecDb.getProductsForListValue(field, String(value).trim()) || [])
-          ];
-          cascadePreAffectedProductIds = [...new Set(preRows.map((row) => row?.product_id).filter(Boolean))];
-        } catch {
-          cascadePreAffectedProductIds = [];
-        }
-        if (listValueId) {
-          runtimeSpecDb.deleteListValueById(listValueId);
-        } else {
-          runtimeSpecDb.deleteListValue(field, String(value).trim());
-        }
-        cascadeAction = 'remove';
-        cascadeValue = String(value).trim();
-      } else if (action === 'accept') {
-        const resolvedValue = String(value).trim();
-        if (!isMeaningfulValue(resolvedValue)) {
-          return jsonRes(res, 400, {
-            error: 'unknown_value_not_actionable',
-            message: 'Cannot accept unknown/empty enum values.',
-          });
-        }
-        const normalizedResolved = resolvedValue.toLowerCase();
-        const isRenameAccept = Boolean(priorValue) && normalizedPrior !== normalizedResolved;
-        if (acceptedCandidateId && requestedCandidateRow) {
-          if (String(requestedCandidateRow.field_key || '').trim() !== String(field || '').trim()) {
-            return jsonRes(res, 400, {
-              error: 'candidate_context_mismatch',
-              message: `candidate_id '${acceptedCandidateId}' does not belong to enum field '${field}'.`,
-            });
-          }
-          const candidateValueToken = String(requestedCandidateRow.value ?? '').trim();
-          if (
-            isMeaningfulValue(candidateValueToken)
-            && !isRenameAccept
-            && normalizeLower(candidateValueToken) !== normalizeLower(resolvedValue)
-          ) {
-            return jsonRes(res, 400, {
-              error: 'candidate_value_mismatch',
-              message: `candidate_id '${acceptedCandidateId}' value does not match enum value '${resolvedValue}'.`,
-            });
-          }
-        }
-        const oldLv = isRenameAccept
-          ? (listValueId
-            ? runtimeSpecDb.getListValueById(listValueId)
-            : runtimeSpecDb.getListValueByFieldAndValue(field, priorValue))
-          : null;
-        if (isRenameAccept && oldLv) {
-          cascadePreAffectedProductIds = oldLv?.id
-            ? (runtimeSpecDb.renameListValueById(oldLv.id, resolvedValue, nowIso) || [])
-            : (runtimeSpecDb.renameListValue(field, priorValue, resolvedValue, nowIso) || []);
-          cascadeAction = 'rename';
-          cascadeValue = priorValue;
-          cascadeNewValue = resolvedValue;
-        }
-        const existingLv = runtimeSpecDb.getListValueByFieldAndValue(field, resolvedValue);
-        const existingState = runtimeSpecDb.getKeyReviewState({
-          category,
-          targetKind: 'enum_key',
-          fieldKey: field,
-          enumValueNorm: normalizedResolved,
-          listValueId: existingLv?.id ?? null,
-        });
-        const priorState = isRenameAccept
-          ? runtimeSpecDb.getKeyReviewState({
-            category,
-            targetKind: 'enum_key',
-            fieldKey: field,
-            enumValueNorm: normalizedPrior,
-            listValueId: oldLv?.id ?? null,
-          })
-          : null;
-        const existingStateStatus = String(existingState?.ai_confirm_shared_status || '').trim().toLowerCase();
-        const priorStateStatus = String(priorState?.ai_confirm_shared_status || '').trim().toLowerCase();
-        const keepNeedsReview = existingStateStatus === 'pending'
-          || priorStateStatus === 'pending'
-          || Boolean(existingLv?.needs_review)
-          || Boolean(oldLv?.needs_review);
-        const looksWorkbook = candidateLooksWorkbook(requestedCandidateId, sourceToken);
-        const selectedSource = String(
-          existingLv?.source
-          || oldLv?.source
-          || (looksWorkbook ? 'known_values' : 'pipeline')
-        );
-        const resolvedCandidateId = acceptedCandidateId;
-        runtimeSpecDb.upsertListValue({
-          fieldKey: field,
-          value: resolvedValue,
-          normalizedValue: normalized,
-          source: selectedSource,
-          overridden: false,
-          needsReview: keepNeedsReview,
-          sourceTimestamp: nowIso,
-          acceptedCandidateId: resolvedCandidateId,
-        });
-        const resolvedLv = runtimeSpecDb.getListValueByFieldAndValue(field, resolvedValue);
-        if (resolvedCandidateId && resolvedLv?.id) {
-          runtimeSpecDb.upsertReview({
-            candidateId: resolvedCandidateId,
-            contextType: 'list',
-            contextId: String(resolvedLv.id),
-            humanAccepted: true,
-            humanAcceptedAt: nowIso,
-            aiReviewStatus: 'accepted',
-            aiReviewedAt: nowIso,
-            aiReviewModel: null,
-            aiConfidence: 1.0,
-            aiReason: 'shared_accept',
-            humanOverrideAi: false,
-          });
-        }
-        const sharedCandidate = resolvedCandidateId
-          ? runtimeSpecDb.getCandidateById(resolvedCandidateId)
-          : null;
-        const sharedConfidence = Number.isFinite(Number(sharedCandidate?.score))
-          ? Number(sharedCandidate.score)
-          : 1.0;
-        applySharedLaneState({
-          specDb: runtimeSpecDb,
-          category,
-          targetKind: 'enum_key',
-          fieldKey: field,
-          enumValueNorm: normalized,
-          listValueId: resolvedLv?.id ?? null,
-          enumListId: resolvedLv?.list_id ?? null,
-          selectedCandidateId: resolvedCandidateId,
-          selectedValue: resolvedValue,
-          confidenceScore: sharedConfidence,
-          laneAction: 'accept',
-          nowIso,
-        });
-      } else if (action === 'confirm') {
-        const resolvedValue = String(value).trim();
-        if (!isMeaningfulValue(resolvedValue)) {
-          return jsonRes(res, 400, {
-            error: 'unknown_value_not_actionable',
-            message: 'Cannot confirm unknown/empty enum values.',
-          });
-        }
-        if (String(requestedCandidateRow.field_key || '').trim() !== String(field || '').trim()) {
-          return jsonRes(res, 400, {
-            error: 'candidate_context_mismatch',
-            message: `candidate_id '${requestedCandidateId}' does not belong to enum field '${field}'.`,
-          });
-        }
-        const requestedValueToken = String(requestedCandidateRow.value ?? '').trim();
-        if (
-          isMeaningfulValue(requestedValueToken)
-          && normalizeLower(requestedValueToken) !== normalizeLower(resolvedValue)
-        ) {
-          return jsonRes(res, 400, {
-            error: 'candidate_value_mismatch',
-            message: `candidate_id '${requestedCandidateId}' value does not match enum value '${resolvedValue}'.`,
-          });
-        }
-        let existingLv = runtimeSpecDb.getListValueByFieldAndValue(field, resolvedValue);
-        if (!existingLv) {
-          runtimeSpecDb.upsertListValue({
-            fieldKey: field,
-            value: resolvedValue,
-            normalizedValue: normalized,
-            source: 'pipeline',
-            enumPolicy: null,
-            overridden: false,
-            needsReview: false,
-            sourceTimestamp: nowIso,
-            acceptedCandidateId: null,
-          });
-          existingLv = runtimeSpecDb.getListValueByFieldAndValue(field, resolvedValue);
-        } else {
-          const persistedAcceptedCandidateId = String(existingLv?.accepted_candidate_id || '').trim();
-          const sanitizedAcceptedCandidateId = (
-            persistedAcceptedCandidateId
-            && runtimeSpecDb.getCandidateById(persistedAcceptedCandidateId)
-          )
-            ? persistedAcceptedCandidateId
-            : null;
-          runtimeSpecDb.upsertListValue({
-            fieldKey: field,
-            value: resolvedValue,
-            normalizedValue: normalized,
-            source: existingLv.source || 'pipeline',
-            enumPolicy: existingLv.enum_policy ?? null,
-            overridden: Boolean(existingLv.overridden),
-            needsReview: false,
-            sourceTimestamp: nowIso,
-            acceptedCandidateId: sanitizedAcceptedCandidateId,
-          });
-          existingLv = runtimeSpecDb.getListValueByFieldAndValue(field, resolvedValue);
-        }
-        const resolvedCandidateId = requestedCandidateId;
-        if (existingLv?.id) {
-          runtimeSpecDb.upsertReview({
-            candidateId: requestedCandidateId,
-            contextType: 'list',
-            contextId: String(existingLv.id),
-            humanAccepted: false,
-            humanAcceptedAt: null,
-            aiReviewStatus: 'accepted',
-            aiConfidence: Number.isFinite(Number(body?.candidateConfidence))
-              ? Number(body.candidateConfidence)
-              : 1.0,
-            aiReason: 'shared_confirm',
-            aiReviewedAt: nowIso,
-            aiReviewModel: null,
-            humanOverrideAi: false,
-            humanOverrideAiAt: null,
-          });
-        }
-        const pendingCandidateIds = getPendingEnumSharedCandidateIds(runtimeSpecDb, {
-          fieldKey: field,
-          listValueId: existingLv?.id ?? null,
-        });
-        const confirmStatusOverride = pendingCandidateIds.length > 0 ? 'pending' : 'confirmed';
-        runtimeSpecDb.upsertListValue({
-          fieldKey: field,
-          value: resolvedValue,
-          normalizedValue: normalized,
-          source: existingLv?.source || 'pipeline',
-          enumPolicy: existingLv?.enum_policy ?? null,
-          overridden: Boolean(existingLv?.overridden),
-          needsReview: confirmStatusOverride === 'pending',
-          sourceTimestamp: nowIso,
-          acceptedCandidateId: resolvedCandidateId,
-        });
-        existingLv = runtimeSpecDb.getListValueByFieldAndValue(field, resolvedValue);
-        const sharedCandidate = resolvedCandidateId
-          ? runtimeSpecDb.getCandidateById(resolvedCandidateId)
-          : null;
-        const sharedConfidence = Number.isFinite(Number(sharedCandidate?.score))
-          ? Number(sharedCandidate.score)
-          : 1.0;
-        applySharedLaneState({
-          specDb: runtimeSpecDb,
-          category,
-          targetKind: 'enum_key',
-          fieldKey: field,
-          enumValueNorm: normalized,
-          listValueId: existingLv?.id ?? null,
-          enumListId: existingLv?.list_id ?? null,
-          selectedCandidateId: resolvedCandidateId,
-          selectedValue: resolvedValue,
-          confidenceScore: sharedConfidence,
-          laneAction: 'confirm',
-          nowIso,
-          confirmStatusOverride,
-        });
-      } else {
-        const resolvedValue = String(value).trim();
-        runtimeSpecDb.upsertListValue({
-          fieldKey: field,
-          value: resolvedValue,
-          normalizedValue: normalized,
-          source: 'manual',
-          overridden: true,
-          needsReview: false,
-          sourceTimestamp: nowIso,
-          acceptedCandidateId: null,
-        });
-        const manualLv = runtimeSpecDb.getListValueByFieldAndValue(field, resolvedValue);
-        applySharedLaneState({
-          specDb: runtimeSpecDb,
-          category,
-          targetKind: 'enum_key',
-          fieldKey: field,
-          enumValueNorm: normalized,
-          listValueId: manualLv?.id ?? null,
-          enumListId: manualLv?.list_id ?? null,
-          selectedCandidateId: null,
-          selectedValue: resolvedValue,
-          confidenceScore: 1.0,
-          laneAction: 'accept',
-          nowIso,
-        });
-      }
-
-      specDbCache.delete(category);
-
-      if (cascadeAction) {
-        await cascadeEnumChange({
-          storage,
-          outputRoot: OUTPUT_ROOT,
-          category,
-          field,
-          action: cascadeAction,
-          value: cascadeValue,
-          newValue: cascadeNewValue,
-          preAffectedProductIds: cascadePreAffectedProductIds,
-          loadQueueState,
-          saveQueueState,
-          specDb: runtimeSpecDb,
-        });
-      }
-      if (action === 'accept' || action === 'add') {
-        try { await markEnumSuggestionStatus(category, field, value, 'accepted'); } catch { /* best-effort */ }
-        if (priorValue) {
-          try { await markEnumSuggestionStatus(category, field, priorValue, 'accepted'); } catch { /* best-effort */ }
-        }
-      } else if (action === 'remove') {
-        try { await markEnumSuggestionStatus(category, field, value, 'dismissed'); } catch { /* best-effort */ }
-      }
-
-      broadcastWs('data-change', { type: 'enum-override', category, field, action: action || 'add' });
-      return jsonRes(res, 200, { ok: true, field, action: action || 'add', persisted: 'specdb' });
-    } catch (sqlErr) {
-      return jsonRes(res, 500, {
-        error: 'enum_override_specdb_write_failed',
-        message: sqlErr?.message || 'SpecDb write failed',
-      });
-    }
-
-  }
-
-  // Atomic enum rename (remove old + add new in one transaction)
-  if (parts[0] === 'review-components' && parts[1] && parts[2] === 'enum-rename' && method === 'POST') {
-    const category = parts[1];
-    const body = await readJsonBody(req);
-    const newValueRaw = body?.newValue ?? body?.new_value;
-    if (!newValueRaw) return jsonRes(res, 400, { error: 'newValue required' });
-    const trimmedNew = String(newValueRaw).trim();
-    if (!trimmedNew) return jsonRes(res, 400, { error: 'newValue cannot be empty' });
-    const runtimeSpecDb = await getSpecDbReady(category);
-    if (!runtimeSpecDb || !runtimeSpecDb.isSeeded()) {
-      return jsonRes(res, 503, { error: 'specdb_not_ready', message: `SpecDb not ready for ${category}` });
-    }
-    const enumCtx = resolveEnumMutationContext(runtimeSpecDb, category, body, {
-      requireListValueId: true,
-    });
-    if (enumCtx?.error) {
-      return jsonRes(res, 400, { error: enumCtx.error, message: enumCtx.errorMessage });
-    }
-    const field = String(enumCtx?.field || '').trim();
-    const oldValue = String(enumCtx?.oldValue || '').trim();
-    const listValueId = enumCtx?.listValueId ?? null;
-    if (!field || !oldValue) {
-      return jsonRes(res, 400, { error: 'field and oldValue (or listValueId) required' });
-    }
-    if (oldValue.toLowerCase() === trimmedNew.toLowerCase()) {
-      return jsonRes(res, 200, { ok: true, field, changed: false });
-    }
-
-    // SQL-first runtime path (legacy workbook_map/known_values writes removed from write path)
-    try {
-      const affectedProductIds = listValueId
-        ? (runtimeSpecDb.renameListValueById(listValueId, trimmedNew, new Date().toISOString()) || [])
-        : (runtimeSpecDb.renameListValue(
-          field,
-          oldValue,
-          trimmedNew,
-          new Date().toISOString()
-        ) || []);
-      specDbCache.delete(category);
-
-      await cascadeEnumChange({
-        storage,
-        outputRoot: OUTPUT_ROOT,
-        category,
-        field,
-        action: 'rename',
-        value: oldValue,
-        newValue: trimmedNew,
-        preAffectedProductIds: affectedProductIds,
-        loadQueueState,
-        saveQueueState,
-        specDb: runtimeSpecDb,
-      });
-      try { await markEnumSuggestionStatus(category, field, oldValue, 'accepted'); } catch { /* best-effort */ }
-
-      broadcastWs('data-change', { type: 'enum-rename', category, field });
-      return jsonRes(res, 200, { ok: true, field, oldValue, newValue: trimmedNew, changed: true, persisted: 'specdb' });
-    } catch (sqlErr) {
-      return jsonRes(res, 500, {
-        error: 'enum_rename_specdb_write_failed',
-        message: sqlErr?.message || 'SpecDb write failed',
-      });
-    }
-
-  }
-
+  const handledReviewEnumMutation = await handleReviewEnumMutationRoute({
+    parts,
+    method,
+    req,
+    res,
+    context: {
+      readJsonBody,
+      jsonRes,
+      getSpecDbReady,
+      syncSyntheticCandidatesFromComponentReview,
+      resolveEnumMutationContext,
+      isMeaningfulValue,
+      normalizeLower,
+      candidateLooksWorkbook,
+      applySharedLaneState,
+      getPendingEnumSharedCandidateIds,
+      specDbCache,
+      storage,
+      outputRoot: OUTPUT_ROOT,
+      cascadeEnumChange,
+      loadQueueState,
+      saveQueueState,
+      markEnumSuggestionStatus,
+      broadcastWs,
+    },
+  });
+  if (handledReviewEnumMutation !== false) return;
   // Component impact analysis
   if (parts[0] === 'review-components' && parts[1] && parts[2] === 'component-impact' && method === 'GET') {
     const category = parts[1];
@@ -8067,7 +6555,7 @@ async function handleApi(req, res) {
     return jsonRes(res, 200, { affected_products: affected, total: affected.length });
   }
 
-  // ── Component AI Review endpoints ──────────────────────────────────
+  // â”€â”€ Component AI Review endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   // Get component review items (flagged for AI/human review)
   if (parts[0] === 'review-components' && parts[1] && parts[2] === 'component-review' && method === 'GET') {
@@ -8149,7 +6637,7 @@ async function handleApi(req, res) {
     const category = parts[1];
     try {
       const result = await runComponentReviewBatch({ config, category, logger: null });
-      // AI batch may write alias overrides — invalidate cache so next product run picks them up
+      // AI batch may write alias overrides â€” invalidate cache so next product run picks them up
       if (result.accepted_alias > 0) invalidateFieldRulesCache(category);
       broadcastWs('data-change', { type: 'component-review', category });
       return jsonRes(res, 200, result);
@@ -8189,7 +6677,7 @@ async function handleApi(req, res) {
     }
   }
 
-  // Process control — IndexLab mode only
+  // Process control â€” IndexLab mode only
   if (parts[0] === 'process' && parts[1] === 'start' && method === 'POST') {
     const body = await readJsonBody(req);
     const {
@@ -8198,7 +6686,7 @@ async function handleApi(req, res) {
       mode = 'indexlab',          // indexlab only
       extractionMode,             // balanced | aggressive | uber_aggressive
       profile,                    // fast | standard | thorough
-      dryRun,                     // boolean — simulation mode
+      dryRun,                     // boolean â€” simulation mode
       fetchConcurrency,           // number - phase 05 fetch parallelism cap
       perHostMinDelayMs,          // number - phase 05 per-host throttle delay
       dynamicCrawleeEnabled,      // boolean - force Crawlee fetch mode when HTTP is not preferred
@@ -8207,11 +6695,19 @@ async function handleApi(req, res) {
       dynamicFetchRetryBudget,    // number - retries for dynamic fetch failures
       dynamicFetchRetryBackoffMs, // number - retry backoff in milliseconds
       dynamicFetchPolicyMapJson,  // string - optional domain policy json
+      scannedPdfOcrEnabled,       // boolean - enable scanned PDF OCR lane
+      scannedPdfOcrPromoteCandidates, // boolean - promote OCR rows to candidate lanes
+      scannedPdfOcrBackend,       // auto | tesseract | none
+      scannedPdfOcrMaxPages,      // number - max OCR pages per PDF
+      scannedPdfOcrMaxPairs,      // number - max OCR pairs per PDF
+      scannedPdfOcrMinCharsPerPage, // number - scanned detection chars/page threshold
+      scannedPdfOcrMinLinesPerPage, // number - scanned detection lines/page threshold
+      scannedPdfOcrMinConfidence, // number - OCR low-confidence threshold
       resumeMode,                 // auto | force_resume | start_over
-      resumeWindowHours,          // number — max age window for resume state
-      reextractAfterHours,        // number — re-extract successful URLs older than this
+      resumeWindowHours,          // number â€” max age window for resume state
+      reextractAfterHours,        // number â€” re-extract successful URLs older than this
       reextractIndexed,
-      discoveryEnabled,           // boolean — enable provider discovery for this run
+      discoveryEnabled,           // boolean â€” enable provider discovery for this run
       searchProvider,             // none|google|bing|searxng|duckduckgo|dual
       phase2LlmEnabled,
       phase2LlmModel,
@@ -8244,7 +6740,7 @@ async function handleApi(req, res) {
       fields,
       providers,
       indexlabOut,
-      replaceRunning = true       // boolean — stop existing process before starting new one
+      replaceRunning = true       // boolean â€” stop existing process before starting new one
     } = body;
     const cat = category || 'mouse';
 
@@ -8374,6 +6870,44 @@ async function handleApi(req, res) {
           message: 'dynamicFetchPolicyMapJson must be valid JSON.'
         });
       }
+    }
+    if (typeof scannedPdfOcrEnabled === 'boolean') {
+      envOverrides.SCANNED_PDF_OCR_ENABLED = scannedPdfOcrEnabled ? 'true' : 'false';
+    }
+    if (typeof scannedPdfOcrPromoteCandidates === 'boolean') {
+      envOverrides.SCANNED_PDF_OCR_PROMOTE_CANDIDATES = scannedPdfOcrPromoteCandidates ? 'true' : 'false';
+    }
+    const normalizedScannedOcrBackend = String(scannedPdfOcrBackend || '').trim().toLowerCase();
+    if (normalizedScannedOcrBackend) {
+      const allowedScannedOcrBackends = new Set(['auto', 'tesseract', 'none']);
+      if (!allowedScannedOcrBackends.has(normalizedScannedOcrBackend)) {
+        return jsonRes(res, 400, {
+          error: 'invalid_scanned_pdf_ocr_backend',
+          message: `Unsupported scannedPdfOcrBackend '${normalizedScannedOcrBackend}'.`
+        });
+      }
+      envOverrides.SCANNED_PDF_OCR_BACKEND = normalizedScannedOcrBackend;
+    }
+    const parsedScannedOcrMaxPages = Number.parseInt(String(scannedPdfOcrMaxPages ?? ''), 10);
+    if (Number.isFinite(parsedScannedOcrMaxPages) && parsedScannedOcrMaxPages >= 1) {
+      envOverrides.SCANNED_PDF_OCR_MAX_PAGES = String(Math.max(1, Math.min(100, parsedScannedOcrMaxPages)));
+    }
+    const parsedScannedOcrMaxPairs = Number.parseInt(String(scannedPdfOcrMaxPairs ?? ''), 10);
+    if (Number.isFinite(parsedScannedOcrMaxPairs) && parsedScannedOcrMaxPairs >= 50) {
+      envOverrides.SCANNED_PDF_OCR_MAX_PAIRS = String(Math.max(50, Math.min(20_000, parsedScannedOcrMaxPairs)));
+    }
+    const parsedScannedOcrMinChars = Number.parseInt(String(scannedPdfOcrMinCharsPerPage ?? ''), 10);
+    if (Number.isFinite(parsedScannedOcrMinChars) && parsedScannedOcrMinChars >= 1) {
+      envOverrides.SCANNED_PDF_OCR_MIN_CHARS_PER_PAGE = String(Math.max(1, Math.min(500, parsedScannedOcrMinChars)));
+    }
+    const parsedScannedOcrMinLines = Number.parseInt(String(scannedPdfOcrMinLinesPerPage ?? ''), 10);
+    if (Number.isFinite(parsedScannedOcrMinLines) && parsedScannedOcrMinLines >= 1) {
+      envOverrides.SCANNED_PDF_OCR_MIN_LINES_PER_PAGE = String(Math.max(1, Math.min(100, parsedScannedOcrMinLines)));
+    }
+    const parsedScannedOcrMinConfidence = Number.parseFloat(String(scannedPdfOcrMinConfidence ?? ''));
+    if (Number.isFinite(parsedScannedOcrMinConfidence) && parsedScannedOcrMinConfidence >= 0) {
+      const clampedConfidence = Math.max(0, Math.min(1, parsedScannedOcrMinConfidence));
+      envOverrides.SCANNED_PDF_OCR_MIN_CONFIDENCE = String(clampedConfidence);
     }
     const hasPhase2LlmOverride = typeof phase2LlmEnabled === 'boolean';
     if (hasPhase2LlmOverride) {
@@ -8508,12 +7042,12 @@ async function handleApi(req, res) {
     }
   }
 
-  // ── Brand Registry API ────────────────────────────────────────────
+  // â”€â”€ Brand Registry API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   // GET /api/v1/brands?category=mouse  (optional filter)
   if (parts[0] === 'brands' && method === 'GET' && !parts[1]) {
     const registry = await loadBrandRegistry(config);
-    const category = params.get('category');
+    const category = resolveCategoryAlias(params.get('category'));
     if (category) {
       return jsonRes(res, 200, getBrandsForCategory(registry, category));
     }
@@ -8523,8 +7057,8 @@ async function handleApi(req, res) {
     return jsonRes(res, 200, all);
   }
 
-  // POST /api/v1/brands/seed  — auto-seed from activeFiltering
-  // Accepts optional { category } body — 'all' or omitted scans all, otherwise just that category.
+  // POST /api/v1/brands/seed  â€” auto-seed from activeFiltering
+  // Accepts optional { category } body â€” 'all' or omitted scans all, otherwise just that category.
   // (must come before the generic POST /brands route)
   if (parts[0] === 'brands' && parts[1] === 'seed' && method === 'POST') {
     const body = await readJsonBody(req).catch(() => ({}));
@@ -8532,7 +7066,7 @@ async function handleApi(req, res) {
     return jsonRes(res, 200, result);
   }
 
-  // GET /api/v1/brands/{slug}/impact — impact analysis for rename/delete
+  // GET /api/v1/brands/{slug}/impact â€” impact analysis for rename/delete
   if (parts[0] === 'brands' && parts[1] && parts[2] === 'impact' && method === 'GET') {
     const result = await getBrandImpactAnalysis({ config, slug: parts[1] });
     return jsonRes(res, result.ok ? 200 : 404, result);
@@ -8563,7 +7097,7 @@ async function handleApi(req, res) {
       if (!existing) return jsonRes(res, 404, { ok: false, error: 'brand_not_found', slug: brandSlug });
 
       if (String(body.name).trim() !== existing.canonical_name) {
-        // Name changed — cascade rename first
+        // Name changed â€” cascade rename first
         const renameResult = await renameBrand({
           config,
           slug: brandSlug,
@@ -8589,7 +7123,7 @@ async function handleApi(req, res) {
       }
     }
 
-    // No rename — standard update
+    // No rename â€” standard update
     const result = await updateBrand({ config, slug: brandSlug, patch: body });
     return jsonRes(res, result.ok ? 200 : 404, result);
   }
@@ -8604,7 +7138,7 @@ async function handleApi(req, res) {
     return jsonRes(res, status, result);
   }
 
-  // ── Test Mode API ──────────────────────────────────────────────────
+  // â”€â”€ Test Mode API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   // POST /api/v1/test-mode/create  { sourceCategory }
   if (parts[0] === 'test-mode' && parts[1] === 'create' && method === 'POST') {
@@ -8692,7 +7226,7 @@ async function handleApi(req, res) {
 
   // GET /api/v1/test-mode/contract-summary?category=_test_mouse
   if (parts[0] === 'test-mode' && parts[1] === 'contract-summary' && method === 'GET') {
-    const category = params.get('category') || '';
+    const category = resolveCategoryAlias(params.get('category') || '');
     if (!category || !category.startsWith('_test_')) {
       return jsonRes(res, 400, { ok: false, error: 'invalid_test_category' });
     }
@@ -8705,7 +7239,7 @@ async function handleApi(req, res) {
     }
   }
 
-  // GET /api/v1/test-mode/status?sourceCategory=mouse — restore test mode state across navigations
+  // GET /api/v1/test-mode/status?sourceCategory=mouse â€” restore test mode state across navigations
   if (parts[0] === 'test-mode' && parts[1] === 'status' && method === 'GET') {
     const sourceCategory = params.get('sourceCategory') || 'mouse';
     const testCategory = `_test_${sourceCategory}`;
@@ -8716,7 +7250,7 @@ async function handleApi(req, res) {
       return jsonRes(res, 200, { ok: true, exists: false, testCategory: '', testCases: [], runResults: [] });
     }
 
-    // Category exists — read test products
+    // Category exists â€” read test products
     const productsDir = path.join('fixtures', 's3', 'specs', 'inputs', testCategory, 'products');
     const productFiles = await listFiles(productsDir, '.json').catch(() => []);
     const testCases = [];
@@ -8768,7 +7302,7 @@ async function handleApi(req, res) {
   // POST /api/v1/test-mode/generate-products  { category }
   if (parts[0] === 'test-mode' && parts[1] === 'generate-products' && method === 'POST') {
     const body = await readJsonBody(req);
-    const category = body.category;
+    const category = resolveCategoryAlias(body.category);
     if (!category || !category.startsWith('_test_')) {
       return jsonRes(res, 400, { ok: false, error: 'invalid_test_category' });
     }
@@ -8780,7 +7314,7 @@ async function handleApi(req, res) {
     let contractAnalysis = null;
     try {
       contractAnalysis = await analyzeContract(HELPER_ROOT, category);
-    } catch { /* non-fatal — will use default scenarios */ }
+    } catch { /* non-fatal â€” will use default scenarios */ }
 
     const testProducts = buildTestProducts(category, contractAnalysis);
     const productIds = [];
@@ -8831,7 +7365,7 @@ async function handleApi(req, res) {
     for (const brandName of testBrands) {
       const result = await addBrand({ config, name: brandName, aliases: [], categories: [category] });
       if (result.ok === false && result.error === 'brand_already_exists') {
-        // Brand exists — ensure test category is in its categories list
+        // Brand exists â€” ensure test category is in its categories list
         const registry = await loadBrandRegistry(config);
         const brand = registry.brands[result.slug];
         if (brand && !brand.categories.includes(category.toLowerCase())) {
@@ -8847,7 +7381,7 @@ async function handleApi(req, res) {
   // POST /api/v1/test-mode/run  { category, productId? }
   if (parts[0] === 'test-mode' && parts[1] === 'run' && method === 'POST') {
     const body = await readJsonBody(req);
-    const category = body.category;
+    const category = resolveCategoryAlias(body.category);
     if (!category || !category.startsWith('_test_')) {
       return jsonRes(res, 400, { ok: false, error: 'invalid_test_category' });
     }
@@ -8936,7 +7470,7 @@ async function handleApi(req, res) {
     if (body.aiReview) {
       try {
         await runComponentReviewBatch({ config, category, logger: null });
-      } catch { /* non-fatal — AI review is optional */ }
+      } catch { /* non-fatal â€” AI review is optional */ }
     }
 
     const resyncSpecDb = body?.resyncSpecDb !== false;
@@ -8962,7 +7496,7 @@ async function handleApi(req, res) {
   // POST /api/v1/test-mode/validate  { category }
   if (parts[0] === 'test-mode' && parts[1] === 'validate' && method === 'POST') {
     const body = await readJsonBody(req);
-    const category = body.category;
+    const category = resolveCategoryAlias(body.category);
     if (!category || !category.startsWith('_test_')) {
       return jsonRes(res, 400, { ok: false, error: 'invalid_test_category' });
     }
@@ -9044,7 +7578,7 @@ async function handleApi(req, res) {
       try { await fs.rm(dir, { recursive: true, force: true }); } catch { /* ignore */ }
     }
 
-    // Clean up test brands — remove test category from brand registrations
+    // Clean up test brands â€” remove test category from brand registrations
     try {
       const registry = await loadBrandRegistry(config);
       const catLower = category.toLowerCase();
@@ -9066,7 +7600,7 @@ async function handleApi(req, res) {
   return null; // not handled
 }
 
-// ── Static File Serving ──────────────────────────────────────────────
+// â”€â”€ Static File Serving â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const DIST_ROOT = process.env.__GUI_DIST_ROOT
   ? path.resolve(process.env.__GUI_DIST_ROOT)
   : path.resolve('tools/gui-react/dist');
@@ -9097,7 +7631,7 @@ function serveStatic(req, res) {
   stream.pipe(res);
 }
 
-// ── WebSocket ────────────────────────────────────────────────────────
+// â”€â”€ WebSocket â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const wsClients = new Set();
 
 function wsToken(value) {
@@ -9172,7 +7706,7 @@ function broadcastWs(channel, data) {
   }
 }
 
-// ── File Watchers ────────────────────────────────────────────────────
+// â”€â”€ File Watchers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function setupWatchers() {
   const eventsPath = path.join(OUTPUT_ROOT, '_runtime', 'events.jsonl');
   let lastEventSize = 0;
@@ -9229,7 +7763,7 @@ function setupWatchers() {
   indexlabWatcher.on('change', publishIndexLabDelta);
 }
 
-// ── HTTP Server ──────────────────────────────────────────────────────
+// â”€â”€ HTTP Server â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const server = http.createServer(async (req, res) => {
   corsHeaders(res);
 
@@ -9304,5 +7838,6 @@ server.listen(PORT, '0.0.0.0', () => {
     execCb(cmd);
   }
 });
+
 
 

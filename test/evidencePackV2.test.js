@@ -24,7 +24,14 @@ test('buildEvidencePackV2 captures definition lists, label-value pairs, and targ
     },
     adapterExtra: {},
     config: {
-      llmMaxEvidenceChars: 4000
+      llmMaxEvidenceChars: 4000,
+      articleExtractorDomainPolicyMap: {
+        'example.com': {
+          mode: 'prefer_fallback',
+          minChars: 300,
+          minScore: 15
+        }
+      }
     },
     targetFields: ['weight', 'polling_rate', 'sensor']
   });
@@ -42,6 +49,9 @@ test('buildEvidencePackV2 captures definition lists, label-value pairs, and targ
   assert.equal(pack.sources?.example_com?.page_content_hash?.startsWith('sha256:'), true);
   assert.equal(typeof pack.meta?.article_extraction?.method, 'string');
   assert.equal(typeof pack.meta?.article_extraction?.quality_score, 'number');
+  assert.equal(pack.meta?.article_extraction?.policy_mode, 'prefer_fallback');
+  assert.equal(pack.meta?.article_extraction?.policy_matched_host, 'example.com');
+  assert.equal(pack.meta?.article_extraction?.policy_override_applied, true);
 });
 
 test('buildEvidencePackV2 emits snippet hashes and JSON-LD Product snippets', () => {
@@ -153,4 +163,121 @@ test('buildEvidencePackV2 emits compact screenshot metadata without binary paylo
   assert.equal(String(screenshotSnippet.text || '').includes('fake-binary-image-data'), false);
   assert.equal(String(screenshotSnippet.text || '').includes('bytes=22'), true);
   assert.equal(Boolean(pack.meta?.visual_artifacts?.screenshot_available), true);
+});
+
+test('buildEvidencePackV2 emits structured metadata snippet types from sidecar surfaces', () => {
+  const pack = buildEvidencePackV2({
+    source: {
+      url: 'https://example.com/mouse',
+      host: 'example.com',
+      sourceId: 'example_source'
+    },
+    pageData: {
+      html: '<html><body><h1>Example Mouse</h1></body></html>',
+      networkResponses: [],
+      ldjsonBlocks: [],
+      embeddedState: {},
+      structuredMetadata: {
+        ok: true,
+        surfaces: {
+          json_ld: [],
+          microdata: [{ weight: '60 g', dpi: '26000' }],
+          rdfa: [{ pollingRate: '8000 Hz' }],
+          microformats: [{ battery: '95 hours' }],
+          opengraph: { 'product:brand': 'Example', 'product:weight': '60 g' },
+          twitter: { 'twitter:title': 'Example Mouse' }
+        },
+        stats: {
+          json_ld_count: 0,
+          microdata_count: 1,
+          rdfa_count: 1,
+          microformats_count: 1,
+          opengraph_count: 2,
+          twitter_count: 1,
+          structured_candidates: 4,
+          structured_rejected_candidates: 0
+        },
+        errors: []
+      }
+    },
+    adapterExtra: {},
+    config: {
+      llmMaxEvidenceChars: 9000
+    },
+    targetFields: ['weight', 'dpi', 'polling_rate']
+  });
+
+  const snippetTypes = new Set((pack.snippets || []).map((row) => String(row.type || '')));
+  assert.equal(snippetTypes.has('microdata_product'), true);
+  assert.equal(snippetTypes.has('rdfa_product'), true);
+  assert.equal(snippetTypes.has('microformat_product'), true);
+  assert.equal(snippetTypes.has('opengraph_product'), true);
+  assert.equal(snippetTypes.has('twitter_card_product'), true);
+  assert.equal(Number(pack?.meta?.structured_metadata?.microdata_count || 0), 1);
+  assert.equal(Number(pack?.meta?.structured_metadata?.opengraph_count || 0), 2);
+});
+
+test('buildEvidencePackV2 emits PDF router metadata and row-level PDF snippets', () => {
+  const pack = buildEvidencePackV2({
+    source: {
+      url: 'https://example.com/mouse',
+      host: 'example.com',
+      sourceId: 'example_source'
+    },
+    pageData: {
+      html: '<html><body><h1>Example Mouse</h1></body></html>',
+      networkResponses: [],
+      ldjsonBlocks: [],
+      embeddedState: {}
+    },
+    adapterExtra: {
+      pdfDocs: [
+        {
+          url: 'https://example.com/manual.pdf',
+          filename: 'manual.pdf',
+          textPreview: 'Weight: 60 g\\nPolling Rate: 8000 Hz',
+          backend_selected: 'pdfplumber',
+          pair_count: 3,
+          kv_pair_count: 2,
+          table_pair_count: 1,
+          pages_scanned: 2,
+          tables_found: 1,
+          kv_preview_rows: [
+            { key: 'Weight', value: '60 g', path: 'pdf.page[1].kv[1]', surface: 'pdf_kv' }
+          ],
+          table_preview_rows: [
+            { key: 'Polling Rate', value: '8000 Hz', path: 'pdf.page[1].table[t1].row[1]', surface: 'pdf_table' }
+          ]
+        }
+      ],
+      pdfStats: {
+        docs_discovered: 1,
+        docs_fetched: 1,
+        docs_parsed: 1,
+        docs_failed: 0,
+        requested_backend: 'auto',
+        backend_selected: 'pdfplumber',
+        backend_fallback_count: 0,
+        pair_count: 3,
+        kv_pair_count: 2,
+        table_pair_count: 1,
+        pages_scanned: 2,
+        tables_found: 1,
+        error_count: 0,
+        errors: []
+      }
+    },
+    config: {
+      llmMaxEvidenceChars: 9000
+    },
+    targetFields: ['weight', 'polling_rate']
+  });
+
+  const snippetTypes = new Set((pack.snippets || []).map((row) => String(row.type || '')));
+  assert.equal(snippetTypes.has('pdf_doc_meta'), true);
+  assert.equal(snippetTypes.has('pdf'), true);
+  assert.equal(snippetTypes.has('pdf_kv_row'), true);
+  assert.equal(snippetTypes.has('pdf_table_row'), true);
+  assert.equal(String(pack?.meta?.pdf_extraction?.backend_selected || ''), 'pdfplumber');
+  assert.equal(Number(pack?.meta?.pdf_extraction?.pair_count || 0), 3);
 });

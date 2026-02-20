@@ -1018,7 +1018,10 @@ test('COMP-12: Single-use component HERO26K shows 1 product in pipeline candidat
     // dpi_max pipeline candidate should reference only 1 product
     const dpiPl = hero.properties.dpi_max.candidates.filter((c) => c.source_id === 'pipeline');
     if (dpiPl.length > 0) {
-      assert.ok(dpiPl[0].source.includes('1 product'), 'HERO26K pipeline candidate should reference 1 product');
+      assert.ok(
+        dpiPl[0].source.includes('1 product'),
+        `HERO26K pipeline candidate should reference 1 product; got source="${dpiPl[0].source}"`
+      );
     }
   } finally { await fs.rm(tempRoot, { recursive: true, force: true }); }
 });

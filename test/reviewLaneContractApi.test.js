@@ -383,6 +383,84 @@ function getEnumSlotIds(db, category, fieldKey, value) {
   };
 }
 
+function parseComponentIdentifier(componentIdentifier) {
+  const parts = String(componentIdentifier || '').split('::');
+  if (parts.length < 2) return null;
+  const componentType = String(parts.shift() || '').trim();
+  const componentMaker = String(parts.pop() || '').trim();
+  const componentName = String(parts.join('::') || '').trim();
+  if (!componentType || !componentName) return null;
+  return { componentType, componentName, componentMaker };
+}
+
+function resolveStrictKeyReviewSlotIds(db, category, row = {}) {
+  const resolved = { ...row };
+  const targetKind = String(resolved.targetKind || resolved.target_kind || '').trim();
+  const fieldKey = String(resolved.fieldKey || resolved.field_key || '').trim();
+
+  if (targetKind === 'grid_key') {
+    resolved.itemFieldStateId = resolved.itemFieldStateId
+      ?? resolved.item_field_state_id
+      ?? getItemFieldStateId(db, category, resolved.itemIdentifier || resolved.item_identifier, fieldKey);
+    return resolved;
+  }
+
+  if (targetKind === 'enum_key') {
+    let listValueId = resolved.listValueId ?? resolved.list_value_id ?? null;
+    let enumListId = resolved.enumListId ?? resolved.enum_list_id ?? null;
+    if (!listValueId && fieldKey) {
+      const selectedValue = String(resolved.selectedValue ?? resolved.selected_value ?? '').trim();
+      if (selectedValue) {
+        const slot = getEnumSlotIds(db, category, fieldKey, selectedValue);
+        listValueId = slot.listValueId;
+        enumListId = slot.enumListId;
+      }
+      if (!listValueId) {
+        const enumNorm = String(resolved.enumValueNorm ?? resolved.enum_value_norm ?? '').trim().toLowerCase();
+        if (enumNorm) {
+          const rowByNorm = db.db.prepare(
+            `SELECT id, list_id
+             FROM list_values
+             WHERE category = ? AND field_key = ? AND normalized_value = ?
+             LIMIT 1`
+          ).get(category, fieldKey, enumNorm);
+          listValueId = rowByNorm?.id ?? null;
+          enumListId = rowByNorm?.list_id ?? enumListId;
+        }
+      }
+    }
+    resolved.listValueId = listValueId;
+    resolved.enumListId = enumListId;
+    return resolved;
+  }
+
+  if (targetKind === 'component_key') {
+    const propertyKey = String(resolved.propertyKey || resolved.property_key || '').trim();
+    const isIdentityProperty = ['__name', '__maker', '__links', '__aliases'].includes(propertyKey);
+    const parsed = parseComponentIdentifier(resolved.componentIdentifier || resolved.component_identifier);
+    if (isIdentityProperty) {
+      resolved.componentIdentityId = resolved.componentIdentityId
+        ?? resolved.component_identity_id
+        ?? (parsed ? getComponentIdentityId(db, category, parsed.componentType, parsed.componentName, parsed.componentMaker) : null);
+      return resolved;
+    }
+    resolved.componentValueId = resolved.componentValueId
+      ?? resolved.component_value_id
+      ?? (parsed ? getComponentValueId(db, category, parsed.componentType, parsed.componentName, parsed.componentMaker, propertyKey) : null);
+    return resolved;
+  }
+
+  return resolved;
+}
+
+function upsertStrictKeyReviewState(db, category, row) {
+  return db.upsertKeyReviewState(resolveStrictKeyReviewSlotIds(db, category, row));
+}
+
+function getStrictKeyReviewState(db, category, row) {
+  return db.getKeyReviewState(resolveStrictKeyReviewSlotIds(db, category, row));
+}
+
 function replaceCandidateRow(db, {
   candidateId,
   category,
@@ -548,7 +626,7 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
     seedStrictLaneCandidates(db, CATEGORY);
 
     const componentIdentifier = buildComponentIdentifier('sensor', 'PAW3950', 'PixArt');
-    db.upsertKeyReviewState({
+    upsertStrictKeyReviewState(db, CATEGORY, {
       category: CATEGORY,
       targetKind: 'grid_key',
       itemIdentifier: PRODUCT_A,
@@ -559,7 +637,7 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
       aiConfirmPrimaryStatus: 'pending',
       userAcceptPrimaryStatus: null,
     });
-    db.upsertKeyReviewState({
+    upsertStrictKeyReviewState(db, CATEGORY, {
       category: CATEGORY,
       targetKind: 'grid_key',
       itemIdentifier: PRODUCT_A,
@@ -570,7 +648,7 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
       aiConfirmPrimaryStatus: 'pending',
       userAcceptPrimaryStatus: null,
     });
-    db.upsertKeyReviewState({
+    upsertStrictKeyReviewState(db, CATEGORY, {
       category: CATEGORY,
       targetKind: 'grid_key',
       itemIdentifier: PRODUCT_A,
@@ -581,7 +659,7 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
       aiConfirmSharedStatus: 'pending',
       userAcceptSharedStatus: null,
     });
-    db.upsertKeyReviewState({
+    upsertStrictKeyReviewState(db, CATEGORY, {
       category: CATEGORY,
       targetKind: 'grid_key',
       itemIdentifier: PRODUCT_B,
@@ -592,7 +670,7 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
       aiConfirmSharedStatus: 'pending',
       userAcceptSharedStatus: null,
     });
-    db.upsertKeyReviewState({
+    upsertStrictKeyReviewState(db, CATEGORY, {
       category: CATEGORY,
       targetKind: 'grid_key',
       itemIdentifier: PRODUCT_A,
@@ -603,7 +681,7 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
       aiConfirmSharedStatus: 'pending',
       userAcceptSharedStatus: null,
     });
-    db.upsertKeyReviewState({
+    upsertStrictKeyReviewState(db, CATEGORY, {
       category: CATEGORY,
       targetKind: 'grid_key',
       itemIdentifier: PRODUCT_B,
@@ -614,7 +692,7 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
       aiConfirmSharedStatus: 'pending',
       userAcceptSharedStatus: null,
     });
-    db.upsertKeyReviewState({
+    upsertStrictKeyReviewState(db, CATEGORY, {
       category: CATEGORY,
       targetKind: 'component_key',
       fieldKey: 'dpi_max',
@@ -626,7 +704,7 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
       aiConfirmSharedStatus: 'pending',
       userAcceptSharedStatus: null,
     });
-    db.upsertKeyReviewState({
+    upsertStrictKeyReviewState(db, CATEGORY, {
       category: CATEGORY,
       targetKind: 'enum_key',
       fieldKey: 'connection',
@@ -784,13 +862,13 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
         candidateId: collisionCandidateId,
       });
 
-      const weightState = db.getKeyReviewState({
+      const weightState = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'grid_key',
         itemIdentifier: PRODUCT_A,
         fieldKey: 'weight',
       });
-      const dpiState = db.getKeyReviewState({
+      const dpiState = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'grid_key',
         itemIdentifier: PRODUCT_A,
@@ -877,14 +955,14 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
         candidateSource: 'pipeline',
       });
 
-      const componentState = db.getKeyReviewState({
+      const componentState = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'component_key',
         fieldKey: 'dpi_max',
         componentIdentifier,
         propertyKey: 'dpi_max',
       });
-      const enumState = db.getKeyReviewState({
+      const enumState = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'enum_key',
         fieldKey: 'connection',
@@ -930,15 +1008,20 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
     await t.test('grid item confirm only confirms item lane', async () => {
       const weightSlotId = getItemFieldStateId(db, CATEGORY, PRODUCT_A, 'weight');
       assert.ok(weightSlotId, 'weight item slot id should exist');
+      const weightCandidatesBefore = await apiJson(baseUrl, 'GET', `/review/${CATEGORY}/candidates/${PRODUCT_A}/weight`);
+      const weightCandidateId = String(
+        (weightCandidatesBefore.candidates || []).find((candidate) => String(candidate?.candidate_id || '').includes('p1-weight-1'))?.candidate_id || ''
+      ).trim();
+      assert.ok(weightCandidateId, 'expected exact candidate id for p1-weight-1');
       await apiJson(baseUrl, 'POST', `/review/${CATEGORY}/key-review-confirm`, {
         itemFieldStateId: weightSlotId,
         lane: 'primary',
-        candidateId: 'p1-weight-1',
+        candidateId: weightCandidateId,
         candidateValue: '49',
         candidateConfidence: 0.95,
       });
 
-      const state = db.getKeyReviewState({
+      const state = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'grid_key',
         itemIdentifier: PRODUCT_A,
@@ -959,15 +1042,20 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
     await t.test('grid item accept only accepts item lane', async () => {
       const dpiSlotId = getItemFieldStateId(db, CATEGORY, PRODUCT_A, 'dpi');
       assert.ok(dpiSlotId, 'dpi item slot id should exist');
+      const dpiCandidatesBefore = await apiJson(baseUrl, 'GET', `/review/${CATEGORY}/candidates/${PRODUCT_A}/dpi`);
+      const dpiCandidateId = String(
+        (dpiCandidatesBefore.candidates || []).find((candidate) => String(candidate?.candidate_id || '').includes('p1-dpi-1'))?.candidate_id || ''
+      ).trim();
+      assert.ok(dpiCandidateId, 'expected exact candidate id for p1-dpi-1');
       await apiJson(baseUrl, 'POST', `/review/${CATEGORY}/key-review-accept`, {
         itemFieldStateId: dpiSlotId,
         lane: 'primary',
-        candidateId: 'p1-dpi-1',
+        candidateId: dpiCandidateId,
         candidateValue: '35000',
         candidateConfidence: 0.97,
       });
 
-      const state = db.getKeyReviewState({
+      const state = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'grid_key',
         itemIdentifier: PRODUCT_A,
@@ -1013,13 +1101,13 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
         candidateConfidence: 0.98,
       });
 
-      const p1 = db.getKeyReviewState({
+      const p1 = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'grid_key',
         itemIdentifier: PRODUCT_A,
         fieldKey: 'sensor',
       });
-      const p2 = db.getKeyReviewState({
+      const p2 = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'grid_key',
         itemIdentifier: PRODUCT_B,
@@ -1035,7 +1123,7 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
       assert.equal(sensorA.keyReview.sharedStatus, 'confirmed');
       assert.equal(sensorB.keyReview.sharedStatus, 'pending');
 
-      const componentState = db.getKeyReviewState({
+      const componentState = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'component_key',
         fieldKey: 'dpi_max',
@@ -1090,19 +1178,19 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
         candidateConfidence: 0.98,
       });
 
-      const p1 = db.getKeyReviewState({
+      const p1 = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'grid_key',
         itemIdentifier: PRODUCT_A,
         fieldKey: 'connection',
       });
-      const p2 = db.getKeyReviewState({
+      const p2 = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'grid_key',
         itemIdentifier: PRODUCT_B,
         fieldKey: 'connection',
       });
-      const enumState = db.getKeyReviewState({
+      const enumState = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'enum_key',
         fieldKey: 'connection',
@@ -1184,7 +1272,7 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
         candidateSource: 'pipeline',
       });
 
-      const afterAccept = db.getKeyReviewState({
+      const afterAccept = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'component_key',
         fieldKey: 'dpi_max',
@@ -1196,6 +1284,16 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
       const componentPayloadAfterAccept = await apiJson(baseUrl, 'GET', `/review-components/${CATEGORY}/components?type=sensor`);
       const componentRowAfterAccept = (componentPayloadAfterAccept.items || []).find((item) => item.name === 'PAW3950' && item.maker === 'PixArt');
       assert.equal(Boolean(componentRowAfterAccept?.properties?.dpi_max?.needs_review), true);
+      const dpiCandidatesAfterAccept = componentRowAfterAccept?.properties?.dpi_max?.candidates || [];
+      const acceptedDpiCandidateAfterAccept = dpiCandidatesAfterAccept.find(
+        (candidate) => String(candidate?.candidate_id || '').trim() === 'cmp_dpi_35000'
+      );
+      assert.ok(acceptedDpiCandidateAfterAccept, 'accepted candidate should remain present after component accept');
+      assert.equal(
+        String(acceptedDpiCandidateAfterAccept?.shared_review_status || '').trim().toLowerCase(),
+        'pending',
+        'component accept must not auto-resolve AI confirm status for the candidate'
+      );
 
       await apiJson(baseUrl, 'POST', `/review-components/${CATEGORY}/component-key-review-confirm`, {
         componentIdentityId,
@@ -1205,7 +1303,7 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
         candidateConfidence: 0.9,
       });
 
-      const afterConfirm = db.getKeyReviewState({
+      const afterConfirm = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'component_key',
         fieldKey: 'dpi_max',
@@ -1228,6 +1326,14 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
       assert.equal(row?.properties?.dpi_max?.accepted_candidate_id, 'cmp_dpi_35000');
       assert.equal(Boolean(row?.properties?.dpi_max?.needs_review), true);
       const dpiCandidates = row?.properties?.dpi_max?.candidates || [];
+      const acceptedDpiCandidateAfterConfirm = dpiCandidates.find(
+        (candidate) => String(candidate?.candidate_id || '').trim() === 'cmp_dpi_35000'
+      );
+      assert.equal(
+        String(acceptedDpiCandidateAfterConfirm?.shared_review_status || '').trim().toLowerCase(),
+        'accepted',
+        'component confirm should resolve the confirmed candidate'
+      );
       const stillPending = dpiCandidates.filter((candidate) => String(candidate?.shared_review_status || '').trim().toLowerCase() === 'pending');
       assert.equal(stillPending.length > 0, true);
     });
@@ -1290,7 +1396,7 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
         candidateId: 'global_connection_candidate',
       });
 
-      const afterAccept = db.getKeyReviewState({
+      const afterAccept = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'enum_key',
         fieldKey: 'connection',
@@ -1302,6 +1408,15 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
       const enumValueAfterAccept = findEnumValue(enumPayloadAfterAccept, 'connection', '2.4GHz');
       assert.ok(enumValueAfterAccept, 'connection value 2.4GHz should exist after accept');
       assert.equal(enumValueAfterAccept.needs_review, true);
+      const acceptedEnumCandidateAfterAccept = (enumValueAfterAccept.candidates || []).find(
+        (candidate) => String(candidate?.candidate_id || '').trim() === 'global_connection_candidate'
+      );
+      assert.ok(acceptedEnumCandidateAfterAccept, 'accepted enum candidate should remain present after accept');
+      assert.equal(
+        String(acceptedEnumCandidateAfterAccept?.shared_review_status || '').trim().toLowerCase(),
+        'pending',
+        'enum accept must not auto-resolve AI confirm status for the candidate'
+      );
 
       await apiJson(baseUrl, 'POST', `/review-components/${CATEGORY}/enum-override`, {
         listValueId: enumSlot.listValueId,
@@ -1310,7 +1425,7 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
         candidateId: 'global_connection_candidate',
       });
 
-      const afterConfirm = db.getKeyReviewState({
+      const afterConfirm = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'enum_key',
         fieldKey: 'connection',
@@ -1327,13 +1442,13 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
       assert.equal(r24?.status, 'pending_ai');
       assert.equal(rWireless?.status, 'pending_ai');
 
-      const gridA = db.getKeyReviewState({
+      const gridA = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'grid_key',
         itemIdentifier: PRODUCT_A,
         fieldKey: 'connection',
       });
-      const gridB = db.getKeyReviewState({
+      const gridB = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'grid_key',
         itemIdentifier: PRODUCT_B,
@@ -1346,6 +1461,14 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
       const value = findEnumValue(enumPayload, 'connection', '2.4GHz');
       assert.ok(value, 'connection value 2.4GHz should exist after enum actions');
       assert.equal(value.accepted_candidate_id, 'global_connection_candidate');
+      const confirmedEnumCandidate = (value.candidates || []).find(
+        (candidate) => String(candidate?.candidate_id || '').trim() === 'global_connection_candidate'
+      );
+      assert.equal(
+        String(confirmedEnumCandidate?.shared_review_status || '').trim().toLowerCase(),
+        'accepted',
+        'enum confirm should resolve the confirmed candidate'
+      );
       assert.equal(value.needs_review, true);
     });
 
@@ -1372,7 +1495,7 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
       assert.equal(String(renamedRows[0].value || ''), 'Wireless');
       assert.equal(String(renamedRows[1].value || ''), 'Wireless');
 
-      const enumState = db.getKeyReviewState({
+      const enumState = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'enum_key',
         fieldKey: 'connection',
@@ -1429,7 +1552,7 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
       });
       assert.equal(gridConfirmNoCandidate.status, 400);
       assert.equal(gridConfirmNoCandidate.data?.error, 'candidate_id_required');
-      const weightAfter = db.getKeyReviewState({
+      const weightAfter = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'grid_key',
         itemIdentifier: PRODUCT_A,
@@ -1453,7 +1576,7 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
         overridden: false,
         constraints: [],
       });
-      db.upsertKeyReviewState({
+      upsertStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'component_key',
         fieldKey: 'custom_prop',
@@ -1480,7 +1603,7 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
       });
       assert.equal(componentConfirmNoCandidate.status, 400);
       assert.equal(componentConfirmNoCandidate.data?.error, 'candidate_id_required');
-      const componentStateAfter = db.getKeyReviewState({
+      const componentStateAfter = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'component_key',
         fieldKey: 'custom_prop',
@@ -1506,7 +1629,7 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
         overridden: false,
         sourceTimestamp: new Date().toISOString(),
       });
-      db.upsertKeyReviewState({
+      upsertStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'enum_key',
         fieldKey: 'connection',
@@ -1535,7 +1658,7 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
       });
       assert.equal(enumConfirmNoCandidate.status, 400);
       assert.equal(enumConfirmNoCandidate.data?.error, 'candidate_id_required');
-      const zeroAfterState = db.getKeyReviewState({
+      const zeroAfterState = getStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'enum_key',
         fieldKey: 'connection',
@@ -1611,7 +1734,7 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
         overridden: false,
         constraints: [],
       });
-      db.upsertKeyReviewState({
+      upsertStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'component_key',
         fieldKey: 'unk_only_prop',
@@ -1644,7 +1767,7 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
         overridden: false,
         sourceTimestamp: new Date().toISOString(),
       });
-      db.upsertKeyReviewState({
+      upsertStrictKeyReviewState(db, CATEGORY, {
         category: CATEGORY,
         targetKind: 'enum_key',
         fieldKey: 'connection',
@@ -1684,3 +1807,4 @@ test('lane contract matrix: grid + component + enum endpoints stay decoupled and
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
+

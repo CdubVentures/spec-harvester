@@ -1,4 +1,21 @@
-﻿# Deep Spec Harvester â€” Phased Implementation Plan (Accuracyâ€‘Max)
+﻿# Phase 03 - Provider Search and Triage
+
+## Canonical Status
+- This is the single canonical file for this phase.
+- Consolidated on 2026-02-20 from split planning plus improvement docs.
+- Includes implemented status and remaining work from merged sources.
+- Keep all unfinished items active until code plus GUI proof confirms completion.
+
+## Merged Source Files
+- PHASE-03-provider-search-triage.md
+- PHASE-03-IMPROVMENT.md
+
+## Full Merged Spec
+
+### Source: PHASE-03-provider-search-triage.md
+
+> Original header: Deep Spec Harvester â€” Phased Implementation Plan (Accuracyâ€‘Max)
+
 
 This phase file is written as an **implementation prompt for senior software engineers**.
 It includes: exact deliverables, file touchpoints, schemas/events, test strategy, and **GUI proof**.
@@ -181,4 +198,26 @@ GUI proof additions in this phase:
 - Every search query and candidate is visible in the GUI.
 - Selected URLs are dominated by Tierâ€‘1 and Tierâ€‘2 when high-stakes fields require them.
 - Phase 03 artifacts contain all fields needed by Phase 06B without adding scheduler logic here.
+
+
+### Source: PHASE-03-IMPROVMENT.md
+
+> Original header: PHASE-03 IMPROVMENT
+
+
+## What I'd Add
+1. Persist SERP applicability fields: `identity_match_level`, `variant_guard_hit`, `multi_model_hint`, `other_model_tokens`.
+2. Add deterministic triage score decomposition (tier/doc kind/identity bonuses/penalties).
+3. Add clear job-intent emission payload for later scheduler use (`dedupe_hash`, `field_targets`, `doc_hint`).
+4. Add duplicate cluster view so near-duplicate URLs are obvious before fetch.
+
+## What We Should Implement Now
+1. Add applicability fields to SERP panel columns.
+2. Add score reason badges and keep/reject explanations in plain text.
+3. Emit triage decisions in scheduler-ready structure without adding scheduling policy here.
+
+## Definition Of Done
+1. Users can explain why a URL was selected or skipped.
+2. Wrong-model candidates are visibly penalized.
+3. Phase-03 artifacts are ready for Phase-06B automation.
 
