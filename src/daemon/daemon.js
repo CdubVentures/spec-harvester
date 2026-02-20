@@ -20,6 +20,7 @@ import {
 import { runUntilComplete } from '../runner/runUntilComplete.js';
 import { loadCategoryConfig } from '../categories/loader.js';
 import { syncJobsFromActiveFiltering } from '../helperFiles/index.js';
+import { validateConfig } from '../config.js';
 
 async function listConfiguredCategories() {
   const dir = path.resolve('categories');
@@ -177,6 +178,23 @@ export async function runDaemon({
   logger = null,
   runtimeHooks = {}
 }) {
+  const configValidation = validateConfig(config);
+  for (const warning of configValidation.warnings) {
+    logger?.warn?.('config_warning', { code: warning.code, message: warning.message });
+  }
+  if (!configValidation.valid) {
+    for (const error of configValidation.errors) {
+      logger?.error?.('config_error', { code: error.code, message: error.message });
+    }
+    return {
+      mode: 'daemon',
+      categories: [],
+      iterations: 0,
+      runs: [],
+      stop_reason: 'config_invalid',
+      config_errors: configValidation.errors
+    };
+  }
   let iteration = 0;
   const categories = Array.isArray(runtimeHooks.categories) && runtimeHooks.categories.length > 0
     ? runtimeHooks.categories
@@ -378,7 +396,7 @@ export async function runDaemon({
                   accuracyMode: mode
                 },
                 s3key: nextJob.s3key,
-                maxRounds: mode === 'aggressive' ? 8 : 4,
+                maxRounds: mode === 'uber_aggressive' ? Math.max(8, Number(config.uberMaxRounds || 6)) : (mode === 'aggressive' ? 8 : 4),
                 mode
               });
               const nextHint = String(nextJob.next_action_hint || '').trim().toLowerCase();

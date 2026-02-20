@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { extractExcelSeedData, loadCategoryFieldRules } from '../ingest/excelSeed.js';
+import { ruleRequiredLevel } from '../engine/ruleAccessors.js';
 
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -279,13 +280,8 @@ function normalizeExpectedFieldValue(rawValue) {
   return rawValue;
 }
 
-function readRequiredLevel(rule = {}) {
-  return normalizeText(
-    rule.required_level ||
-    (isObject(rule.priority) ? rule.priority.required_level : '') ||
-    'optional'
-  ).toLowerCase() || 'optional';
-}
+// readRequiredLevel replaced by ruleRequiredLevel from ruleAccessors.js
+const readRequiredLevel = ruleRequiredLevel;
 
 function readGroup(rule = {}) {
   return normalizeFieldKey(

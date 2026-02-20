@@ -1,5 +1,6 @@
 {
   "category": "mouse",
+  "publish_gate": "required_complete",
   "component_db_sources": {
     "encoder": {
       "entity_count": 40,
@@ -13,8 +14,37 @@
         ],
         "maker_column": "B",
         "primary_identifier_column": "C",
-        "property_columns": [],
-        "property_mappings": [],
+        "property_columns": [
+          "D",
+          "E",
+          "F"
+        ],
+        "property_mappings": [
+          {
+            "column": "D",
+            "constraints": [],
+            "key": "encoder_type",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "E",
+            "constraints": [],
+            "key": "encoder_steps",
+            "type": "number",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "F",
+            "constraints": [],
+            "key": "encoder_life_span",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          }
+        ],
         "sheet": "encoder",
         "stop_after_blank_names": 10,
         "stop_after_blank_primary": 10
@@ -59,7 +89,32 @@
         ],
         "maker": "B",
         "primary_identifier": "C",
-        "properties": []
+        "properties": [
+          {
+            "column": "D",
+            "constraints": [],
+            "key": "encoder_type",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "E",
+            "constraints": [],
+            "key": "encoder_steps",
+            "type": "number",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "F",
+            "constraints": [],
+            "key": "encoder_life_span",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          }
+        ]
       },
       "sample_entities": [
         "Encoder",
@@ -135,8 +190,72 @@
         ],
         "maker_column": "B",
         "primary_identifier_column": "C",
-        "property_columns": [],
-        "property_mappings": [],
+        "property_columns": [
+          "D",
+          "E",
+          "F",
+          "G",
+          "H",
+          "I"
+        ],
+        "property_mappings": [
+          {
+            "column": "D",
+            "constraints": [],
+            "field_key": "flawless_sensor",
+            "key": "flawless_sensor",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "E",
+            "constraints": [],
+            "field_key": "sensor_type",
+            "key": "sensor_type",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "F",
+            "constraints": [],
+            "field_key": "dpi",
+            "key": "dpi",
+            "type": "number",
+            "unit": "dpi",
+            "variance_policy": "upper_bound"
+          },
+          {
+            "column": "G",
+            "constraints": [],
+            "field_key": "ips",
+            "key": "ips",
+            "type": "number",
+            "unit": "ips",
+            "variance_policy": "upper_bound"
+          },
+          {
+            "column": "H",
+            "constraints": [],
+            "field_key": "acceleration",
+            "key": "acceleration",
+            "type": "number",
+            "unit": "g",
+            "variance_policy": "upper_bound"
+          },
+          {
+            "column": "I",
+            "constraints": [
+              "sensor_date <= release_date"
+            ],
+            "field_key": "sensor_date",
+            "key": "sensor_date",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          }
+        ],
         "sheet": "sensors",
         "stop_after_blank_names": 10,
         "stop_after_blank_primary": 10
@@ -181,7 +300,64 @@
         ],
         "maker": "B",
         "primary_identifier": "C",
-        "properties": []
+        "properties": [
+          {
+            "column": "D",
+            "constraints": [],
+            "field_key": "flawless_sensor",
+            "key": "flawless_sensor",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "E",
+            "constraints": [],
+            "field_key": "sensor_type",
+            "key": "sensor_type",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "F",
+            "constraints": [],
+            "field_key": "dpi",
+            "key": "dpi",
+            "type": "number",
+            "unit": "dpi",
+            "variance_policy": "upper_bound"
+          },
+          {
+            "column": "G",
+            "constraints": [],
+            "field_key": "ips",
+            "key": "ips",
+            "type": "number",
+            "unit": "ips",
+            "variance_policy": "upper_bound"
+          },
+          {
+            "column": "H",
+            "constraints": [],
+            "field_key": "acceleration",
+            "key": "acceleration",
+            "type": "number",
+            "unit": "g",
+            "variance_policy": "upper_bound"
+          },
+          {
+            "column": "I",
+            "constraints": [
+              "sensor_date <= release_date"
+            ],
+            "field_key": "sensor_date",
+            "key": "sensor_date",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          }
+        ]
       },
       "sample_entities": [
         "Focus Pro 45K",
@@ -210,8 +386,48 @@
         ],
         "maker_column": "B",
         "primary_identifier_column": "C",
-        "property_columns": [],
-        "property_mappings": [],
+        "property_columns": [
+          "D",
+          "E",
+          "F",
+          "G"
+        ],
+        "property_mappings": [
+          {
+            "column": "D",
+            "constraints": [],
+            "field_key": "switch_type",
+            "key": "switch_type",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "E",
+            "constraints": [],
+            "key": "switch_life_span",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "F",
+            "constraints": [],
+            "field_key": "click_force",
+            "key": "click_force",
+            "type": "number",
+            "unit": "gf",
+            "variance_policy": "override_allowed"
+          },
+          {
+            "column": "G",
+            "constraints": [],
+            "key": "releasing_force",
+            "type": "number",
+            "unit": "gf",
+            "variance_policy": "authoritative"
+          }
+        ],
         "sheet": "switches",
         "stop_after_blank_names": 10,
         "stop_after_blank_primary": 10
@@ -256,7 +472,42 @@
         ],
         "maker": "B",
         "primary_identifier": "C",
-        "properties": []
+        "properties": [
+          {
+            "column": "D",
+            "constraints": [],
+            "field_key": "switch_type",
+            "key": "switch_type",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "E",
+            "constraints": [],
+            "key": "switch_life_span",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "F",
+            "constraints": [],
+            "field_key": "click_force",
+            "key": "click_force",
+            "type": "number",
+            "unit": "gf",
+            "variance_policy": "override_allowed"
+          },
+          {
+            "column": "G",
+            "constraints": [],
+            "key": "releasing_force",
+            "type": "number",
+            "unit": "gf",
+            "variance_policy": "authoritative"
+          }
+        ]
       },
       "sample_entities": [
         "ROG Micro Switch",
@@ -284,7 +535,9 @@
       },
       "values": [
         "matte",
-        "rubber grips"
+        "rubber grips",
+        "A",
+        "help"
       ]
     },
     "connection": {
@@ -299,7 +552,10 @@
         "hybrid",
         "wired",
         "wireless",
-        "bluetooth"
+        "bluetooth",
+        "1",
+        "2",
+        "he"
       ]
     },
     "connectivity": {
@@ -314,7 +570,9 @@
         "n/a",
         "2.4GHz Dongle",
         "2.4GHz RF Dongle",
-        "2.4GHz WIFI Dongle"
+        "2.4GHz WIFI Dongle",
+        "1",
+        "2.5"
       ]
     },
     "data_lists.coating": {
@@ -729,7 +987,8 @@
         "PTFE (Virgin-Grade)",
         "PTFE (Teflon)",
         "PTFE (95%)",
-        "Glass"
+        "Glass",
+        "l"
       ]
     },
     "form_factor": {
@@ -742,7 +1001,8 @@
       "values": [
         "right",
         "ambidextrous",
-        "left"
+        "left",
+        "lets"
       ]
     },
     "front_flare": {
@@ -915,20 +1175,28 @@
         "mechanical",
         "optical",
         "optical-mechanical",
-        "optical / mechanical"
+        "optical / mechanical",
+        "eqwe",
+        "yay"
       ]
     }
   },
   "field_count": 75,
   "fields": {
     "acceleration": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [
         "acceleration",
         "g",
         "max acceleration"
       ],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "rounding": {
@@ -947,7 +1215,6 @@
       "effort": 3,
       "enum": {
         "match": {
-          "fuzzy_threshold": 0.92,
           "strategy": "alias"
         },
         "new_value_policy": {
@@ -988,8 +1255,6 @@
       "key": "acceleration",
       "output_shape": "scalar",
       "parse": {
-        "accept_bare_numbers_as_mode": false,
-        "allow_ranges": false,
         "allow_unitless": true,
         "strict_unit_required": false,
         "template": "number_with_unit",
@@ -1056,13 +1321,18 @@
         "tooltip_md": "Define 'Max Acceleration' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "adjustable_scroll_wheel": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -1172,13 +1442,18 @@
         "tooltip_md": "Define 'Adjustable Scroll Wheel' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "adjustable_weight": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -1290,10 +1565,16 @@
         "tooltip_md": "Define 'Adjustable Weight' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "battery_hours": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [
         "battery life",
         "battery life (hours)",
@@ -1301,7 +1582,6 @@
         "battery_hours"
       ],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "rounding": {
@@ -1429,13 +1709,18 @@
         "tooltip_md": "Define 'Battery Life (Hours)' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "bluetooth": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -1545,13 +1830,18 @@
         "tooltip_md": "Define 'Bluetooth' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "cable_type": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -1661,13 +1951,18 @@
         "tooltip_md": "Define 'Cable Type' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "click_force": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "rounding": {
@@ -1794,13 +2089,18 @@
         "tooltip_md": "Define 'Click Force' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "click_latency": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "rounding": {
@@ -1931,13 +2231,18 @@
         "tooltip_md": "Define 'Click Latency' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "click_latency_list": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "list_rules": {
@@ -2112,13 +2417,18 @@
         "tooltip_md": "Click latency values by mode when available. Rare; do not guess. Structured list preferred: e.g., '1.1 wired, 1.3 wireless'.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "list_of_objects"
+      "unknown_reason_default": "not_found_after_search"
     },
     "coating": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "list_rules": {
@@ -2251,13 +2561,18 @@
         "tooltip_md": "Define 'Coating' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "list"
+      "unknown_reason_default": "not_found_after_search"
     },
     "colors": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "list_rules": {
@@ -2384,13 +2699,18 @@
         "tooltip_md": "Colorway tokens. Use list<string>. Normalize grey→gray; multi-colorways may use '+'.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "list"
+      "unknown_reason_default": "not_found_after_search"
     },
     "computer_side_connector": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -2500,13 +2820,18 @@
         "tooltip_md": "Define 'Computer-side Connector' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "connection": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -2623,22 +2948,21 @@
         "tooltip_md": "Primary connection mode (wired/wireless/hybrid/bluetooth). Prefer manufacturer docs.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "connectivity": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
-        "list_rules": {
-          "dedupe": true,
-          "max_items": 100,
-          "min_items": 0,
-          "sort": "none"
-        },
-        "shape": "list",
+        "shape": "scalar",
         "type": "string",
         "unknown_reason_required": true,
         "unknown_token": "unk"
@@ -2696,16 +3020,9 @@
       "field_key": "connectivity",
       "group": "connectivity",
       "key": "connectivity",
-      "output_shape": "list",
+      "output_shape": "scalar",
       "parse": {
-        "delimiters": [
-          ",",
-          "/",
-          "|",
-          ";",
-          "+"
-        ],
-        "template": "list_of_tokens_delimited"
+        "template": "text_field"
       },
       "priority": {
         "availability": "expected",
@@ -2762,13 +3079,18 @@
         "tooltip_md": "Connectivity options (e.g., 2.4GHz, Bluetooth, USB). Use list if multiple.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "list"
+      "unknown_reason_default": "not_found_after_search"
     },
     "debounce": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "rounding": {
@@ -2888,13 +3210,18 @@
         "tooltip_md": "Define 'Debounce' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "design": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "list_rules": {
@@ -3017,13 +3344,18 @@
         "tooltip_md": "Define 'Design' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "list"
+      "unknown_reason_default": "not_found_after_search"
     },
     "discontinued": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -3128,10 +3460,16 @@
         "tooltip_md": "Define 'Discontinued' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "dpi": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [
         "cpi",
         "dpi",
@@ -3139,7 +3477,6 @@
         "maximum dpi"
       ],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "range": {
@@ -3269,15 +3606,38 @@
         "tooltip_md": "Max DPI (or max CPI) as integer. Do not list steps; store maximum unless field_rules later adds a steps field.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "encoder": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": {
+        "ai": {
+          "context_level": "properties",
+          "mode": "off",
+          "model_strategy": "auto",
+          "reasoning_note": ""
+        },
         "allow_new_components": true,
+        "match": {
+          "auto_accept_score": 0.95,
+          "flag_review_score": 0.65,
+          "fuzzy_threshold": 0.75,
+          "name_weight": 0.4,
+          "property_keys": [],
+          "property_weight": 0.6
+        },
+        "priority": {
+          "difficulty": "medium",
+          "effort": 5
+        },
         "require_identity_evidence": true,
         "source": "component_db.encoder",
         "type": "encoder"
@@ -3391,13 +3751,18 @@
         "tooltip_md": "Define 'Encoder' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "encoder_brand": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -3508,13 +3873,18 @@
         "tooltip_md": "Define 'Encoder Brand' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "encoder_link": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -3620,13 +3990,18 @@
         "tooltip_md": "Define 'Encoder Link' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "feet_material": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -3742,13 +4117,18 @@
         "tooltip_md": "Define 'Feet Material' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "flawless_sensor": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -3858,13 +4238,18 @@
         "tooltip_md": "Define 'Flawless Sensor' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "form_factor": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -3981,13 +4366,18 @@
         "tooltip_md": "Define 'Form Factor' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "front_flare": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -4103,13 +4493,18 @@
         "tooltip_md": "Define 'Front Flare' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "grip": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "list_rules": {
@@ -4231,13 +4626,18 @@
         "tooltip_md": "Define 'Grip' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "list"
+      "unknown_reason_default": "not_found_after_search"
     },
     "hand_size": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "list_rules": {
@@ -4359,13 +4759,18 @@
         "tooltip_md": "Define 'Hand Size' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "list"
+      "unknown_reason_default": "not_found_after_search"
     },
     "hardware_acceleration": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -4475,17 +4880,22 @@
         "tooltip_md": "Define 'Hardware Acceleration' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "height": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [
         "height",
         "height_mm",
         "overall height"
       ],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "rounding": {
@@ -4617,13 +5027,18 @@
         "tooltip_md": "Overall height in millimeters. Convert inches/cm to mm; require unit when parsing.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "honeycomb_frame": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -4733,13 +5148,18 @@
         "tooltip_md": "Define 'Honeycomb Frame' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "hot_swappable": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -4849,13 +5269,18 @@
         "tooltip_md": "Define 'Hot Swappable' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "hump": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -4971,17 +5396,22 @@
         "tooltip_md": "Define 'Hump' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "ips": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [
         "inches per second",
         "ips",
         "max ips"
       ],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "rounding": {
@@ -5105,10 +5535,16 @@
         "tooltip_md": "Define 'Max IPS' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "lift": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [
         "lift",
         "lift off distance",
@@ -5116,7 +5552,6 @@
         "lod"
       ],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "list_rules": {
@@ -5262,13 +5697,18 @@
         "tooltip_md": "Lift-off distance (LOD) in mm. May be a range or set; normalize ranges to {min,max}.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "mixed_values_and_ranges"
+      "unknown_reason_default": "not_found_after_search"
     },
     "lift_settings": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "list_rules": {
@@ -5397,13 +5837,18 @@
         "tooltip_md": "Define 'Lift Settings' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "list"
+      "unknown_reason_default": "not_found_after_search"
     },
     "lighting": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "list_rules": {
@@ -5536,10 +5981,16 @@
         "tooltip_md": "Define 'Lighting' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "list"
+      "unknown_reason_default": "not_found_after_search"
     },
     "lngth": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [
         "length",
         "length_mm",
@@ -5547,7 +5998,6 @@
         "overall length"
       ],
       "availability": "expected",
-      "canonical_key": "length",
       "component": null,
       "contract": {
         "rounding": {
@@ -5680,15 +6130,38 @@
         "tooltip_md": "Overall length in millimeters. Convert inches/cm to mm; require unit when parsing.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "material": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": {
+        "ai": {
+          "context_level": "properties",
+          "mode": "off",
+          "model_strategy": "auto",
+          "reasoning_note": ""
+        },
         "allow_new_components": true,
+        "match": {
+          "auto_accept_score": 0.95,
+          "flag_review_score": 0.65,
+          "fuzzy_threshold": 0.75,
+          "name_weight": 0.4,
+          "property_keys": [],
+          "property_weight": 0.6
+        },
+        "priority": {
+          "difficulty": "medium",
+          "effort": 5
+        },
         "require_identity_evidence": true,
         "source": "component_db.material",
         "type": "material"
@@ -5804,13 +6277,18 @@
         "tooltip_md": "Define 'Material' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "mcu": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -5931,13 +6409,18 @@
         "tooltip_md": "Define 'MCU' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "mcu_link": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -6045,13 +6528,18 @@
         "tooltip_md": "Define 'MCU Link' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "middle_buttons": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "rounding": {
@@ -6169,13 +6657,18 @@
         "tooltip_md": "Count of middle buttons (wheel click + extra middle buttons).",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "motion_sync": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -6285,13 +6778,18 @@
         "tooltip_md": "Define 'Motion Sync' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "mouse_side_connector": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -6401,13 +6899,18 @@
         "tooltip_md": "Define 'Mouse-side Connector' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "nvidia_reflex": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "rare",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -6517,13 +7020,18 @@
         "tooltip_md": "Define 'NVIDIA Reflex' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "onboard_memory": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -6633,13 +7141,18 @@
         "tooltip_md": "Define 'Onboard Memory' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "onboard_memory_value": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "rounding": {
@@ -6756,13 +7269,18 @@
         "tooltip_md": "Define 'Onboard Memory (Value)' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "paracord": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -6872,10 +7390,16 @@
         "tooltip_md": "Define 'Paracord' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "polling_rate": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [
         "hz",
         "polling",
@@ -6884,7 +7408,6 @@
         "report rate"
       ],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "list_rules": {
@@ -7034,13 +7557,18 @@
         "tooltip_md": "Polling rate options in Hz. Normalize to list of integers, sorted ascending; common values: 125/250/500/1000/2000/4000/8000.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "list"
+      "unknown_reason_default": "not_found_after_search"
     },
     "price_range": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -7153,13 +7681,18 @@
         "tooltip_md": "MSRP price bracket or stated MSRP. Keep as a string token; do not guess if not public.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "profile_switching": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -7269,13 +7802,18 @@
         "tooltip_md": "Define 'Profile Switching' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "programmable_buttons": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "rounding": {
@@ -7393,13 +7931,18 @@
         "tooltip_md": "Define 'Programmable Buttons' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "release_date": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -7516,13 +8059,18 @@
         "tooltip_md": "Define 'Release Date' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "rgb": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -7632,15 +8180,38 @@
         "tooltip_md": "Define 'RGB' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "sensor": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": {
+        "ai": {
+          "context_level": "properties",
+          "mode": "off",
+          "model_strategy": "auto",
+          "reasoning_note": ""
+        },
         "allow_new_components": true,
+        "match": {
+          "auto_accept_score": 0.95,
+          "flag_review_score": 0.65,
+          "fuzzy_threshold": 0.75,
+          "name_weight": 0.4,
+          "property_keys": [],
+          "property_weight": 0.6
+        },
+        "priority": {
+          "difficulty": "medium",
+          "effort": 5
+        },
         "require_identity_evidence": true,
         "source": "component_db.sensor",
         "type": "sensor"
@@ -7761,13 +8332,18 @@
         "tooltip_md": "Sensor model (component DB-backed). Must be evidence-backed; avoid wrong-variant merges.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "sensor_brand": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -7880,13 +8456,18 @@
         "tooltip_md": "Sensor manufacturer brand (e.g., PixArt). Prefer component DB if sensor identified.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "sensor_date": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "rounding": {
@@ -8007,13 +8588,18 @@
         "tooltip_md": "Define 'Sensor Date' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "sensor_latency": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "rounding": {
@@ -8144,13 +8730,18 @@
         "tooltip_md": "Define 'Sensor Latency' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "sensor_latency_list": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "list_rules": {
@@ -8325,13 +8916,18 @@
         "tooltip_md": "Latency values by mode (wired/wireless/bluetooth) when available. Rare; do not guess. Structured list preferred: e.g., '1.1 wired, 1.3 wireless'.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "list_of_objects"
+      "unknown_reason_default": "not_found_after_search"
     },
     "sensor_link": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -8442,13 +9038,18 @@
         "tooltip_md": "Define 'Sensor Link' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "sensor_type": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -8564,13 +9165,18 @@
         "tooltip_md": "Define 'Sensor Type' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "shape": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -8686,13 +9292,18 @@
         "tooltip_md": "Define 'Shape' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "shift_latency": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "rounding": {
@@ -8813,13 +9424,18 @@
         "tooltip_md": "Define 'DPI Shift Latency' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "side_buttons": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "rounding": {
@@ -8937,13 +9553,18 @@
         "tooltip_md": "Count of side buttons (excluding main clicks and wheel).",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "silent_clicks": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -9053,13 +9674,18 @@
         "tooltip_md": "Define 'Silent Clicks' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "sku": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -9169,13 +9795,18 @@
         "tooltip_md": "Define 'SKU / Part #' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "smoothing": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -9285,15 +9916,38 @@
         "tooltip_md": "Define 'Smoothing' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "switch": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": {
+        "ai": {
+          "context_level": "properties",
+          "mode": "off",
+          "model_strategy": "auto",
+          "reasoning_note": ""
+        },
         "allow_new_components": true,
+        "match": {
+          "auto_accept_score": 0.95,
+          "flag_review_score": 0.65,
+          "fuzzy_threshold": 0.75,
+          "name_weight": 0.4,
+          "property_keys": [],
+          "property_weight": 0.6
+        },
+        "priority": {
+          "difficulty": "medium",
+          "effort": 5
+        },
         "require_identity_evidence": true,
         "source": "component_db.switch",
         "type": "switch"
@@ -9414,13 +10068,18 @@
         "tooltip_md": "Main click switch model (component DB-backed). Evidence required.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "switch_brand": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -9533,13 +10192,18 @@
         "tooltip_md": "Switch manufacturer brand. Prefer component DB when switch identified.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "switch_type": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -9656,17 +10320,22 @@
         "tooltip_md": "Define 'Switch Type' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "switches_link": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [
         "Switch Link",
         "switch_link",
         "switches_link"
       ],
       "availability": "sometimes",
-      "canonical_key": "switch_link",
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -9799,13 +10468,18 @@
         "tooltip_md": "",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "thumb_rest": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -9915,13 +10589,18 @@
         "tooltip_md": "Define 'Thumb Rest' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "tilt_scroll_wheel": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -10031,10 +10710,16 @@
         "tooltip_md": "Define 'Tilt Scroll Wheel' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "weight": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [
         "grams",
         "mass",
@@ -10042,7 +10727,6 @@
         "weight_g"
       ],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "range": {
@@ -10175,17 +10859,22 @@
         "tooltip_md": "Mouse weight in grams. Convert oz→g when necessary; keep decimals if provided.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "width": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [
         "overall width",
         "width",
         "width_mm"
       ],
       "availability": "expected",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "rounding": {
@@ -10317,13 +11006,18 @@
         "tooltip_md": "Overall width in millimeters. Convert inches/cm to mm; require unit when parsing.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     },
     "wireless_charging": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
       "aliases": [],
       "availability": "sometimes",
-      "canonical_key": null,
       "component": null,
       "contract": {
         "shape": "scalar",
@@ -10433,11 +11127,10 @@
         "tooltip_md": "Define 'Wireless Charging' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search",
-      "value_form": "scalar"
+      "unknown_reason_default": "not_found_after_search"
     }
   },
-  "generated_at": "2026-02-13T02:18:36.677Z",
+  "generated_at": "2026-02-17T09:49:22.300Z",
   "key_range": "dataEntry!B9:B83",
   "notes": [
     "Generated by Field Rules Studio compiler.",

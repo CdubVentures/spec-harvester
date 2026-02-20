@@ -185,10 +185,26 @@ function mergeProfiles(previous, next) {
   };
 }
 
-export async function loadLearningProfile({ storage, config, category, job }) {
+export async function loadLearningProfile({ storage, config, category, job, specDb = null }) {
   const profileId = profileIdFromJob(job);
   const profileKey = toPosixKey(config.s3OutputPrefix, '_learning', category, 'profiles', `${profileId}.json`);
+  const productId = job.productId;
 
+  /* --- SQLite primary path --- */
+  if (specDb && productId) {
+    const sqliteProfileId = `${category}/${productId}`;
+    const row = specDb.getLearningProfile(sqliteProfileId);
+    if (row) {
+      /* getLearningProfile already parses JSON columns back to objects/arrays */
+      return {
+        profileId,
+        profileKey,
+        profile: row
+      };
+    }
+  }
+
+  /* --- JSON fallback path --- */
   const existing = await storage.readJsonOrNull(profileKey);
   return {
     profileId,
@@ -223,10 +239,12 @@ export async function persistLearningProfile({
   learningProfile,
   discoveryResult,
   runBase,
-  runId
+  runId,
+  specDb = null
 }) {
   const profileId = learningProfile.profileId;
   const profileKey = learningProfile.profileKey;
+  const productId = job.productId;
 
   const totalSchemaFields = (summary?.coverage_overall_percent || 0) / 100;
   const unknownFieldRate = Number.parseFloat((1 - totalSchemaFields).toFixed(4));
@@ -268,9 +286,39 @@ export async function persistLearningProfile({
 
   const merged = mergeProfiles(learningProfile.profile, current);
 
-  await storage.writeObject(profileKey, Buffer.from(JSON.stringify(merged, null, 2), 'utf8'), {
-    contentType: 'application/json'
-  });
+  /* --- SQLite primary path --- */
+  if (specDb && productId) {
+    const sqliteProfileId = `${category}/${productId}`;
+    specDb.upsertLearningProfile({
+      profile_id: sqliteProfileId,
+      category,
+      brand: merged.identity_lock?.brand || '',
+      model: merged.identity_lock?.model || '',
+      variant: merged.identity_lock?.variant || '',
+      runs_total: merged.runs_total || 0,
+      validated_runs: merged.validated_runs || 0,
+      validated: merged.validated ? 1 : 0,
+      unknown_field_rate: merged.unknown_field_rate || 0,
+      unknown_field_rate_avg: merged.unknown_field_rate_avg || 0,
+      parser_health_avg: merged.parser_health_avg || 0,
+      preferred_urls: JSON.stringify(merged.preferred_urls || []),
+      feedback_urls: JSON.stringify(merged.feedback_urls || []),
+      uncertain_fields: JSON.stringify(merged.uncertain_fields || []),
+      host_stats: JSON.stringify(merged.host_stats || []),
+      critical_fields_below: JSON.stringify(merged.critical_fields_below_pass_target || []),
+      last_run: JSON.stringify(merged.last_run || {}),
+      parser_health: JSON.stringify(merged.parser_health || {}),
+      updated_at: merged.updated_at || new Date().toISOString()
+    });
+  }
+
+  /* --- JSON path: write when configured or when SQLite is unavailable --- */
+  const shouldWriteJson = !specDb || config.learningJsonWrite;
+  if (shouldWriteJson) {
+    await storage.writeObject(profileKey, Buffer.from(JSON.stringify(merged, null, 2), 'utf8'), {
+      contentType: 'application/json'
+    });
+  }
 
   const learningRunKey = `${runBase}/logs/learning.json`;
   await storage.writeObject(learningRunKey, Buffer.from(JSON.stringify(merged, null, 2), 'utf8'), {

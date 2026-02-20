@@ -13,6 +13,7 @@ import {
   setManualOverride,
   setOverrideFromCandidate
 } from '../src/review/overrideWorkflow.js';
+import { buildManualOverrideCandidateId } from '../src/utils/candidateIdentifier.js';
 
 function makeStorage(tempRoot) {
   return createStorage({
@@ -278,6 +279,42 @@ test('setOverrideFromCandidate writes helper override file and finalize applies 
   }
 });
 
+test('setOverrideFromCandidate accepts synthetic candidates when candidateValue is provided', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-review-synthetic-candidate-'));
+  const storage = makeStorage(tempRoot);
+  const config = {
+    helperFilesRoot: path.join(tempRoot, 'helper_files')
+  };
+  const category = 'mouse';
+  const productId = 'mouse-review-synthetic-candidate';
+  try {
+    await seedFieldRulesArtifacts(config.helperFilesRoot, category);
+    await seedLatestArtifacts(storage, category, productId);
+
+    const setResult = await setOverrideFromCandidate({
+      storage,
+      config,
+      category,
+      productId,
+      field: 'weight',
+      candidateId: 'pl_weight_synthetic_1',
+      candidateValue: '59',
+      candidateSource: 'pipeline',
+      candidateMethod: 'product_extraction',
+    });
+    assert.equal(setResult.value, '59');
+    assert.equal(setResult.candidate_id, 'pl_weight_synthetic_1');
+
+    const overridePath = resolveOverrideFilePath({ config, category, productId });
+    const overridePayload = JSON.parse(await fs.readFile(overridePath, 'utf8'));
+    assert.equal(overridePayload.overrides.weight.candidate_id, 'pl_weight_synthetic_1');
+    assert.equal(overridePayload.overrides.weight.override_value, '59');
+    assert.equal(overridePayload.overrides.weight.source.method, 'product_extraction');
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('finalizeOverrides demotes invalid override values through runtime engine gate', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-review-override-invalid-'));
   const storage = makeStorage(tempRoot);
@@ -352,7 +389,7 @@ test('readReviewArtifacts returns safe defaults when review files do not exist',
   }
 });
 
-test('setManualOverride requires evidence and writes manual_snp audit payload', async () => {
+test('setManualOverride requires evidence and writes canonical manual override candidate id', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-review-manual-override-'));
   const storage = makeStorage(tempRoot);
   const config = {
@@ -392,7 +429,17 @@ test('setManualOverride requires evidence and writes manual_snp audit payload', 
         quote_span: [0, 12]
       }
     });
-    assert.equal(String(manual.candidate_id).startsWith('manual_snp_'), true);
+    assert.equal(
+      manual.candidate_id,
+      buildManualOverrideCandidateId({
+        category,
+        productId,
+        fieldKey: 'weight',
+        value: '59',
+        evidenceUrl: 'https://manufacturer.example/spec',
+        evidenceQuote: 'Weight: 59 g',
+      }),
+    );
 
     const overridePath = resolveOverrideFilePath({ config, category, productId });
     const overridePayload = JSON.parse(await fs.readFile(overridePath, 'utf8'));

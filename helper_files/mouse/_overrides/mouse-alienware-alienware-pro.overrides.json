@@ -1,0 +1,40 @@
+{
+  "category": "mouse",
+  "created_at": "2026-02-16T11:14:28.114Z",
+  "overrides": {
+    "mouse_side_connector": {
+      "candidate_id": "manual_snp_mouse_side_connector_mlp2ucni",
+      "candidate_index": null,
+      "field": "mouse_side_connector",
+      "overridden_at": "2026-02-16T11:14:28.877Z",
+      "overridden_by": null,
+      "override_provenance": {
+        "quote": "Manually set to \"change\" via GUI",
+        "quote_span": null,
+        "retrieved_at": "2026-02-16T11:14:28.875Z",
+        "snippet_hash": null,
+        "snippet_id": null,
+        "source_id": null,
+        "url": "gui://manual-entry"
+      },
+      "override_reason": null,
+      "override_source": "manual_entry",
+      "override_value": "change",
+      "set_at": "2026-02-16T11:14:28.877Z",
+      "source": {
+        "evidence_key": "gui://manual-entry",
+        "host": "manual-override.local",
+        "method": "manual_override",
+        "source_id": null,
+        "tier": 1
+      },
+      "validated": null,
+      "value": "change"
+    }
+  },
+  "product_id": "mouse-alienware-alienware-pro",
+  "review_started_at": "2026-02-16T11:14:28.114Z",
+  "review_status": "in_progress",
+  "updated_at": "2026-02-16T11:14:28.877Z",
+  "version": 1
+}

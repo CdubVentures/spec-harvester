@@ -1,0 +1,18 @@
+{
+  "product_id": "lamzu-atlantis-mini-pro",
+  "category": "mouse",
+  "description": "Lamzu Atlantis Mini Pro — compact ultralight wireless gaming mouse with 4K polling",
+  "expected_fields": {
+    "weight": "47",
+    "sensor": "PixArt PAW3395",
+    "max_dpi": "26000",
+    "polling_rate": "4000",
+    "connectivity": "wireless",
+    "battery_life": "70",
+    "switches": "Huano Transparent Blue Shell Pink Dot",
+    "shape": "symmetrical",
+    "buttons": "5"
+  },
+  "required_evidence_fields": ["weight", "sensor", "max_dpi", "polling_rate"],
+  "notes": "Golden reference for regression testing. Values sourced from manufacturer specs and review sites."
+}

@@ -7,7 +7,9 @@
     "variant": "",
     "sku": "",
     "mpn": "",
-    "gtin": ""
+    "gtin": "",
+    "id": 256,
+    "identifier": "4189c1f1"
   },
   "seedUrls": [],
   "anchors": {}

@@ -16,6 +16,8 @@ export function buildIdentityObject(job, extractedIdentity = {}, options = {}) {
   const variant = lock.variant || (allowDerivedVariant && extractedVariant ? extractedVariant : 'unk');
 
   return {
+    id: lock.id || 0,
+    identifier: lock.identifier || '',
     brand,
     model,
     base_model: lock.model || extractedIdentity.base_model || model,

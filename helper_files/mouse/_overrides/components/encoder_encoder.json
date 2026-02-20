@@ -1,0 +1,8 @@
+{
+  "componentType": "encoder",
+  "name": "Encoder",
+  "properties": {
+    "encoder_steps": "25"
+  },
+  "updated_at": "2026-02-16T22:20:32.441Z"
+}

@@ -16,6 +16,12 @@ export function selectLlmProvider(provider) {
       request: requestGeminiChatCompletion
     };
   }
+  if (token === 'chatmock') {
+    return {
+      name: 'chatmock',
+      request: requestOpenAICompatibleChatCompletion
+    };
+  }
   return {
     name: 'openai',
     request: requestOpenAICompatibleChatCompletion

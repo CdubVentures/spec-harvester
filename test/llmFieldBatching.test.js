@@ -20,9 +20,9 @@ test('buildFieldBatches groups fields into at most seven batches', () => {
     targetFields: fields,
     maxBatches: 7,
     fieldRules: {
-      sensor_latency: { difficulty: 'instrumented' },
-      click_latency: { difficulty: 'hard' },
-      coating: { difficulty: 'easy' }
+      sensor_latency: { priority: { required_level: 'expected', difficulty: 'instrumented' } },
+      click_latency: { priority: { required_level: 'expected', difficulty: 'hard' } },
+      coating: { priority: { required_level: 'expected', difficulty: 'easy' } }
     }
   });
 
@@ -62,3 +62,20 @@ test('resolveBatchModel routes hard/instrumented batches to reasoning model', ()
   assert.equal(hard.reasoningMode, true);
 });
 
+test('resolveBatchModel supports runtime forced-high field escalation', () => {
+  const forced = resolveBatchModel({
+    batch: {
+      id: 'physical',
+      fields: ['weight'],
+      difficulty: { hard: 0, instrumented: 0 }
+    },
+    config: {
+      llmModelFast: 'gpt-5-low',
+      llmModelReasoning: 'gpt-5-high'
+    },
+    forcedHighFields: ['weight']
+  });
+  assert.equal(forced.model, 'gpt-5-high');
+  assert.equal(forced.reasoningMode, true);
+  assert.equal(forced.reason, 'extract_forced_high_batch');
+});

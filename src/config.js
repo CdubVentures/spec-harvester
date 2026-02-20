@@ -28,6 +28,39 @@ function parseBoolEnv(name, defaultValue = false) {
   return norm === '1' || norm === 'true' || norm === 'yes' || norm === 'on';
 }
 
+function parseJsonEnv(name, defaultValue = {}) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
+    return defaultValue;
+  }
+  try {
+    const parsed = JSON.parse(String(raw));
+    return parsed && typeof parsed === 'object' ? parsed : defaultValue;
+  } catch {
+    return defaultValue;
+  }
+}
+
+function normalizeModelPricingMap(input = {}) {
+  const output = {};
+  if (!input || typeof input !== 'object') {
+    return output;
+  }
+  for (const [rawModel, rawRates] of Object.entries(input)) {
+    const model = String(rawModel || '').trim();
+    if (!model || !rawRates || typeof rawRates !== 'object') continue;
+    const inPer1M = Number.parseFloat(String(rawRates.inputPer1M ?? rawRates.input_per_1m ?? rawRates.input ?? ''));
+    const outPer1M = Number.parseFloat(String(rawRates.outputPer1M ?? rawRates.output_per_1m ?? rawRates.output ?? ''));
+    const cachedPer1M = Number.parseFloat(String(rawRates.cachedInputPer1M ?? rawRates.cached_input_per_1m ?? rawRates.cached_input ?? rawRates.cached ?? ''));
+    output[model] = {
+      inputPer1M: Number.isFinite(inPer1M) ? inPer1M : 0,
+      outputPer1M: Number.isFinite(outPer1M) ? outPer1M : 0,
+      cachedInputPer1M: Number.isFinite(cachedPer1M) ? cachedPer1M : 0
+    };
+  }
+  return output;
+}
+
 function hasS3EnvCreds() {
   return Boolean(
     process.env.AWS_ACCESS_KEY_ID &&
@@ -119,8 +152,10 @@ export function applyRunProfile(config, profile) {
     next.discoveryMaxQueries = intMax(next.discoveryMaxQueries, 24);
     next.discoveryResultsPerQuery = intMax(next.discoveryResultsPerQuery, 20);
     next.discoveryMaxDiscovered = intMax(next.discoveryMaxDiscovered, 300);
+    next.discoveryQueryConcurrency = intMax(next.discoveryQueryConcurrency, 8);
     next.llmPlanDiscoveryQueries = true;
     next.manufacturerBroadDiscovery = true;
+    next.preferHttpFetcher = false;
   } else if (normalizedProfile === 'fast') {
     next.maxRunSeconds = intMin(next.maxRunSeconds, 180);
     next.maxUrlsPerProduct = intMin(next.maxUrlsPerProduct, 12);
@@ -132,6 +167,10 @@ export function applyRunProfile(config, profile) {
     next.discoveryMaxQueries = intMin(next.discoveryMaxQueries, 4);
     next.discoveryResultsPerQuery = intMin(next.discoveryResultsPerQuery, 6);
     next.discoveryMaxDiscovered = intMin(next.discoveryMaxDiscovered, 60);
+    next.discoveryQueryConcurrency = intMax(next.discoveryQueryConcurrency, 4);
+    next.perHostMinDelayMs = intMin(next.perHostMinDelayMs, 150);
+    next.pageGotoTimeoutMs = intMin(next.pageGotoTimeoutMs, 12_000);
+    next.pageNetworkIdleTimeoutMs = intMin(next.pageNetworkIdleTimeoutMs, 1_500);
     next.endpointSignalLimit = intMin(next.endpointSignalLimit, 24);
     next.endpointSuggestionLimit = intMin(next.endpointSuggestionLimit, 8);
     next.endpointNetworkScanLimit = intMin(next.endpointNetworkScanLimit, 400);
@@ -140,6 +179,7 @@ export function applyRunProfile(config, profile) {
     next.postLoadWaitMs = intMin(next.postLoadWaitMs, 0);
     next.autoScrollEnabled = false;
     next.autoScrollPasses = 0;
+    next.preferHttpFetcher = true;
   }
 
   next.manufacturerReserveUrls = Math.max(
@@ -268,11 +308,16 @@ export function loadConfig(overrides = {}) {
     discoveryMaxQueries: parseIntEnv('DISCOVERY_MAX_QUERIES', 8),
     discoveryResultsPerQuery: parseIntEnv('DISCOVERY_RESULTS_PER_QUERY', 10),
     discoveryMaxDiscovered: parseIntEnv('DISCOVERY_MAX_DISCOVERED', 120),
+    discoveryQueryConcurrency: parseIntEnv('DISCOVERY_QUERY_CONCURRENCY', 4),
     searchProvider: process.env.SEARCH_PROVIDER || 'none',
+    searxngBaseUrl: process.env.SEARXNG_BASE_URL || process.env.SEARXNG_URL || '',
     bingSearchKey: process.env.BING_SEARCH_KEY || '',
     bingSearchEndpoint: process.env.BING_SEARCH_ENDPOINT || '',
     googleCseKey: process.env.GOOGLE_CSE_KEY || '',
     googleCseCx: process.env.GOOGLE_CSE_CX || '',
+    disableGoogleCse: parseBoolEnv('DISABLE_GOOGLE_CSE', false),
+    cseRescueOnlyMode: parseBoolEnv('CSE_RESCUE_ONLY_MODE', true),
+    cseRescueRequiredIteration: parseIntEnv('CSE_RESCUE_REQUIRED_ITERATION', 2),
     duckduckgoEnabled: parseBoolEnv('DUCKDUCKGO_ENABLED', true),
     duckduckgoBaseUrl: process.env.DUCKDUCKGO_BASE_URL || 'https://html.duckduckgo.com/html/',
     duckduckgoTimeoutMs: parseIntEnv('DUCKDUCKGO_TIMEOUT_MS', 8_000),
@@ -288,6 +333,14 @@ export function loadConfig(overrides = {}) {
     llmModelPlan: process.env.LLM_MODEL_PLAN || process.env.LLM_MODEL_EXTRACT || defaultModel,
     llmModelFast:
       process.env.LLM_MODEL_FAST ||
+      process.env.LLM_MODEL_EXTRACT ||
+      defaultModel,
+    llmModelTriage:
+      process.env.LLM_MODEL_TRIAGE ||
+      process.env.CORTEX_MODEL_RERANK_FAST ||
+      process.env.CORTEX_MODEL_SEARCH_FAST ||
+      process.env.LLM_MODEL_FAST ||
+      process.env.LLM_MODEL_PLAN ||
       process.env.LLM_MODEL_EXTRACT ||
       defaultModel,
     llmModelReasoning:
@@ -333,13 +386,18 @@ export function loadConfig(overrides = {}) {
     llmWriteFallbackProvider: (process.env.LLM_WRITE_FALLBACK_PROVIDER || '').trim().toLowerCase(),
     llmWriteFallbackBaseUrl: process.env.LLM_WRITE_FALLBACK_BASE_URL || '',
     llmWriteFallbackApiKey: process.env.LLM_WRITE_FALLBACK_API_KEY || '',
+    llmSerpRerankEnabled: parseBoolEnv('LLM_SERP_RERANK_ENABLED', false),
+    llmModelCatalog: process.env.LLM_MODEL_CATALOG || '',
+    llmModelPricingMap: normalizeModelPricingMap(parseJsonEnv('LLM_MODEL_PRICING_JSON', {})),
     cortexEnabled: parseBoolEnv('CORTEX_ENABLED', false),
     chatmockDir: process.env.CHATMOCK_DIR || defaultChatmockDir(),
     chatmockComposeFile: process.env.CHATMOCK_COMPOSE_FILE
       || path.join(process.env.CHATMOCK_DIR || defaultChatmockDir(), 'docker-compose.yml'),
-    cortexBaseUrl: process.env.CORTEX_BASE_URL || 'http://localhost:8000/v1',
+    cortexBaseUrl: process.env.CORTEX_BASE_URL || 'http://localhost:5001/v1',
     cortexApiKey: process.env.CORTEX_API_KEY || 'key',
     cortexAsyncBaseUrl: process.env.CORTEX_ASYNC_BASE_URL || 'http://localhost:4000/api',
+    cortexAsyncSubmitPath: process.env.CORTEX_ASYNC_SUBMIT_PATH || '/jobs',
+    cortexAsyncStatusPath: process.env.CORTEX_ASYNC_STATUS_PATH || '/jobs/{id}',
     cortexAsyncEnabled: parseBoolEnv('CORTEX_ASYNC_ENABLED', true),
     cortexModelFast: process.env.CORTEX_MODEL_FAST || 'gpt-5-low',
     cortexModelAudit: process.env.CORTEX_MODEL_AUDIT || process.env.CORTEX_MODEL_FAST || 'gpt-5-low',
@@ -347,6 +405,7 @@ export function loadConfig(overrides = {}) {
     cortexModelReasoningDeep: process.env.CORTEX_MODEL_REASONING_DEEP || 'gpt-5-high',
     cortexModelVision: process.env.CORTEX_MODEL_VISION || process.env.CORTEX_MODEL_REASONING_DEEP || 'gpt-5-high',
     cortexModelSearchFast: process.env.CORTEX_MODEL_SEARCH_FAST || process.env.CORTEX_MODEL_FAST || 'gpt-5-low',
+    cortexModelRerankFast: process.env.CORTEX_MODEL_RERANK_FAST || process.env.CORTEX_MODEL_SEARCH_FAST || process.env.CORTEX_MODEL_FAST || 'gpt-5-low',
     cortexModelSearchDeep: process.env.CORTEX_MODEL_SEARCH_DEEP || process.env.CORTEX_MODEL_REASONING_DEEP || 'gpt-5-high',
     cortexEscalateConfidenceLt: parseFloatEnv('CORTEX_ESCALATE_CONFIDENCE_LT', 0.85),
     cortexEscalateIfConflict: parseBoolEnv('CORTEX_ESCALATE_IF_CONFLICT', true),
@@ -366,6 +425,36 @@ export function loadConfig(overrides = {}) {
     aggressiveLlmTargetMaxFields: parseIntEnv('AGGRESSIVE_LLM_TARGET_MAX_FIELDS', 75),
     aggressiveLlmDiscoveryPasses: parseIntEnv('AGGRESSIVE_LLM_DISCOVERY_PASSES', 3),
     aggressiveLlmDiscoveryQueryCap: parseIntEnv('AGGRESSIVE_LLM_DISCOVERY_QUERY_CAP', 24),
+    uberAggressiveEnabled: parseBoolEnv('UBER_AGGRESSIVE_ENABLED', false),
+    uberMaxUrlsPerProduct: parseIntEnv('UBER_MAX_URLS_PER_PRODUCT', 25),
+    uberMaxUrlsPerDomain: parseIntEnv('UBER_MAX_URLS_PER_DOMAIN', 6),
+    uberMaxRounds: parseIntEnv('UBER_MAX_ROUNDS', 6),
+    specDbDir: process.env.SPEC_DB_DIR || '.specfactory_tmp',
+    frontierDbPath: process.env.FRONTIER_DB_PATH || '_intel/frontier/frontier.json',
+    frontierEnableSqlite: parseBoolEnv('FRONTIER_ENABLE_SQLITE', true),
+    frontierStripTrackingParams: parseBoolEnv('FRONTIER_STRIP_TRACKING_PARAMS', true),
+    frontierQueryCooldownSeconds: parseIntEnv('FRONTIER_QUERY_COOLDOWN_SECONDS', 6 * 60 * 60),
+    frontierCooldown404Seconds: parseIntEnv('FRONTIER_COOLDOWN_404', 72 * 60 * 60),
+    frontierCooldown404RepeatSeconds: parseIntEnv('FRONTIER_COOLDOWN_404_REPEAT', 14 * 24 * 60 * 60),
+    frontierCooldown410Seconds: parseIntEnv('FRONTIER_COOLDOWN_410', 90 * 24 * 60 * 60),
+    frontierCooldownTimeoutSeconds: parseIntEnv('FRONTIER_COOLDOWN_TIMEOUT', 6 * 60 * 60),
+    frontierCooldown429BaseSeconds: parseIntEnv('FRONTIER_COOLDOWN_429_BASE', 15 * 60),
+    runtimeTraceEnabled: parseBoolEnv('RUNTIME_TRACE_ENABLED', true),
+    runtimeTraceFetchRing: parseIntEnv('RUNTIME_TRACE_FETCH_RING', 30),
+    runtimeTraceLlmRing: parseIntEnv('RUNTIME_TRACE_LLM_RING', 50),
+    indexingResumeMode: (process.env.INDEXING_RESUME_MODE || 'auto').trim().toLowerCase(),
+    indexingResumeMaxAgeHours: parseIntEnv('INDEXING_RESUME_MAX_AGE_HOURS', 48),
+    indexingResumeSeedLimit: parseIntEnv('INDEXING_RESUME_SEED_LIMIT', 24),
+    indexingResumePersistLimit: parseIntEnv('INDEXING_RESUME_PERSIST_LIMIT', 160),
+    indexingResumeRetryPersistLimit: parseIntEnv('INDEXING_RESUME_RETRY_PERSIST_LIMIT', 80),
+    indexingResumeSuccessPersistLimit: parseIntEnv('INDEXING_RESUME_SUCCESS_PERSIST_LIMIT', 240),
+    indexingReextractEnabled: parseBoolEnv('INDEXING_REEXTRACT_ENABLED', true),
+    indexingReextractAfterHours: parseIntEnv('INDEXING_REEXTRACT_AFTER_HOURS', 24),
+    indexingReextractSeedLimit: parseIntEnv('INDEXING_REEXTRACT_SEED_LIMIT', 8),
+    indexingHelperFilesEnabled: parseBoolEnv('INDEXING_HELPER_FILES_ENABLED', false),
+    runtimeControlFile: process.env.RUNTIME_CONTROL_FILE || '_runtime/control/runtime_overrides.json',
+    runtimeCaptureScreenshots: parseBoolEnv('RUNTIME_CAPTURE_SCREENSHOTS', false),
+    runtimeScreenshotMode: process.env.RUNTIME_SCREENSHOT_MODE || 'last_only',
     cortexSyncTimeoutMs: parseIntEnv('CORTEX_SYNC_TIMEOUT_MS', 60_000),
     cortexAsyncPollIntervalMs: parseIntEnv('CORTEX_ASYNC_POLL_INTERVAL_MS', 5_000),
     cortexAsyncMaxWaitMs: parseIntEnv('CORTEX_ASYNC_MAX_WAIT_MS', 900_000),
@@ -398,7 +487,13 @@ export function loadConfig(overrides = {}) {
     ),
     openaiTimeoutMs: timeoutMs,
     llmReasoningMode: parseBoolEnv('LLM_REASONING_MODE', hasDeepSeekKey),
-    llmReasoningBudget: parseIntEnv('LLM_REASONING_BUDGET', 2048),
+    llmReasoningBudget: parseIntEnv('LLM_REASONING_BUDGET', 32768),
+    llmMaxTokens: parseIntEnv('LLM_MAX_TOKENS', 16384),
+    llmExtractReasoningBudget: parseIntEnv('LLM_EXTRACT_REASONING_BUDGET', 4096),
+    llmExtractMaxTokens: parseIntEnv('LLM_EXTRACT_MAX_TOKENS', 1200),
+    llmExtractMaxSnippetsPerBatch: parseIntEnv('LLM_EXTRACT_MAX_SNIPPETS_PER_BATCH', 6),
+    llmExtractMaxSnippetChars: parseIntEnv('LLM_EXTRACT_MAX_SNIPPET_CHARS', 900),
+    llmExtractSkipLowSignal: parseBoolEnv('LLM_EXTRACT_SKIP_LOW_SIGNAL', true),
     llmVerifyMode: parseBoolEnv('LLM_VERIFY_MODE', false),
     llmVerifySampleRate: parseIntEnv('LLM_VERIFY_SAMPLE_RATE', 10),
     llmVerifyAggressiveAlways: parseBoolEnv('LLM_VERIFY_AGGRESSIVE_ALWAYS', false),
@@ -454,6 +549,7 @@ export function loadConfig(overrides = {}) {
     pageGotoTimeoutMs: parseIntEnv('PAGE_GOTO_TIMEOUT_MS', 30_000),
     pageNetworkIdleTimeoutMs: parseIntEnv('PAGE_NETWORK_IDLE_TIMEOUT_MS', 6_000),
     postLoadWaitMs: parseIntEnv('POST_LOAD_WAIT_MS', 0),
+    preferHttpFetcher: parseBoolEnv('PREFER_HTTP_FETCHER', false),
     autoScrollEnabled: parseBoolEnv('AUTO_SCROLL_ENABLED', false),
     autoScrollPasses: parseIntEnv('AUTO_SCROLL_PASSES', 0),
     autoScrollDelayMs: parseIntEnv('AUTO_SCROLL_DELAY_MS', 900),
@@ -470,7 +566,21 @@ export function loadConfig(overrides = {}) {
     hypothesisAutoFollowupRounds: parseIntEnv('HYPOTHESIS_AUTO_FOLLOWUP_ROUNDS', 0),
     hypothesisFollowupUrlsPerRound: parseIntEnv('HYPOTHESIS_FOLLOWUP_URLS_PER_ROUND', 12),
     fieldRewardHalfLifeDays: parseIntEnv('FIELD_REWARD_HALF_LIFE_DAYS', 45),
-    batchStrategy: (process.env.BATCH_STRATEGY || 'bandit').toLowerCase()
+    batchStrategy: (process.env.BATCH_STRATEGY || 'bandit').toLowerCase(),
+    fieldRulesEngineEnforceEvidence: parseBoolEnv(
+      'FIELD_RULES_ENGINE_ENFORCE_EVIDENCE',
+      parseBoolEnv('AGGRESSIVE_MODE_ENABLED', false) || parseBoolEnv('UBER_AGGRESSIVE_ENABLED', false)
+    ),
+
+    // SQLite migration feature flags (dual-write controls)
+    queueJsonWrite: parseBoolEnv('QUEUE_JSON_WRITE', false),
+    billingJsonWrite: parseBoolEnv('BILLING_JSON_WRITE', false),
+    brainJsonWrite: parseBoolEnv('BRAIN_JSON_WRITE', false),
+    intelJsonWrite: parseBoolEnv('INTEL_JSON_WRITE', false),
+    corpusJsonWrite: parseBoolEnv('CORPUS_JSON_WRITE', false),
+    learningJsonWrite: parseBoolEnv('LEARNING_JSON_WRITE', false),
+    cacheJsonWrite: parseBoolEnv('CACHE_JSON_WRITE', false),
+    eventsJsonWrite: parseBoolEnv('EVENTS_JSON_WRITE', true)
   };
 
   const filtered = Object.fromEntries(
@@ -502,6 +612,7 @@ export function loadConfig(overrides = {}) {
   merged.llmModelExtract = merged.llmModelExtract || merged.openaiModelExtract;
   merged.llmModelPlan = merged.llmModelPlan || merged.openaiModelPlan;
   merged.llmModelFast = merged.llmModelFast || merged.llmModelExtract || merged.llmModelPlan;
+  merged.llmModelTriage = merged.llmModelTriage || merged.cortexModelRerankFast || merged.cortexModelSearchFast || merged.llmModelFast;
   merged.llmModelReasoning = merged.llmModelReasoning || merged.llmModelExtract;
   merged.llmModelValidate = merged.llmModelValidate || merged.openaiModelWrite;
   merged.llmModelWrite = merged.llmModelWrite || merged.llmModelValidate;
@@ -517,6 +628,8 @@ export function loadConfig(overrides = {}) {
   merged.llmWriteProvider = merged.llmWriteProvider || merged.llmProvider;
   merged.llmWriteBaseUrl = merged.llmWriteBaseUrl || merged.llmBaseUrl;
   merged.llmWriteApiKey = merged.llmWriteApiKey || merged.llmApiKey;
+  merged.cortexModelRerankFast = merged.cortexModelRerankFast || merged.cortexModelSearchFast || merged.llmModelTriage || merged.llmModelFast;
+  merged.llmModelPricingMap = normalizeModelPricingMap(merged.llmModelPricingMap || {});
   merged.llmTimeoutMs = merged.llmTimeoutMs || merged.openaiTimeoutMs;
   merged.openaiApiKey = merged.llmApiKey;
   merged.openaiBaseUrl = merged.llmBaseUrl;
@@ -529,4 +642,79 @@ export function loadConfig(overrides = {}) {
     merged,
     filtered.runProfile || cfg.runProfile
   );
+}
+
+export function validateConfig(config) {
+  const errors = [];
+  const warnings = [];
+
+  // Rule 1: LLM enabled requires API key
+  if (config.llmEnabled && !config.llmApiKey) {
+    errors.push({
+      code: 'LLM_NO_API_KEY',
+      message: 'LLM_ENABLED=true but LLM_API_KEY is not set'
+    });
+  }
+
+  // Rule 2: Discovery enabled requires search provider
+  if (config.discoveryEnabled && config.searchProvider === 'none') {
+    errors.push({
+      code: 'DISCOVERY_NO_SEARCH_PROVIDER',
+      message: 'DISCOVERY_ENABLED=true but SEARCH_PROVIDER is "none"'
+    });
+  }
+
+  // Rule 3: Cortex enabled requires base URL
+  if (config.cortexEnabled && !config.cortexBaseUrl) {
+    errors.push({
+      code: 'CORTEX_NO_BASE_URL',
+      message: 'CORTEX_ENABLED=true but CORTEX_BASE_URL is not set'
+    });
+  }
+
+  // Rule 4: S3 output mode requires AWS credentials
+  if (config.outputMode === 's3' && !config.mirrorToS3) {
+    warnings.push({
+      code: 'S3_MODE_NO_CREDS',
+      message: 'OUTPUT_MODE=s3 but AWS credentials not detected'
+    });
+  }
+
+  // Rule 5: Aggressive mode should have frontier enabled
+  if (config.aggressiveModeEnabled && !config.frontierEnableSqlite && !config.frontierDbPath) {
+    warnings.push({
+      code: 'AGGRESSIVE_NO_FRONTIER',
+      message: 'AGGRESSIVE_MODE_ENABLED=true but frontier DB is not configured'
+    });
+  }
+
+  // Rule 6: manufacturerReserveUrls should not exceed maxUrlsPerProduct
+  if (config.maxUrlsPerProduct < config.manufacturerReserveUrls) {
+    warnings.push({
+      code: 'MANUFACTURER_RESERVE_EXCEEDS_MAX',
+      message: `manufacturerReserveUrls (${config.manufacturerReserveUrls}) > maxUrlsPerProduct (${config.maxUrlsPerProduct})`
+    });
+  }
+
+  // Rule 7: Uber aggressive requires aggressive mode
+  if (config.uberAggressiveEnabled && !config.aggressiveModeEnabled) {
+    warnings.push({
+      code: 'UBER_WITHOUT_AGGRESSIVE',
+      message: 'UBER_AGGRESSIVE_ENABLED=true but AGGRESSIVE_MODE_ENABLED=false'
+    });
+  }
+
+  // Rule 8: Budget guards disabled is risky
+  if (config.llmDisableBudgetGuards) {
+    warnings.push({
+      code: 'BUDGET_GUARDS_DISABLED',
+      message: 'LLM_DISABLE_BUDGET_GUARDS=true — no cost ceiling in effect'
+    });
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings
+  };
 }

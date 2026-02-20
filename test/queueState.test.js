@@ -9,6 +9,7 @@ import {
   markStaleQueueProducts,
   recordQueueFailure,
   selectNextQueueProduct,
+  syncQueueFromInputs,
   upsertQueueProduct
 } from '../src/queue/queueState.js';
 
@@ -157,6 +158,64 @@ test('loadQueueState recovers from corrupt queue state json and allows rewrite o
 
     const after = await loadQueueState({ storage, category });
     assert.equal(Boolean(after.state.products['mouse-recovery-check']), true);
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('syncQueueFromInputs applies identity gate and skips conflicting variant files', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-queue-gate-'));
+  const storage = makeStorage(tempRoot);
+  const helperRoot = path.join(tempRoot, 'helper_files');
+  const category = 'mouse';
+
+  try {
+    const cpDir = path.join(helperRoot, category, '_control_plane');
+    await fs.mkdir(cpDir, { recursive: true });
+    await fs.writeFile(path.join(cpDir, 'product_catalog.json'), JSON.stringify({
+      _version: 1,
+      products: {
+        'mouse-acer-cestus-310': {
+          brand: 'Acer',
+          model: 'Cestus 310',
+          variant: ''
+        }
+      }
+    }, null, 2), 'utf8');
+
+    await storage.writeObject(
+      'specs/inputs/mouse/products/mouse-acer-cestus-310.json',
+      Buffer.from(JSON.stringify({
+        productId: 'mouse-acer-cestus-310',
+        category: 'mouse',
+        identityLock: { brand: 'Acer', model: 'Cestus 310', variant: '' },
+        seedUrls: [],
+        anchors: {}
+      }), 'utf8')
+    );
+    await storage.writeObject(
+      'specs/inputs/mouse/products/mouse-acer-cestus-310-310.json',
+      Buffer.from(JSON.stringify({
+        productId: 'mouse-acer-cestus-310-310',
+        category: 'mouse',
+        identityLock: { brand: 'Acer', model: 'Cestus 310', variant: '310' },
+        seedUrls: [],
+        anchors: {}
+      }), 'utf8')
+    );
+
+    const sync = await syncQueueFromInputs({
+      storage,
+      category,
+      config: { helperFilesRoot: helperRoot }
+    });
+
+    assert.equal(sync.added, 1);
+    assert.equal(sync.rejected_by_identity_gate, 1);
+
+    const loaded = await loadQueueState({ storage, category });
+    assert.equal(Boolean(loaded.state.products['mouse-acer-cestus-310']), true);
+    assert.equal(Boolean(loaded.state.products['mouse-acer-cestus-310-310']), false);
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }

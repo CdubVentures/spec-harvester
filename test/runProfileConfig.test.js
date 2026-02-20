@@ -24,6 +24,7 @@ test('applyRunProfile thorough raises deep crawl and backend capture budgets', (
     pageGotoTimeoutMs: 30_000,
     pageNetworkIdleTimeoutMs: 6_000,
     postLoadWaitMs: 0,
+    preferHttpFetcher: false,
     autoScrollEnabled: false,
     autoScrollPasses: 0,
     autoScrollDelayMs: 900,
@@ -46,6 +47,35 @@ test('applyRunProfile thorough raises deep crawl and backend capture budgets', (
   assert.equal(profiled.autoScrollEnabled, true);
   assert.equal(profiled.discoveryEnabled, true);
   assert.equal(profiled.manufacturerBroadDiscovery, true);
+  assert.equal(profiled.preferHttpFetcher, false);
+});
+
+test('applyRunProfile fast prefers HTTP fetcher and increases discovery fanout concurrency', () => {
+  const profiled = applyRunProfile({
+    runProfile: 'standard',
+    maxRunSeconds: 300,
+    maxUrlsPerProduct: 20,
+    maxCandidateUrls: 50,
+    maxPagesPerDomain: 2,
+    maxManufacturerUrlsPerProduct: 20,
+    maxManufacturerPagesPerDomain: 8,
+    manufacturerReserveUrls: 10,
+    perHostMinDelayMs: 900,
+    pageGotoTimeoutMs: 30_000,
+    pageNetworkIdleTimeoutMs: 6_000,
+    discoveryMaxQueries: 8,
+    discoveryResultsPerQuery: 10,
+    discoveryMaxDiscovered: 120,
+    discoveryQueryConcurrency: 1,
+    preferHttpFetcher: false
+  }, 'fast');
+
+  assert.equal(profiled.runProfile, 'fast');
+  assert.equal(profiled.preferHttpFetcher, true);
+  assert.equal(profiled.discoveryQueryConcurrency >= 4, true);
+  assert.equal(profiled.perHostMinDelayMs <= 150, true);
+  assert.equal(profiled.pageGotoTimeoutMs <= 12_000, true);
+  assert.equal(profiled.pageNetworkIdleTimeoutMs <= 1_500, true);
 });
 
 test('loadConfig supports thorough profile override', () => {

@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd:*)",
+      "Bash(node --test:*)",
+      "Bash(node -e \"import\\(''../src/cli/spec.js''\\)\")",
+      "Bash(node -e \"import\\(''./src/cli/spec.js''\\)\")",
+      "Bash(ls:*)",
+      "Bash(xargs cat:*)",
+      "Bash(npm install:*)",
+      "Bash(node -e:*)",
+      "Bash(timeout 5 node:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run build:*)",
+      "Bash(node tools/gui-react/test-server.mjs:*)",
+      "Bash(wc:*)",
+      "Bash(find:*)",
+      "Bash(npx vite build:*)",
+      "Bash(node --version:*)",
+      "Bash(test:*)",
+      "Bash(node --check:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(npm run gui:exe:*)",
+      "Bash(taskkill:*)",
+      "Bash(node -c:*)",
+      "Bash(netstat:*)",
+      "Bash(node:*)",
+      "Bash(wmic process:*)",
+      "Bash(tasklist:*)",
+      "Bash(curl:*)",
+      "Bash(python3:*)",
+      "Bash(cmd //c \"taskkill /PID 10080 /F & taskkill /PID 55136 /F & taskkill /PID 9088 /F & taskkill /PID 28408 /F\")",
+      "Bash(python:*)",
+      "Bash(cmd //c \"taskkill /PID 56184 /F\")",
+      "Bash(unzip:*)",
+      "Bash(echo:*)",
+      "Bash(npx jest --passWithNoTests)",
+      "Bash(npx @yao-pkg/pkg:*)",
+      "Bash(cmd.exe //c \"taskkill /IM SpecFactory.exe /F\")",
+      "Bash(jq:*)"
+    ]
+  }
+}

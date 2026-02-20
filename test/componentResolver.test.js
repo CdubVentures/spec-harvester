@@ -6,13 +6,13 @@ function buildEngineStub() {
   return {
     getAllRules() {
       return {
-        sensor: { component_db_ref: 'sensors' },
+        sensor: { component_db_ref: 'sensor' },
         dpi: {},
         ips: {}
       };
     },
     fuzzyMatchComponent(dbName, query) {
-      if (dbName !== 'sensors' || String(query).toLowerCase() !== 'paw3395') {
+      if (dbName !== 'sensor' || String(query).toLowerCase() !== 'paw3395') {
         return { match: null, score: 0 };
       }
       return {
@@ -47,6 +47,6 @@ test('ComponentResolver infers related fields from matched component DB entity',
   assert.equal(byField.get('ips')?.value, '650');
   assert.equal(byField.get('dpi')?.method, 'component_db_inference');
   assert.deepEqual(byField.get('dpi')?.evidenceRefs, ['s1']);
-  assert.equal(byField.get('ips')?.keyPath, 'component_db.sensors.max_ips');
+  assert.equal(byField.get('ips')?.keyPath, 'component_db.sensor.max_ips');
 });
 

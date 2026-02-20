@@ -77,13 +77,71 @@ async function seedCategoryArtifacts(helperRoot, category) {
   });
 }
 
-async function seedLatestArtifacts(storage, category, productId) {
+async function seedLatestArtifacts(storage, category, productId, options = {}) {
   const latestBase = storage.resolveOutputKey(category, productId, 'latest');
+  const identity = options.identity ?? { brand: 'Razer', model: 'Viper V3 Pro', variant: 'Wireless' };
+  const fields = options.fields ?? { weight: 59, dpi: 'unk', connection: 'wireless' };
+  const summary = {
+    productId,
+    runId: 'run_test_001',
+    confidence: 0.88,
+    coverage_overall: 0.66,
+    validated: false,
+    fields_below_pass_target: ['dpi'],
+    critical_fields_below_pass_target: ['dpi'],
+    missing_required_fields: ['dpi'],
+    field_reasoning: {
+      dpi: {
+        unknown_reason: 'not_found_after_search',
+        reasons: ['missing_required_field']
+      }
+    },
+    generated_at: '2026-02-13T00:00:00.000Z',
+    ...(options.summary || {})
+  };
+  const candidates = options.candidates ?? {
+    weight: [
+      {
+        candidate_id: 'cand_weight_1',
+        value: '59',
+        score: 0.96,
+        host: 'razer.example',
+        source_id: 'razer_com',
+        tier: 1,
+        method: 'spec_table_match',
+        evidence: {
+          url: 'https://razer.example/specs',
+          snippet_id: 'snp_001',
+          snippet_hash: 'sha256:abc',
+          quote: 'Weight: 59 g',
+          quote_span: [0, 12],
+          snippet_text: 'Weight: 59 g (without cable)'
+        }
+      }
+    ],
+    dpi: [
+      {
+        candidate_id: 'cand_dpi_1',
+        value: '30000',
+        score: 0.54,
+        host: 'db.example',
+        source_id: 'db_example',
+        tier: 2,
+        method: 'llm_extract',
+        evidence: {
+          url: 'https://db.example/review',
+          snippet_id: 'snp_777',
+          quote: 'DPI: 30000'
+        }
+      }
+    ]
+  };
+
   await storage.writeObject(
     `${latestBase}/normalized.json`,
     Buffer.from(JSON.stringify({
-      identity: { brand: 'Razer', model: 'Viper V3 Pro', variant: 'Wireless' },
-      fields: { weight: 59, dpi: 'unk', connection: 'wireless' }
+      identity,
+      fields
     }, null, 2), 'utf8'),
     { contentType: 'application/json' }
   );
@@ -127,64 +185,12 @@ async function seedLatestArtifacts(storage, category, productId) {
   );
   await storage.writeObject(
     `${latestBase}/summary.json`,
-    Buffer.from(JSON.stringify({
-      productId,
-      runId: 'run_test_001',
-      confidence: 0.88,
-      coverage_overall: 0.66,
-      validated: false,
-      fields_below_pass_target: ['dpi'],
-      critical_fields_below_pass_target: ['dpi'],
-      missing_required_fields: ['dpi'],
-      field_reasoning: {
-        dpi: {
-          unknown_reason: 'not_found_after_search',
-          reasons: ['missing_required_field']
-        }
-      },
-      generated_at: '2026-02-13T00:00:00.000Z'
-    }, null, 2), 'utf8'),
+    Buffer.from(JSON.stringify(summary, null, 2), 'utf8'),
     { contentType: 'application/json' }
   );
   await storage.writeObject(
     `${latestBase}/candidates.json`,
-    Buffer.from(JSON.stringify({
-      weight: [
-        {
-          candidate_id: 'cand_weight_1',
-          value: '59',
-          score: 0.96,
-          host: 'razer.example',
-          source_id: 'razer_com',
-          tier: 1,
-          method: 'spec_table_match',
-          evidence: {
-            url: 'https://razer.example/specs',
-            snippet_id: 'snp_001',
-            snippet_hash: 'sha256:abc',
-            quote: 'Weight: 59 g',
-            quote_span: [0, 12],
-            snippet_text: 'Weight: 59 g (without cable)'
-          }
-        }
-      ],
-      dpi: [
-        {
-          candidate_id: 'cand_dpi_1',
-          value: '30000',
-          score: 0.54,
-          host: 'db.example',
-          source_id: 'db_example',
-          tier: 2,
-          method: 'llm_extract',
-          evidence: {
-            url: 'https://db.example/review',
-            snippet_id: 'snp_777',
-            quote: 'DPI: 30000'
-          }
-        }
-      ]
-    }, null, 2), 'utf8'),
+    Buffer.from(JSON.stringify(candidates, null, 2), 'utf8'),
     { contentType: 'application/json' }
   );
 }
@@ -359,6 +365,55 @@ test('buildReviewQueue sorts products by urgency and writeCategoryReviewArtifact
     const stored = await storage.readJson(`_review/${category}/queue.json`);
     assert.equal(stored.count, 2);
     assert.equal(Array.isArray(stored.items), true);
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('review payload and queue infer readable identity from product_id when normalized identity is missing', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-review-identity-fallback-'));
+  const storage = makeStorage(tempRoot);
+  const config = { helperFilesRoot: path.join(tempRoot, 'helper_files') };
+  const category = 'mouse';
+  const productId = 'mouse-acer-cestus-310-310';
+  try {
+    await seedCategoryArtifacts(config.helperFilesRoot, category);
+    await seedLatestArtifacts(storage, category, productId, {
+      identity: {}
+    });
+    await seedQueueState(storage, category, [productId]);
+    await storage.writeObject(
+      `final/${category}/${productId}/review/review_queue.json`,
+      Buffer.from(JSON.stringify({
+        version: 1,
+        category,
+        product_id: productId,
+        count: 2,
+        items: [{ field: 'dpi', reason_codes: ['missing_required_field'] }]
+      }, null, 2), 'utf8'),
+      { contentType: 'application/json' }
+    );
+
+    const payload = await buildProductReviewPayload({
+      storage,
+      config,
+      category,
+      productId,
+      includeCandidates: false
+    });
+    assert.equal(payload.identity.brand, 'Acer');
+    assert.equal(payload.identity.model, 'Cestus 310');
+
+    const queue = await buildReviewQueue({
+      storage,
+      config,
+      category,
+      status: 'needs_review',
+      limit: 10
+    });
+    assert.equal(queue.length, 1);
+    assert.equal(queue[0].brand, 'Acer');
+    assert.equal(queue[0].model, 'Cestus 310');
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }

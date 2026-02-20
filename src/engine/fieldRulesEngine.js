@@ -12,6 +12,14 @@ import {
   convertUnit,
   canonicalUnitToken
 } from './normalization-functions.js';
+import {
+  ruleRequiredLevel as requiredLevel,
+  ruleAvailability as availabilityLevel,
+  ruleDifficulty as difficultyLevel,
+  ruleType as parseRuleType,
+  ruleShape as parseRuleShape,
+  ruleUnit as parseRuleUnit
+} from './ruleAccessors.js';
 
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -53,20 +61,7 @@ function parseRange(rule = {}) {
   return { min, max };
 }
 
-function parseRuleType(rule = {}) {
-  const contract = isObject(rule.contract) ? rule.contract : {};
-  return normalizeToken(rule.data_type || contract.type || rule.type || 'string') || 'string';
-}
-
-function parseRuleShape(rule = {}) {
-  const contract = isObject(rule.contract) ? rule.contract : {};
-  return normalizeToken(rule.output_shape || contract.shape || rule.shape || 'scalar') || 'scalar';
-}
-
-function parseRuleUnit(rule = {}) {
-  const contract = isObject(rule.contract) ? rule.contract : {};
-  return canonicalUnitToken(contract.unit || rule.unit || '');
-}
+// parseRuleType, parseRuleShape, parseRuleUnit imported from ruleAccessors.js
 
 function parseRuleNormalizationFn(rule = {}) {
   const contract = isObject(rule.contract) ? rule.contract : {};
@@ -79,29 +74,7 @@ function parseRuleNormalizationFn(rule = {}) {
   );
 }
 
-function requiredLevel(rule = {}) {
-  return normalizeToken(
-    rule.required_level ||
-    (isObject(rule.priority) ? rule.priority.required_level : '') ||
-    'optional'
-  ) || 'optional';
-}
-
-function availabilityLevel(rule = {}) {
-  return normalizeToken(
-    rule.availability ||
-    (isObject(rule.priority) ? rule.priority.availability : '') ||
-    'sometimes'
-  ) || 'sometimes';
-}
-
-function difficultyLevel(rule = {}) {
-  return normalizeToken(
-    rule.difficulty ||
-    (isObject(rule.priority) ? rule.priority.difficulty : '') ||
-    'medium'
-  ) || 'medium';
-}
+// requiredLevel, availabilityLevel, difficultyLevel imported from ruleAccessors.js
 
 function groupKey(rule = {}) {
   return normalizeFieldKey(rule.group || rule?.ui?.group || 'general') || 'general';
@@ -319,6 +292,10 @@ export class FieldRulesEngine {
     });
   }
 
+  getPublishGate() {
+    return this.loaded?.rules?.publish_gate || null;
+  }
+
   getAllFieldKeys() {
     return Object.keys(this.rules)
       .map((field) => normalizeFieldKey(field))
@@ -434,9 +411,15 @@ export class FieldRulesEngine {
     return { matched: false };
   }
 
+  _resolveDbKey(dbName) {
+    const key = normalizeFieldKey(dbName);
+    if (!key) return null;
+    return isObject(this.componentDBs[key]) ? key : null;
+  }
+
   lookupComponent(dbName, query) {
-    const dbKey = normalizeFieldKey(dbName);
-    if (!dbKey || !isObject(this.componentDBs[dbKey])) {
+    const dbKey = this._resolveDbKey(dbName);
+    if (!dbKey) {
       return null;
     }
     const token = normalizeToken(query);
@@ -448,8 +431,8 @@ export class FieldRulesEngine {
   }
 
   fuzzyMatchComponent(dbName, query, threshold = 0.75) {
-    const dbKey = normalizeFieldKey(dbName);
-    if (!dbKey || !isObject(this.componentDBs[dbKey])) {
+    const dbKey = this._resolveDbKey(dbName);
+    if (!dbKey) {
       return { match: null, score: 0, alternatives: [] };
     }
     const entries = Object.values(this.componentDBs[dbKey].entries || {});
@@ -893,8 +876,8 @@ export class FieldRulesEngine {
         };
       }
       value = urlValue;
-    } else if (type === 'component_ref' || normalizeText(rule?.component_db_ref)) {
-      const dbName = normalizeText(rule?.component_db_ref);
+    } else if (type === 'component_ref' || normalizeText(rule?.component_db_ref || rule?.component?.type)) {
+      const dbName = normalizeText(rule?.component_db_ref || rule?.component?.type);
       if (!dbName) {
         return {
           ok: false,
@@ -908,11 +891,210 @@ export class FieldRulesEngine {
       if (exact) {
         value = exact.canonical_name;
         attempts.push('component:exact_or_alias');
+        // Record identity observation for exact/alias match
+        if (Array.isArray(context?.identityObservations)) {
+          context.identityObservations.push({
+            component_type: dbName,
+            canonical_name: exact.canonical_name,
+            raw_query: query,
+            match_type: 'exact_or_alias',
+            score: 1.0,
+            field_key: key,
+          });
+        }
       } else {
-        const fuzzy = this.fuzzyMatchComponent(dbName, query, 0.75);
-        if (fuzzy.match) {
+        // Property-aware tiered scoring for component resolution
+        const componentRule = isObject(rule?.component) ? rule.component : {};
+        const matchConfig = isObject(componentRule.match) ? componentRule.match : {};
+        const nameWeight = Number.isFinite(Number(matchConfig.name_weight)) ? Number(matchConfig.name_weight) : 0.4;
+        const propWeight = Number.isFinite(Number(matchConfig.property_weight)) ? Number(matchConfig.property_weight) : 0.6;
+        const propKeys = toArray(matchConfig.property_keys);
+        const autoAcceptScore = Number.isFinite(Number(matchConfig.auto_accept_score)) ? Number(matchConfig.auto_accept_score) : 0.95;
+        const flagReviewScore = Number.isFinite(Number(matchConfig.flag_review_score)) ? Number(matchConfig.flag_review_score) : 0.65;
+
+        const rawThreshold = Number(matchConfig.fuzzy_threshold ?? rule?.enum?.match?.fuzzy_threshold);
+        const componentThreshold = Number.isFinite(rawThreshold)
+          ? Math.max(0, Math.min(1, rawThreshold))
+          : 0.75;
+        const fuzzy = this.fuzzyMatchComponent(dbName, query, componentThreshold);
+
+        // Name similarity (already computed by fuzzyMatchComponent)
+        const nameScore = fuzzy.score || 0;
+
+        // Property similarity: compare extracted product values against component properties
+        // using field rules for normalization (type, unit conversion) and variance policies.
+        let propScore = 0;
+        if (propKeys.length > 0 && fuzzy.match && isObject(fuzzy.match.properties)) {
+          const extractedValues = isObject(context?.extractedValues) ? context.extractedValues : {};
+          const variancePolicies = isObject(fuzzy.match.__variance_policies) ? fuzzy.match.__variance_policies : {};
+          let totalWeight = 0;
+          let matchWeight = 0;
+          for (const pk of propKeys) {
+            const extracted = extractedValues[pk];
+            const known = fuzzy.match.properties[pk];
+            if (extracted === undefined || extracted === null || known === undefined || known === null) {
+              continue;
+            }
+            totalWeight += 1;
+            const pkRule = this.rules[normalizeFieldKey(pk)];
+            const pkType = pkRule ? parseRuleType(pkRule) : null;
+            const pkUnit = pkRule ? parseRuleUnit(pkRule) : '';
+            const variance = variancePolicies[pk] || 'authoritative';
+
+            // Normalize both sides through the field's type/unit rules
+            if (pkType === 'number' || pkType === 'integer') {
+              const parsedExtracted = parseNumberAndUnit(extracted);
+              const parsedKnown = parseNumberAndUnit(known);
+              if (parsedExtracted.value === null || parsedKnown.value === null) {
+                // Can't compare numerically — fall back to string
+                if (normalizeToken(extracted) === normalizeToken(known)) matchWeight += 1;
+                continue;
+              }
+              // Unit conversion: normalize both to the rule's canonical unit
+              let numExtracted = parsedExtracted.value;
+              let numKnown = parsedKnown.value;
+              const fromUnitExtracted = canonicalUnitToken(parsedExtracted.unit);
+              const fromUnitKnown = canonicalUnitToken(parsedKnown.unit);
+              if (pkUnit) {
+                if (fromUnitExtracted && fromUnitExtracted !== pkUnit) {
+                  numExtracted = convertUnit(numExtracted, fromUnitExtracted, pkUnit);
+                }
+                if (fromUnitKnown && fromUnitKnown !== pkUnit) {
+                  numKnown = convertUnit(numKnown, fromUnitKnown, pkUnit);
+                }
+              }
+              if (pkType === 'integer') {
+                numExtracted = Math.round(numExtracted);
+                numKnown = Math.round(numKnown);
+              }
+
+              // Apply variance policy for numeric comparison
+              if (variance === 'upper_bound') {
+                // Component value is upper bound — extracted value at or below is valid
+                if (numExtracted <= numKnown) { matchWeight += 1; }
+                else {
+                  // Partial credit: how far over? (diminishing score for overages)
+                  const ratio = numKnown / Math.max(numExtracted, 1);
+                  matchWeight += Math.max(0, ratio);
+                }
+              } else if (variance === 'lower_bound') {
+                // Component value is lower bound — extracted value at or above is valid
+                if (numExtracted >= numKnown) { matchWeight += 1; }
+                else {
+                  const ratio = numExtracted / Math.max(numKnown, 1);
+                  matchWeight += Math.max(0, ratio);
+                }
+              } else if (variance === 'range') {
+                // Allow 10% tolerance for range-type values
+                const tolerance = Math.abs(numKnown) * 0.1;
+                if (Math.abs(numExtracted - numKnown) <= tolerance) { matchWeight += 1; }
+                else {
+                  const diff = Math.abs(numExtracted - numKnown);
+                  matchWeight += Math.max(0, 1 - (diff / Math.max(Math.abs(numKnown), 1)));
+                }
+              } else {
+                // authoritative or override_allowed — exact numeric match
+                if (numExtracted === numKnown) { matchWeight += 1; }
+                else {
+                  // Partial credit for close values (within 5%)
+                  const diff = Math.abs(numExtracted - numKnown);
+                  const base = Math.max(Math.abs(numKnown), 1);
+                  matchWeight += diff / base <= 0.05 ? 0.9 : Math.max(0, 1 - (diff / base));
+                }
+              }
+            } else {
+              // String/enum/boolean: normalize and compare case-insensitively, trim whitespace
+              if (normalizeToken(extracted) === normalizeToken(known)) {
+                matchWeight += 1;
+              }
+            }
+          }
+          propScore = totalWeight > 0 ? matchWeight / totalWeight : 0;
+        }
+
+        const combinedScore = propKeys.length > 0
+          ? (nameScore * nameWeight) + (propScore * propWeight)
+          : nameScore;
+
+        if (fuzzy.match && combinedScore >= autoAcceptScore) {
+          // High confidence: auto-accept
           value = fuzzy.match.canonical_name;
-          attempts.push(`component:fuzzy:${Number.parseFloat(String(fuzzy.score)).toFixed(2)}`);
+          attempts.push(`component:auto_accept:${combinedScore.toFixed(2)}`);
+          // Record identity observation for auto-accepted fuzzy match
+          if (Array.isArray(context?.identityObservations)) {
+            context.identityObservations.push({
+              component_type: dbName,
+              canonical_name: fuzzy.match.canonical_name,
+              raw_query: query,
+              match_type: 'fuzzy_auto_accepted',
+              score: combinedScore,
+              field_key: key,
+            });
+          }
+        } else if (fuzzy.match && combinedScore >= flagReviewScore) {
+          // Medium confidence: use provisionally, flag for AI review
+          value = fuzzy.match.canonical_name;
+          attempts.push(`component:flagged_review:${combinedScore.toFixed(2)}`);
+          // Only queue for AI review if ai.mode is not 'off'
+          const aiConfig = isObject(componentRule.ai) ? componentRule.ai : {};
+          if (Array.isArray(context?.componentReviewQueue)) {
+            // Collect relevant product attributes for AI review context
+            const productAttrs = {};
+            const ev = isObject(context?.extractedValues) ? context.extractedValues : {};
+            const keysToCollect = propKeys.length > 0 ? propKeys : Object.keys(ev);
+            for (const pk of keysToCollect) {
+              if (ev[pk] !== undefined && ev[pk] !== null) productAttrs[pk] = ev[pk];
+            }
+            context.componentReviewQueue.push({
+              field_key: key,
+              raw_query: query,
+              matched_component: fuzzy.match.canonical_name,
+              name_score: nameScore,
+              property_score: propScore,
+              combined_score: combinedScore,
+              match_type: 'fuzzy_flagged',
+              component_type: dbName,
+              alternatives: (fuzzy.alternatives || []).slice(0, 5),
+              reasoning_note: aiConfig.reasoning_note || '',
+              product_attributes: productAttrs,
+            });
+          }
+        } else if (componentRule.allow_new_components === true) {
+          // Low confidence or no match: treat as potential new component, flag for AI
+          value = normalizeText(Array.isArray(value) ? value[0] : value);
+          attempts.push('component:new_suggestion_flagged');
+          const aiConfigNew = isObject(componentRule.ai) ? componentRule.ai : {};
+          if (Array.isArray(context?.componentReviewQueue)) {
+            const productAttrs = {};
+            const ev = isObject(context?.extractedValues) ? context.extractedValues : {};
+            const keysToCollect = propKeys.length > 0 ? propKeys : Object.keys(ev);
+            for (const pk of keysToCollect) {
+              if (ev[pk] !== undefined && ev[pk] !== null) productAttrs[pk] = ev[pk];
+            }
+            context.componentReviewQueue.push({
+              field_key: key,
+              raw_query: query,
+              matched_component: null,
+              name_score: nameScore,
+              property_score: 0,
+              combined_score: combinedScore,
+              match_type: 'new_component',
+              component_type: dbName,
+              alternatives: (fuzzy.alternatives || []).slice(0, 5),
+              reasoning_note: aiConfigNew.reasoning_note || '',
+              product_attributes: productAttrs,
+            });
+          }
+          // Also push to legacy curationQueue for backward compat
+          if (Array.isArray(context?.curationQueue)) {
+            context.curationQueue.push({
+              field_key: key,
+              raw_value: rawCandidate,
+              normalized_value: value,
+              suggestion_type: 'new_component',
+              component_type: dbName
+            });
+          }
         } else {
           return {
             ok: false,
@@ -923,7 +1105,12 @@ export class FieldRulesEngine {
         }
       }
     } else {
-      value = normalizeText(value);
+      if (Array.isArray(value)) {
+        value = value.map((item) => normalizeText(item)).filter(Boolean);
+        attempts.push('type:string_list');
+      } else {
+        value = normalizeText(value);
+      }
     }
 
     const shapeCheck = this.validateShapeAndUnits(key, value);
@@ -969,9 +1156,32 @@ export class FieldRulesEngine {
       });
     }
 
+    // Candidate-level list_rules: dedupe only (sort + limits applied in runtimeGate)
+    let finalValue = enumCheck.canonical_value;
+    if (Array.isArray(finalValue)) {
+      const listRules = rule?.contract?.list_rules;
+      if (listRules && listRules.dedupe !== false) {
+        const seen = new Set();
+        const deduped = [];
+        for (const item of finalValue) {
+          const dedupeKey = typeof item === 'number'
+            ? String(item)
+            : normalizeToken(String(item));
+          if (!seen.has(dedupeKey)) {
+            seen.add(dedupeKey);
+            deduped.push(item);
+          }
+        }
+        if (deduped.length !== finalValue.length) {
+          attempts.push('list_rules:dedupe');
+        }
+        finalValue = deduped;
+      }
+    }
+
     return {
       ok: true,
-      normalized: enumCheck.canonical_value,
+      normalized: finalValue,
       applied_rules: attempts
     };
   }

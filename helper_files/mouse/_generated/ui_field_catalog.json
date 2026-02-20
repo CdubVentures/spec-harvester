@@ -353,7 +353,7 @@
       "placeholder": "unk",
       "prefix": null,
       "required_level": "required",
-      "shape": "list",
+      "shape": "scalar",
       "short_label": null,
       "suffix": null,
       "surfaces": {
@@ -2828,6 +2828,6 @@
       "unit": ""
     }
   ],
-  "generated_at": "2026-02-13T02:18:36.677Z",
+  "generated_at": "2026-02-17T09:49:22.300Z",
   "version": 1
 }

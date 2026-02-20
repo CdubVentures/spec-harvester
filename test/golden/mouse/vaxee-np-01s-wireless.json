@@ -1,0 +1,18 @@
+{
+  "product_id": "vaxee-np-01s-wireless",
+  "category": "mouse",
+  "description": "VAXEE NP-01S Wireless — competitive ergonomic wireless gaming mouse",
+  "expected_fields": {
+    "weight": "72",
+    "sensor": "PixArt PAW3395",
+    "max_dpi": "26000",
+    "polling_rate": "1000",
+    "connectivity": "wireless",
+    "battery_life": "90",
+    "switches": "Huano Blue Shell White Dot",
+    "shape": "ergonomic",
+    "buttons": "5"
+  },
+  "required_evidence_fields": ["weight", "sensor", "max_dpi", "polling_rate"],
+  "notes": "Golden reference for regression testing. Values sourced from manufacturer specs and review sites."
+}

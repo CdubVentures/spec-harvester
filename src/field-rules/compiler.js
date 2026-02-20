@@ -8,6 +8,15 @@ import ExcelJS from 'exceljs';
 import semver from 'semver';
 import { compileCategoryWorkbook, saveWorkbookMap } from '../ingest/categoryCompile.js';
 import { buildMigrationPlan } from './migrations.js';
+import {
+  ruleType as ruleTypeAccessor,
+  ruleShape as ruleShapeAccessor,
+  ruleRequiredLevel as ruleRequiredLevelAccessor,
+  ruleAvailability as ruleAvailabilityAccessor,
+  ruleDifficulty as ruleDifficultyAccessor,
+  ruleEffort as ruleEffortAccessor,
+  ruleEvidenceRequired as ruleEvidenceRequiredAccessor
+} from '../engine/ruleAccessors.js';
 
 const REQUIRED_ARTIFACTS = [
   'field_rules.json',
@@ -686,16 +695,13 @@ export function normalizeFieldRulesForPhase1(fieldRules = {}) {
     const evidence = isObject(rule.evidence) ? rule.evidence : {};
     const ui = isObject(rule.ui) ? rule.ui : {};
     const parse = isObject(rule.parse) ? rule.parse : {};
-    const dataType = String(rule.data_type || contract.type || rule.type || 'string').trim().toLowerCase() || 'string';
-    const outputShape = String(rule.output_shape || contract.shape || rule.shape || 'scalar').trim().toLowerCase() || 'scalar';
-    const requiredLevel = String(rule.required_level || priority.required_level || 'optional').trim().toLowerCase() || 'optional';
-    const availability = String(rule.availability || priority.availability || 'sometimes').trim().toLowerCase() || 'sometimes';
-    const difficulty = String(rule.difficulty || priority.difficulty || 'medium').trim().toLowerCase() || 'medium';
-    const effortValue = Number.parseInt(String(rule.effort ?? priority.effort ?? ''), 10);
-    const normalizedEffort = Number.isFinite(effortValue) ? effortValue : 5;
-    const evidenceRequired = typeof rule.evidence_required === 'boolean'
-      ? rule.evidence_required
-      : (typeof evidence.required === 'boolean' ? evidence.required : true);
+    const dataType = ruleTypeAccessor(rule);
+    const outputShape = ruleShapeAccessor(rule);
+    const requiredLevel = ruleRequiredLevelAccessor(rule);
+    const availability = ruleAvailabilityAccessor(rule);
+    const difficulty = ruleDifficultyAccessor(rule);
+    const normalizedEffort = ruleEffortAccessor(rule);
+    const evidenceRequired = ruleEvidenceRequiredAccessor(rule);
 
     rule.field_key = String(rule.field_key || fieldKey);
     rule.display_name = String(rule.display_name || ui.label || titleCase(fieldKey));

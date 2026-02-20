@@ -1,0 +1,98 @@
+{
+  "category": "mouse",
+  "created_at": "2026-02-16T07:41:35.737Z",
+  "overrides": {
+    "connection": {
+      "candidate_id": "manual_snp_connection_mlov8pz9",
+      "candidate_index": null,
+      "field": "connection",
+      "overridden_at": "2026-02-16T07:41:42.405Z",
+      "overridden_by": null,
+      "override_provenance": {
+        "quote": "Manually set to \"1\" via GUI",
+        "quote_span": null,
+        "retrieved_at": "2026-02-16T07:41:42.400Z",
+        "snippet_hash": null,
+        "snippet_id": null,
+        "source_id": null,
+        "url": "gui://manual-entry"
+      },
+      "override_reason": null,
+      "override_source": "manual_entry",
+      "override_value": "1",
+      "set_at": "2026-02-16T07:41:42.405Z",
+      "source": {
+        "evidence_key": "gui://manual-entry",
+        "host": "manual-override.local",
+        "method": "manual_override",
+        "source_id": null,
+        "tier": 1
+      },
+      "validated": null,
+      "value": "1"
+    },
+    "lighting": {
+      "candidate_id": "manual_snp_lighting_mlowztmr",
+      "candidate_index": null,
+      "field": "lighting",
+      "overridden_at": "2026-02-16T08:30:46.467Z",
+      "overridden_by": null,
+      "override_provenance": {
+        "quote": "Manually set to \"2\" via GUI",
+        "quote_span": null,
+        "retrieved_at": "2026-02-16T08:30:46.463Z",
+        "snippet_hash": null,
+        "snippet_id": null,
+        "source_id": null,
+        "url": "gui://manual-entry"
+      },
+      "override_reason": null,
+      "override_source": "manual_entry",
+      "override_value": "2",
+      "set_at": "2026-02-16T08:30:46.467Z",
+      "source": {
+        "evidence_key": "gui://manual-entry",
+        "host": "manual-override.local",
+        "method": "manual_override",
+        "source_id": null,
+        "tier": 1
+      },
+      "validated": null,
+      "value": "2"
+    },
+    "price_range": {
+      "candidate_id": "manual_snp_price_range_mlp2xdb6",
+      "candidate_index": null,
+      "field": "price_range",
+      "overridden_at": "2026-02-16T11:16:49.698Z",
+      "overridden_by": null,
+      "override_provenance": {
+        "quote": "Manually set to \"hey\" via GUI",
+        "quote_span": null,
+        "retrieved_at": "2026-02-16T11:16:49.694Z",
+        "snippet_hash": null,
+        "snippet_id": null,
+        "source_id": null,
+        "url": "gui://manual-entry"
+      },
+      "override_reason": null,
+      "override_source": "manual_entry",
+      "override_value": "hey",
+      "set_at": "2026-02-16T11:16:49.698Z",
+      "source": {
+        "evidence_key": "gui://manual-entry",
+        "host": "manual-override.local",
+        "method": "manual_override",
+        "source_id": null,
+        "tier": 1
+      },
+      "validated": null,
+      "value": "hey"
+    }
+  },
+  "product_id": "mouse-acer-cestus-350",
+  "review_started_at": "2026-02-16T07:41:35.737Z",
+  "review_status": "in_progress",
+  "updated_at": "2026-02-16T11:16:49.698Z",
+  "version": 1
+}

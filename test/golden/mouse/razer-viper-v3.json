@@ -1,0 +1,18 @@
+{
+  "product_id": "razer-viper-v3",
+  "category": "mouse",
+  "description": "Razer Viper V3 — ultralight wired gaming mouse with 8K polling",
+  "expected_fields": {
+    "weight": "55",
+    "sensor": "Focus 4K",
+    "max_dpi": "35000",
+    "polling_rate": "8000",
+    "connectivity": "wired",
+    "battery_life": null,
+    "switches": "Razer Gen-3 Optical",
+    "shape": "ambidextrous",
+    "buttons": "5"
+  },
+  "required_evidence_fields": ["weight", "sensor", "max_dpi", "polling_rate"],
+  "notes": "Golden reference for regression testing. Values sourced from manufacturer specs and review sites."
+}

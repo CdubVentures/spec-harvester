@@ -18,6 +18,14 @@ export class EventLogger {
       ...(options.context || {})
     };
     this.writeQueue = Promise.resolve();
+
+    // SQLite-backed event storage
+    this.specDb = options.specDb || null;
+    this.category = options.category || '';
+    this.runId = options.runId || '';
+    const config = options.config || {};
+    this.eventsJsonWrite = config.eventsJsonWrite !== false; // default true
+    this.onEvent = typeof options.onEvent === 'function' ? options.onEvent : null;
   }
 
   setContext(context = {}) {
@@ -36,10 +44,35 @@ export class EventLogger {
       ...data
     };
     this.events.push(row);
+    if (this.onEvent) {
+      try {
+        this.onEvent(row);
+      } catch {
+        // ignore observer hook failures
+      }
+    }
     if (this.echoStdout) {
       process.stderr.write(`${JSON.stringify(row)}\n`);
     }
-    if (this.storage && typeof this.storage.appendText === 'function') {
+
+    // SQLite write (synchronous, best-effort)
+    if (this.specDb) {
+      try {
+        this.specDb.insertRuntimeEvent({
+          ts: new Date().toISOString(),
+          level: level,
+          event: event,
+          category: this.category || '',
+          product_id: data?.productId || data?.product_id || '',
+          run_id: this.runId || '',
+          data: JSON.stringify(data || {})
+        });
+      } catch { /* best-effort */ }
+    }
+
+    // NDJSON write (async, queued)
+    const shouldWriteNdjson = this.eventsJsonWrite || !this.specDb;
+    if (shouldWriteNdjson && this.storage && typeof this.storage.appendText === 'function') {
       const line = `${JSON.stringify(row)}\n`;
       this.writeQueue = this.writeQueue
         .then(() => this.storage.appendText(

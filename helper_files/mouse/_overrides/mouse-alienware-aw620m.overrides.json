@@ -1,0 +1,69 @@
+{
+  "category": "mouse",
+  "created_at": "2026-02-16T07:27:10.800Z",
+  "overrides": {
+    "design": {
+      "candidate_id": "manual_snp_design_mlowodge",
+      "candidate_index": null,
+      "field": "design",
+      "overridden_at": "2026-02-16T08:21:52.286Z",
+      "overridden_by": null,
+      "override_provenance": {
+        "quote": "Manually set to \"1\" via GUI",
+        "quote_span": null,
+        "retrieved_at": "2026-02-16T08:21:52.282Z",
+        "snippet_hash": null,
+        "snippet_id": null,
+        "source_id": null,
+        "url": "gui://manual-entry"
+      },
+      "override_reason": null,
+      "override_source": "manual_entry",
+      "override_value": "1",
+      "set_at": "2026-02-16T08:21:52.286Z",
+      "source": {
+        "evidence_key": "gui://manual-entry",
+        "host": "manual-override.local",
+        "method": "manual_override",
+        "source_id": null,
+        "tier": 1
+      },
+      "validated": null,
+      "value": "1"
+    },
+    "lighting": {
+      "candidate_id": "manual_snp_lighting_mlouq1g0",
+      "candidate_index": null,
+      "field": "lighting",
+      "overridden_at": "2026-02-16T07:27:10.800Z",
+      "overridden_by": null,
+      "override_provenance": {
+        "quote": "Manually set to \"1\" via GUI",
+        "quote_span": null,
+        "retrieved_at": "2026-02-16T07:27:10.798Z",
+        "snippet_hash": null,
+        "snippet_id": null,
+        "source_id": null,
+        "url": "gui://manual-entry"
+      },
+      "override_reason": null,
+      "override_source": "manual_entry",
+      "override_value": "1",
+      "set_at": "2026-02-16T07:27:10.800Z",
+      "source": {
+        "evidence_key": "gui://manual-entry",
+        "host": "manual-override.local",
+        "method": "manual_override",
+        "source_id": null,
+        "tier": 1
+      },
+      "validated": null,
+      "value": "1"
+    }
+  },
+  "product_id": "mouse-alienware-aw620m",
+  "review_started_at": "2026-02-16T07:27:10.800Z",
+  "review_status": "in_progress",
+  "updated_at": "2026-02-16T08:21:52.286Z",
+  "version": 1
+}

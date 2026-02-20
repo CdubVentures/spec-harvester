@@ -81,3 +81,40 @@ test('route key helpers detect role-only keys and snapshot masks secrets', () =>
   assert.equal(snapshot.extract.primary.api_key_present, false);
   assert.equal(Object.hasOwn(snapshot.plan.primary, 'apiKey'), false);
 });
+
+test('model override switches route provider and credentials by model family', () => {
+  const config = {
+    llmProvider: 'openai',
+    llmApiKey: 'openai-key',
+    llmBaseUrl: 'http://localhost:5001',
+    llmModelPlan: 'gpt-5.1-low',
+    llmPlanProvider: 'openai',
+    llmPlanApiKey: 'openai-key',
+    llmPlanBaseUrl: 'http://localhost:5001',
+    llmWriteProvider: 'gemini',
+    llmWriteApiKey: 'gem-key',
+    llmWriteBaseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    llmPlanFallbackProvider: 'deepseek',
+    llmPlanFallbackApiKey: 'ds-key',
+    llmPlanFallbackBaseUrl: 'https://api.deepseek.com',
+    llmPlanFallbackModel: 'deepseek-chat'
+  };
+
+  const geminiRoute = resolveLlmRoute(config, {
+    role: 'plan',
+    modelOverride: 'gemini-2.5-flash-lite'
+  });
+  assert.equal(geminiRoute.provider, 'gemini');
+  assert.equal(geminiRoute.baseUrl, 'https://generativelanguage.googleapis.com/v1beta/openai');
+  assert.equal(geminiRoute.apiKey, 'gem-key');
+  assert.equal(geminiRoute.model, 'gemini-2.5-flash-lite');
+
+  const deepseekRoute = resolveLlmRoute(config, {
+    role: 'plan',
+    modelOverride: 'deepseek-chat'
+  });
+  assert.equal(deepseekRoute.provider, 'deepseek');
+  assert.equal(deepseekRoute.baseUrl, 'https://api.deepseek.com');
+  assert.equal(deepseekRoute.apiKey, 'ds-key');
+  assert.equal(deepseekRoute.model, 'deepseek-chat');
+});

@@ -1,0 +1,8 @@
+{
+  "componentType": "encoder",
+  "name": "Green",
+  "properties": {
+    "encoder_steps": "26"
+  },
+  "updated_at": "2026-02-16T11:24:48.534Z"
+}

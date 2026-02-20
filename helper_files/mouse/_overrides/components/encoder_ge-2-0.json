@@ -1,0 +1,8 @@
+{
+  "componentType": "encoder",
+  "name": "GE 2.0",
+  "properties": {
+    "encoder_steps": "24"
+  },
+  "updated_at": "2026-02-16T11:00:22.161Z"
+}

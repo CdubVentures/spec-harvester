@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply min-h-screen antialiased;
+  }
+}
+
+@layer components {
+  .traffic-green { @apply bg-green-500; }
+  .traffic-yellow { @apply bg-yellow-400; }
+  .traffic-red { @apply bg-red-500; }
+  .traffic-gray { @apply bg-gray-400; }
+}

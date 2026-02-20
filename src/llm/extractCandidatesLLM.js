@@ -5,6 +5,7 @@ import { buildFieldBatches, resolveBatchModel } from './fieldBatching.js';
 import { LLMCache } from './llmCache.js';
 import { verifyCandidateEvidence } from './evidenceVerifier.js';
 import { callLlmWithRouting, hasAnyLlmApiKey } from './routing.js';
+import { ruleType, ruleShape, ruleRequiredLevel, ruleUnit, ruleAiMode, ruleAiReasoningNote, autoGenerateExtractionGuidance } from '../engine/ruleAccessors.js';
 
 const IDENTITY_KEYS = ['brand', 'model', 'sku', 'mpn', 'gtin', 'variant'];
 
@@ -210,12 +211,88 @@ function fieldHintSet(snippet = {}) {
   return set;
 }
 
-function buildBatchEvidence(evidencePack = {}, batchFields = []) {
-  const wanted = new Set((batchFields || []).map((field) => String(field || '').trim().toLowerCase()).filter(Boolean));
+const FIELD_TERM_HINTS = {
+  lngth: ['length', 'long', 'mm', 'cm', 'inch', 'inches'],
+  width: ['width', 'wide', 'mm', 'cm', 'inch', 'inches'],
+  height: ['height', 'tall', 'mm', 'cm', 'inch', 'inches'],
+  weight: ['weight', 'gram', 'grams', 'g'],
+  colors: ['color', 'colour', 'black', 'white', 'red', 'blue'],
+  coating: ['coating', 'coat', 'finish', 'surface'],
+  material: ['material', 'plastic', 'aluminum', 'aluminium', 'magnesium', 'shell', 'body']
+};
+
+const IDENTITY_FIELDS = new Set(['brand', 'model', 'variant', 'sku', 'mpn', 'gtin', 'base_model']);
+
+function uniqueTokens(tokens = []) {
+  return [...new Set((tokens || []).map((item) => String(item || '').trim().toLowerCase()).filter(Boolean))];
+}
+
+function fieldTokens(field = '') {
+  const key = String(field || '').trim().toLowerCase();
+  return uniqueTokens([
+    key.replace(/_/g, ' '),
+    ...(FIELD_TERM_HINTS[key] || [])
+  ]);
+}
+
+function countTokenHits(text = '', tokens = []) {
+  const source = String(text || '').toLowerCase();
+  let hits = 0;
+  for (const token of uniqueTokens(tokens)) {
+    if (token && source.includes(token)) {
+      hits += 1;
+    }
+  }
+  return hits;
+}
+
+function hasDimensionSignal(text = '') {
+  return /\b\d+(?:\.\d+)?\s?(mm|cm|in|inch|inches|g|gram|grams)\b/i.test(String(text || ''));
+}
+
+function clipText(value, maxChars = 900) {
+  const token = String(value || '');
+  const cap = Math.max(160, Number.parseInt(String(maxChars || 900), 10) || 900);
+  if (token.length <= cap) {
+    return token;
+  }
+  return `${token.slice(0, cap)}...`;
+}
+
+function buildPromptEvidencePayload(scoped = {}, config = {}) {
+  const maxCharsPerSnippet = Math.max(160, Number.parseInt(String(config.llmExtractMaxSnippetChars || 900), 10) || 900);
+  const promptRefs = (scoped.references || []).map((row) => ({
+    id: String(row?.id || '').trim(),
+    source_id: row?.source_id || row?.source || '',
+    url: row?.url || '',
+    type: row?.type || 'text',
+    snippet_hash: row?.snippet_hash || ''
+  })).filter((row) => row.id);
+  const promptSnippets = (scoped.snippets || []).map((row) => ({
+    id: String(row?.id || '').trim(),
+    source: row?.source || row?.source_id || '',
+    source_id: row?.source_id || row?.source || '',
+    type: row?.type || 'text',
+    field_hints: Array.isArray(row?.field_hints) ? row.field_hints : [],
+    text: clipText(row?.normalized_text || row?.text || '', maxCharsPerSnippet),
+    snippet_hash: row?.snippet_hash || '',
+    url: row?.url || ''
+  })).filter((row) => row.id && row.text);
+  return {
+    references: promptRefs,
+    snippets: promptSnippets
+  };
+}
+
+function buildBatchEvidence(evidencePack = {}, batchFields = [], config = {}) {
+  const wantedFields = uniqueTokens((batchFields || []).map((field) => String(field || '').trim().toLowerCase()));
+  const wanted = new Set(wantedFields);
+  const wantsOnlyIdentity = wantedFields.length > 0 && wantedFields.every((field) => IDENTITY_FIELDS.has(field));
   const { snippetById, refById } = collectSnippetAndRefMaps(evidencePack);
   const selectedSnippets = [];
   const selectedRefs = [];
   const selectedIds = new Set();
+  const scoredSnippets = [];
 
   const allSnippets = [...snippetById.entries()].map(([id, row]) => ({
     id,
@@ -223,31 +300,62 @@ function buildBatchEvidence(evidencePack = {}, batchFields = []) {
   }));
 
   for (const snippet of allSnippets) {
+    const snippetType = String(snippet?.type || '').toLowerCase();
+    const normalizedText = String(snippet?.normalized_text || snippet?.text || '');
+    const text = normalizedText.toLowerCase();
     const hints = fieldHintSet(snippet);
-    const text = String(snippet?.normalized_text || snippet?.text || '').toLowerCase();
-    let relevant = false;
-    if (hints.size > 0) {
-      relevant = [...wanted].some((field) => hints.has(field));
-    } else {
-      relevant = [...wanted].some((field) => text.includes(field.replace(/_/g, ' ')));
-    }
+    const hintHits = wantedFields.filter((field) => hints.has(field)).length;
+    const lexicalHits = wantedFields.reduce((acc, field) => acc + countTokenHits(text, fieldTokens(field)), 0);
+    const dimensionSignal = hasDimensionSignal(text);
+    const relevant = hintHits > 0 || lexicalHits > 0;
     if (!relevant) {
       continue;
     }
-    selectedSnippets.push(snippet);
-    selectedIds.add(snippet.id);
+    if (!wantsOnlyIdentity && snippetType.includes('json_ld') && lexicalHits === 0) {
+      // JSON-LD is useful for identity/commerce; for strict spec extraction it often adds noisy dimensions.
+      continue;
+    }
+    if (config.llmExtractSkipLowSignal !== false && lexicalHits === 0 && hintHits === 0) {
+      continue;
+    }
+    const score =
+      (hintHits * 5) +
+      (lexicalHits * 3) +
+      (dimensionSignal ? 2 : 0) +
+      (snippetType === 'text' || snippetType === 'window' ? 1 : 0);
+    scoredSnippets.push({
+      ...snippet,
+      _score: score,
+      _length: normalizedText.length
+    });
   }
 
-  if (selectedSnippets.length === 0) {
-    for (const snippet of allSnippets.slice(0, 12)) {
+  const maxSnippets = Math.max(1, Number.parseInt(String(config.llmExtractMaxSnippetsPerBatch || 6), 10) || 6);
+  scoredSnippets
+    .sort((a, b) => (b._score - a._score) || (a._length - b._length))
+    .slice(0, maxSnippets)
+    .forEach((snippet) => {
       selectedSnippets.push(snippet);
       selectedIds.add(snippet.id);
-    }
+    });
+
+  if (selectedSnippets.length === 0) {
+    return {
+      references: [],
+      snippets: []
+    };
   }
 
   for (const id of selectedIds) {
     if (refById.has(id)) {
-      selectedRefs.push(refById.get(id));
+      const row = refById.get(id);
+      selectedRefs.push({
+        id: String(row?.id || id).trim(),
+        source_id: row?.source_id || row?.source || '',
+        url: row?.url || '',
+        type: row?.type || 'text',
+        snippet_hash: row?.snippet_hash || ''
+      });
       continue;
     }
     const snippet = snippetById.get(id);
@@ -258,32 +366,14 @@ function buildBatchEvidence(evidencePack = {}, batchFields = []) {
       id,
       url: snippet?.url || evidencePack?.meta?.url || '',
       type: snippet?.type || 'text',
-      content: snippet?.normalized_text || snippet?.text || '',
+      source_id: snippet?.source_id || snippet?.source || '',
       snippet_hash: snippet?.snippet_hash || ''
     });
   }
 
-  if (selectedRefs.length === 0 && Array.isArray(evidencePack?.references)) {
-    selectedRefs.push(...evidencePack.references);
-  }
-  if (selectedSnippets.length === 0 && selectedRefs.length > 0) {
-    for (const row of selectedRefs) {
-      const id = String(row?.id || '').trim();
-      if (!id) {
-        continue;
-      }
-      selectedSnippets.push({
-        id,
-        type: row?.type || 'text',
-        normalized_text: row?.content || '',
-        snippet_hash: row?.snippet_hash || ''
-      });
-    }
-  }
-
   return {
     references: selectedRefs,
-    snippets: selectedSnippets
+    snippets: selectedSnippets.map(({ _score, _length, ...row }) => row)
   };
 }
 
@@ -396,7 +486,7 @@ function toArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function buildPromptFieldContracts(categoryConfig = {}, fields = []) {
+export function buildPromptFieldContracts(categoryConfig = {}, fields = [], componentDBs = {}, knownValuesMap = {}) {
   const ruleMap = categoryConfig?.fieldRules?.fields || {};
   const contracts = {};
   const enumOptions = {};
@@ -407,15 +497,26 @@ function buildPromptFieldContracts(categoryConfig = {}, fields = []) {
     if (!rule || typeof rule !== 'object') {
       continue;
     }
+    const guidance = autoGenerateExtractionGuidance(rule, field);
+    const compactGuidance = guidance
+      ? String(guidance)
+        .split('.')
+        .slice(0, 2)
+        .map((chunk) => chunk.trim())
+        .filter(Boolean)
+        .join('. ')
+      : '';
     contracts[field] = {
       description: rule.description || rule.tooltip_md || '',
-      data_type: rule.data_type || rule?.contract?.type || 'string',
-      output_shape: rule.output_shape || rule?.contract?.shape || 'scalar',
-      required_level: rule.required_level || rule?.priority?.required_level || 'optional',
-      unit: rule?.contract?.unit || rule.unit || '',
-      unknown_reason: rule?.unknown_reason || null
+      data_type: ruleType(rule),
+      output_shape: ruleShape(rule),
+      required_level: ruleRequiredLevel(rule),
+      unit: ruleUnit(rule),
+      unknown_reason: rule?.unknown_reason || null,
+      ...(compactGuidance ? { extraction_guidance: compactGuidance } : {})
     };
 
+    // Merge inline enum values with known_values for this field
     const enumValues = [
       ...toArray(rule?.enum),
       ...toArray(rule?.contract?.enum),
@@ -428,13 +529,26 @@ function buildPromptFieldContracts(categoryConfig = {}, fields = []) {
         return String(entry || '').trim();
       })
       .filter(Boolean);
+    // Include known_values for this field (from known_values.json)
+    const kvValues = toArray(knownValuesMap[field]);
+    for (const v of kvValues) {
+      const s = String(v || '').trim();
+      if (s) enumValues.push(s);
+    }
     if (enumValues.length > 0) {
       enumOptions[field] = [...new Set(enumValues)];
     }
 
-    const componentDbRef = String(rule?.component_db_ref || '').trim();
+    const componentDbRef = String(rule?.component_db_ref || rule?.component?.type || '').trim();
     if (componentDbRef) {
-      componentRefs[field] = componentDbRef;
+      // Include entity names from the component DB so the LLM can constrain guesses
+      const dbKey = componentDbRef.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+      const db = componentDBs[dbKey];
+      const entityNames = db?.entries ? Object.values(db.entries).map(e => e.canonical_name).filter(Boolean).sort() : [];
+      componentRefs[field] = {
+        type: componentDbRef,
+        known_entities: entityNames.slice(0, 200) // Cap to avoid prompt bloat
+      };
     }
   }
 
@@ -453,7 +567,10 @@ export async function extractCandidatesLLM({
   targetFields = null,
   config,
   logger,
-  llmContext = {}
+  llmContext = {},
+  componentDBs = {},
+  knownValues = {},
+  specDb = null
 }) {
   if (!config.llmEnabled || !hasAnyLlmApiKey(config)) {
     return {
@@ -468,6 +585,13 @@ export async function extractCandidatesLLM({
     ? targetFields
     : (categoryConfig.fieldOrder || []);
   const fieldRules = categoryConfig?.fieldRules?.fields || {};
+
+  // Flatten knownValues { enums: { field: { values: [...] } } } into { field: [...] }
+  const kvEnums = (knownValues && typeof knownValues === 'object' && knownValues.enums) ? knownValues.enums : {};
+  const knownValuesFlat = {};
+  for (const [k, v] of Object.entries(kvEnums)) {
+    if (v && Array.isArray(v.values)) knownValuesFlat[k] = v.values;
+  }
   const maxBatchCount = Math.max(1, Number.parseInt(String(config.llmMaxBatchesPerProduct || 7), 10) || 7);
   const batches = buildFieldBatches({
     targetFields: effectiveFieldOrder,
@@ -504,8 +628,10 @@ export async function extractCandidatesLLM({
   const cacheEnabled = Boolean(config.llmExtractionCacheEnabled);
   const cache = cacheEnabled
     ? new LLMCache({
+      specDb,
       cacheDir: config.llmExtractionCacheDir || '.specfactory_tmp/llm_cache',
-      defaultTtlMs: Number(config.llmExtractionCacheTtlMs || 7 * 24 * 60 * 60 * 1000)
+      defaultTtlMs: Number(config.llmExtractionCacheTtlMs || 7 * 24 * 60 * 60 * 1000),
+      cacheJsonWrite: Boolean(config.cacheJsonWrite)
     })
     : null;
   let cacheHits = 0;
@@ -515,12 +641,27 @@ export async function extractCandidatesLLM({
       routeRole = 'extract',
       reasoningMode,
       reason,
+      maxTokens = 0,
       usageTracker,
       userPayload,
       fieldSet,
       validRefs,
       scopedEvidencePack
     }) => {
+    const defaultExtractMaxTokens = Math.max(
+      256,
+      Number.parseInt(
+        String(config.llmExtractMaxTokens || config.llmMaxTokens || 1200),
+        10
+      ) || 1200
+    );
+    const defaultReasoningBudget = Math.max(
+      256,
+      Number.parseInt(
+        String(config.llmExtractReasoningBudget || config.llmReasoningBudget || 4096),
+        10
+      ) || 4096
+    );
     const result = await callLlmWithRouting({
       config,
       reason,
@@ -533,6 +674,7 @@ export async function extractCandidatesLLM({
         '- Only use provided evidence.',
         '- Every proposed field candidate must include evidenceRefs matching provided reference ids.',
         '- If uncertain, omit the candidate.',
+        '- Always return object keys: identityCandidates, fieldCandidates, conflicts, notes.',
         '- No prose; JSON only.'
       ].join('\n'),
       user: JSON.stringify(userPayload),
@@ -545,7 +687,12 @@ export async function extractCandidatesLLM({
         reason,
         host: scopedEvidencePack?.meta?.host || evidencePack?.meta?.host || '',
         url_count: Math.max(0, Number(scopedEvidencePack?.references?.length || 0)),
-        evidence_chars: Math.max(0, Number(scopedEvidencePack?.meta?.total_chars || evidencePack?.meta?.total_chars || 0))
+        evidence_chars: Math.max(0, Number(scopedEvidencePack?.meta?.total_chars || evidencePack?.meta?.total_chars || 0)),
+        traceWriter: llmContext.traceWriter || null,
+        trace_context: {
+          purpose: 'extract_candidates',
+          target_fields: [...fieldSet]
+        }
       },
       costRates: llmContext.costRates || config,
       onUsage: async (usageRow) => {
@@ -560,7 +707,8 @@ export async function extractCandidatesLLM({
         }
       },
       reasoningMode: Boolean(reasoningMode),
-      reasoningBudget: Number(config.llmReasoningBudget || 0),
+      reasoningBudget: Number(defaultReasoningBudget),
+      maxTokens: Number(maxTokens || defaultExtractMaxTokens),
       timeoutMs: config.llmTimeoutMs || config.openaiTimeoutMs,
       logger
     });
@@ -603,14 +751,26 @@ export async function extractCandidatesLLM({
         continue;
       }
 
-      const scoped = buildBatchEvidence(evidencePack, batchFields);
+      const scoped = buildBatchEvidence(evidencePack, batchFields, config);
       const validRefs = new Set((scoped.references || []).map((item) => String(item.id || '').trim()).filter(Boolean));
       const fieldSet = new Set(batchFields);
       const modelRoute = resolveBatchModel({
         batch,
-        config
+        config,
+        forcedHighFields: llmContext?.forcedHighFields || [],
+        fieldRules
       });
       const model = modelRoute.model || config.llmModelExtract;
+      if (!Array.isArray(scoped.snippets) || scoped.snippets.length === 0) {
+        logger?.info?.('llm_extract_batch_skipped_no_signal', {
+          productId: job.productId,
+          batch: batch.id,
+          field_count: batchFields.length
+        });
+        aggregateNotes.push(`Batch ${batch.id} skipped: no relevant evidence snippets.`);
+        continue;
+      }
+      const promptEvidence = buildPromptEvidencePayload(scoped, config);
       const userPayload = {
         product: {
           productId: job.productId,
@@ -619,14 +779,27 @@ export async function extractCandidatesLLM({
           variant: job.identityLock?.variant || '',
           category: job.category || 'mouse'
         },
-        schemaFields: categoryConfig.fieldOrder || [],
         targetFields: batchFields,
-        ...buildPromptFieldContracts(categoryConfig, batchFields),
+        ...buildPromptFieldContracts(categoryConfig, batchFields, componentDBs, knownValuesFlat),
         anchors: job.anchors || {},
         golden_examples: (goldenExamples || []).slice(0, 5),
-        references: scoped.references || [],
-        snippets: scoped.snippets || []
+        references: promptEvidence.references,
+        snippets: promptEvidence.snippets
       };
+      logger?.info?.('llm_extract_batch_prompt_profile', {
+        productId: job.productId,
+        batch: batch.id,
+        model,
+        route_reason: modelRoute.reason,
+        target_field_count: batchFields.length,
+        reference_count: promptEvidence.references.length,
+        snippet_count: promptEvidence.snippets.length,
+        snippet_chars_total: promptEvidence.snippets.reduce(
+          (sum, row) => sum + String(row?.text || '').length,
+          0
+        ),
+        payload_chars: JSON.stringify(userPayload).length
+      });
 
       const cacheKey = cache?.getCacheKey({
         model,
@@ -662,6 +835,7 @@ export async function extractCandidatesLLM({
           routeRole: modelRoute.routeRole || 'extract',
           reasoningMode: Boolean(modelRoute.reasoningMode),
           reason: modelRoute.reason,
+          maxTokens: modelRoute.maxTokens || 0,
           usageTracker: null,
           userPayload,
           fieldSet,
@@ -675,6 +849,12 @@ export async function extractCandidatesLLM({
         if (cache && cacheKey) {
           await cache.set(cacheKey, sanitized);
         }
+      }
+
+      // Stamp model attribution on each candidate
+      for (const cand of sanitized.fieldCandidates || []) {
+        cand.llm_extract_model = model || config.llmModelExtract || '';
+        cand.llm_extract_provider = config.llmProvider || '';
       }
 
       aggregateIdentity = {
@@ -704,7 +884,30 @@ export async function extractCandidatesLLM({
       const verifyBatchLimit = aggressiveVerifyMode
         ? Math.max(1, Number.parseInt(String(config.llmVerifyAggressiveBatchCount || 3), 10) || 3)
         : 1;
-      const verifyBatches = usableBatches.slice(0, verifyBatchLimit);
+      // Mode-aware verification: prioritize batches with judge fields, skip all-advisory batches
+      const verifyBatches = usableBatches
+        .filter((batch) => {
+          const fields = batch.fields || [];
+          const allAdvisory = fields.length > 0 && fields.every((f) => {
+            const rule = fieldRules[f];
+            return rule && typeof rule === 'object' && ruleAiMode(rule) === 'advisory';
+          });
+          return !allAdvisory;
+        })
+        .sort((a, b) => {
+          // Prioritize batches containing judge fields
+          const aHasJudge = (a.fields || []).some((f) => {
+            const rule = fieldRules[f];
+            return rule && typeof rule === 'object' && ruleAiMode(rule) === 'judge';
+          });
+          const bHasJudge = (b.fields || []).some((f) => {
+            const rule = fieldRules[f];
+            return rule && typeof rule === 'object' && ruleAiMode(rule) === 'judge';
+          });
+          if (aHasJudge !== bHasJudge) return aHasJudge ? -1 : 1;
+          return 0;
+        })
+        .slice(0, verifyBatchLimit);
       const usageFast = { prompt_tokens: 0, completion_tokens: 0, cost_usd: 0 };
       const usageReason = { prompt_tokens: 0, completion_tokens: 0, cost_usd: 0 };
       const fastModel = String(config.llmModelFast || config.llmModelPlan || '').trim();
@@ -728,9 +931,10 @@ export async function extractCandidatesLLM({
           if (!verifyFields.length) {
             continue;
           }
-          const verifyScoped = buildBatchEvidence(evidencePack, verifyFields);
+          const verifyScoped = buildBatchEvidence(evidencePack, verifyFields, config);
           const verifyRefs = new Set((verifyScoped.references || []).map((item) => String(item.id || '').trim()).filter(Boolean));
           const verifyFieldSet = new Set(verifyFields);
+          const verifyPromptEvidence = buildPromptEvidencePayload(verifyScoped, config);
           const verifyPayload = {
             product: {
               productId: job.productId,
@@ -739,13 +943,12 @@ export async function extractCandidatesLLM({
               variant: job.identityLock?.variant || '',
               category: job.category || 'mouse'
             },
-            schemaFields: categoryConfig.fieldOrder || [],
             targetFields: verifyFields,
             ...buildPromptFieldContracts(categoryConfig, verifyFields),
             anchors: job.anchors || {},
             golden_examples: (goldenExamples || []).slice(0, 5),
-            references: verifyScoped.references || [],
-            snippets: verifyScoped.snippets || []
+            references: verifyPromptEvidence.references,
+            snippets: verifyPromptEvidence.snippets
           };
 
           let fastResult = null;

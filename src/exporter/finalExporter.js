@@ -90,6 +90,7 @@ function compactSummary(summary = {}) {
     critical_fields_below_pass_target: summary.critical_fields_below_pass_target || [],
     contradiction_count: toInt(summary.constraint_analysis?.contradiction_count, 0),
     identity_gate_validated: Boolean(summary.identity_gate_validated),
+    needset: summary.needset || null,
     publishable: resolvePublishable(summary, true),
     publish_blockers: Array.isArray(summary.publish_blockers) ? summary.publish_blockers : [],
     identity_report: summary.identity_report || null,

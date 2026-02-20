@@ -1,4 +1,10 @@
 import { INSTRUMENTED_FIELDS } from '../constants.js';
+import {
+  ruleDifficulty as ruleDifficultyAccessor,
+  ruleAiMode,
+  ruleAiModelStrategy,
+  ruleAiMaxTokens
+} from '../engine/ruleAccessors.js';
 
 function normalizeField(value) {
   return String(value || '')
@@ -58,7 +64,12 @@ function getRuleDifficulty(field, fieldRules = {}) {
   if (!fromMap || typeof fromMap !== 'object') {
     return INSTRUMENTED_FIELDS.has(key) ? 'instrumented' : 'medium';
   }
-  return normalizeDifficulty(fromMap.difficulty);
+  // AI mode overrides: judge/force_deep → hard, force_fast → easy
+  const aiMode = ruleAiMode(fromMap);
+  const aiStrategy = ruleAiModelStrategy(fromMap);
+  if (aiMode === 'judge' || aiStrategy === 'force_deep') return 'hard';
+  if (aiStrategy === 'force_fast') return 'easy';
+  return normalizeDifficulty(ruleDifficultyAccessor(fromMap));
 }
 
 function compareBatches(a, b) {
@@ -81,6 +92,7 @@ export function buildFieldBatches({
   const limit = Math.max(1, Number.parseInt(String(maxBatches || 7), 10) || 7);
   const seen = new Set();
   const grouped = new Map();
+  const skippedOffFields = [];
 
   for (const rawField of targetFields || []) {
     const field = normalizeField(rawField);
@@ -88,6 +100,12 @@ export function buildFieldBatches({
       continue;
     }
     seen.add(field);
+    // Filter out mode=off fields from LLM batches
+    const fromMap = fieldRules?.[field];
+    if (fromMap && typeof fromMap === 'object' && ruleAiMode(fromMap) === 'off') {
+      skippedOffFields.push(field);
+      continue;
+    }
     const group = fieldGroup(field);
     if (!grouped.has(group)) {
       grouped.set(group, {
@@ -131,18 +149,54 @@ export function buildFieldBatches({
     batches = [...keep, merged].sort(compareBatches);
   }
 
+  batches.skippedOffFields = skippedOffFields;
   return batches;
 }
 
 export function resolveBatchModel({
   batch,
-  config = {}
+  config = {},
+  forcedHighFields = [],
+  fieldRules = {}
 }) {
   const fastModel = String(config.llmModelFast || config.llmModelPlan || config.llmModelExtract || '').trim();
   const reasoningModel = String(config.llmModelReasoning || config.llmModelExtract || fastModel).trim();
   const difficulty = batch?.difficulty || {};
   const fields = Array.isArray(batch?.fields) ? batch.fields.map((field) => normalizeField(field)) : [];
+  const forcedSet = new Set((forcedHighFields || []).map((field) => normalizeField(field)).filter(Boolean));
+  const runtimeForced = fields.some((field) => forcedSet.has(field));
+
+  // Per-field AI model strategy checks
+  const perFieldStrategies = fields.map((field) => {
+    const rule = fieldRules?.[field];
+    return rule && typeof rule === 'object' ? ruleAiModelStrategy(rule) : 'auto';
+  });
+  const anyForceDeep = perFieldStrategies.some((s) => s === 'force_deep');
+  const allForceFast = perFieldStrategies.length > 0 && perFieldStrategies.every((s) => s === 'force_fast');
+
+  // Compute per-field max_tokens: use MAX across all fields in batch
+  const batchMaxTokens = fields.reduce((max, field) => {
+    const rule = fieldRules?.[field];
+    if (rule && typeof rule === 'object') {
+      return Math.max(max, ruleAiMaxTokens(rule));
+    }
+    return max;
+  }, 0);
+
+  // If all fields are force_fast, skip reasoning regardless of difficulty
+  if (allForceFast) {
+    return {
+      model: fastModel || reasoningModel,
+      reasoningMode: false,
+      routeRole: 'plan',
+      reason: 'extract_force_fast_all',
+      maxTokens: batchMaxTokens || 0
+    };
+  }
+
   const requiresReasoning =
+    runtimeForced ||
+    anyForceDeep ||
     Number(difficulty.instrumented || 0) > 0 ||
     Number(difficulty.hard || 0) > 0 ||
     fields.some((field) => INSTRUMENTED_FIELDS.has(field)) ||
@@ -154,7 +208,8 @@ export function resolveBatchModel({
       model: reasoningModel || fastModel,
       reasoningMode: true,
       routeRole: 'extract',
-      reason: 'extract_reasoning_batch'
+      reason: anyForceDeep ? 'extract_force_deep_field' : (runtimeForced ? 'extract_forced_high_batch' : 'extract_reasoning_batch'),
+      maxTokens: batchMaxTokens || 0
     };
   }
 
@@ -162,7 +217,7 @@ export function resolveBatchModel({
     model: fastModel || reasoningModel,
     reasoningMode: false,
     routeRole: 'plan',
-    reason: 'extract_fast_batch'
+    reason: 'extract_fast_batch',
+    maxTokens: batchMaxTokens || 0
   };
 }
-

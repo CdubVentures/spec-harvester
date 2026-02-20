@@ -1,0 +1,18 @@
+{
+  "product_id": "logitech-g-pro-x-superlight-2",
+  "category": "mouse",
+  "description": "Logitech G PRO X SUPERLIGHT 2 — lightweight wireless eSports mouse",
+  "expected_fields": {
+    "weight": "60",
+    "sensor": "HERO 2",
+    "max_dpi": "44000",
+    "polling_rate": "2000",
+    "connectivity": "wireless",
+    "battery_life": "95",
+    "switches": "Lightforce",
+    "shape": "ambidextrous",
+    "buttons": "5"
+  },
+  "required_evidence_fields": ["weight", "sensor", "max_dpi", "polling_rate"],
+  "notes": "Golden reference for Logitech flagship. Values sourced from rtings.com and logitechg.com."
+}

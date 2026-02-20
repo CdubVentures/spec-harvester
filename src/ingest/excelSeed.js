@@ -7,6 +7,12 @@ import { XMLParser } from 'fast-xml-parser';
 import { toPosixKey } from '../s3/storage.js';
 import { nowIso } from '../utils/common.js';
 import { upsertQueueProduct } from '../queue/queueState.js';
+import { slugify as canonicalSlugify, buildProductId as canonicalBuildProductId } from '../catalog/slugify.js';
+import {
+  evaluateIdentityGate,
+  loadCanonicalIdentityIndex,
+  registerCanonicalIdentity
+} from '../catalog/identityGate.js';
 
 function toArray(value) {
   return Array.isArray(value) ? value : [];
@@ -39,10 +45,7 @@ function isIdentityLikeField(field) {
 }
 
 function slug(value) {
-  return String(value || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+  return canonicalSlugify(value);
 }
 
 function parseRowRange(value) {
@@ -444,9 +447,7 @@ function extractExcelPayloadWithNode({
 }
 
 function buildProductId({ category, brand, model, variant }) {
-  return [slug(category), slug(brand), slug(model), slug(variant)]
-    .filter(Boolean)
-    .join('-');
+  return canonicalBuildProductId(category, brand, model, variant);
 }
 
 function helperCategoryDir({ category, config = {} }) {
@@ -846,19 +847,35 @@ export async function syncJobsFromExcelSeed({
   }
 
   const selected = limit > 0 ? extracted.products.slice(0, limit) : extracted.products;
+  const canonicalIndex = await loadCanonicalIdentityIndex({ config, category });
   let created = 0;
   let skippedExisting = 0;
+  let skippedIdentityGate = 0;
 
   for (const product of selected) {
-    const productId = buildProductId({
+    const gate = evaluateIdentityGate({
       category,
       brand: product.brand,
       model: product.model,
-      variant: product.variant
+      variant: product.variant,
+      canonicalIndex
     });
-    if (!productId) {
+    if (!gate.valid) {
+      skippedIdentityGate += 1;
       continue;
     }
+
+    const identity = gate.normalized;
+    const productId = identity.productId;
+    if (!productId) continue;
+    registerCanonicalIdentity({
+      canonicalIndex,
+      brand: identity.brand,
+      model: identity.model,
+      variant: identity.variant,
+      productId
+    });
+
     const s3key = toPosixKey(config.s3InputPrefix, category, 'products', `${productId}.json`);
     const exists = await storage.objectExists(s3key);
     if (exists) {
@@ -869,9 +886,9 @@ export async function syncJobsFromExcelSeed({
       productId,
       category,
       identityLock: {
-        brand: product.brand,
-        model: product.model,
-        variant: product.variant
+        brand: identity.brand,
+        model: identity.model,
+        variant: identity.variant
       },
       seedUrls: [],
       anchors: {},
@@ -914,6 +931,7 @@ export async function syncJobsFromExcelSeed({
     products_seen: extracted.products.length,
     created,
     skipped_existing: skippedExisting,
+    skipped_identity_gate: skippedIdentityGate,
     field_count: extracted.field_rows.length
   };
 }

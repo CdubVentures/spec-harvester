@@ -7,7 +7,9 @@
     "variant": "",
     "sku": "CH-931G000-WW",
     "mpn": "",
-    "gtin": ""
+    "gtin": "",
+    "id": 50,
+    "identifier": "bcf659ca"
   },
   "seedUrls": [],
   "anchors": {}

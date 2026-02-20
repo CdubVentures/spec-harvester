@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { ruleType, ruleShape } from '../engine/ruleAccessors.js';
 
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -73,8 +74,8 @@ function baseZodForField({
   knownValues
 }) {
   const contract = isObject(rule.contract) ? rule.contract : {};
-  const dataType = normalizeText(rule.data_type || contract.type || rule.type || 'string').toLowerCase();
-  const shape = normalizeText(rule.output_shape || contract.shape || rule.shape || 'scalar').toLowerCase();
+  const dataType = ruleType(rule);
+  const shape = ruleShape(rule);
 
   let base = 'z.string()';
   if (dataType === 'number' || dataType === 'float' || dataType === 'decimal') {

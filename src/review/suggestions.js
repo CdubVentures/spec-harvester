@@ -34,13 +34,14 @@ function normalizeType(value) {
 }
 
 function fileNameForType(type) {
+  // Consolidated: use the same files as the runtime curation system
   if (type === 'enum') {
-    return 'new_enum_values.json';
+    return 'enums.json';
   }
   if (type === 'component') {
-    return 'new_components.json';
+    return 'components.json';
   }
-  return 'new_aliases.json';
+  return 'aliases.json';
 }
 
 function dedupeKeyForType(type, item = {}) {

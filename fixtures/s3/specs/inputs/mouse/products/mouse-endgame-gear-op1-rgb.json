@@ -7,7 +7,9 @@
     "variant": "",
     "sku": "",
     "mpn": "",
-    "gtin": ""
+    "gtin": "",
+    "id": 200,
+    "identifier": "f1156ded"
   },
   "seedUrls": [],
   "anchors": {}

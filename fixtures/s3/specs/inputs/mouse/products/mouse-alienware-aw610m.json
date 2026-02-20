@@ -7,7 +7,9 @@
     "variant": "",
     "sku": "570-ABCQ",
     "mpn": "",
-    "gtin": ""
+    "gtin": "",
+    "id": 1,
+    "identifier": "121cc826"
   },
   "seedUrls": [],
   "anchors": {}

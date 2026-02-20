@@ -4,6 +4,7 @@ import {
   buildContractEffortPlan,
   buildRoundConfig,
   buildRoundRequirements,
+  explainSearchProviderSelection,
   evaluateRequiredSearchExhaustion,
   resolveMissingRequiredForPlanning,
   selectRoundSearchProvider,
@@ -181,18 +182,56 @@ test('evaluateRequiredSearchExhaustion continues before threshold or without mis
   assert.equal(noMissing.stop, false);
 });
 
-test('selectRoundSearchProvider promotes dual when required fields are missing and multiple providers are ready', () => {
+test('selectRoundSearchProvider promotes dual when required fields are missing and rescue threshold is reached', () => {
   const provider = selectRoundSearchProvider({
     baseConfig: {
       searchProvider: 'none',
       bingSearchEndpoint: 'https://api.bing.microsoft.com/v7.0/search',
       bingSearchKey: 'bing-key',
-      searxngBaseUrl: 'http://127.0.0.1:8080'
+      googleCseKey: 'google-key',
+      googleCseCx: 'google-cx',
+      searxngBaseUrl: 'http://127.0.0.1:8080',
+      cseRescueOnlyMode: true,
+      cseRescueRequiredIteration: 2
     },
     discoveryEnabled: true,
-    missingRequiredCount: 2
+    missingRequiredCount: 2,
+    requiredSearchIteration: 2
   });
   assert.equal(provider, 'dual');
+});
+
+test('selectRoundSearchProvider stays on free provider before rescue threshold', () => {
+  const provider = selectRoundSearchProvider({
+    baseConfig: {
+      searchProvider: 'none',
+      googleCseKey: 'google-key',
+      googleCseCx: 'google-cx',
+      searxngBaseUrl: 'http://127.0.0.1:8080',
+      cseRescueOnlyMode: true,
+      cseRescueRequiredIteration: 3
+    },
+    discoveryEnabled: true,
+    missingRequiredCount: 2,
+    requiredSearchIteration: 1
+  });
+  assert.equal(provider, 'searxng');
+});
+
+test('selectRoundSearchProvider can force paid provider when rescue-only mode is disabled', () => {
+  const provider = selectRoundSearchProvider({
+    baseConfig: {
+      searchProvider: 'none',
+      googleCseKey: 'google-key',
+      googleCseCx: 'google-cx',
+      searxngBaseUrl: 'http://127.0.0.1:8080',
+      cseRescueOnlyMode: false
+    },
+    discoveryEnabled: true,
+    missingRequiredCount: 2,
+    requiredSearchIteration: 0
+  });
+  assert.equal(provider, 'google');
 });
 
 test('selectRoundSearchProvider falls back to searxng when configured providers are unavailable', () => {
@@ -231,6 +270,48 @@ test('selectRoundSearchProvider returns none when discovery is disabled', () => 
     missingRequiredCount: 3
   });
   assert.equal(provider, 'none');
+});
+
+test('explainSearchProviderSelection marks paid rescue when threshold is reached', () => {
+  const selection = explainSearchProviderSelection({
+    baseConfig: {
+      searchProvider: 'none',
+      googleCseKey: 'google-key',
+      googleCseCx: 'google-cx',
+      searxngBaseUrl: 'http://127.0.0.1:8080',
+      cseRescueOnlyMode: true,
+      cseRescueRequiredIteration: 2
+    },
+    discoveryEnabled: true,
+    missingRequiredCount: 2,
+    requiredSearchIteration: 2
+  });
+
+  assert.equal(selection.provider, 'google');
+  assert.equal(selection.reason_code, 'auto_paid_rescue_google');
+  assert.equal(selection.use_paid_rescue, true);
+  assert.equal(selection.paid_provider_ready, true);
+  assert.equal(selection.free_provider_ready, true);
+});
+
+test('explainSearchProviderSelection reports free-provider mode before rescue threshold', () => {
+  const selection = explainSearchProviderSelection({
+    baseConfig: {
+      searchProvider: 'none',
+      googleCseKey: 'google-key',
+      googleCseCx: 'google-cx',
+      searxngBaseUrl: 'http://127.0.0.1:8080',
+      cseRescueOnlyMode: true,
+      cseRescueRequiredIteration: 3
+    },
+    discoveryEnabled: true,
+    missingRequiredCount: 2,
+    requiredSearchIteration: 1
+  });
+
+  assert.equal(selection.provider, 'searxng');
+  assert.equal(selection.reason_code, 'auto_free_searxng_for_missing_required');
+  assert.equal(selection.use_paid_rescue, false);
 });
 
 test('buildRoundConfig keeps discovery disabled when required fields are already complete', () => {
@@ -526,6 +607,49 @@ test('buildRoundConfig allows aggressive thorough profile from configured round'
   );
 
   assert.equal(roundConfig.runProfile, 'thorough');
+});
+
+test('buildRoundConfig boosts budgets in uber_aggressive mode', () => {
+  const base = buildRoundConfig(
+    {
+      runProfile: 'standard',
+      maxUrlsPerProduct: 90,
+      maxCandidateUrls: 120,
+      discoveryEnabled: true,
+      fetchCandidateSources: true,
+      searchProvider: 'searxng',
+      searxngBaseUrl: 'http://127.0.0.1:8080',
+      llmMaxCallsPerRound: 5,
+      llmMaxCallsPerProductFast: 2
+    },
+    {
+      round: 1,
+      mode: 'aggressive',
+      missingRequiredCount: 3
+    }
+  );
+  const uber = buildRoundConfig(
+    {
+      runProfile: 'standard',
+      maxUrlsPerProduct: 90,
+      maxCandidateUrls: 120,
+      discoveryEnabled: true,
+      fetchCandidateSources: true,
+      searchProvider: 'searxng',
+      searxngBaseUrl: 'http://127.0.0.1:8080',
+      llmMaxCallsPerRound: 5,
+      llmMaxCallsPerProductFast: 2
+    },
+    {
+      round: 1,
+      mode: 'uber_aggressive',
+      missingRequiredCount: 3
+    }
+  );
+
+  assert.equal((uber.maxUrlsPerProduct || 0) >= (base.maxUrlsPerProduct || 0), true);
+  assert.equal((uber.maxCandidateUrls || 0) >= (base.maxCandidateUrls || 0), true);
+  assert.equal((uber.discoveryMaxQueries || 0) >= (base.discoveryMaxQueries || 0), true);
 });
 
 test('buildContractEffortPlan derives weighted effort from field rule contracts', () => {

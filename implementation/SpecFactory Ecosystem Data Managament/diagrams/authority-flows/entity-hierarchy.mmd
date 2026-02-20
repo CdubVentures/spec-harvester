@@ -1,0 +1,86 @@
+﻿erDiagram
+  COMPONENT_IDENTITY ||--o{ COMPONENT_VALUES : has
+  COMPONENT_IDENTITY ||--o{ COMPONENT_ALIASES : has
+  COMPONENT_IDENTITY ||--o{ ITEM_COMPONENT_LINKS : links_to_items
+  LIST_VALUES ||--o{ ITEM_LIST_LINKS : links_to_items
+
+  PRODUCTS ||--o{ ITEM_FIELD_STATE : has_fields
+  PRODUCTS ||--o{ ITEM_COMPONENT_LINKS : has_component_links
+  PRODUCTS ||--o{ ITEM_LIST_LINKS : has_enum_links
+
+  PRODUCTS ||--o{ CANDIDATES : has_candidates
+
+  KEY_REVIEW_STATE }o--|| PRODUCTS : grid_key_item_identifier
+  KEY_REVIEW_STATE }o--|| COMPONENT_IDENTITY : component_key_component_identifier
+  KEY_REVIEW_STATE }o--|| LIST_VALUES : enum_key_field_value_norm
+
+  COMPONENT_IDENTITY {
+    string category
+    string component_type
+    string canonical_name
+    string maker
+  }
+
+  COMPONENT_VALUES {
+    string category
+    string component_type
+    string component_name
+    string component_maker
+    string property_key
+    string value
+    string variance_policy
+    string constraints
+  }
+
+  LIST_VALUES {
+    string category
+    string field_key
+    string value
+    string normalized_value
+  }
+
+  ITEM_FIELD_STATE {
+    string category
+    string product_id
+    string field_key
+    string value
+    bool needs_ai_review
+  }
+
+  ITEM_COMPONENT_LINKS {
+    string category
+    string product_id
+    string field_key
+    string component_type
+    string component_name
+    string component_maker
+  }
+
+  ITEM_LIST_LINKS {
+    string category
+    string product_id
+    string field_key
+    int list_value_id
+  }
+
+  KEY_REVIEW_STATE {
+    string category
+    string target_kind
+    string item_identifier
+    string field_key
+    string enum_value_norm
+    string component_identifier
+    string property_key
+    string selected_value
+    string selected_candidate_id
+  }
+
+  CANDIDATES {
+    string candidate_id
+    string category
+    string product_id
+    string field_key
+    string value
+    string source_host
+    string source_method
+  }

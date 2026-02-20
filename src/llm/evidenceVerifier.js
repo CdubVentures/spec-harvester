@@ -27,19 +27,16 @@ function referenceMapFromEvidencePack(evidencePack = {}) {
 
 function snippetMapFromEvidencePack(evidencePack = {}) {
   const byId = new Map();
-  for (const row of evidencePack?.snippets || []) {
-    const id = normalizeText(row?.id || '');
-    if (id) {
-      byId.set(id, row);
+  const raw = evidencePack?.snippets;
+  if (Array.isArray(raw)) {
+    for (const row of raw) {
+      const id = normalizeText(row?.id || '');
+      if (id) {
+        byId.set(id, row);
+      }
     }
-  }
-  if (
-    byId.size === 0 &&
-    evidencePack?.snippets &&
-    typeof evidencePack.snippets === 'object' &&
-    !Array.isArray(evidencePack.snippets)
-  ) {
-    for (const [rawId, row] of Object.entries(evidencePack.snippets || {})) {
+  } else if (raw && typeof raw === 'object') {
+    for (const [rawId, row] of Object.entries(raw)) {
       const id = normalizeText(rawId);
       if (id) {
         byId.set(id, row);

@@ -2,25 +2,33 @@
   "category": "mouse",
   "fields": {
     "coating": [
+      "A",
+      "help",
       "matte",
       "rubber grips"
     ],
     "connection": [
+      "1",
+      "2",
       "bluetooth",
+      "he",
       "hybrid",
       "unk",
       "wired",
       "wireless"
     ],
     "connectivity": [
+      "1",
       "2.4GHz Dongle",
       "2.4GHz RF Dongle",
       "2.4GHz WIFI Dongle",
+      "2.5",
       "n/a",
       "unk"
     ],
     "feet_material": [
       "Glass",
+      "l",
       "PTFE",
       "PTFE (95%)",
       "PTFE (Black-Dyed)",
@@ -30,6 +38,7 @@
     "form_factor": [
       "ambidextrous",
       "left",
+      "lets",
       "right"
     ],
     "front_flare": [
@@ -92,6 +101,7 @@
       "Black Shell Blue Dot",
       "Corsair Quickstrike",
       "D2FC-F-7N (20M)",
+      "eqwe",
       "Haptic Inductive Trigger System (HITS)",
       "Kailh GM 4.0",
       "LK Optical V2",
@@ -113,13 +123,14 @@
       "Transparent Crystal Shell White Dot",
       "TTC Optical Microswitch",
       "unk",
-      "unspecified"
+      "unspecified",
+      "yay"
     ],
     "yes_no": [
       "yes",
       "no"
     ]
   },
-  "generated_at": "2026-02-13T02:18:36.677Z",
+  "generated_at": "2026-02-17T09:49:22.300Z",
   "version": 1
 }

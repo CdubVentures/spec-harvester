@@ -1,0 +1,18 @@
+{
+  "product_id": "roccat-kone-pro-air",
+  "category": "mouse",
+  "description": "ROCCAT Kone Pro Air — lightweight wireless ergonomic gaming mouse",
+  "expected_fields": {
+    "weight": "75",
+    "sensor": "Owl-Eye 19K",
+    "max_dpi": "19000",
+    "polling_rate": "1000",
+    "connectivity": "wireless",
+    "battery_life": "100",
+    "switches": "Titan Optical",
+    "shape": "ergonomic",
+    "buttons": "6"
+  },
+  "required_evidence_fields": ["weight", "sensor", "max_dpi", "polling_rate"],
+  "notes": "Golden reference for regression testing. Values sourced from manufacturer specs and review sites."
+}

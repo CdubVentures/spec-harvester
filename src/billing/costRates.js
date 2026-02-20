@@ -11,12 +11,71 @@ function normalizeModel(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function normalizePricingEntry(entry = {}) {
+  if (!entry || typeof entry !== 'object') return null;
+  const inputPer1M = toNumber(entry.inputPer1M ?? entry.input_per_1m ?? entry.input, NaN);
+  const outputPer1M = toNumber(entry.outputPer1M ?? entry.output_per_1m ?? entry.output, NaN);
+  const cachedInputPer1M = toNumber(
+    entry.cachedInputPer1M ?? entry.cached_input_per_1m ?? entry.cached_input ?? entry.cached,
+    NaN
+  );
+  if (!Number.isFinite(inputPer1M) && !Number.isFinite(outputPer1M) && !Number.isFinite(cachedInputPer1M)) {
+    return null;
+  }
+  return {
+    inputPer1M: Number.isFinite(inputPer1M) ? inputPer1M : 0,
+    outputPer1M: Number.isFinite(outputPer1M) ? outputPer1M : 0,
+    cachedInputPer1M: Number.isFinite(cachedInputPer1M) ? cachedInputPer1M : 0
+  };
+}
+
+function resolveModelPricingMap(rates = {}) {
+  const map = rates.llmModelPricingMap || rates.modelPricing || {};
+  if (!map || typeof map !== 'object') return {};
+  const output = {};
+  for (const [rawModel, rawEntry] of Object.entries(map)) {
+    const model = String(rawModel || '').trim();
+    if (!model) continue;
+    const normalizedEntry = normalizePricingEntry(rawEntry);
+    if (!normalizedEntry) continue;
+    output[model] = normalizedEntry;
+  }
+  return output;
+}
+
+function resolveModelPricingFromMap(rates = {}, model = '') {
+  const token = normalizeModel(model);
+  if (!token) return null;
+  const map = resolveModelPricingMap(rates);
+  let exact = null;
+  let prefix = null;
+  for (const [rawModel, rawEntry] of Object.entries(map)) {
+    const modelToken = normalizeModel(rawModel);
+    if (!modelToken) continue;
+    if (token === modelToken) {
+      exact = rawEntry;
+      break;
+    }
+    if (token.startsWith(modelToken) || modelToken.startsWith(token)) {
+      if (!prefix || modelToken.length > normalizeModel(prefix._model || '').length) {
+        prefix = { ...rawEntry, _model: rawModel };
+      }
+    }
+  }
+  if (exact) return exact;
+  if (prefix) {
+    const { _model, ...rest } = prefix;
+    return rest;
+  }
+  return null;
+}
+
 function resolveModelSpecificRates(rates = {}, model = '') {
   const token = normalizeModel(model);
   const output = {
-    inputPer1M: toNumber(rates.llmCostInputPer1M, 0.28),
-    outputPer1M: toNumber(rates.llmCostOutputPer1M, 0.42),
-    cachedInputPer1M: toNumber(rates.llmCostCachedInputPer1M, 0)
+    inputPer1M: toNumber(rates.llmCostInputPer1M ?? rates.inputPer1M, 0.28),
+    outputPer1M: toNumber(rates.llmCostOutputPer1M ?? rates.outputPer1M, 0.42),
+    cachedInputPer1M: toNumber(rates.llmCostCachedInputPer1M ?? rates.cachedInputPer1M, 0)
   };
 
   const applyIfValid = (value, setter) => {
@@ -26,23 +85,42 @@ function resolveModelSpecificRates(rates = {}, model = '') {
     }
   };
 
+  const fromMap = resolveModelPricingFromMap(rates, model);
+  if (fromMap) {
+    output.inputPer1M = toNumber(fromMap.inputPer1M, output.inputPer1M);
+    output.outputPer1M = toNumber(fromMap.outputPer1M, output.outputPer1M);
+    output.cachedInputPer1M = toNumber(fromMap.cachedInputPer1M, output.cachedInputPer1M);
+    return output;
+  }
+
   if (token === 'deepseek-chat' || token.startsWith('deepseek-chat')) {
-    applyIfValid(rates.llmCostInputPer1MDeepseekChat, (num) => { output.inputPer1M = num; });
-    applyIfValid(rates.llmCostOutputPer1MDeepseekChat, (num) => { output.outputPer1M = num; });
-    applyIfValid(rates.llmCostCachedInputPer1MDeepseekChat, (num) => { output.cachedInputPer1M = num; });
+    applyIfValid(rates.llmCostInputPer1MDeepseekChat ?? rates.inputPer1MDeepseekChat, (num) => { output.inputPer1M = num; });
+    applyIfValid(rates.llmCostOutputPer1MDeepseekChat ?? rates.outputPer1MDeepseekChat, (num) => { output.outputPer1M = num; });
+    applyIfValid(rates.llmCostCachedInputPer1MDeepseekChat ?? rates.cachedInputPer1MDeepseekChat, (num) => { output.cachedInputPer1M = num; });
   }
 
   if (token === 'deepseek-reasoner' || token.startsWith('deepseek-reasoner')) {
-    applyIfValid(rates.llmCostInputPer1MDeepseekReasoner, (num) => { output.inputPer1M = num; });
-    applyIfValid(rates.llmCostOutputPer1MDeepseekReasoner, (num) => { output.outputPer1M = num; });
-    applyIfValid(rates.llmCostCachedInputPer1MDeepseekReasoner, (num) => { output.cachedInputPer1M = num; });
+    applyIfValid(rates.llmCostInputPer1MDeepseekReasoner ?? rates.inputPer1MDeepseekReasoner, (num) => { output.inputPer1M = num; });
+    applyIfValid(rates.llmCostOutputPer1MDeepseekReasoner ?? rates.outputPer1MDeepseekReasoner, (num) => { output.outputPer1M = num; });
+    applyIfValid(rates.llmCostCachedInputPer1MDeepseekReasoner ?? rates.cachedInputPer1MDeepseekReasoner, (num) => { output.cachedInputPer1M = num; });
   }
 
   return output;
 }
 
 export function normalizeCostRates(config = {}) {
-  return resolveModelSpecificRates(config, '');
+  return {
+    llmCostInputPer1M: toNumber(config.llmCostInputPer1M ?? config.inputPer1M, 0.28),
+    llmCostOutputPer1M: toNumber(config.llmCostOutputPer1M ?? config.outputPer1M, 0.42),
+    llmCostCachedInputPer1M: toNumber(config.llmCostCachedInputPer1M ?? config.cachedInputPer1M, 0),
+    llmCostInputPer1MDeepseekChat: toNumber(config.llmCostInputPer1MDeepseekChat ?? config.inputPer1MDeepseekChat, -1),
+    llmCostOutputPer1MDeepseekChat: toNumber(config.llmCostOutputPer1MDeepseekChat ?? config.outputPer1MDeepseekChat, -1),
+    llmCostCachedInputPer1MDeepseekChat: toNumber(config.llmCostCachedInputPer1MDeepseekChat ?? config.cachedInputPer1MDeepseekChat, -1),
+    llmCostInputPer1MDeepseekReasoner: toNumber(config.llmCostInputPer1MDeepseekReasoner ?? config.inputPer1MDeepseekReasoner, -1),
+    llmCostOutputPer1MDeepseekReasoner: toNumber(config.llmCostOutputPer1MDeepseekReasoner ?? config.outputPer1MDeepseekReasoner, -1),
+    llmCostCachedInputPer1MDeepseekReasoner: toNumber(config.llmCostCachedInputPer1MDeepseekReasoner ?? config.cachedInputPer1MDeepseekReasoner, -1),
+    llmModelPricingMap: resolveModelPricingMap(config)
+  };
 }
 
 export function estimateTokensFromText(value) {

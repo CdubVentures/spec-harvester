@@ -2,6 +2,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { extractRootDomain } from '../utils/common.js';
 import { toPosixKey } from '../s3/storage.js';
+import {
+  ruleRequiredLevel,
+  ruleAvailability,
+  ruleDifficulty
+} from '../engine/ruleAccessors.js';
 
 const cache = new Map();
 
@@ -205,26 +210,7 @@ function normalizeField(value) {
     .replace(/^_+|_+$/g, '');
 }
 
-function ruleRequiredLevel(rule = {}) {
-  return String(
-    rule.required_level ||
-    (isObject(rule.priority) ? rule.priority.required_level : '')
-  ).trim().toLowerCase();
-}
-
-function ruleAvailability(rule = {}) {
-  return String(
-    rule.availability ||
-    (isObject(rule.priority) ? rule.priority.availability : '')
-  ).trim().toLowerCase();
-}
-
-function ruleDifficulty(rule = {}) {
-  return String(
-    rule.difficulty ||
-    (isObject(rule.priority) ? rule.priority.difficulty : '')
-  ).trim().toLowerCase();
-}
+// ruleRequiredLevel, ruleAvailability, ruleDifficulty imported from ruleAccessors.js
 
 function toArray(value) {
   return Array.isArray(value) ? value : [];
@@ -567,6 +553,7 @@ export async function loadCategoryConfig(category, options = {}) {
   });
 
   resolved.fieldRules = generated.fieldRules;
+  resolved.uiFieldCatalog = generated.uiFieldCatalog || null;
   resolved.generated_root = generated.generatedRoot;
   resolved.generated_schema_path = generated.schemaPath;
   resolved.generated_required_fields_path = generated.requiredPath;

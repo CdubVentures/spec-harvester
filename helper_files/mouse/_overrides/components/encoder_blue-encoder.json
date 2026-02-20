@@ -1,0 +1,8 @@
+{
+  "componentType": "encoder",
+  "name": "Blue Encoder",
+  "properties": {
+    "encoder_steps": "hellow"
+  },
+  "updated_at": "2026-02-16T09:41:14.372Z"
+}

@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { nowIso } from '../utils/common.js';
 import { toRawFieldKey } from '../utils/fieldKeys.js';
+import { buildManualOverrideCandidateId } from '../utils/candidateIdentifier.js';
 import { createFieldRulesEngine } from '../engine/fieldRulesEngine.js';
 import { applyRuntimeFieldRules } from '../engine/runtimeGate.js';
 import { buildProductReviewPayload } from './reviewGridData.js';
@@ -86,10 +87,15 @@ function normalizeOverrideEvidence(evidence = {}) {
   };
 }
 
-function manualCandidateId(field) {
-  const token = normalizeField(field) || 'field';
-  const stamp = Date.now().toString(36);
-  return `manual_snp_${token}_${stamp}`;
+function manualCandidateId({ category, productId, field, value, evidence }) {
+  return buildManualOverrideCandidateId({
+    category,
+    productId,
+    fieldKey: normalizeField(field),
+    value: String(value || '').trim(),
+    evidenceUrl: String(evidence?.url || '').trim(),
+    evidenceQuote: String(evidence?.quote || '').trim(),
+  });
 }
 
 function extractOverrideValue(override = {}) {
@@ -365,8 +371,15 @@ export async function setOverrideFromCandidate({
   productId,
   field,
   candidateId,
+  candidateValue = null,
+  candidateScore = null,
+  candidateSource = '',
+  candidateMethod = '',
+  candidateTier = null,
+  candidateEvidence = null,
   reviewer = '',
-  reason = ''
+  reason = '',
+  specDb = null
 }) {
   const normalizedField = normalizeField(field);
   if (!normalizedField) {
@@ -379,10 +392,71 @@ export async function setOverrideFromCandidate({
 
   const review = await readReviewArtifacts({ storage, category, productId });
   const rows = findCandidateRows(review.candidates);
-  const candidate = rows.find((row) =>
+  let candidate = rows.find((row) =>
     normalizeToken(row.candidate_id) === normalizeToken(targetCandidateId)
     && normalizeField(row.field) === normalizedField
   );
+  if (!candidate && specDb) {
+    const dbCandidate = specDb.getCandidateById(targetCandidateId);
+    if (
+      dbCandidate
+      && String(dbCandidate.product_id || '') === String(productId || '')
+      && normalizeField(dbCandidate.field_key) === normalizedField
+    ) {
+      candidate = {
+        candidate_id: dbCandidate.candidate_id,
+        field: dbCandidate.field_key,
+        value: dbCandidate.value,
+        score: dbCandidate.score ?? 0,
+        candidate_index: null,
+        source_id: dbCandidate.source_host || dbCandidate.source_root_domain || dbCandidate.source_method || '',
+        source: dbCandidate.source_host || 'SpecDb',
+        host: dbCandidate.source_host || '',
+        tier: dbCandidate.source_tier ?? null,
+        method: dbCandidate.source_method || 'specdb_lookup',
+        evidence: {
+          url: dbCandidate.evidence_url || dbCandidate.source_url || '',
+          retrieved_at: dbCandidate.evidence_retrieved_at || dbCandidate.extracted_at || '',
+          snippet_id: dbCandidate.snippet_id || '',
+          snippet_hash: dbCandidate.snippet_hash || '',
+          quote: dbCandidate.quote || '',
+          quote_span: (dbCandidate.quote_span_start != null && dbCandidate.quote_span_end != null)
+            ? [dbCandidate.quote_span_start, dbCandidate.quote_span_end]
+            : null,
+          snippet_text: dbCandidate.snippet_text || '',
+          source_id: dbCandidate.source_host || dbCandidate.source_root_domain || dbCandidate.source_method || '',
+        },
+      };
+    }
+  }
+  if (!candidate && candidateValue != null && String(candidateValue).trim()) {
+    const now = nowIso();
+    const fallbackSource = String(candidateSource || '').trim() || 'pipeline';
+    const fallbackEvidence = isObject(candidateEvidence) ? candidateEvidence : {};
+    candidate = {
+      candidate_id: targetCandidateId,
+      field: normalizedField,
+      value: String(candidateValue).trim(),
+      score: Number.isFinite(toNumber(candidateScore, NaN)) ? toNumber(candidateScore, 0) : 0,
+      candidate_index: null,
+      source_id: String(fallbackEvidence.source_id || fallbackSource).trim() || null,
+      source: fallbackSource,
+      host: fallbackSource,
+      tier: Number.isFinite(toNumber(candidateTier, NaN)) ? toNumber(candidateTier, null) : null,
+      method: String(candidateMethod || 'synthetic_candidate_accept').trim(),
+      evidence_key: String(fallbackEvidence.url || '').trim() || null,
+      evidence: {
+        url: String(fallbackEvidence.url || '').trim(),
+        retrieved_at: String(fallbackEvidence.retrieved_at || now).trim(),
+        snippet_id: String(fallbackEvidence.snippet_id || '').trim() || null,
+        snippet_hash: String(fallbackEvidence.snippet_hash || '').trim() || null,
+        quote: String(fallbackEvidence.quote || '').trim() || null,
+        quote_span: normalizeQuoteSpan(fallbackEvidence.quote_span),
+        snippet_text: String(fallbackEvidence.snippet_text || '').trim() || null,
+        source_id: String(fallbackEvidence.source_id || fallbackSource).trim() || null
+      }
+    };
+  }
   if (!candidate) {
     throw new Error(`candidate_id '${targetCandidateId}' not found for field '${normalizedField}'`);
   }
@@ -421,6 +495,41 @@ export async function setOverrideFromCandidate({
   };
 
   await writeJsonStable(overridePath, current);
+
+  // Dual-write to SpecDb
+  if (specDb) {
+    try {
+      specDb.upsertItemFieldState({
+        productId,
+        fieldKey: normalizedField,
+        value: String(candidate.value || '').trim(),
+        confidence: 1.0,
+        source: 'user',
+        acceptedCandidateId: candidate.candidate_id || null,
+        overridden: false,
+        needsAiReview: false,
+        aiReviewComplete: true
+      });
+      specDb.syncItemListLinkForFieldValue({
+        productId,
+        fieldKey: normalizedField,
+        value: String(candidate.value || '').trim(),
+      });
+      specDb.insertAuditLog({
+        entity_type: 'item_field_state',
+        entity_id: `${productId}::${normalizedField}`,
+        field_changed: normalizedField,
+        new_value: String(candidate.value || '').trim(),
+        change_type: 'override',
+        actor_type: 'user',
+        actor_id: reviewer || null,
+        product_id: productId,
+        field_key: normalizedField,
+        note: reason || 'candidate_selection'
+      });
+    } catch { /* best-effort */ }
+  }
+
   return {
     override_path: overridePath,
     field: normalizedField,
@@ -438,7 +547,8 @@ export async function setManualOverride({
   value,
   evidence = {},
   reviewer = '',
-  reason = ''
+  reason = '',
+  specDb = null
 }) {
   const normalizedField = normalizeField(field);
   if (!normalizedField) {
@@ -481,7 +591,13 @@ export async function setManualOverride({
       overridden_by: String(reviewer || '').trim() || null,
       overridden_at: setAt,
       validated: null,
-      candidate_id: manualCandidateId(normalizedField),
+      candidate_id: manualCandidateId({
+        category,
+        productId,
+        field: normalizedField,
+        value: nextValue,
+        evidence: normalizedEvidence,
+      }),
       value: nextValue,
       source: {
         host: 'manual-override.local',
@@ -494,6 +610,41 @@ export async function setManualOverride({
     }
   };
   await writeJsonStable(overridePath, current);
+
+  // Dual-write to SpecDb
+  if (specDb) {
+    try {
+      specDb.upsertItemFieldState({
+        productId,
+        fieldKey: normalizedField,
+        value: nextValue,
+        confidence: 1.0,
+        source: 'user',
+        acceptedCandidateId: null,
+        overridden: true,
+        needsAiReview: false,
+        aiReviewComplete: true
+      });
+      specDb.syncItemListLinkForFieldValue({
+        productId,
+        fieldKey: normalizedField,
+        value: nextValue,
+      });
+      specDb.insertAuditLog({
+        entity_type: 'item_field_state',
+        entity_id: `${productId}::${normalizedField}`,
+        field_changed: normalizedField,
+        new_value: nextValue,
+        change_type: 'manual_override',
+        actor_type: 'user',
+        actor_id: reviewer || null,
+        product_id: productId,
+        field_key: normalizedField,
+        note: reason || 'manual_entry'
+      });
+    } catch { /* best-effort */ }
+  }
+
   return {
     override_path: overridePath,
     field: normalizedField,
@@ -722,7 +873,8 @@ export async function finalizeOverrides({
   productId,
   applyOverrides = false,
   saveAsDraft = false,
-  reviewer = ''
+  reviewer = '',
+  specDb = null
 }) {
   const overridePath = resolveOverrideFilePath({ config, category, productId });
   const overrideDoc = await readOverrideFile(overridePath);
@@ -851,7 +1003,8 @@ export async function finalizeOverrides({
       fieldOrder: runtimeEngine.getAllFieldKeys(),
       enforceEvidence: false,
       strictEvidence: false,
-      evidencePack: null
+      evidencePack: null,
+      respectPerFieldEvidence: false
     });
     nextNormalized.fields = runtimeGateResult.fields || nextNormalized.fields;
   } catch {
@@ -913,6 +1066,46 @@ export async function finalizeOverrides({
     writeStorageJson(storage, latest.provenanceKey, nextProvenance),
     writeStorageJson(storage, latest.summaryKey, nextSummary)
   ]);
+
+  // Dual-write finalized overrides to SpecDb
+  if (specDb) {
+    try {
+      const tx = specDb.db.transaction(() => {
+        for (const row of appliedRows) {
+          specDb.upsertItemFieldState({
+            productId,
+            fieldKey: row.field,
+            value: row.value,
+            confidence: 1.0,
+            source: 'user',
+            acceptedCandidateId: row.candidate_id || null,
+            overridden: true,
+            needsAiReview: false,
+            aiReviewComplete: true
+          });
+          specDb.syncItemListLinkForFieldValue({
+            productId,
+            fieldKey: row.field,
+            value: row.value,
+          });
+          specDb.insertAuditLog({
+            entity_type: 'item_field_state',
+            entity_id: `${productId}::${row.field}`,
+            field_changed: row.field,
+            old_value: row.previous,
+            new_value: row.value,
+            change_type: 'finalize_override',
+            actor_type: 'user',
+            actor_id: reviewer || null,
+            product_id: productId,
+            field_key: row.field,
+            note: row.override_reason || row.override_source || 'finalized'
+          });
+        }
+      });
+      tx();
+    } catch { /* best-effort */ }
+  }
 
   const review = reviewKeys(storage, category, productId);
   const report = {

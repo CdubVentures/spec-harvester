@@ -70,6 +70,47 @@ function normalizeToken(value) {
   return normalizeText(value).toLowerCase();
 }
 
+const REVIEW_REQUIRED_LEVELS = new Set(['identity', 'required', 'critical', 'expected', 'optional', 'editorial', 'commerce']);
+const REVIEW_AVAILABILITY_LEVELS = new Set(['always', 'expected', 'sometimes', 'rare', 'editorial_only']);
+const REVIEW_DIFFICULTY_LEVELS = new Set(['easy', 'medium', 'hard', 'instrumented']);
+const DEFAULT_REVIEW_PRIORITY = Object.freeze({
+  required_level: 'expected',
+  availability: 'expected',
+  difficulty: 'medium',
+  effort: 3
+});
+const REVIEW_AI_MODES = new Set(['off', 'advisory', 'planner', 'judge']);
+const REVIEW_AI_MODEL_STRATEGIES = new Set(['auto', 'force_fast', 'force_deep']);
+
+function normalizeReviewPriority(value = {}) {
+  const priority = isObject(value) ? value : {};
+  const requiredLevel = normalizeToken(priority.required_level || DEFAULT_REVIEW_PRIORITY.required_level);
+  const availability = normalizeToken(priority.availability || DEFAULT_REVIEW_PRIORITY.availability);
+  const difficulty = normalizeToken(priority.difficulty || DEFAULT_REVIEW_PRIORITY.difficulty);
+  const effort = Math.max(1, Math.min(10, asInt(priority.effort, DEFAULT_REVIEW_PRIORITY.effort)));
+  return {
+    required_level: REVIEW_REQUIRED_LEVELS.has(requiredLevel) ? requiredLevel : DEFAULT_REVIEW_PRIORITY.required_level,
+    availability: REVIEW_AVAILABILITY_LEVELS.has(availability) ? availability : DEFAULT_REVIEW_PRIORITY.availability,
+    difficulty: REVIEW_DIFFICULTY_LEVELS.has(difficulty) ? difficulty : DEFAULT_REVIEW_PRIORITY.difficulty,
+    effort
+  };
+}
+
+function normalizeReviewAiAssist(value = {}) {
+  const aiAssist = isObject(value) ? value : {};
+  const modeToken = normalizeToken(aiAssist.mode || '');
+  const strategyToken = normalizeToken(aiAssist.model_strategy || 'auto') || 'auto';
+  const maxCallsRaw = asInt(aiAssist.max_calls, 0);
+  const maxTokensRaw = asInt(aiAssist.max_tokens, 0);
+  return {
+    mode: REVIEW_AI_MODES.has(modeToken) ? modeToken : null,
+    model_strategy: REVIEW_AI_MODEL_STRATEGIES.has(strategyToken) ? strategyToken : 'auto',
+    max_calls: maxCallsRaw > 0 ? Math.max(1, Math.min(10, maxCallsRaw)) : null,
+    max_tokens: maxTokensRaw > 0 ? Math.max(256, Math.min(65536, maxTokensRaw)) : null,
+    reasoning_note: normalizeText(aiAssist.reasoning_note || '')
+  };
+}
+
 function normalizeFieldKey(value) {
   return String(value ?? '')
     .trim()
@@ -590,11 +631,9 @@ function buildSheetPreview(sheet, { previewRows = 20, previewCols = 8 } = {}) {
       }
     }
   }
-  const columns = [...colCounts.entries()]
-    .sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]))
-    .slice(0, Math.max(1, previewCols))
-    .map(([col]) => col)
-    .sort((a, b) => (colToIndex(a) || 0) - (colToIndex(b) || 0));
+  const columns = [...colCounts.keys()]
+    .sort((a, b) => (colToIndex(a) || 0) - (colToIndex(b) || 0))
+    .slice(0, Math.max(1, previewCols));
 
   const rows = [];
   for (const row of selectedRows) {
@@ -1292,13 +1331,25 @@ function normalizeWorkbookMap(map = {}) {
       brand_row: asInt(productRaw.brand_row || samplingRaw.brand_row, 3),
       model_row: asInt(productRaw.model_row || samplingRaw.model_row, 4),
       variant_row: asInt(productRaw.variant_row || samplingRaw.variant_row, 5),
+      id_row: asInt(productRaw.id_row, 0),
+      identifier_row: asInt(productRaw.identifier_row, 0),
       value_col_start: normalizeText(productRaw.value_col_start || samplingRaw.value_col_start || samplingRaw.value_start_column || 'C').toUpperCase(),
       value_col_end: normalizeText(productRaw.value_col_end || samplingRaw.value_col_end || '').toUpperCase(),
       sample_columns: asInt(productRaw.sample_columns || samplingRaw.sample_columns || samplingRaw.sample_count, 0)
     }
     : null;
 
-  const enumRowsRaw = toArray(map.enum_lists).length > 0 ? toArray(map.enum_lists) : toArray(map.enum_sources);
+  const manualEnumValuesInput = isObject(map.manual_enum_values)
+    ? Object.fromEntries(
+        Object.entries(map.manual_enum_values)
+          .filter(([k, v]) => normalizeFieldKey(k) && Array.isArray(v) && v.length > 0)
+          .map(([k, v]) => [normalizeFieldKey(k), orderedUniqueStrings(v.map((val) => String(val).trim()).filter(Boolean))])
+      )
+    : {};
+  const dataListsRaw = toArray(map.data_lists).filter((row) => isObject(row));
+  const enumRowsRaw = dataListsRaw.length > 0
+    ? dataListsRaw.filter((row) => normalizeToken(row.mode || 'workbook') !== 'scratch')
+    : (toArray(map.enum_lists).length > 0 ? toArray(map.enum_lists) : toArray(map.enum_sources));
   const enumLists = [];
   for (const row of enumRowsRaw) {
     if (!isObject(row)) {
@@ -1310,6 +1361,8 @@ function normalizeWorkbookMap(map = {}) {
     const normalizeMode = normalizeToken(row.normalize || 'lower_trim');
     const delimiter = normalizeText(row.delimiter || '');
     const rowHeader = asInt(row.header_row, 0);
+    const rowPriority = normalizeReviewPriority(row.priority);
+    const rowAiAssist = normalizeReviewAiAssist(row.ai_assist);
     const pushEnumRow = (bucket, columnRef) => {
       const field = shouldKeepEnumBucket({
         requestedBucket: bucket,
@@ -1328,7 +1381,9 @@ function normalizeWorkbookMap(map = {}) {
         row_end: rowEnd,
         delimiter,
         normalize: normalizeMode,
-        header_row: rowHeader
+        header_row: rowHeader,
+        priority: rowPriority,
+        ai_assist: rowAiAssist
       });
     };
     const columns = toArray(row.columns);
@@ -1354,6 +1409,74 @@ function normalizeWorkbookMap(map = {}) {
     pushEnumRow(row.field || row.bucket, row.value_column || row.column || 'A');
   }
 
+  let dataLists = [];
+  if (dataListsRaw.length > 0) {
+    dataLists = dataListsRaw.map((row) => {
+      const field = normalizeFieldKey(row.field || '');
+      const rowManualValues = Array.isArray(row.manual_values)
+        ? orderedUniqueStrings(row.manual_values.map((val) => String(val).trim()).filter(Boolean))
+        : [];
+      const mergedManualValues = field
+        ? orderedUniqueStrings([...(manualEnumValuesInput[field] || []), ...rowManualValues])
+        : rowManualValues;
+      return {
+        field,
+        mode: normalizeToken(row.mode || 'workbook') === 'scratch' ? 'scratch' : 'workbook',
+        sheet: normalizeText(row.sheet),
+        value_column: normalizeText(row.value_column || row.column || '').toUpperCase(),
+        header_row: asInt(row.header_row, 0),
+        row_start: asInt(row.row_start || row.start_row, 2),
+        row_end: asInt(row.row_end || row.end_row, 0),
+        normalize: normalizeToken(row.normalize || 'lower_trim') || 'lower_trim',
+        delimiter: normalizeText(row.delimiter || ''),
+        manual_values: mergedManualValues,
+        priority: normalizeReviewPriority(row.priority),
+        ai_assist: normalizeReviewAiAssist(row.ai_assist)
+      };
+    });
+  } else {
+    const seenFields = new Set();
+    dataLists = enumLists.map((row) => {
+      const field = normalizeFieldKey(row.field || '');
+      if (field) {
+        seenFields.add(field);
+      }
+      return {
+        field,
+        mode: 'workbook',
+        sheet: row.sheet,
+        value_column: row.value_column,
+        header_row: asInt(row.header_row, 0),
+        row_start: asInt(row.row_start, 2),
+        row_end: asInt(row.row_end, 0),
+        normalize: normalizeToken(row.normalize || 'lower_trim') || 'lower_trim',
+        delimiter: normalizeText(row.delimiter || ''),
+        manual_values: field && Array.isArray(manualEnumValuesInput[field]) ? manualEnumValuesInput[field] : [],
+        priority: normalizeReviewPriority(row.priority),
+        ai_assist: normalizeReviewAiAssist(row.ai_assist)
+      };
+    });
+    for (const [field, values] of Object.entries(manualEnumValuesInput)) {
+      if (seenFields.has(field) || !Array.isArray(values) || values.length === 0) {
+        continue;
+      }
+      dataLists.push({
+        field,
+        mode: 'scratch',
+        sheet: '',
+        value_column: '',
+        header_row: 0,
+        row_start: 2,
+        row_end: 0,
+        normalize: 'lower_trim',
+        delimiter: '',
+        manual_values: values,
+        priority: normalizeReviewPriority({}),
+        ai_assist: normalizeReviewAiAssist({})
+      });
+    }
+  }
+
   const componentRowsRaw = toArray(map.component_sources).length > 0 ? toArray(map.component_sources) : toArray(map.component_sheets);
   const componentSheets = componentRowsRaw.map((row) => {
     const rolesRaw = isObject(row.roles) ? row.roles : {};
@@ -1367,12 +1490,19 @@ function normalizeWorkbookMap(map = {}) {
       : toArray(row.property_mappings);
     const propertyMappings = propertyMappingsRaw
       .filter((entry) => isObject(entry))
-      .map((entry) => ({
-        key: normalizeFieldKey(entry.key || entry.property_key || ''),
-        column: normalizeText(entry.column || entry.col || '').toUpperCase(),
-        type: ['number', 'string'].includes(normalizeToken(entry.type)) ? normalizeToken(entry.type) : 'string',
-        unit: normalizeText(entry.unit || '')
-      }))
+      .map((entry) => {
+        const fieldKey = normalizeFieldKey(entry.field_key || '');
+        const legacyKey = normalizeFieldKey(entry.key || entry.property_key || '');
+        return {
+          key: fieldKey || legacyKey,
+          column: normalizeText(entry.column || entry.col || '').toUpperCase(),
+          type: ['number', 'string'].includes(normalizeToken(entry.type || entry.manual_type)) ? normalizeToken(entry.type || entry.manual_type) : 'string',
+          unit: normalizeText(entry.unit || entry.manual_unit || ''),
+          field_key: fieldKey || undefined,
+          variance_policy: normalizeToken(entry.variance_policy || 'authoritative'),
+          constraints: Array.isArray(entry.constraints) ? entry.constraints.map((c) => normalizeText(c)) : []
+        };
+      })
       .filter((entry) => entry.column);
     if (propertyMappings.length === 0) {
       for (const col of stableSortStrings(toArray(row.property_columns || row.props_columns).map((entry) => normalizeText(entry).toUpperCase()))) {
@@ -1381,7 +1511,10 @@ function normalizeWorkbookMap(map = {}) {
           key: normalizeFieldKey(col),
           column: col,
           type: 'string',
-          unit: ''
+          unit: '',
+          field_key: undefined,
+          variance_policy: 'authoritative',
+          constraints: []
         });
       }
     }
@@ -1407,6 +1540,8 @@ function normalizeWorkbookMap(map = {}) {
       toArray(rolesRaw.links || row.link_columns || row.links_columns).map((entry) => normalizeText(entry).toUpperCase())
     );
     const stopAfterBlankPrimary = Math.max(1, asInt(row.stop_after_blank_primary || row.stop_after_blank_names, 10));
+    const rowPriority = normalizeReviewPriority(row.priority || row.review_priority);
+    const rowAiAssist = normalizeReviewAiAssist(row.ai_assist);
     return {
       sheet: normalizeText(row.sheet),
       component_type: normalizeToken(row.component_type || row.type || guessComponentType(row.sheet)),
@@ -1431,7 +1566,9 @@ function normalizeWorkbookMap(map = {}) {
       first_data_row: firstDataRow,
       stop_after_blank_primary: stopAfterBlankPrimary,
       stop_after_blank_names: stopAfterBlankPrimary,
-      row_end: asInt(row.row_end || row.end_row, 0)
+      row_end: asInt(row.row_end || row.end_row, 0),
+      priority: rowPriority,
+      ai_assist: rowAiAssist
     };
   });
   const tooltipSourceRaw = isObject(map.tooltip_source) ? map.tooltip_source : {};
@@ -1446,6 +1583,23 @@ function normalizeWorkbookMap(map = {}) {
     || (tooltipSourcePath ? path.extname(tooltipSourcePath).slice(1) : '')
     || 'auto'
   ) || 'auto';
+  const manualEnumValues = {};
+  for (const [field, values] of Object.entries(manualEnumValuesInput)) {
+    if (!field || !Array.isArray(values) || values.length === 0) {
+      continue;
+    }
+    manualEnumValues[field] = orderedUniqueStrings(values);
+  }
+  for (const row of dataLists) {
+    const field = normalizeFieldKey(row.field || '');
+    if (!field || !Array.isArray(row.manual_values) || row.manual_values.length === 0) {
+      continue;
+    }
+    manualEnumValues[field] = orderedUniqueStrings([
+      ...(manualEnumValues[field] || []),
+      ...row.manual_values
+    ]);
+  }
 
   return {
     version: asInt(map.version, 1),
@@ -1477,6 +1631,7 @@ function normalizeWorkbookMap(map = {}) {
         variant_row: productTable.variant_row
       }
       : null,
+    data_lists: dataLists,
     enum_lists: enumLists.filter((row) => row.sheet),
     enum_sources: enumLists
       .filter((row) => row.sheet)
@@ -1488,7 +1643,9 @@ function normalizeWorkbookMap(map = {}) {
         start_row: row.row_start,
         end_row: row.row_end > 0 ? row.row_end : null,
         delimiter: row.delimiter || '',
-        normalize: row.normalize
+        normalize: row.normalize,
+        priority: row.priority,
+        ai_assist: row.ai_assist
       })),
     component_sheets: [],
     component_sources: componentSheets
@@ -1507,7 +1664,9 @@ function normalizeWorkbookMap(map = {}) {
         },
         auto_derive_aliases: row.auto_derive_aliases,
         stop_after_blank_primary: row.stop_after_blank_primary,
-        start_row: row.first_data_row
+        start_row: row.first_data_row,
+        priority: row.priority,
+        ai_assist: row.ai_assist
       })),
     expectations: isObject(map.expectations) ? {
       required_fields: stableSortStrings(toArray(map.expectations.required_fields).map((field) => normalizeFieldKey(field))),
@@ -1536,7 +1695,8 @@ function normalizeWorkbookMap(map = {}) {
     } : {
       min_identifiers: 2,
       anti_merge_rules: []
-    }
+    },
+    manual_enum_values: manualEnumValues
   };
 }
 
@@ -1576,6 +1736,9 @@ function mergeWorkbookMapDefaults(baseMap = {}, suggestedMap = {}) {
   if (isEmptyArrayValue(merged.enum_lists) && !isEmptyArrayValue(suggested.enum_lists)) {
     merged.enum_lists = suggested.enum_lists;
     merged.enum_sources = suggested.enum_sources;
+  }
+  if (isEmptyArrayValue(merged.data_lists) && !isEmptyArrayValue(suggested.data_lists)) {
+    merged.data_lists = suggested.data_lists;
   }
   if (isEmptyArrayValue(merged.component_sources) && !isEmptyArrayValue(suggested.component_sources)) {
     merged.component_sheets = suggested.component_sheets;
@@ -1725,12 +1888,13 @@ export function validateWorkbookMap(map = {}, options = {}) {
         errors.push(`component_sources: invalid property column '${propCol}' for sheet '${row.sheet}'`);
       }
     }
+    const VALID_VARIANCE_POLICIES = ['authoritative', 'upper_bound', 'lower_bound', 'range', 'override_allowed'];
     for (const prop of propertyMappings) {
       if (!isObject(prop)) {
         errors.push(`component_sources: invalid property mapping in sheet '${row.sheet}'`);
         continue;
       }
-      if (!normalizeFieldKey(prop.key || '')) {
+      if (!normalizeFieldKey(prop.field_key || prop.key || '')) {
         errors.push(`component_sources: property mapping missing key for sheet '${row.sheet}'`);
       }
       if (!colToIndex(prop.column || '')) {
@@ -1738,6 +1902,12 @@ export function validateWorkbookMap(map = {}, options = {}) {
       }
       if (prop.type && !['string', 'number'].includes(normalizeToken(prop.type))) {
         errors.push(`component_sources: invalid property mapping type '${prop.type}' for sheet '${row.sheet}'`);
+      }
+      if (prop.variance_policy && !VALID_VARIANCE_POLICIES.includes(normalizeToken(prop.variance_policy))) {
+        errors.push(`component_sources: invalid variance_policy '${prop.variance_policy}' for property '${prop.field_key || prop.key || '?'}' in sheet '${row.sheet}'`);
+      }
+      if (prop.constraints && !Array.isArray(prop.constraints)) {
+        errors.push(`component_sources: constraints must be an array for property '${prop.field_key || prop.key || '?'}' in sheet '${row.sheet}'`);
       }
     }
   }
@@ -1871,8 +2041,14 @@ function pullMatrixSamples(workbook, map, keyRows) {
     if (!brand && !model) {
       continue;
     }
+    const idRow = productTable.id_row || 0;
+    const identifierRow = productTable.identifier_row || 0;
+    const id = idRow > 0 ? String(getCell(sheet, column, idRow) || '').trim() : '';
+    const identifier = identifierRow > 0 ? String(getCell(sheet, column, identifierRow) || '').trim() : '';
     productColumns.push({
       column,
+      id,
+      identifier,
       brand,
       model,
       variant
@@ -2146,11 +2322,19 @@ function pullComponentDbs(workbook, map) {
     const linkColumns = stableSortStrings(toArray(rolesRaw.links).map((value) => normalizeText(value).toUpperCase()));
     const rolePropertyMappings = toArray(rolesRaw.properties)
       .filter((entry) => isObject(entry))
-      .map((entry) => ({
-        key: normalizeFieldKey(entry.key || entry.property_key || ''),
-        column: normalizeText(entry.column || entry.col || '').toUpperCase(),
-        type: ['number', 'string'].includes(normalizeToken(entry.type)) ? normalizeToken(entry.type) : 'string'
-      }))
+      .map((entry) => {
+        const fieldKey = normalizeFieldKey(entry.field_key || '');
+        const legacyKey = normalizeFieldKey(entry.key || entry.property_key || '');
+        return {
+          key: fieldKey || legacyKey,
+          column: normalizeText(entry.column || entry.col || '').toUpperCase(),
+          type: ['number', 'string'].includes(normalizeToken(entry.type || entry.manual_type)) ? normalizeToken(entry.type || entry.manual_type) : 'string',
+          unit: normalizeText(entry.unit || entry.manual_unit || ''),
+          field_key: fieldKey || undefined,
+          variance_policy: normalizeToken(entry.variance_policy || 'authoritative'),
+          constraints: Array.isArray(entry.constraints) ? entry.constraints.map((c) => normalizeText(c)) : []
+        };
+      })
       .filter((entry) => entry.column);
     const firstDataRow = Math.max(1, asInt(
       row.first_data_row || row.row_start,
@@ -2214,11 +2398,13 @@ function pullComponentDbs(workbook, map) {
           if (!value) {
             continue;
           }
+          // Use field_key as canonical property name when available, fall back to legacy key
+          const propKey = mapping.field_key || mapping.key;
           if (mapping.type === 'number') {
             const numericValue = asNumber(value);
-            properties[mapping.key] = numericValue === null ? value : numericValue;
+            properties[propKey] = numericValue === null ? value : numericValue;
           } else {
-            properties[mapping.key] = value;
+            properties[propKey] = value;
           }
         }
       }
@@ -2234,6 +2420,32 @@ function pullComponentDbs(workbook, map) {
       }
       if (rolePropertyMappings.length > 0 && Object.keys(properties).length > 0) {
         entity.properties = properties;
+        // Attach variance policies for runtime consumption
+        const variancePolicies = {};
+        let hasNonDefault = false;
+        for (const mapping of rolePropertyMappings) {
+          const propKey = mapping.field_key || mapping.key;
+          if (mapping.variance_policy && mapping.variance_policy !== 'authoritative') {
+            variancePolicies[propKey] = mapping.variance_policy;
+            hasNonDefault = true;
+          }
+        }
+        if (hasNonDefault) {
+          entity.__variance_policies = variancePolicies;
+        }
+        // Attach constraints for runtime evaluation
+        const constraintMap = {};
+        let hasConstraints = false;
+        for (const mapping of rolePropertyMappings) {
+          const propKey = mapping.field_key || mapping.key;
+          if (Array.isArray(mapping.constraints) && mapping.constraints.length > 0) {
+            constraintMap[propKey] = mapping.constraints.filter(Boolean);
+            hasConstraints = true;
+          }
+        }
+        if (hasConstraints) {
+          entity.__constraints = constraintMap;
+        }
       }
       out[componentType].push(entity);
     }
@@ -2464,6 +2676,7 @@ function enforceExpectationPriority({ key, rule, expectations }) {
   rule.publish_gate_reason = finalLevel === 'identity'
     ? 'missing_identity'
     : (finalLevel === 'required' ? 'missing_required' : '');
+  priority.publish_gate_reason = rule.publish_gate_reason;
 
   const evidence = isObject(rule.evidence) ? { ...rule.evidence } : {};
   if (typeof evidence.required !== 'boolean') {
@@ -2804,12 +3017,19 @@ function buildComponentSourceSummary({
     const rolesBlock = isObject(row.roles) ? row.roles : {};
     const propertyMappings = toArray(rolesBlock.properties)
       .filter((entry) => isObject(entry))
-      .map((entry) => ({
-        key: normalizeFieldKey(entry.key || entry.property_key || ''),
-        column: normalizeText(entry.column || entry.col || '').toUpperCase(),
-        type: ['number', 'string'].includes(normalizeToken(entry.type)) ? normalizeToken(entry.type) : 'string',
-        unit: normalizeText(entry.unit || '')
-      }))
+      .map((entry) => {
+        const fieldKey = normalizeFieldKey(entry.field_key || '');
+        const legacyKey = normalizeFieldKey(entry.key || entry.property_key || '');
+        return {
+          key: fieldKey || legacyKey,
+          column: normalizeText(entry.column || entry.col || '').toUpperCase(),
+          type: ['number', 'string'].includes(normalizeToken(entry.type || entry.manual_type)) ? normalizeToken(entry.type || entry.manual_type) : 'string',
+          unit: normalizeText(entry.unit || entry.manual_unit || ''),
+          field_key: fieldKey || undefined,
+          variance_policy: normalizeToken(entry.variance_policy || 'authoritative'),
+          constraints: Array.isArray(entry.constraints) ? entry.constraints.map((c) => normalizeText(c)) : []
+        };
+      })
       .filter((entry) => entry.column);
     const primaryIdentifier = normalizeText(
       rolesBlock.primary_identifier
@@ -3548,6 +3768,43 @@ function buildStudioFieldRule({
     }
     : {};
 
+  // Extend component block with match, ai, and priority sub-objects if authored
+  if (Object.keys(nestedComponent).length > 0) {
+    const matchInput = isObject(componentBlock.match) ? componentBlock.match : {};
+    const rawFuzzyThreshold = asNumber(matchInput.fuzzy_threshold);
+    const rawPropWeight = asNumber(matchInput.property_weight);
+    const rawNameWeight = asNumber(matchInput.name_weight);
+    const rawAutoAccept = asNumber(matchInput.auto_accept_score);
+    const rawFlagReview = asNumber(matchInput.flag_review_score);
+    nestedComponent.match = {
+      fuzzy_threshold: rawFuzzyThreshold !== null ? Math.max(0, Math.min(1, rawFuzzyThreshold)) : 0.75,
+      property_weight: rawPropWeight !== null ? Math.max(0, Math.min(1, rawPropWeight)) : 0.6,
+      name_weight: rawNameWeight !== null ? Math.max(0, Math.min(1, rawNameWeight)) : 0.4,
+      property_keys: toArray(matchInput.property_keys).map(k => normalizeFieldKey(k)).filter(Boolean),
+      auto_accept_score: rawAutoAccept !== null ? Math.max(0, Math.min(1, rawAutoAccept)) : 0.95,
+      flag_review_score: rawFlagReview !== null ? Math.max(0, Math.min(1, rawFlagReview)) : 0.65,
+    };
+
+    const aiInput = isObject(componentBlock.ai) ? componentBlock.ai : {};
+    const validAiModes = ['judge', 'planner', 'advisory', 'off'];
+    const validContextLevels = ['name_only', 'properties', 'properties_and_evidence'];
+    nestedComponent.ai = {
+      mode: validAiModes.includes(normalizeToken(aiInput.mode)) ? normalizeToken(aiInput.mode) : 'off',
+      model_strategy: normalizeToken(aiInput.model_strategy || '') || 'auto',
+      context_level: validContextLevels.includes(normalizeToken(aiInput.context_level))
+        ? normalizeToken(aiInput.context_level) : 'properties',
+      reasoning_note: normalizeText(aiInput.reasoning_note || ''),
+    };
+
+    const priorityInput = isObject(componentBlock.priority) ? componentBlock.priority : {};
+    const validDifficulties = ['easy', 'medium', 'hard'];
+    nestedComponent.priority = {
+      difficulty: validDifficulties.includes(normalizeToken(priorityInput.difficulty))
+        ? normalizeToken(priorityInput.difficulty) : 'medium',
+      effort: Math.max(1, Math.min(10, asInt(priorityInput.effort, 5))),
+    };
+  }
+
   const nestedEvidence = isObject(rule.evidence) ? { ...rule.evidence } : {};
   nestedEvidence.required = nestedEvidence.required !== false;
   nestedEvidence.min_evidence_refs = asInt(
@@ -3561,6 +3818,16 @@ function buildStudioFieldRule({
   nestedEvidence.conflict_policy = normalizeToken(
     nestedEvidence.conflict_policy || 'resolve_by_tier_else_unknown'
   ) || 'resolve_by_tier_else_unknown';
+
+  // Build ai_assist block (auto-derive if not explicitly set)
+  const aiAssistInput = isObject(rule.ai_assist) ? rule.ai_assist : {};
+  const nestedAiAssist = {
+    mode: normalizeToken(aiAssistInput.mode || '') || null,
+    model_strategy: normalizeToken(aiAssistInput.model_strategy || '') || 'auto',
+    max_calls: asInt(aiAssistInput.max_calls, 0) || null,
+    max_tokens: asInt(aiAssistInput.max_tokens, 0) || null,
+    reasoning_note: normalizeText(aiAssistInput.reasoning_note || '')
+  };
 
   const uiOut = {
     label: normalizeText(ui.label || titleFromKey(key)),
@@ -3649,14 +3916,108 @@ function buildStudioFieldRule({
       : valueForm
   );
 
+  // Build contract block
+  const outContract = {
+    unknown_token: nestedContract.unknown_token,
+    unknown_reason_required: nestedContract.unknown_reason_required !== false,
+    type: nestedContract.type,
+    shape: nestedContract.shape
+  };
+  if (normalizeText(nestedContract.unit)) {
+    outContract.unit = normalizeText(nestedContract.unit);
+  }
+  if (normalizeText(nestedContract.value_form)) {
+    outContract.value_form = normalizeText(nestedContract.value_form);
+  }
+  if (isObject(nestedContract.rounding) && Object.keys(nestedContract.rounding).length > 0) {
+    outContract.rounding = sortDeep(nestedContract.rounding);
+  }
+  if (isObject(nestedContract.range) && Object.keys(nestedContract.range).length > 0) {
+    outContract.range = sortDeep(nestedContract.range);
+  }
+  if (nestedContract.shape === 'list') {
+    outContract.list_rules = sortDeep(
+      isObject(nestedContract.list_rules) && Object.keys(nestedContract.list_rules).length > 0
+        ? nestedContract.list_rules
+        : { dedupe: true, sort: 'none', min_items: 0, max_items: 100 }
+    );
+  }
+  if ((nestedContract.shape === 'object' || nestedContract.type === 'object') && isObject(nestedContract.object_schema) && Object.keys(nestedContract.object_schema).length > 0) {
+    outContract.object_schema = sortDeep(nestedContract.object_schema);
+  }
+  if (Array.isArray(nestedContract.item_union) && nestedContract.item_union.length > 0) {
+    outContract.item_union = sortDeep(nestedContract.item_union);
+  }
+
+  // Build parse block
+  const outParse = {
+    template: canonicalParseTemplate(nestedParse.template || parseTemplate || '')
+  };
+  const maybeCopy = (parseKey) => {
+    const parseValue = nestedParse[parseKey];
+    if (Array.isArray(parseValue) && parseValue.length > 0) {
+      outParse[parseKey] = sortDeep(parseValue);
+      return;
+    }
+    if (isObject(parseValue) && Object.keys(parseValue).length > 0) {
+      outParse[parseKey] = sortDeep(parseValue);
+      return;
+    }
+    if (typeof parseValue === 'boolean') {
+      outParse[parseKey] = parseValue;
+      return;
+    }
+    if (typeof parseValue === 'string' && parseValue.trim()) {
+      outParse[parseKey] = parseValue;
+    }
+  };
+  const parseTemplateToken = outParse.template;
+  if (['number_with_unit', 'integer_with_unit', 'list_of_numbers_with_unit', 'list_numbers_or_ranges_with_unit', 'range_number', 'latency_list_modes_ms'].includes(parseTemplateToken)) {
+    maybeCopy('unit');
+    maybeCopy('unit_accepts');
+    maybeCopy('unit_conversions');
+    maybeCopy('strict_unit_required');
+  }
+  if (['list_of_tokens_delimited', 'list_of_numbers_with_unit', 'list_numbers_or_ranges_with_unit', 'latency_list_modes_ms'].includes(parseTemplateToken)) {
+    maybeCopy('delimiters');
+  }
+  if (parseTemplateToken === 'list_numbers_or_ranges_with_unit') {
+    maybeCopy('range_separators');
+  }
+  if (parseTemplateToken === 'component_reference') {
+    maybeCopy('component_type');
+  }
+  maybeCopy('token_map');
+  maybeCopy('allow_ranges');
+  maybeCopy('allow_unitless');
+  maybeCopy('accepted_formats');
+  maybeCopy('mode_aliases');
+  maybeCopy('accept_bare_numbers_as_mode');
+
+  // Build output with alphabetically-sorted keys matching canonical format
   const out = {
-    key,
+    ai_assist: nestedAiAssist,
+    aliases: orderedUniqueStrings(toArray(rule.aliases || [])),
+    availability,
     canonical_key: (() => {
       const candidate = normalizeFieldKey(rule.canonical_key || '');
       return candidate && candidate !== key ? candidate : null;
     })(),
-    aliases: orderedUniqueStrings(toArray(rule.aliases || [])),
-    ui: uiOut,
+    component: Object.keys(nestedComponent).length ? nestedComponent : null,
+    contract: outContract,
+    data_type: nestedContract.type || 'string',
+    difficulty,
+    display_name: normalizeText(uiOut.label || titleFromKey(key)),
+    effort,
+    enum: nestedEnum,
+    evidence: nestedEvidence,
+    evidence_required: nestedEvidence.required !== false,
+    excel_hints: excelHints,
+    field_key: key,
+    group: normalizeFieldKey(uiOut.group || inferGroup(key)),
+    key,
+    output_shape: nestedContract.shape || 'scalar',
+    parse: outParse,
     priority: {
       required_level: requiredLevel,
       availability,
@@ -3665,97 +4026,16 @@ function buildStudioFieldRule({
       publish_gate: publishGate,
       block_publish_when_unk: blockPublishWhenUnk
     },
-    contract: (() => {
-      const outContract = {
-        unknown_token: nestedContract.unknown_token,
-        unknown_reason_required: nestedContract.unknown_reason_required !== false,
-        type: nestedContract.type,
-        shape: nestedContract.shape
-      };
-      if (normalizeText(nestedContract.unit)) {
-        outContract.unit = normalizeText(nestedContract.unit);
-      }
-      if (normalizeText(nestedContract.value_form)) {
-        outContract.value_form = normalizeText(nestedContract.value_form);
-      }
-      if (isObject(nestedContract.rounding) && Object.keys(nestedContract.rounding).length > 0) {
-        outContract.rounding = sortDeep(nestedContract.rounding);
-      }
-      if (isObject(nestedContract.range) && Object.keys(nestedContract.range).length > 0) {
-        outContract.range = sortDeep(nestedContract.range);
-      }
-      if (nestedContract.shape === 'list') {
-        outContract.list_rules = sortDeep(
-          isObject(nestedContract.list_rules) && Object.keys(nestedContract.list_rules).length > 0
-            ? nestedContract.list_rules
-            : { dedupe: true, sort: 'none', min_items: 0, max_items: 100 }
-        );
-      }
-      if ((nestedContract.shape === 'object' || nestedContract.type === 'object') && isObject(nestedContract.object_schema) && Object.keys(nestedContract.object_schema).length > 0) {
-        outContract.object_schema = sortDeep(nestedContract.object_schema);
-      }
-      if (Array.isArray(nestedContract.item_union) && nestedContract.item_union.length > 0) {
-        outContract.item_union = sortDeep(nestedContract.item_union);
-      }
-      return outContract;
-    })(),
-    parse: (() => {
-      const outParse = {
-        template: canonicalParseTemplate(nestedParse.template || parseTemplate || '')
-      };
-      const maybeCopy = (parseKey) => {
-        const parseValue = nestedParse[parseKey];
-        if (Array.isArray(parseValue) && parseValue.length > 0) {
-          outParse[parseKey] = sortDeep(parseValue);
-          return;
-        }
-        if (isObject(parseValue) && Object.keys(parseValue).length > 0) {
-          outParse[parseKey] = sortDeep(parseValue);
-          return;
-        }
-        if (typeof parseValue === 'boolean') {
-          outParse[parseKey] = parseValue;
-          return;
-        }
-        if (typeof parseValue === 'string' && parseValue.trim()) {
-          outParse[parseKey] = parseValue;
-        }
-      };
-      const parseTemplateToken = outParse.template;
-      if (['number_with_unit', 'integer_with_unit', 'list_of_numbers_with_unit', 'list_numbers_or_ranges_with_unit', 'range_number', 'latency_list_modes_ms'].includes(parseTemplateToken)) {
-        maybeCopy('unit');
-        maybeCopy('unit_accepts');
-        maybeCopy('unit_conversions');
-        maybeCopy('strict_unit_required');
-      }
-      if (['list_of_tokens_delimited', 'list_of_numbers_with_unit', 'list_numbers_or_ranges_with_unit', 'latency_list_modes_ms'].includes(parseTemplateToken)) {
-        maybeCopy('delimiters');
-      }
-      if (parseTemplateToken === 'list_numbers_or_ranges_with_unit') {
-        maybeCopy('range_separators');
-      }
-      if (parseTemplateToken === 'component_reference') {
-        maybeCopy('component_type');
-      }
-      maybeCopy('token_map');
-      maybeCopy('allow_ranges');
-      maybeCopy('allow_unitless');
-      maybeCopy('accepted_formats');
-      maybeCopy('mode_aliases');
-      maybeCopy('accept_bare_numbers_as_mode');
-      return outParse;
-    })(),
-    enum: nestedEnum,
-    component: Object.keys(nestedComponent).length ? nestedComponent : null,
-    evidence: nestedEvidence,
-    excel_hints: excelHints,
-    value_form: canonicalValueForm,
-    search_hints: searchHints
+    required_level: requiredLevel,
+    search_hints: searchHints,
+    ui: uiOut,
+    unknown_reason_default: normalizeText(rule.unknown_reason_default || '') || 'not_found_after_search',
+    value_form: canonicalValueForm
   };
   if (isObject(rule.selection_policy) && Object.keys(rule.selection_policy).length > 0) {
     out.selection_policy = sortDeep(rule.selection_policy);
   }
-  return out;
+  return sortDeep(out);
 }
 
 function buildCompileValidation({ fields, knownValues, enumLists, componentDb }) {
@@ -4060,6 +4340,60 @@ function buildCompileValidation({ fields, knownValues, enumLists, componentDb })
       warnings.push(`field ${fieldKey}: enum_policy=open but parse_rules is empty`);
     }
   }
+  // ── Component DB data quality validation ─────────────────────────
+  for (const [componentType, items] of Object.entries(componentDb || {})) {
+    if (!Array.isArray(items) || items.length === 0) continue;
+
+    // Collect all property keys across entities
+    const allPropKeys = new Set();
+    for (const entity of items) {
+      if (isObject(entity.properties)) {
+        for (const k of Object.keys(entity.properties)) allPropKeys.add(k);
+      }
+    }
+
+    // Check completeness: warn if entities are missing properties that others have
+    for (const entity of items) {
+      const entityProps = isObject(entity.properties) ? entity.properties : {};
+      const missing = [];
+      for (const pk of allPropKeys) {
+        const val = entityProps[pk];
+        if (val === undefined || val === null || val === '') missing.push(pk);
+      }
+      if (missing.length > 0 && missing.length < allPropKeys.size) {
+        warnings.push(`component_db.${componentType}: "${entity.name || '?'}" missing properties: ${missing.join(', ')}`);
+      }
+    }
+
+    // Check for Excel serial dates (5-digit numbers) in date-like properties
+    const dateProps = [...allPropKeys].filter(k => /date|year|release|launch/i.test(k));
+    for (const entity of items) {
+      const entityProps = isObject(entity.properties) ? entity.properties : {};
+      for (const dp of dateProps) {
+        const val = entityProps[dp];
+        if (val !== undefined && val !== null && val !== '') {
+          const s = String(val).trim();
+          // Detect Excel serial dates: 5-digit numbers between 10000 and 60000
+          if (/^\d{5}$/.test(s)) {
+            const num = Number(s);
+            if (num >= 10000 && num <= 60000) {
+              warnings.push(`component_db.${componentType}: "${entity.name || '?'}" property "${dp}" looks like an Excel serial date (${s}) — convert to ISO date`);
+            }
+          }
+        }
+      }
+    }
+
+    // Check for entities with no properties at all
+    for (const entity of items) {
+      if (!isObject(entity.properties) || Object.keys(entity.properties).length === 0) {
+        if (allPropKeys.size > 0) {
+          warnings.push(`component_db.${componentType}: "${entity.name || '?'}" has no properties (other entities have ${allPropKeys.size})`);
+        }
+      }
+    }
+  }
+
   return {
     errors,
     warnings
@@ -4075,7 +4409,7 @@ async function writeCanonicalFieldRulesPair({
   generatedRoot,
   runtimePayload
 }) {
-  const canonical = JSON.stringify(runtimePayload, null, 2);
+  const canonical = JSON.stringify(runtimePayload, null, 2) + '\n';
   const canonicalBuffer = Buffer.from(canonical, 'utf8');
   const canonicalHash = hashBuffer(canonicalBuffer);
   const canonicalBytes = canonicalBuffer.length;
@@ -4240,6 +4574,153 @@ export async function saveWorkbookMap({
     map_hash: hashJson(normalized),
     workbook_map: normalized,
     version_snapshot: snapshot
+  };
+}
+
+export async function extractWorkbookContext({ workbookPath, workbookMap, category = '' }) {
+  const resolvedWorkbook = path.resolve(String(workbookPath || '').trim());
+  if (!resolvedWorkbook || !(await fileExists(resolvedWorkbook))) {
+    throw new Error(`workbook_not_found:${resolvedWorkbook}`);
+  }
+  const map = normalizeWorkbookMap(workbookMap || {});
+
+  // Open workbook (same pattern as compileCategoryWorkbook)
+  const introspect = await introspectWorkbook({ workbookPath: resolvedWorkbook, previewRows: 0, previewCols: 0 });
+  const workbookBuffer = await fs.readFile(resolvedWorkbook);
+  const entries = readZipEntries(workbookBuffer);
+  const descriptors = loadSheetDescriptors({ workbookBuffer, entries });
+  const sharedStrings = loadSharedStrings({ workbookBuffer, entries });
+  const sheetMap = new Map();
+  for (const descriptor of descriptors) {
+    const sheetLoaded = loadSheetCellMap({
+      workbookBuffer,
+      entries,
+      sheetPath: descriptor.sheetPath,
+      sharedStrings
+    });
+    sheetMap.set(descriptor.name, {
+      name: descriptor.name,
+      cells: sheetLoaded.cells,
+      maxRow: sheetLoaded.maxRow,
+      maxCol: sheetLoaded.maxCol
+    });
+  }
+  const workbook = {
+    sheetMap,
+    namedRanges: Object.fromEntries(
+      toArray(introspect.named_ranges)
+        .filter((row) => isObject(row) && normalizeText(row.name))
+        .map((row) => [
+          normalizeText(row.name),
+          {
+            sheet: normalizeText(row.sheet),
+            startColumn: normalizeText(row.start_column || row.startColumn).toUpperCase(),
+            endColumn: normalizeText(row.end_column || row.endColumn).toUpperCase(),
+            startRow: asInt(row.row_start || row.startRow, 0),
+            endRow: asInt(row.row_end || row.endRow, 0)
+          }
+        ])
+    )
+  };
+
+  // Pull key rows + add group column
+  const extractedKeyRows = pullKeyRowsFromMap(workbook, map);
+  const keyList = map.key_list || {};
+  const keySheet = sheetByName(workbook, keyList.sheet);
+  const keyColIndex = colToIndex(keyList.column || 'B');
+  const groupColLabel = keyColIndex && keyColIndex > 1 ? indexToCol(keyColIndex - 1) : '';
+  let lastGroup = '';
+  const keys = extractedKeyRows.map((row) => {
+    let group = '';
+    if (groupColLabel && keySheet) {
+      const cellValue = normalizeText(getCell(keySheet, groupColLabel, row.row));
+      if (cellValue) {
+        lastGroup = cellValue;
+      }
+      group = lastGroup;
+    }
+    return { row: row.row, group, key: row.key, label: row.label };
+  });
+
+  // Pull product columns
+  let samples = { byField: {}, columns: [] };
+  if (map.product_table?.sheet) {
+    if (map.product_table.layout === 'rows') {
+      samples = pullRowTableSamples(workbook, map, extractedKeyRows);
+    } else {
+      samples = pullMatrixSamples(workbook, map, extractedKeyRows);
+    }
+  }
+
+  // Pull enum lists + component dbs
+  const enums = pullEnumLists(workbook, map);
+  // Merge manual_enum_values into pulled enum lists
+  const manualEnumValues1 = isObject(map.manual_enum_values) ? map.manual_enum_values : {};
+  for (const [field, values] of Object.entries(manualEnumValues1)) {
+    const nf = normalizeFieldKey(field);
+    if (!nf) continue;
+    const existing = toArray(enums[nf]);
+    const manual = toArray(values).map((v) => String(v).trim()).filter(Boolean);
+    enums[nf] = orderedUniqueStrings([...existing, ...manual]);
+  }
+  const componentPull = pullComponentDbs(workbook, map);
+  const componentDb = componentPull.componentDb || {};
+
+  // Build component summary with aliases and source config
+  const componentSourcesRawForSummary = toArray(map.component_sources).length > 0 ? toArray(map.component_sources) : toArray(map.component_sheets);
+  const componentSummary = {};
+  for (const [type, items] of Object.entries(componentDb)) {
+    const arr = toArray(items);
+    const makers = orderedUniqueStrings(arr.map((item) => normalizeText(item.maker || '')).filter(Boolean));
+    // Find source config for this type
+    const sourceConfig = componentSourcesRawForSummary.find((src) =>
+      normalizeFieldKey(src.component_type || src.type || '') === normalizeFieldKey(type)
+    ) || {};
+    const roles = isObject(sourceConfig.roles) ? sourceConfig.roles : {};
+    componentSummary[type] = {
+      count: arr.length,
+      sampleNames: arr.slice(0, 5).map((item) => item.name || ''),
+      sampleAliases: arr.slice(0, 5).map((item) => toArray(item.aliases).slice(0, 3)),
+      makers,
+      sourceSheet: normalizeText(sourceConfig.sheet || ''),
+      nameColumn: normalizeText(roles.primary_identifier || 'A'),
+      makerColumn: normalizeText(roles.maker || ''),
+      aliasColumns: toArray(roles.aliases).map((c) => normalizeText(c)),
+      linkColumns: toArray(roles.links).map((c) => normalizeText(c))
+    };
+  }
+
+  // Map summary
+  const pt = map.product_table || {};
+  const kl = map.key_list || {};
+  const tooltipPath = normalizeText(map.tooltip_source?.path || '');
+  const componentSourcesRaw = toArray(map.component_sources).length > 0 ? toArray(map.component_sources) : toArray(map.component_sheets);
+  const mapSummary = {
+    workbook_path: resolvedWorkbook,
+    product_sheet: normalizeText(pt.sheet || ''),
+    layout: normalizeText(pt.layout || 'matrix'),
+    brand_row: asInt(pt.brand_row, 3),
+    model_row: asInt(pt.model_row, 4),
+    variant_row: asInt(pt.variant_row, 5),
+    id_row: asInt(pt.id_row, 0),
+    identifier_row: asInt(pt.identifier_row, 0),
+    key_sheet: normalizeText(kl.sheet || ''),
+    key_column: normalizeText(kl.column || ''),
+    key_row_start: asInt(kl.row_start, 0),
+    key_row_end: asInt(kl.row_end, 0),
+    value_col_start: normalizeText(pt.value_col_start || ''),
+    tooltip_source: tooltipPath,
+    tooltip_file_count: 0,
+    component_sources_count: componentSourcesRaw.length,
+    enum_lists_count: toArray(map.enum_lists).length
+  };
+
+  return {
+    mapSummary,
+    keys,
+    products: samples.columns || [],
+    enums,
+    componentSummary
   };
 }
 
@@ -4423,6 +4904,15 @@ export async function compileCategoryWorkbook({
     }
   }
   const enumLists = pullEnumLists(workbookForCompile, map);
+  // Merge manual_enum_values into pulled enum lists
+  const manualEnumValues2 = isObject(map.manual_enum_values) ? map.manual_enum_values : {};
+  for (const [field, values] of Object.entries(manualEnumValues2)) {
+    const nf = normalizeFieldKey(field);
+    if (!nf) continue;
+    const existing = toArray(enumLists[nf]);
+    const manual = toArray(values).map((v) => String(v).trim()).filter(Boolean);
+    enumLists[nf] = orderedUniqueStrings([...existing, ...manual]);
+  }
   const componentPull = pullComponentDbs(workbookForCompile, map);
   const componentDb = componentPull.componentDb || {};
   const componentSourceAssertions = toArray(componentPull.sourceAssertions);
@@ -4883,6 +5373,25 @@ export async function compileCategoryWorkbook({
       canonicalFields[fieldKey] = fieldsStudio[fieldKey];
     }
   }
+
+  // Sort canonicalFields alphabetically by key
+  const sortedCanonicalFields = {};
+  for (const k of stableSortStrings(Object.keys(canonicalFields))) {
+    sortedCanonicalFields[k] = canonicalFields[k];
+  }
+  Object.keys(canonicalFields).forEach(k => delete canonicalFields[k]);
+  Object.assign(canonicalFields, sortedCanonicalFields);
+
+  // Strip orphan properties from compiled output.
+  // These are used internally during compilation but never read by runtime code.
+  const orphanKeys = ['parse_rules', 'value_form', 'round', 'canonical_key'];
+  for (const rule of Object.values(canonicalFields)) {
+    if (!isObject(rule)) continue;
+    for (const orphan of orphanKeys) {
+      delete rule[orphan];
+    }
+  }
+
   const identityKeys = stableSortStrings(
     Object.entries(canonicalFields)
       .filter(([, rule]) => normalizeToken(rule?.priority?.required_level) === 'identity')
@@ -4953,10 +5462,13 @@ export async function compileCategoryWorkbook({
     : buildParseTemplateCatalog();
 
   const fieldRulesCanonical = {
-    version: normalizeText(baselineFieldRules?.version || '') || `field_rules_${normalizeFieldKey(category) || category}_compiled_v1`,
-    generated_at: compileTimestamp,
     category,
-    source_workbook: normalizeText(baselineFieldRules?.source_workbook || '') || path.basename(resolvedWorkbook),
+    publish_gate: normalizeToken(baselineFieldRules?.publish_gate || '') || 'required_complete',
+    component_db_sources: sortDeep(componentDbSources),
+    enum_buckets: sortDeep(isObject(baselineFieldRules?.enum_buckets) ? baselineFieldRules.enum_buckets : enumBuckets),
+    field_count: Object.keys(canonicalFields).length,
+    fields: canonicalFields,
+    generated_at: compileTimestamp,
     key_range: normalizeText(baselineFieldRules?.key_range || '') || keyRange,
     notes: Array.isArray(baselineFieldRules?.notes)
       ? baselineFieldRules.notes
@@ -4964,11 +5476,10 @@ export async function compileCategoryWorkbook({
         'Generated by Field Rules Studio compiler.',
         'Canonical runtime contract used by ingestion and extraction.'
       ],
-    workbook_tabs: isObject(baselineFieldRules?.workbook_tabs) ? baselineFieldRules.workbook_tabs : workbookTabs,
-    enum_buckets: isObject(baselineFieldRules?.enum_buckets) ? baselineFieldRules.enum_buckets : enumBuckets,
-    component_db_sources: componentDbSources,
-    parse_templates: parseTemplates,
-    fields: canonicalFields
+    parse_templates: sortDeep(parseTemplates),
+    source_workbook: normalizeText(baselineFieldRules?.source_workbook || '') || path.basename(resolvedWorkbook),
+    version: normalizeText(baselineFieldRules?.version || '') || `field_rules_${normalizeFieldKey(category) || category}_compiled_v1`,
+    workbook_tabs: sortDeep(isObject(baselineFieldRules?.workbook_tabs) ? baselineFieldRules.workbook_tabs : workbookTabs)
   };
 
   const fieldRulesFull = sortDeep({
@@ -5191,7 +5702,20 @@ export async function compileCategoryWorkbook({
   await fs.rm(path.join(generatedRoot, 'schema.json'), { force: true });
   await fs.rm(path.join(generatedRoot, 'required_fields.json'), { force: true });
   if (Object.keys(keyMigrations).length > 0) {
-    await writeJsonStable(path.join(generatedRoot, 'key_migrations.json'), keyMigrations);
+    const keyMigrationsEnvelope = {
+      bump: 'patch',
+      key_map: sortDeep(keyMigrations),
+      migrations: Object.entries(keyMigrations).map(([from, to]) => ({
+        from,
+        reason: 'auto-generated from key map',
+        to,
+        type: 'rename'
+      })),
+      previous_version: '1.0.0',
+      summary: { added_count: 0, changed_count: 0, removed_count: 0 },
+      version: '1.0.0'
+    };
+    await writeJsonStable(path.join(generatedRoot, 'key_migrations.json'), keyMigrationsEnvelope);
   } else {
     await fs.rm(path.join(generatedRoot, 'key_migrations.json'), { force: true });
   }
@@ -5206,7 +5730,41 @@ export async function compileCategoryWorkbook({
     mcu: 'mcus',
     material: 'materials'
   };
+  // Merge component overrides from _overrides/components/ into compiled output
+  const componentOverrideDir = path.join(categoryRoot, '_overrides', 'components');
+  const componentOverrides = {};
+  try {
+    const overrideEntries = await fs.readdir(componentOverrideDir, { withFileTypes: true });
+    for (const entry of overrideEntries) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+      try {
+        const ovr = JSON.parse(await fs.readFile(path.join(componentOverrideDir, entry.name), 'utf8'));
+        if (ovr?.componentType && ovr?.name && isObject(ovr?.properties)) {
+          const typeKey = normalizeToken(ovr.componentType);
+          if (!componentOverrides[typeKey]) componentOverrides[typeKey] = {};
+          componentOverrides[typeKey][normalizeToken(ovr.name)] = ovr.properties;
+        }
+      } catch { /* skip corrupt override files */ }
+    }
+  } catch (err) {
+    if (err?.code !== 'ENOENT') throw err;
+  }
   for (const [componentType, rows] of Object.entries(componentDb)) {
+    // Apply overrides to matching entities
+    const typeOverrides = componentOverrides[normalizeToken(componentType)] || {};
+    for (const entity of rows) {
+      const entityKey = normalizeToken(entity.name || '');
+      const ovr = typeOverrides[entityKey];
+      if (ovr && isObject(entity.properties)) {
+        for (const [prop, val] of Object.entries(ovr)) {
+          if (val !== undefined && val !== null && val !== '') {
+            entity.properties[prop] = val;
+            if (!entity.__overridden) entity.__overridden = {};
+            entity.__overridden[prop] = true;
+          }
+        }
+      }
+    }
     const payload = {
       version: 1,
       category,

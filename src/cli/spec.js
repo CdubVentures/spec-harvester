@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { loadConfig, loadDotEnvFile } from '../config.js';
+import { loadConfig, loadDotEnvFile, validateConfig } from '../config.js';
 import { createStorage, toPosixKey } from '../s3/storage.js';
 import { parseArgs, asBool } from './args.js';
 import { runProduct } from '../pipeline/runProduct.js';
@@ -92,6 +92,26 @@ import {
   validateGoldenFixtures
 } from '../testing/goldenFiles.js';
 import { generateTypesForCategory } from '../build/generate-types.js';
+import { runQaJudge } from '../review/qaJudge.js';
+import { computeCalibrationReport } from '../calibration/confidenceCalibrator.js';
+import { reconcileOrphans } from '../catalog/reconciler.js';
+import { IndexLabRuntimeBridge } from '../indexlab/runtimeBridge.js';
+import fsNode from 'node:fs/promises';
+import pathNode from 'node:path';
+
+async function openSpecDbForCategory(config, category) {
+  const normalizedCategory = String(category || '').trim();
+  if (!normalizedCategory) return null;
+  try {
+    const { SpecDb } = await import('../db/specDb.js');
+    const dbDir = pathNode.join(config.specDbDir || '.specfactory_tmp', normalizedCategory);
+    await fsNode.mkdir(dbDir, { recursive: true });
+    const dbPath = pathNode.join(dbDir, 'spec.sqlite');
+    return new SpecDb({ dbPath, category: normalizedCategory });
+  } catch {
+    return null;
+  }
+}
 
 function usage() {
   return [
@@ -99,10 +119,11 @@ function usage() {
     '',
     'Commands:',
     '  run-one --s3key <key> [--local] [--dry-run]',
-    '  run-ad-hoc <category> <brand> <model> [<variant>] [--seed-urls <csv>] [--until-complete] [--mode aggressive|balanced] [--max-rounds <n>] [--local]',
-    '  run-ad-hoc --category <category> --brand <brand> --model <model> [--variant <variant>] [--seed-urls <csv>] [--until-complete] [--mode aggressive|balanced] [--max-rounds <n>] [--local]',
+    '  indexlab --category <category> --seed <product_id|s3key|url|title> [--product-id <id>] [--s3key <key>] [--brand <brand>] [--model <model>] [--variant <variant>] [--sku <sku>] [--fields <csv>] [--providers <csv>] [--out <dir>] [--local]',
+    '  run-ad-hoc <category> <brand> <model> [<variant>] [--seed-urls <csv>] [--until-complete] [--mode uber_aggressive|aggressive|balanced] [--max-rounds <n>] [--local]',
+    '  run-ad-hoc --category <category> --brand <brand> --model <model> [--variant <variant>] [--seed-urls <csv>] [--until-complete] [--mode uber_aggressive|aggressive|balanced] [--max-rounds <n>] [--local]',
     '  run-batch --category <category> [--brand <brand>] [--strategy <explore|exploit|mixed|bandit>] [--local] [--dry-run]',
-    '  run-until-complete --s3key <key> [--max-rounds <n>] [--mode aggressive|balanced] [--local]',
+    '  run-until-complete --s3key <key> [--max-rounds <n>] [--mode uber_aggressive|aggressive|balanced] [--local]',
     '  category-compile --category <category> [--workbook <path>] [--map <path>] [--local]',
     '  compile-rules --category <category> [--workbook <path>] [--map <path>] [--dry-run] [--watch] [--watch-seconds <n>] [--max-events <n>] [--local]',
     '  compile-rules --all [--dry-run] [--local]',
@@ -116,6 +137,7 @@ function usage() {
     '  create-golden --category <category> --product-id <id> [--fields-json <json>] [--identity-json <json>] [--unknowns-json <json>] [--notes <text>] [--local]',
     '  create-golden --category <category> --from-excel [--count <n>] [--product-id <id>] [--local]',
     '  test-golden --category <category> [--local]',
+    '  calibrate-confidence --category <category> [--product-id <id>] [--local]',
     '  accuracy-report --category <category> [--format md|json] [--max-cases <n>] [--local]',
     '  accuracy-benchmark --category <category> [--period weekly|daily] [--max-cases <n>] [--golden-files] [--local]',
     '  accuracy-trend --category <category> --field <field> [--period <n>d|week|month] [--local]',
@@ -133,7 +155,7 @@ function usage() {
     '  discover --category <category> [--brand <brand>] [--local]',
     '  ingest-csv --category <category> --path <csv> [--imports-root <path>] [--local]',
     '  watch-imports [--imports-root <path>] [--category <category>|--all] [--once] [--local]',
-    '  daemon [--imports-root <path>] [--category <category>|--all] [--mode aggressive|balanced] [--once] [--local]',
+    '  daemon [--imports-root <path>] [--category <category>|--all] [--mode uber_aggressive|aggressive|balanced] [--once] [--local]',
     '  queue add --category <category> --brand <brand> --model <model> [--variant <variant>] [--priority <1-5>] [--local]',
     '  queue add --category <category> --product-id <id> [--s3key <key>] [--priority <1-5>] [--local]',
     '  queue add-batch --category <category> --file <csv> [--imports-root <path>] [--local]',
@@ -171,6 +193,9 @@ function usage() {
     '  benchmark-golden --category <category> [--fixture <path>] [--max-cases <n>] [--local]',
     '  rebuild-index --category <category> [--local]',
     '  intel-graph-api --category <category> [--host <host>] [--port <port>] [--local]',
+    '  product-reconcile --category <category> [--dry-run] [--local]',
+    '  seed-db --category <category> [--local]',
+    '  migrate-to-sqlite --category <category> [--phase <1-9>] [--local]',
     '',
     'Global options:',
     '  --env <path>   Path to dotenv file (default: .env)',
@@ -417,6 +442,15 @@ function parseCsvList(value) {
     .filter(Boolean);
 }
 
+function looksHttpUrl(value) {
+  try {
+    const parsed = new URL(String(value || '').trim());
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 function parseJsonArg(name, value, defaultValue) {
   if (value === undefined || value === null || value === '') {
     return defaultValue;
@@ -461,6 +495,130 @@ async function commandRunOne(config, storage, args) {
     runBase: result.exportInfo.runBase,
     latestBase: result.exportInfo.latestBase,
     finalBase: result.finalExport?.final_base || null
+  };
+}
+
+async function commandIndexLab(config, storage, args) {
+  const category = String(args.category || 'mouse').trim();
+  const seed = String(args.seed || '').trim();
+  const outRoot = String(args.out || pathNode.join('artifacts', 'indexlab')).trim();
+  const productIdArg = String(args['product-id'] || '').trim();
+  const fields = parseCsvList(args.fields);
+  const providerTokens = parseCsvList(args.providers).map((entry) => entry.toLowerCase());
+
+  const buildInputKey = (pid) => {
+    const normalized = String(pid || '').trim().replace(/\.json$/i, '');
+    if (!normalized) return '';
+    return toPosixKey(config.s3InputPrefix, category, 'products', `${normalized}.json`);
+  };
+
+  let s3Key = String(args.s3key || '').trim();
+  if (!s3Key && productIdArg) {
+    s3Key = buildInputKey(productIdArg);
+  }
+
+  if (!s3Key && seed) {
+    if (seed.endsWith('.json') || seed.includes('/')) {
+      s3Key = seed;
+    } else if (!seed.includes(' ') && !looksHttpUrl(seed)) {
+      s3Key = buildInputKey(seed);
+    }
+  }
+
+  if (!s3Key) {
+    const seedIsUrl = looksHttpUrl(seed);
+    const brand = String(args.brand || 'unknown').trim() || 'unknown';
+    const model = String(args.model || args.sku || '').trim() || 'unknown-model';
+    const variant = String(args.variant || '').trim();
+    const sku = String(args.sku || '').trim();
+    const title = String(args.title || (!seedIsUrl ? seed : '')).trim();
+    const generatedProductId = productIdArg
+      || [category, slug(brand), slug(model), slug(variant), `indexlab-${Date.now()}`]
+        .filter(Boolean)
+        .join('-');
+    const job = {
+      productId: generatedProductId,
+      category,
+      identityLock: {
+        brand,
+        model,
+        variant,
+        sku,
+        title
+      },
+      seedUrls: seedIsUrl ? [seed] : parseCsvList(args['seed-urls'])
+    };
+    if (fields.length > 0) {
+      job.requirements = {
+        requiredFields: fields
+      };
+    }
+    s3Key = buildInputKey(generatedProductId);
+    await storage.writeObject(
+      s3Key,
+      Buffer.from(JSON.stringify(job, null, 2), 'utf8'),
+      { contentType: 'application/json' }
+    );
+  }
+
+  const bridge = new IndexLabRuntimeBridge({
+    outRoot,
+    context: {
+      category,
+      s3Key
+    }
+  });
+  const runConfig = {
+    ...config,
+    onRuntimeEvent: (row) => bridge.onRuntimeEvent(row)
+  };
+  const discoveryEnabledArg = asBool(args['discovery-enabled'], undefined);
+  const searchProviderArg = String(args['search-provider'] || '').trim().toLowerCase();
+  if (providerTokens.length === 1) {
+    runConfig.searchProvider = providerTokens[0];
+  } else if (providerTokens.length > 1) {
+    runConfig.searchProvider = 'dual';
+  }
+  if (searchProviderArg) {
+    runConfig.searchProvider = searchProviderArg;
+  }
+  if (typeof discoveryEnabledArg === 'boolean') {
+    runConfig.discoveryEnabled = discoveryEnabledArg;
+  } else if (String(runConfig.searchProvider || '').trim().toLowerCase() !== 'none') {
+    runConfig.discoveryEnabled = true;
+  }
+
+  const result = await runProduct({ storage, config: runConfig, s3Key });
+  bridge.setContext({
+    category,
+    productId: result.productId,
+    s3Key
+  });
+  await bridge.finalize({
+    status: 'completed',
+    run_id: result.runId,
+    run_base: result.exportInfo?.runBase || '',
+    latest_base: result.exportInfo?.latestBase || ''
+  });
+
+  return {
+    command: 'indexlab',
+    category,
+    productId: result.productId,
+    runId: result.runId,
+    s3Key,
+    validated: result.summary.validated,
+    confidence: result.summary.confidence,
+    completeness_required_percent: result.summary.completeness_required_percent,
+    coverage_overall_percent: result.summary.coverage_overall_percent,
+    runBase: result.exportInfo.runBase,
+    latestBase: result.exportInfo.latestBase,
+    indexlab: {
+      out_root: pathNode.resolve(outRoot),
+      run_dir: pathNode.resolve(outRoot, result.runId),
+      events_path: pathNode.resolve(outRoot, result.runId, 'run_events.ndjson'),
+      run_meta_path: pathNode.resolve(outRoot, result.runId, 'run.json')
+    }
   };
 }
 
@@ -739,6 +897,79 @@ async function commandTestGolden(config, _storage, args) {
   };
 }
 
+async function commandQaJudge(config, storage, args) {
+  const category = String(args.category || '').trim();
+  const productId = String(args['product-id'] || args.product || '').trim();
+  if (!category || !productId) {
+    throw new Error('qa-judge requires --category <category> --product-id <id>');
+  }
+  return runQaJudge({
+    storage,
+    config,
+    category,
+    productId
+  });
+}
+
+async function commandCalibrateConfidence(config, storage, args) {
+  const category = String(args.category || '').trim();
+  if (!category) {
+    throw new Error('calibrate-confidence requires --category <category>');
+  }
+  const productId = String(args['product-id'] || '').trim();
+
+  // Collect predictions from latest run summaries
+  const predictions = [];
+  const productIds = [];
+
+  if (productId) {
+    productIds.push(productId);
+  } else {
+    const allKeys = await storage.listInputKeys(category);
+    for (const key of allKeys) {
+      const job = await storage.readJsonOrNull(key);
+      if (job?.productId) productIds.push(job.productId);
+    }
+  }
+
+  for (const pid of productIds) {
+    const latestBase = storage.resolveOutputKey(category, pid, 'latest');
+    const summary = await storage.readJsonOrNull(`${latestBase}/summary.json`);
+    const normalized = await storage.readJsonOrNull(`${latestBase}/normalized.json`);
+    if (!normalized?.fields) continue;
+
+    for (const [field, value] of Object.entries(normalized.fields)) {
+      const token = String(value ?? '').trim().toLowerCase();
+      if (token === 'unk' || token === '') continue;
+      const confidence = Number.parseFloat(
+        String(summary?.field_confidence?.[field] ?? summary?.confidence ?? 0.5)
+      ) || 0.5;
+      predictions.push({ field, value, confidence, product_id: pid });
+    }
+  }
+
+  // Load ground truth from golden files
+  const goldenDir = `fixtures/golden/${category}`;
+  const goldenKeys = await storage.listKeys?.(goldenDir) || [];
+  const groundTruth = {};
+  for (const gk of goldenKeys) {
+    if (!gk.endsWith('.json')) continue;
+    const golden = await storage.readJsonOrNull(gk);
+    if (!golden?.expected_fields) continue;
+    for (const [field, value] of Object.entries(golden.expected_fields)) {
+      if (!groundTruth[field]) groundTruth[field] = value;
+    }
+  }
+
+  const report = computeCalibrationReport({ predictions, groundTruth });
+  return {
+    command: 'calibrate-confidence',
+    category,
+    product_count: productIds.length,
+    ...report
+  };
+}
+
 async function commandAccuracyReport(config, storage, args) {
   const category = String(args.category || '').trim();
   if (!category) {
@@ -1006,6 +1237,21 @@ async function commandDriftReconcile(config, storage, args) {
     command: 'drift-reconcile',
     ...result
   };
+}
+
+async function commandProductReconcile(config, storage, args) {
+  const category = String(args.category || '').trim();
+  if (!category) {
+    throw new Error('product-reconcile requires --category <category>');
+  }
+  const dryRun = asBool(args['dry-run'], true);
+  const result = await reconcileOrphans({
+    storage,
+    category,
+    config,
+    dryRun
+  });
+  return result;
 }
 
 async function commandGenerateTypes(config, _storage, args) {
@@ -1427,13 +1673,20 @@ async function commandReview(config, storage, args) {
   if (action === 'queue') {
     const status = String(args.status || 'needs_review').trim().toLowerCase();
     const limit = Math.max(1, Number.parseInt(String(args.limit || '100'), 10) || 100);
-    const items = await buildReviewQueue({
-      storage,
-      config,
-      category,
-      status,
-      limit
-    });
+    const specDb = await openSpecDbForCategory(config, category);
+    let items;
+    try {
+      items = await buildReviewQueue({
+        storage,
+        config,
+        category,
+        status,
+        limit,
+        specDb
+      });
+    } finally {
+      try { specDb?.close(); } catch { /* no-op */ }
+    }
     return {
       command: 'review',
       action,
@@ -1450,13 +1703,20 @@ async function commandReview(config, storage, args) {
       throw new Error('review product requires --product-id <id>');
     }
     const includeCandidates = !asBool(args['without-candidates'], false) && !asBool(args['selected-only'], false);
-    const payload = await buildProductReviewPayload({
-      storage,
-      config,
-      category,
-      productId,
-      includeCandidates
-    });
+    const specDb = await openSpecDbForCategory(config, category);
+    let payload;
+    try {
+      payload = await buildProductReviewPayload({
+        storage,
+        config,
+        category,
+        productId,
+        includeCandidates,
+        specDb
+      });
+    } finally {
+      try { specDb?.close(); } catch { /* no-op */ }
+    }
     return {
       command: 'review',
       action,
@@ -1551,16 +1811,23 @@ async function commandReview(config, storage, args) {
     if (!productId || !field || !candidateId) {
       throw new Error('review override requires --product-id --field --candidate-id');
     }
-    const result = await setOverrideFromCandidate({
-      storage,
-      config,
-      category,
-      productId,
-      field,
-      candidateId,
-      reason: String(args.reason || '').trim(),
-      reviewer: String(args.reviewer || '').trim()
-    });
+    const specDb = await openSpecDbForCategory(config, category);
+    let result;
+    try {
+      result = await setOverrideFromCandidate({
+        storage,
+        config,
+        category,
+        productId,
+        field,
+        candidateId,
+        reason: String(args.reason || '').trim(),
+        reviewer: String(args.reviewer || '').trim(),
+        specDb
+      });
+    } finally {
+      try { specDb?.close(); } catch { /* no-op */ }
+    }
     return {
       command: 'review',
       action,
@@ -1598,25 +1865,32 @@ async function commandReview(config, storage, args) {
     if (!productId || !field || !value) {
       throw new Error('review manual-override requires --product-id --field --value');
     }
-    const result = await setManualOverride({
-      storage,
-      config,
-      category,
-      productId,
-      field,
-      value,
-      reason: String(args.reason || '').trim(),
-      reviewer: String(args.reviewer || '').trim(),
-      evidence: {
-        url: String(args['evidence-url'] || '').trim(),
-        quote: String(args['evidence-quote'] || '').trim(),
-        quote_span: parseJsonArg('evidence-quote-span', args['evidence-quote-span'], null),
-        snippet_id: String(args['evidence-snippet-id'] || '').trim(),
-        snippet_hash: String(args['evidence-snippet-hash'] || '').trim(),
-        source_id: String(args['evidence-source-id'] || '').trim(),
-        retrieved_at: String(args['evidence-retrieved-at'] || '').trim()
-      }
-    });
+    const specDb = await openSpecDbForCategory(config, category);
+    let result;
+    try {
+      result = await setManualOverride({
+        storage,
+        config,
+        category,
+        productId,
+        field,
+        value,
+        reason: String(args.reason || '').trim(),
+        reviewer: String(args.reviewer || '').trim(),
+        evidence: {
+          url: String(args['evidence-url'] || '').trim(),
+          quote: String(args['evidence-quote'] || '').trim(),
+          quote_span: parseJsonArg('evidence-quote-span', args['evidence-quote-span'], null),
+          snippet_id: String(args['evidence-snippet-id'] || '').trim(),
+          snippet_hash: String(args['evidence-snippet-hash'] || '').trim(),
+          source_id: String(args['evidence-source-id'] || '').trim(),
+          retrieved_at: String(args['evidence-retrieved-at'] || '').trim()
+        },
+        specDb
+      });
+    } finally {
+      try { specDb?.close(); } catch { /* no-op */ }
+    }
     return {
       command: 'review',
       action,
@@ -1630,15 +1904,22 @@ async function commandReview(config, storage, args) {
     if (!productId) {
       throw new Error('review finalize requires --product-id <id>');
     }
-    const result = await finalizeOverrides({
-      storage,
-      config,
-      category,
-      productId,
-      applyOverrides: asBool(args.apply, false),
-      saveAsDraft: asBool(args.draft, false),
-      reviewer: String(args.reviewer || '').trim()
-    });
+    const specDb = await openSpecDbForCategory(config, category);
+    let result;
+    try {
+      result = await finalizeOverrides({
+        storage,
+        config,
+        category,
+        productId,
+        applyOverrides: asBool(args.apply, false),
+        saveAsDraft: asBool(args.draft, false),
+        reviewer: String(args.reviewer || '').trim(),
+        specDb
+      });
+    } finally {
+      try { specDb?.close(); } catch { /* no-op */ }
+    }
     return {
       command: 'review',
       action,
@@ -2145,6 +2426,229 @@ async function commandTestS3() {
   };
 }
 
+async function commandSeedDb(config, _storage, args) {
+  const category = String(args.category || '').trim();
+  if (!category) throw new Error('seed-db requires --category');
+
+  const { loadFieldRules } = await import('../field-rules/loader.js');
+  const { SpecDb } = await import('../db/specDb.js');
+  const { seedSpecDb } = await import('../db/seed.js');
+
+  const fieldRules = await loadFieldRules(category, { config });
+  const dbDir = pathNode.join(config.specDbDir || '.specfactory_tmp', category);
+  await fsNode.mkdir(dbDir, { recursive: true });
+  const dbPath = pathNode.join(dbDir, 'spec.sqlite');
+  const db = new SpecDb({ dbPath, category });
+
+  try {
+    const result = await seedSpecDb({ db, config, category, fieldRules, logger: null });
+    return { command: 'seed-db', category, db_path: dbPath, ...result };
+  } finally {
+    db.close();
+  }
+}
+
+async function commandMigrateToSqlite(config, storage, args) {
+  const category = String(args.category || '').trim();
+  if (!category) throw new Error('migrate-to-sqlite requires --category');
+  const phase = args.phase ? Number.parseInt(String(args.phase), 10) : 0;
+  const specDb = await openSpecDbForCategory(config, category);
+  if (!specDb) throw new Error(`Could not open SpecDb for category: ${category}`);
+
+  const results = {};
+
+  try {
+    // Phase 1: Queue state — verify SQLite has rows (already migrated via dual-write)
+    if (!phase || phase === 1) {
+      const rows = specDb.getAllQueueProducts();
+      results.phase1_queue = { status: 'verified', rows: rows.length };
+    }
+
+    // Phase 2: Billing ledger — import NDJSON files
+    if (!phase || phase === 2) {
+      let imported = 0;
+      const billingPrefix = toPosixKey(config.s3OutputPrefix, '_billing');
+      const keys = await storage.listKeys(billingPrefix);
+      const ledgerKeys = keys.filter((k) => k.endsWith('.jsonl') && k.includes('ledger'));
+      for (const key of ledgerKeys) {
+        const text = await storage.readTextOrNull(key);
+        if (!text) continue;
+        for (const line of text.split(/\r?\n/)) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            const entry = JSON.parse(trimmed);
+            const ts = String(entry.ts || '');
+            specDb.insertBillingEntry({
+              ts,
+              month: ts.slice(0, 7),
+              day: ts.slice(0, 10),
+              provider: entry.provider || 'unknown',
+              model: entry.model || 'unknown',
+              category: entry.category || '',
+              product_id: entry.productId || entry.product_id || '',
+              run_id: entry.runId || entry.run_id || '',
+              round: entry.round || 0,
+              prompt_tokens: entry.prompt_tokens || 0,
+              completion_tokens: entry.completion_tokens || 0,
+              cached_prompt_tokens: entry.cached_prompt_tokens || 0,
+              total_tokens: entry.total_tokens || 0,
+              cost_usd: entry.cost_usd || 0,
+              reason: entry.reason || 'extract',
+              host: entry.host || '',
+              url_count: entry.url_count || 0,
+              evidence_chars: entry.evidence_chars || 0,
+              estimated_usage: entry.estimated_usage ? 1 : 0,
+              meta: JSON.stringify(entry.meta || {})
+            });
+            imported += 1;
+          } catch { /* skip malformed lines */ }
+        }
+      }
+      results.phase2_billing = { status: 'imported', entries: imported, files: ledgerKeys.length };
+    }
+
+    // Phase 3: LLM cache — import cache dir files
+    if (!phase || phase === 3) {
+      let imported = 0;
+      const cacheDir = config.llmExtractionCacheDir || '.specfactory_tmp/llm_cache';
+      try {
+        const files = await fsNode.readdir(cacheDir);
+        for (const file of files) {
+          if (!file.endsWith('.json')) continue;
+          const key = file.replace(/\.json$/, '');
+          try {
+            const raw = await fsNode.readFile(pathNode.join(cacheDir, file), 'utf8');
+            const parsed = JSON.parse(raw);
+            if (parsed.response !== undefined && parsed.timestamp > 0) {
+              const ttl = parsed.ttl || 7 * 24 * 60 * 60 * 1000;
+              if ((Date.now() - parsed.timestamp) <= ttl) {
+                specDb.setLlmCacheEntry(key, JSON.stringify(parsed.response), parsed.timestamp, ttl);
+                imported += 1;
+              }
+            }
+          } catch { /* skip bad files */ }
+        }
+      } catch { /* cache dir may not exist */ }
+      results.phase3_cache = { status: 'imported', entries: imported };
+    }
+
+    // Phase 4: Learning profiles — import profile JSONs
+    if (!phase || phase === 4) {
+      let imported = 0;
+      const learningPrefix = toPosixKey(config.s3OutputPrefix, '_learning', category, 'profiles');
+      const keys = await storage.listKeys(learningPrefix);
+      for (const key of keys) {
+        if (!key.endsWith('.json')) continue;
+        try {
+          const profile = await storage.readJsonOrNull(key);
+          if (!profile) continue;
+          const profileId = profile.profile_id || key.split('/').pop()?.replace(/\.json$/, '') || '';
+          specDb.upsertLearningProfile({
+            profile_id: profileId,
+            category: profile.category || category,
+            brand: profile.brand || '',
+            model: profile.model || '',
+            variant: profile.variant || '',
+            runs_total: profile.runs_total || 0,
+            validated_runs: profile.validated_runs || 0,
+            validated: profile.validated ? 1 : 0,
+            unknown_field_rate: profile.unknown_field_rate || 0,
+            unknown_field_rate_avg: profile.unknown_field_rate_avg || 0,
+            parser_health_avg: profile.parser_health_avg || 0,
+            preferred_urls: JSON.stringify(profile.preferred_urls || []),
+            feedback_urls: JSON.stringify(profile.feedback_urls || []),
+            uncertain_fields: JSON.stringify(profile.uncertain_fields || []),
+            host_stats: JSON.stringify(profile.host_stats || []),
+            critical_fields_below: JSON.stringify(profile.critical_fields_below_pass_target || []),
+            last_run: JSON.stringify(profile.last_run || {}),
+            parser_health: JSON.stringify(profile.parser_health || {}),
+            updated_at: profile.updated_at || new Date().toISOString()
+          });
+          imported += 1;
+        } catch { /* skip bad files */ }
+      }
+      results.phase4_learning = { status: 'imported', profiles: imported };
+    }
+
+    // Phase 5: Category brain — import 8 artifact files
+    if (!phase || phase === 5) {
+      let imported = 0;
+      const artifactNames = [
+        'field_lexicon', 'constraints', 'field_yield', 'identity_grammar',
+        'query_templates', 'source_promotions', 'stats', 'field_availability'
+      ];
+      for (const name of artifactNames) {
+        const key = toPosixKey(config.s3OutputPrefix, '_learning', category, `${name}.json`);
+        try {
+          const data = await storage.readJsonOrNull(key);
+          if (data) {
+            specDb.upsertCategoryBrainArtifact(category, name, data);
+            imported += 1;
+          }
+        } catch { /* skip */ }
+      }
+      results.phase5_brain = { status: 'imported', artifacts: imported };
+    }
+
+    // Phase 6: Source intel — decompose domain_stats.json
+    if (!phase || phase === 6) {
+      const intelKey = toPosixKey(config.s3OutputPrefix, '_source_intel', category, 'domain_stats.json');
+      const data = await storage.readJsonOrNull(intelKey);
+      if (data && data.domains) {
+        specDb.persistSourceIntelFull(category, data.domains);
+        results.phase6_intel = { status: 'imported', domains: Object.keys(data.domains).length };
+      } else {
+        results.phase6_intel = { status: 'skipped', reason: 'no domain_stats.json found' };
+      }
+    }
+
+    // Phase 7: Source corpus — import corpus.json
+    if (!phase || phase === 7) {
+      const corpusKey = toPosixKey(config.s3OutputPrefix, '_source_intel', category, 'corpus.json');
+      const data = await storage.readJsonOrNull(corpusKey);
+      if (data && Array.isArray(data.documents || data)) {
+        const docs = data.documents || data;
+        specDb.upsertSourceCorpusBatch(docs.map((doc) => ({
+          url: doc.url || '',
+          category,
+          host: doc.host || '',
+          root_domain: doc.rootDomain || doc.root_domain || '',
+          path: doc.path || '',
+          title: doc.title || '',
+          snippet: doc.snippet || '',
+          tier: doc.tier ?? 99,
+          role: doc.role || '',
+          fields: JSON.stringify(doc.fields || []),
+          methods: JSON.stringify(doc.methods || []),
+          identity_match: doc.identity_match ? 1 : 0,
+          first_seen_at: doc.first_seen_at || null,
+          last_seen_at: doc.last_seen_at || null
+        })));
+        results.phase7_corpus = { status: 'imported', documents: docs.length };
+      } else {
+        results.phase7_corpus = { status: 'skipped', reason: 'no corpus.json found' };
+      }
+    }
+
+    // Phase 8: Frontier — already has its own migration
+    if (!phase || phase === 8) {
+      results.phase8_frontier = { status: 'skipped', note: 'frontier has built-in migration' };
+    }
+
+    const counts = specDb.counts();
+    return {
+      command: 'migrate-to-sqlite',
+      category,
+      phase: phase || 'all',
+      results,
+      table_counts: counts
+    };
+  } finally {
+    specDb.close();
+  }
+}
+
 async function main() {
   const [command, ...rest] = process.argv.slice(2);
   if (!command) {
@@ -2156,11 +2660,24 @@ async function main() {
   const args = parseArgs(rest);
   loadDotEnvFile(args.env || '.env');
   const config = buildConfig(args);
+  const validation = validateConfig(config);
+  for (const warning of validation.warnings) {
+    process.stderr.write(`[config-warning] ${warning.code}: ${warning.message}\n`);
+  }
+  if (!validation.valid) {
+    for (const error of validation.errors) {
+      process.stderr.write(`[config-error] ${error.code}: ${error.message}\n`);
+    }
+    process.exitCode = 1;
+    return;
+  }
   const storage = createStorage(config);
 
   let output;
   if (command === 'run-one') {
     output = await commandRunOne(config, storage, args);
+  } else if (command === 'indexlab') {
+    output = await commandIndexLab(config, storage, args);
   } else if (command === 'run-ad-hoc') {
     output = await commandRunAdHoc(config, storage, args);
   } else if (command === 'run-until-complete') {
@@ -2187,6 +2704,10 @@ async function main() {
     output = await commandCreateGolden(config, storage, args);
   } else if (command === 'test-golden') {
     output = await commandTestGolden(config, storage, args);
+  } else if (command === 'qa-judge') {
+    output = await commandQaJudge(config, storage, args);
+  } else if (command === 'calibrate-confidence') {
+    output = await commandCalibrateConfidence(config, storage, args);
   } else if (command === 'accuracy-report') {
     output = await commandAccuracyReport(config, storage, args);
   } else if (command === 'accuracy-benchmark') {
@@ -2265,6 +2786,12 @@ async function main() {
     output = await commandBenchmark(config, storage, args, 'benchmark-golden');
   } else if (command === 'intel-graph-api') {
     output = await commandIntelGraphApi(config, storage, args);
+  } else if (command === 'product-reconcile') {
+    output = await commandProductReconcile(config, storage, args);
+  } else if (command === 'seed-db') {
+    output = await commandSeedDb(config, storage, args);
+  } else if (command === 'migrate-to-sqlite') {
+    output = await commandMigrateToSqlite(config, storage, args);
   } else {
     throw new Error(`Unknown command: ${command}`);
   }

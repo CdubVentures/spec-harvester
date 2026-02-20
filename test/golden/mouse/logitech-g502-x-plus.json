@@ -1,0 +1,18 @@
+{
+  "product_id": "logitech-g502-x-plus",
+  "category": "mouse",
+  "description": "Logitech G502 X PLUS — feature-rich wireless gaming mouse with LIGHTFORCE switches",
+  "expected_fields": {
+    "weight": "106",
+    "sensor": "HERO 25K",
+    "max_dpi": "25600",
+    "polling_rate": "1000",
+    "connectivity": "wireless",
+    "battery_life": "130",
+    "switches": "LIGHTFORCE Hybrid",
+    "shape": "ergonomic",
+    "buttons": "13"
+  },
+  "required_evidence_fields": ["weight", "sensor", "max_dpi", "polling_rate"],
+  "notes": "Golden reference for regression testing. Values sourced from manufacturer specs and review sites."
+}

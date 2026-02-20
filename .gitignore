@@ -17,3 +17,28 @@ __pycache__/
 # Excel temp/lock files
 ~$*.xls*
 **/~$*.xls*
+
+# Local runtime/cache data
+.specfactory_tmp/
+artifacts/
+
+# Local temporary scratch files
+.tmp-*
+_tmp_*
+*.tmp
+
+# Local desktop/build outputs
+desktop.ini
+build/
+dist/
+gui-dist/
+tools/dist/
+
+# Generated discovery/candidate dumps (local run artifacts)
+fixtures/s3/specs/inputs/_discovery/
+fixtures/s3/specs/inputs/_sources/candidates/
+fixtures/s3/specs/inputs/_test_*/
+
+# Local helper staging/test data
+helper_files/_test_*/
+helper_files/_global/

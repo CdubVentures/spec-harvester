@@ -268,3 +268,78 @@ test('resolveHelperProductContext resolves active row by variant match', async (
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
+
+test('syncJobsFromActiveFiltering enforces identity gate against catalog conflicts', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-helper-gate-'));
+  const helperRoot = path.join(tempRoot, 'helper_files');
+  const categoryDir = path.join(helperRoot, 'mouse');
+  const controlDir = path.join(categoryDir, '_control_plane');
+  await fs.mkdir(controlDir, { recursive: true });
+
+  await fs.writeFile(
+    path.join(categoryDir, 'activeFiltering.json'),
+    JSON.stringify([
+      {
+        brand: 'Acer',
+        model: 'Cestus 310',
+        variant: '',
+        url: 'https://example.com/cestus-310'
+      },
+      {
+        brand: 'Acer',
+        model: 'Cestus 310',
+        variant: '310',
+        url: 'https://example.com/cestus-310-v2'
+      }
+    ], null, 2),
+    'utf8'
+  );
+  await fs.writeFile(
+    path.join(controlDir, 'product_catalog.json'),
+    JSON.stringify({
+      _version: 1,
+      products: {
+        'mouse-acer-cestus-310': {
+          brand: 'Acer',
+          model: 'Cestus 310',
+          variant: ''
+        }
+      }
+    }, null, 2),
+    'utf8'
+  );
+
+  const config = {
+    localMode: true,
+    localInputRoot: path.join(tempRoot, 'fixtures'),
+    localOutputRoot: path.join(tempRoot, 'out'),
+    s3InputPrefix: 'specs/inputs',
+    s3OutputPrefix: 'specs/outputs',
+    helperFilesEnabled: true,
+    helperAutoSeedTargets: true,
+    helperFilesRoot: helperRoot,
+    helperActiveSyncLimit: 0
+  };
+  const storage = createStorage(config);
+
+  try {
+    const sync = await syncJobsFromActiveFiltering({
+      storage,
+      config,
+      category: 'mouse',
+      categoryConfig: mouseCategoryConfig()
+    });
+    assert.equal(sync.created, 1);
+    assert.equal(sync.skipped_identity_gate, 1);
+    assert.equal(
+      await storage.objectExists('specs/inputs/mouse/products/mouse-acer-cestus-310.json'),
+      true
+    );
+    assert.equal(
+      await storage.objectExists('specs/inputs/mouse/products/mouse-acer-cestus-310-310.json'),
+      false
+    );
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});

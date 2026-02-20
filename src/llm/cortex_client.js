@@ -179,7 +179,7 @@ export class CortexClient {
   }
 
   async _executeSyncTask(task) {
-    const baseUrl = normalizeBaseUrl(this.config.cortexBaseUrl, 'http://localhost:8000/v1');
+    const baseUrl = normalizeBaseUrl(this.config.cortexBaseUrl, 'http://localhost:5001/v1');
     const timeoutMs = Math.max(3_000, toInt(this.config.cortexSyncTimeoutMs, 60_000));
     const response = await this.fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',

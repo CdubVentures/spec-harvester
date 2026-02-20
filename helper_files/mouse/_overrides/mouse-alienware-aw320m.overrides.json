@@ -1,0 +1,127 @@
+{
+  "category": "mouse",
+  "created_at": "2026-02-16T07:42:46.659Z",
+  "overrides": {
+    "bluetooth": {
+      "candidate_id": "manual_snp_bluetooth_mlp20tq1",
+      "candidate_index": null,
+      "field": "bluetooth",
+      "overridden_at": "2026-02-16T10:51:31.320Z",
+      "overridden_by": null,
+      "override_provenance": {
+        "quote": "Manually set to \"10\" via GUI",
+        "quote_span": null,
+        "retrieved_at": "2026-02-16T10:51:31.318Z",
+        "snippet_hash": null,
+        "snippet_id": null,
+        "source_id": null,
+        "url": "gui://manual-entry"
+      },
+      "override_reason": null,
+      "override_source": "manual_entry",
+      "override_value": "10",
+      "set_at": "2026-02-16T10:51:31.320Z",
+      "source": {
+        "evidence_key": "gui://manual-entry",
+        "host": "manual-override.local",
+        "method": "manual_override",
+        "source_id": null,
+        "tier": 1
+      },
+      "validated": null,
+      "value": "10"
+    },
+    "colors": {
+      "candidate_id": "manual_snp_colors_mlova3k4",
+      "candidate_index": null,
+      "field": "colors",
+      "overridden_at": "2026-02-16T07:42:46.659Z",
+      "overridden_by": null,
+      "override_provenance": {
+        "quote": "Manually set to \"1\" via GUI",
+        "quote_span": null,
+        "retrieved_at": "2026-02-16T07:42:46.657Z",
+        "snippet_hash": null,
+        "snippet_id": null,
+        "source_id": null,
+        "url": "gui://manual-entry"
+      },
+      "override_reason": null,
+      "override_source": "manual_entry",
+      "override_value": "1",
+      "set_at": "2026-02-16T07:42:46.659Z",
+      "source": {
+        "evidence_key": "gui://manual-entry",
+        "host": "manual-override.local",
+        "method": "manual_override",
+        "source_id": null,
+        "tier": 1
+      },
+      "validated": null,
+      "value": "1"
+    },
+    "computer_side_connector": {
+      "candidate_id": "manual_snp_computer_side_connector_mlp1vckt",
+      "candidate_index": null,
+      "field": "computer_side_connector",
+      "overridden_at": "2026-02-16T10:47:15.821Z",
+      "overridden_by": null,
+      "override_provenance": {
+        "quote": "Manually set to \"test \" via GUI",
+        "quote_span": null,
+        "retrieved_at": "2026-02-16T10:47:15.817Z",
+        "snippet_hash": null,
+        "snippet_id": null,
+        "source_id": null,
+        "url": "gui://manual-entry"
+      },
+      "override_reason": null,
+      "override_source": "manual_entry",
+      "override_value": "test",
+      "set_at": "2026-02-16T10:47:15.821Z",
+      "source": {
+        "evidence_key": "gui://manual-entry",
+        "host": "manual-override.local",
+        "method": "manual_override",
+        "source_id": null,
+        "tier": 1
+      },
+      "validated": null,
+      "value": "test"
+    },
+    "feet_material": {
+      "candidate_id": "manual_snp_feet_material_mlow0cpt",
+      "candidate_index": null,
+      "field": "feet_material",
+      "overridden_at": "2026-02-16T08:03:11.585Z",
+      "overridden_by": null,
+      "override_provenance": {
+        "quote": "Manually set to \"1\" via GUI",
+        "quote_span": null,
+        "retrieved_at": "2026-02-16T08:03:11.582Z",
+        "snippet_hash": null,
+        "snippet_id": null,
+        "source_id": null,
+        "url": "gui://manual-entry"
+      },
+      "override_reason": null,
+      "override_source": "manual_entry",
+      "override_value": "1",
+      "set_at": "2026-02-16T08:03:11.585Z",
+      "source": {
+        "evidence_key": "gui://manual-entry",
+        "host": "manual-override.local",
+        "method": "manual_override",
+        "source_id": null,
+        "tier": 1
+      },
+      "validated": null,
+      "value": "1"
+    }
+  },
+  "product_id": "mouse-alienware-aw320m",
+  "review_started_at": "2026-02-16T07:42:46.659Z",
+  "review_status": "in_progress",
+  "updated_at": "2026-02-16T10:51:31.320Z",
+  "version": 1
+}

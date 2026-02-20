@@ -1,317 +1,693 @@
 {
   "category": "mouse",
   "component_type": "switch",
-  "generated_at": "2026-02-13T02:18:36.677Z",
+  "generated_at": "2026-02-17T09:49:22.300Z",
   "items": [
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "ROGMicroSwitch"
       ],
       "maker": "asus",
-      "name": "ROG Micro Switch"
+      "name": "ROG Micro Switch",
+      "properties": {
+        "switch_life_span": "70",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "ROGMicroSwitchII"
       ],
       "maker": "asus",
-      "name": "ROG Micro Switch II"
+      "name": "ROG Micro Switch II",
+      "properties": {
+        "switch_life_span": "100",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "LightBlade"
       ],
       "maker": "atk",
-      "name": "Light Blade"
+      "name": "Light Blade",
+      "properties": {
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "OpticalSwitches"
       ],
       "maker": "atk",
-      "name": "Optical Switches"
+      "name": "Optical Switches",
+      "properties": {
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "maker": "atk",
-      "name": "SwiftLight"
+      "name": "SwiftLight",
+      "properties": {
+        "switch_life_span": "150",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "BlueGhostOptical"
       ],
       "maker": "chilkey",
-      "name": "Blue Ghost Optical"
+      "name": "Blue Ghost Optical",
+      "properties": {
+        "switch_life_span": "100",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "FogBlueOptical"
       ],
       "maker": "chilkey",
-      "name": "Fog Blue Optical"
+      "name": "Fog Blue Optical",
+      "properties": {
+        "switch_life_span": "100",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "AdvancedOpticalSwitch"
       ],
       "maker": "fe",
-      "name": "Advanced Optical Switch"
+      "name": "Advanced Optical Switch",
+      "properties": {
+        "click_force": 60,
+        "switch_life_span": "100",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "BlackShellWhiteDot"
       ],
       "maker": "fraly",
-      "name": "Black Shell White Dot"
+      "name": "Black Shell White Dot",
+      "properties": {
+        "switch_life_span": "30",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "MouseSwitches"
       ],
       "maker": "glorious",
-      "name": "Mouse Switches"
+      "name": "Mouse Switches",
+      "properties": {
+        "click_force": 65,
+        "releasing_force": 25,
+        "switch_life_span": "80",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "maker": "hator",
-      "name": "Optical"
+      "name": "Optical",
+      "properties": {
+        "switch_life_span": "100",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "BlackShellPinkDot"
       ],
       "maker": "huano",
-      "name": "Black Shell Pink Dot"
+      "name": "Black Shell Pink Dot",
+      "properties": {
+        "click_force": 80,
+        "switch_life_span": "10",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "BlackShellWhiteDot"
       ],
       "maker": "huano",
-      "name": "Black Shell White Dot"
+      "name": "Black Shell White Dot",
+      "properties": {
+        "click_force": 80,
+        "switch_life_span": "5",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "BlueShellBlueDot"
       ],
       "maker": "huano",
-      "name": "Blue Shell Blue Dot"
+      "name": "Blue Shell Blue Dot",
+      "properties": {
+        "click_force": 65,
+        "releasing_force": 20,
+        "switch_life_span": "50",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "BlueShellPinkDot"
       ],
       "maker": "huano",
-      "name": "Blue Shell Pink Dot"
+      "name": "Blue Shell Pink Dot",
+      "properties": {
+        "click_force": 65,
+        "releasing_force": 20,
+        "switch_life_span": "80",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "BlueShellWhiteDot"
       ],
       "maker": "huano",
-      "name": "Blue Shell White Dot"
+      "name": "Blue Shell White Dot",
+      "properties": {
+        "click_force": 65,
+        "releasing_force": 20,
+        "switch_life_span": "20",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "CrispyPink"
       ],
       "maker": "huano",
-      "name": "Crispy Pink"
+      "name": "Crispy Pink",
+      "properties": {
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "DragonClaw"
       ],
       "maker": "huano",
-      "name": "Dragon Claw"
+      "name": "Dragon Claw",
+      "properties": {
+        "switch_life_span": "80",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "OrangeSPDT"
       ],
       "maker": "huano",
-      "name": "Orange SPDT"
+      "name": "Orange SPDT",
+      "properties": {
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "SilentBrownShellWhiteDot"
       ],
       "maker": "huano",
-      "name": "Silent Brown Shell White Dot"
+      "name": "Silent Brown Shell White Dot",
+      "properties": {
+        "click_force": 50,
+        "switch_life_span": "10",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "SilentBrownShellYellowDot"
       ],
       "maker": "huano",
-      "name": "Silent Brown Shell Yellow Dot"
+      "name": "Silent Brown Shell Yellow Dot",
+      "properties": {
+        "click_force": 50,
+        "switch_life_span": "20",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "TransparentBlueShellBlueDot"
       ],
       "maker": "huano",
-      "name": "Transparent Blue Shell Blue Dot"
+      "name": "Transparent Blue Shell Blue Dot",
+      "properties": {
+        "click_force": 60,
+        "releasing_force": 24.5,
+        "switch_life_span": "50",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "TransparentBlueShellPinkDot"
       ],
       "maker": "huano",
-      "name": "Transparent Blue Shell Pink Dot"
+      "name": "Transparent Blue Shell Pink Dot",
+      "properties": {
+        "click_force": 60,
+        "releasing_force": 24.5,
+        "switch_life_span": "80",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "TransparentBlueShellRedDot"
       ],
       "maker": "huano",
-      "name": "Transparent Blue Shell Red Dot"
+      "name": "Transparent Blue Shell Red Dot",
+      "properties": {
+        "click_force": 60,
+        "releasing_force": 24.5,
+        "switch_life_span": "60",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "TransparentBlueShellYellowDot"
       ],
       "maker": "huano",
-      "name": "Transparent Blue Shell Yellow Dot"
+      "name": "Transparent Blue Shell Yellow Dot",
+      "properties": {
+        "click_force": 60,
+        "releasing_force": 24.5,
+        "switch_life_span": "30",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "TransparentGreenShellWhiteDot"
       ],
       "maker": "huano",
-      "name": "Transparent Green Shell White Dot"
+      "name": "Transparent Green Shell White Dot",
+      "properties": {
+        "click_force": 65,
+        "switch_life_span": "100",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "TransparentPinkShellPinkDot"
       ],
       "maker": "huano",
-      "name": "Transparent Pink Shell Pink Dot"
+      "name": "Transparent Pink Shell Pink Dot",
+      "properties": {
+        "click_force": 70,
+        "releasing_force": 20,
+        "switch_life_span": "90",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "TransparentPurpleShellWhiteDot"
       ],
       "maker": "huano",
-      "name": "Transparent Purple Shell White Dot"
+      "name": "Transparent Purple Shell White Dot",
+      "properties": {
+        "switch_life_span": "90",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "TransparentYellowShellWhiteDot"
       ],
       "maker": "huano",
-      "name": "Transparent Yellow Shell White Dot"
+      "name": "Transparent Yellow Shell White Dot",
+      "properties": {
+        "click_force": 65,
+        "switch_life_span": "120",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "OpticalSwitches"
       ],
       "maker": "hyperx",
-      "name": "Optical Switches"
+      "name": "Optical Switches",
+      "properties": {
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "maker": "hyperx",
-      "name": "Switches"
+      "name": "Switches",
+      "properties": {
+        "switch_life_span": "100",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "maker": "incott",
-      "name": "Purple"
+      "name": "Purple",
+      "properties": {
+        "switch_life_span": "20",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "BlackShellBlueDot"
       ],
       "maker": "kailh",
-      "name": "Black Shell Blue Dot"
+      "name": "Black Shell Blue Dot",
+      "properties": {
+        "click_force": 65,
+        "releasing_force": 25,
+        "switch_life_span": "30",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "BlackShellRedDot"
       ],
       "maker": "kailh",
-      "name": "Black Shell Red Dot"
+      "name": "Black Shell Red Dot",
+      "properties": {
+        "click_force": 65,
+        "releasing_force": 25,
+        "switch_life_span": "20",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "GM 8 0",
         "GM80"
       ],
       "maker": "kailh",
-      "name": "GM 8.0"
+      "name": "GM 8.0",
+      "properties": {
+        "click_force": 65,
+        "releasing_force": 25,
+        "switch_life_span": "80",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "GM 8 0 Blue",
         "GM80Blue"
       ],
       "maker": "kailh",
-      "name": "GM 8.0 Blue"
+      "name": "GM 8.0 Blue",
+      "properties": {
+        "click_force": 60,
+        "releasing_force": 25,
+        "switch_life_span": "90",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "maker": "kailh",
-      "name": "GO"
+      "name": "GO",
+      "properties": {
+        "click_force": 65,
+        "releasing_force": 25,
+        "switch_life_span": "80",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "maker": "kailh",
-      "name": "GX"
+      "name": "GX",
+      "properties": {
+        "click_force": 50,
+        "switch_life_span": "80",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "maker": "kailh",
-      "name": "Optical"
+      "name": "Optical",
+      "properties": {
+        "click_force": 65,
+        "releasing_force": 25,
+        "switch_life_span": "80",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "OpticalV2"
       ],
       "maker": "kailh",
-      "name": "Optical V2"
+      "name": "Optical V2",
+      "properties": {
+        "click_force": 60,
+        "releasing_force": 20,
+        "switch_life_span": "150",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "SwordGMX"
       ],
       "maker": "kailh",
-      "name": "Sword GM X"
+      "name": "Sword GM X",
+      "properties": {
+        "click_force": 60,
+        "releasing_force": 25,
+        "switch_life_span": "100",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "maker": "logitech",
-      "name": "SUPERSTRIKE"
+      "name": "SUPERSTRIKE",
+      "properties": {
+        "switch_type": "inductive"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "maker": "ninjutso",
-      "name": "HyperSwitch"
+      "name": "HyperSwitch",
+      "properties": {
+        "click_force": 58,
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "D2F 01F",
         "D2F01F"
       ],
       "maker": "omron",
-      "name": "D2F -01F"
+      "name": "D2F -01F",
+      "properties": {
+        "click_force": 55,
+        "releasing_force": 5,
+        "switch_life_span": "1",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "D2F F",
         "D2FF"
       ],
       "maker": "omron",
-      "name": "D2F -F"
+      "name": "D2F -F",
+      "properties": {
+        "click_force": 75,
+        "releasing_force": 5,
+        "switch_life_span": "1",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "D2FC F 7N 100M",
         "D2FCF7N100M"
       ],
       "maker": "omron",
-      "name": "D2FC -F-7N(100M)"
+      "name": "D2FC -F-7N(100M)",
+      "properties": {
+        "click_force": 60,
+        "releasing_force": 24.5,
+        "switch_life_span": "100",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "D2FC F 7N 10M",
         "D2FCF7N10M"
       ],
       "maker": "omron",
-      "name": "D2FC -F-7N(10M)"
+      "name": "D2FC -F-7N(10M)",
+      "properties": {
+        "click_force": 60,
+        "releasing_force": 24.5,
+        "switch_life_span": "10",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "D2FC F 7N 20M",
         "D2FCF7N20M"
@@ -320,398 +696,848 @@
         "https://www.mouser.com/ProductDetail/Omron-Electronics/D2FC-F-7N20M?qs=17ckDYBRdek0%2FvhX1fLcuQ%3D%3D"
       ],
       "maker": "omron",
-      "name": "D2FC -F-7N(20M)"
+      "name": "D2FC -F-7N(20M)",
+      "properties": {
+        "click_force": 60,
+        "releasing_force": 24.5,
+        "switch_life_span": "20",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "D2FC F 7N G",
         "D2FCF7NG"
       ],
       "maker": "omron",
-      "name": "D2FC -F-7N(G)"
+      "name": "D2FC -F-7N(G)",
+      "properties": {
+        "click_force": 60,
+        "releasing_force": 24.5,
+        "switch_life_span": "20",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "D2FC F 7N G1",
         "D2FCF7NG1"
       ],
       "maker": "omron",
-      "name": "D2FC -F-7N(G1)"
+      "name": "D2FC -F-7N(G1)",
+      "properties": {
+        "click_force": 60,
+        "releasing_force": 24.5,
+        "switch_life_span": "20",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "D2LS 21 20M",
         "D2LS2120M"
       ],
       "maker": "omron",
-      "name": "D2LS-21 (20M)"
+      "name": "D2LS-21 (20M)",
+      "properties": {
+        "click_force": 61,
+        "releasing_force": 15,
+        "switch_life_span": "20",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "maker": "omron",
-      "name": "Optical"
+      "name": "Optical",
+      "properties": {
+        "click_force": 60,
+        "releasing_force": 24.5,
+        "switch_life_span": "70",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "OpticalSwitch"
       ],
       "maker": "pulsar",
-      "name": "Optical Switch"
+      "name": "Optical Switch",
+      "properties": {
+        "click_force": 60,
+        "switch_life_span": "100",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "maker": "raesha",
-      "name": "Optical"
+      "name": "Optical",
+      "properties": {
+        "click_force": 75,
+        "switch_life_span": "90",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "maker": "raesha",
-      "name": "Optical"
+      "name": "Optical",
+      "properties": {
+        "click_force": 60,
+        "switch_life_span": "100",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "maker": "rapoo",
-      "name": "Optical"
+      "name": "Optical",
+      "properties": {
+        "switch_life_span": "120",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "MechanicalMouseSwitches"
       ],
       "maker": "razer",
-      "name": "Mechanical Mouse Switches"
+      "name": "Mechanical Mouse Switches",
+      "properties": {
+        "click_force": 75,
+        "releasing_force": 24.5,
+        "switch_life_span": "50",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "Mechanical Mouse Switches Gen 2",
         "MechanicalMouseSwitchesGen2"
       ],
       "maker": "razer",
-      "name": "Mechanical Mouse Switches Gen-2"
+      "name": "Mechanical Mouse Switches Gen-2",
+      "properties": {
+        "click_force": 65,
+        "releasing_force": 25,
+        "switch_life_span": "60",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "OpticalMouseSwitches"
       ],
       "maker": "razer",
-      "name": "Optical Mouse Switches"
+      "name": "Optical Mouse Switches",
+      "properties": {
+        "switch_life_span": "70",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "Optical Mouse Switches Gen 2",
         "OpticalMouseSwitchesGen2"
       ],
       "maker": "razer",
-      "name": "Optical Mouse Switches Gen-2"
+      "name": "Optical Mouse Switches Gen-2",
+      "properties": {
+        "switch_life_span": "70",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "Optical Mouse Switches Gen 3",
         "OpticalMouseSwitchesGen3"
       ],
       "maker": "razer",
-      "name": "Optical Mouse Switches Gen-3"
+      "name": "Optical Mouse Switches Gen-3",
+      "properties": {
+        "switch_life_span": "90",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "Optical Mouse Switches Gen 4",
         "OpticalMouseSwitchesGen4"
       ],
       "maker": "razer",
-      "name": "Optical Mouse Switches Gen-4"
+      "name": "Optical Mouse Switches Gen-4",
+      "properties": {
+        "switch_life_span": "100",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "TITANOpticalSwitch"
       ],
       "maker": "roccat",
-      "name": "TITAN Optical Switch"
+      "name": "TITAN Optical Switch",
+      "properties": {
+        "switch_life_span": "100",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "BlackShellOrangeDot10M"
       ],
       "maker": "steelseries",
-      "name": "Black Shell Orange Dot 10M"
+      "name": "Black Shell Orange Dot 10M",
+      "properties": {
+        "switch_life_span": "10",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "BlackShellOrangeDot30M"
       ],
       "maker": "steelseries",
-      "name": "Black Shell Orange Dot 30M"
+      "name": "Black Shell Orange Dot 30M",
+      "properties": {
+        "switch_life_span": "30",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "PrestigeOM"
       ],
       "maker": "steelseries",
-      "name": "Prestige OM"
+      "name": "Prestige OM",
+      "properties": {
+        "switch_life_span": "100",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "AzureDragon"
       ],
       "maker": "ttc",
-      "name": "Azure Dragon"
+      "name": "Azure Dragon",
+      "properties": {
+        "click_force": 65,
+        "switch_life_span": "100",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "BlackShellWhiteDot"
       ],
       "maker": "ttc",
-      "name": "Black Shell White Dot"
+      "name": "Black Shell White Dot",
+      "properties": {
+        "switch_life_span": "5",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "DustproofGold100M"
       ],
       "maker": "ttc",
-      "name": "Dustproof Gold 100M"
+      "name": "Dustproof Gold 100M",
+      "properties": {
+        "click_force": 60,
+        "releasing_force": 25,
+        "switch_life_span": "100",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "DustproofGold20M"
       ],
       "maker": "ttc",
-      "name": "Dustproof Gold 20M"
+      "name": "Dustproof Gold 20M",
+      "properties": {
+        "click_force": 60,
+        "releasing_force": 25,
+        "switch_life_span": "20",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "DustproofGold60M"
       ],
       "maker": "ttc",
-      "name": "Dustproof Gold 60M"
+      "name": "Dustproof Gold 60M",
+      "properties": {
+        "click_force": 60,
+        "releasing_force": 25,
+        "switch_life_span": "60",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "DustproofGold80M"
       ],
       "maker": "ttc",
-      "name": "Dustproof Gold 80M"
+      "name": "Dustproof Gold 80M",
+      "properties": {
+        "click_force": 60,
+        "releasing_force": 25,
+        "switch_life_span": "80",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "FalconTransparentBlueShellWhiteDot"
       ],
       "maker": "ttc",
-      "name": "Falcon Transparent Blue Shell White Dot"
+      "name": "Falcon Transparent Blue Shell White Dot",
+      "properties": {
+        "click_force": 60,
+        "switch_life_span": "60",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "NihilTransparentBlackDot"
       ],
       "maker": "ttc",
-      "name": "Nihil Transparent Black Dot"
+      "name": "Nihil Transparent Black Dot",
+      "properties": {
+        "click_force": 65,
+        "switch_life_span": "80",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "OpticalV2"
       ],
       "maker": "ttc",
-      "name": "Optical V2"
+      "name": "Optical V2",
+      "properties": {
+        "click_force": 60,
+        "switch_life_span": "100",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "OrangeDotOpticalV2"
       ],
       "maker": "ttc",
-      "name": "Orange Dot Optical V2"
+      "name": "Orange Dot Optical V2",
+      "properties": {
+        "click_force": 60,
+        "switch_life_span": "100",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "maker": "ttc",
-      "name": "Silver"
+      "name": "Silver",
+      "properties": {
+        "click_force": 60,
+        "switch_life_span": "20",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "TITANOpticalSwitch"
       ],
       "maker": "turtle-beach",
-      "name": "TITAN Optical Switch"
+      "name": "TITAN Optical Switch",
+      "properties": {
+        "switch_life_span": "100",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "MechanicalSwitches"
       ],
       "maker": "unk",
-      "name": "Mechanical Switches"
+      "name": "Mechanical Switches",
+      "properties": {
+        "switch_life_span": "80",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "MechanicalSwitches"
       ],
       "maker": "unk",
-      "name": "Mechanical Switches"
+      "name": "Mechanical Switches",
+      "properties": {
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "MechanicalSwitches"
       ],
       "maker": "unk",
-      "name": "Mechanical Switches"
+      "name": "Mechanical Switches",
+      "properties": {
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "MechanicalSwitches"
       ],
       "maker": "unk",
-      "name": "Mechanical Switches"
+      "name": "Mechanical Switches",
+      "properties": {
+        "switch_life_span": "30",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "MechanicalSwitches"
       ],
       "maker": "unk",
-      "name": "Mechanical Switches"
+      "name": "Mechanical Switches",
+      "properties": {
+        "switch_life_span": "60",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "MechanicalSwitches"
       ],
       "maker": "unk",
-      "name": "Mechanical Switches"
+      "name": "Mechanical Switches",
+      "properties": {
+        "switch_life_span": "5",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "MechanicalSwitches"
       ],
       "maker": "unk",
-      "name": "Mechanical Switches"
+      "name": "Mechanical Switches",
+      "properties": {
+        "switch_life_span": "10",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "OpticalSwitches"
       ],
       "maker": "unk",
-      "name": "Optical Switches"
+      "name": "Optical Switches",
+      "properties": {
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "OpticalSwitches"
       ],
       "maker": "unk",
-      "name": "Optical Switches"
+      "name": "Optical Switches",
+      "properties": {
+        "switch_life_span": "130",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "OpticalSwitches"
       ],
       "maker": "unk",
-      "name": "Optical Switches"
+      "name": "Optical Switches",
+      "properties": {
+        "switch_life_span": "150",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "maker": "unk",
-      "name": "Silent"
+      "name": "Silent",
+      "properties": {
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "maker": "vgn",
-      "name": "Optical"
+      "name": "Optical",
+      "properties": {
+        "switch_life_span": "160",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "DF3 P1L1",
         "DF3P1L1"
       ],
       "maker": "zippy",
-      "name": "DF3-P1L1"
+      "name": "DF3-P1L1",
+      "properties": {
+        "click_force": 60,
+        "releasing_force": 21,
+        "switch_life_span": "60",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "D2FC F K 60M",
         "D2FCFK60M"
       ],
       "maker": "omron",
-      "name": "D2FC -F-K(60M)"
+      "name": "D2FC -F-K(60M)",
+      "properties": {
+        "click_force": 75,
+        "releasing_force": 24.5,
+        "switch_life_span": "60",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "GM 4 0",
         "GM40"
       ],
       "maker": "kailh",
-      "name": "GM 4.0"
+      "name": "GM 4.0",
+      "properties": {
+        "click_force": 70,
+        "releasing_force": 25,
+        "switch_life_span": "60",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "D2FC F 7N",
         "D2FCF7N"
       ],
       "maker": "omron",
-      "name": "D2FC -F-7N"
+      "name": "D2FC -F-7N",
+      "properties": {
+        "click_force": 60,
+        "releasing_force": 24.5,
+        "switch_life_span": "5",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "maker": "lk",
-      "name": "Optical"
+      "name": "Optical",
+      "properties": {
+        "switch_life_span": "70",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "maker": "ttc",
-      "name": "Optical"
+      "name": "Optical",
+      "properties": {
+        "click_force": 60,
+        "switch_life_span": "100",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "D2FC F 7N",
         "D2FCF7N"
       ],
       "maker": "omron",
-      "name": "D2FC -F-7N"
+      "name": "D2FC -F-7N",
+      "properties": {
+        "click_force": 60,
+        "releasing_force": 24.5,
+        "switch_life_span": "5",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "D2FC F K 50M",
         "D2FCFK50M"
       ],
       "maker": "omron",
-      "name": "D2FC -F-K(50M)"
+      "name": "D2FC -F-K(50M)",
+      "properties": {
+        "click_force": 75,
+        "releasing_force": 24.5,
+        "switch_life_span": "50",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "D2FC F 7N 60M",
         "D2FCF7N60M"
       ],
       "maker": "omron",
-      "name": "D2FC -F-7N(60M)"
+      "name": "D2FC -F-7N(60M)",
+      "properties": {
+        "click_force": 60,
+        "releasing_force": 24.5,
+        "switch_life_span": "60",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "BlackShellBlueDot"
       ],
       "maker": "huano",
-      "name": "Black Shell Blue Dot"
+      "name": "Black Shell Blue Dot",
+      "properties": {
+        "click_force": 80,
+        "switch_life_span": "10",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "TransparentCrystalShellWhiteDot"
       ],
       "maker": "huano",
-      "name": "Transparent Crystal Shell White Dot"
+      "name": "Transparent Crystal Shell White Dot",
+      "properties": {
+        "click_force": 60,
+        "switch_life_span": "100",
+        "switch_type": "mechanical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "ROGOpticalMicroSwitches"
       ],
       "maker": "asus",
-      "name": "ROG Optical Micro Switches"
+      "name": "ROG Optical Micro Switches",
+      "properties": {
+        "switch_life_span": "100",
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "maker": "logitech",
-      "name": "LIGHTFORCE"
+      "name": "LIGHTFORCE",
+      "properties": {
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "D2FC F K",
         "D2FCFK"
       ],
       "maker": "omron",
-      "name": "D2FC-F-K"
+      "name": "D2FC-F-K",
+      "properties": {
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "Opticalv2"
       ],
       "maker": "lk",
-      "name": "Optical v2"
+      "name": "Optical v2",
+      "properties": {
+        "switch_type": "optical"
+      }
     },
     {
+      "__variance_policies": {
+        "click_force": "override_allowed"
+      },
       "aliases": [
         "OpticalMicroswitch"
       ],
       "maker": "ttc",
-      "name": "Optical Microswitch"
+      "name": "Optical Microswitch",
+      "properties": {
+        "switch_type": "optical"
+      }
     }
   ],
   "version": 1

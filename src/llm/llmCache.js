@@ -23,11 +23,16 @@ function sha256(value) {
 
 export class LLMCache {
   constructor({
+    specDb = null,
     cacheDir = '',
-    defaultTtlMs = 7 * 24 * 60 * 60 * 1000
+    defaultTtlMs = 7 * 24 * 60 * 60 * 1000,
+    cacheJsonWrite = false
   } = {}) {
+    this.specDb = specDb;
     this.cacheDir = String(cacheDir || '').trim();
     this.defaultTtlMs = Math.max(1, Number(defaultTtlMs || 0) || (7 * 24 * 60 * 60 * 1000));
+    this.cacheJsonWrite = Boolean(cacheJsonWrite);
+    this._setCount = 0;
   }
 
   getCacheKey({
@@ -50,7 +55,38 @@ export class LLMCache {
   }
 
   async get(key) {
-    if (!this.cacheDir || !key) {
+    if (!key) {
+      return null;
+    }
+
+    // Try SQLite first when specDb is available
+    if (this.specDb) {
+      try {
+        const entry = this.specDb.getLlmCacheEntry(key);
+        if (entry) {
+          const timestamp = Number(entry.timestamp || 0);
+          const ttl = Number(entry.ttl || this.defaultTtlMs);
+          if (Number.isFinite(timestamp) && Number.isFinite(ttl) && timestamp > 0 && ttl > 0) {
+            if ((Date.now() - timestamp) <= ttl) {
+              const response = entry.response;
+              if (typeof response === 'string') {
+                try {
+                  return JSON.parse(response) ?? null;
+                } catch {
+                  return response ?? null;
+                }
+              }
+              return response ?? null;
+            }
+          }
+        }
+      } catch {
+        // Fall through to file-based cache
+      }
+    }
+
+    // File-based fallback
+    if (!this.cacheDir) {
       return null;
     }
     const filePath = this.filePathForKey(key);
@@ -72,17 +108,41 @@ export class LLMCache {
   }
 
   async set(key, response, ttlMs = this.defaultTtlMs) {
-    if (!this.cacheDir || !key) {
+    if (!key) {
       return;
     }
-    const filePath = this.filePathForKey(key);
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-    const payload = {
-      response,
-      timestamp: Date.now(),
-      ttl: Math.max(1, Number(ttlMs || this.defaultTtlMs) || this.defaultTtlMs)
-    };
-    await fs.writeFile(filePath, `${JSON.stringify(payload)}\n`, 'utf8');
+    const effectiveTtl = Math.max(1, Number(ttlMs || this.defaultTtlMs) || this.defaultTtlMs);
+
+    // Write to SQLite when specDb is available
+    if (this.specDb) {
+      try {
+        this.specDb.setLlmCacheEntry(key, JSON.stringify(response), Date.now(), effectiveTtl);
+        this._setCount += 1;
+        if (this._setCount % 100 === 0) {
+          this.specDb.evictExpiredCache(Date.now());
+        }
+      } catch {
+        // Ignore SQLite write errors; fall through to file if enabled
+      }
+    }
+
+    // Write JSON file if cacheJsonWrite is enabled, or if specDb is not available
+    if ((this.cacheJsonWrite || !this.specDb) && this.cacheDir) {
+      const filePath = this.filePathForKey(key);
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      const payload = {
+        response,
+        timestamp: Date.now(),
+        ttl: effectiveTtl
+      };
+      await fs.writeFile(filePath, `${JSON.stringify(payload)}\n`, 'utf8');
+    }
+  }
+
+  evictExpired() {
+    if (this.specDb) {
+      this.specDb.evictExpiredCache(Date.now());
+    }
   }
 }
 

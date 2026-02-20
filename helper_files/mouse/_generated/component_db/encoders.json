@@ -1,188 +1,396 @@
 {
   "category": "mouse",
   "component_type": "encoder",
-  "generated_at": "2026-02-13T02:18:36.677Z",
+  "generated_at": "2026-02-17T09:49:22.300Z",
   "items": [
     {
+      "__overridden": {
+        "encoder_steps": true
+      },
       "maker": "alps",
-      "name": "Encoder"
+      "name": "Encoder",
+      "properties": {
+        "encoder_steps": "25",
+        "encoder_type": "mechanical"
+      }
     },
     {
+      "__overridden": {
+        "encoder_steps": true
+      },
       "maker": "changfeng",
-      "name": "Encoder"
+      "name": "Encoder",
+      "properties": {
+        "encoder_steps": "25",
+        "encoder_type": "mechanical"
+      }
     },
     {
       "maker": "f-switch",
-      "name": "Black"
+      "name": "Black",
+      "properties": {
+        "encoder_steps": 24,
+        "encoder_type": "mechanical"
+      }
     },
     {
       "maker": "f-switch",
-      "name": "Brown"
+      "name": "Brown",
+      "properties": {
+        "encoder_steps": 24,
+        "encoder_type": "mechanical"
+      }
     },
     {
       "maker": "f-switch",
-      "name": "E10A2"
+      "name": "E10A2",
+      "properties": {
+        "encoder_steps": 24,
+        "encoder_type": "mechanical"
+      }
+    },
+    {
+      "__overridden": {
+        "encoder_steps": true
+      },
+      "maker": "f-switch",
+      "name": "Encoder",
+      "properties": {
+        "encoder_steps": "25",
+        "encoder_type": "mechanical"
+      }
+    },
+    {
+      "__overridden": {
+        "encoder_steps": true
+      },
+      "maker": "f-switch",
+      "name": "Green",
+      "properties": {
+        "encoder_steps": "26",
+        "encoder_type": "mechanical"
+      }
+    },
+    {
+      "__overridden": {
+        "encoder_steps": true
+      },
+      "maker": "f-switch",
+      "name": "Pink",
+      "properties": {
+        "encoder_steps": "59",
+        "encoder_type": "mechanical"
+      }
     },
     {
       "maker": "f-switch",
-      "name": "Encoder"
+      "name": "Teal",
+      "properties": {
+        "encoder_steps": 24,
+        "encoder_type": "mechanical"
+      }
     },
     {
-      "maker": "f-switch",
-      "name": "Green"
-    },
-    {
-      "maker": "f-switch",
-      "name": "Pink"
-    },
-    {
-      "maker": "f-switch",
-      "name": "Teal"
-    },
-    {
+      "__overridden": {
+        "encoder_steps": true
+      },
       "maker": "fswq",
-      "name": "Encoder"
+      "name": "Encoder",
+      "properties": {
+        "encoder_steps": "25",
+        "encoder_type": "mechanical"
+      }
     },
     {
+      "__overridden": {
+        "encoder_steps": true,
+        "encoder_type": true
+      },
       "maker": "huano",
-      "name": "Red"
+      "name": "Red",
+      "properties": {
+        "encoder_steps": "5",
+        "encoder_type": "mechanical"
+      }
     },
     {
+      "__overridden": {
+        "encoder_steps": true
+      },
       "maker": "huano",
-      "name": "Unspecified"
+      "name": "Unspecified",
+      "properties": {
+        "encoder_steps": "30",
+        "encoder_type": "mechanical"
+      }
     },
     {
       "maker": "kailh",
-      "name": "Black"
+      "name": "Black",
+      "properties": {
+        "encoder_steps": 24,
+        "encoder_type": "mechanical"
+      }
     },
     {
+      "__overridden": {
+        "encoder_steps": true
+      },
       "aliases": [
         "GE 2 0",
         "GE20"
       ],
       "maker": "kailh",
-      "name": "GE 2.0"
+      "name": "GE 2.0",
+      "properties": {
+        "encoder_steps": "24",
+        "encoder_type": "mechanical"
+      }
     },
     {
+      "__overridden": {
+        "encoder_steps": true
+      },
       "aliases": [
         "GE 5 0",
         "GE50"
       ],
       "maker": "kailh",
-      "name": "GE 5.0"
+      "name": "GE 5.0",
+      "properties": {
+        "encoder_steps": "25",
+        "encoder_type": "mechanical"
+      }
     },
     {
+      "__overridden": {
+        "encoder_steps": true,
+        "encoder_type": true
+      },
       "maker": "kailh",
-      "name": "Gray"
+      "name": "Gray",
+      "properties": {
+        "encoder_steps": "24",
+        "encoder_type": "mechanical"
+      }
     },
     {
+      "__overridden": {
+        "encoder_steps": true
+      },
       "maker": "kailh",
-      "name": "Green"
+      "name": "Green",
+      "properties": {
+        "encoder_steps": "26",
+        "encoder_type": "mechanical"
+      }
     },
     {
+      "__overridden": {
+        "encoder_steps": true,
+        "encoder_type": true
+      },
       "maker": "kailh",
-      "name": "Red"
+      "name": "Red",
+      "properties": {
+        "encoder_steps": "5",
+        "encoder_type": "mechanical"
+      }
     },
     {
+      "__overridden": {
+        "encoder_steps": true
+      },
       "maker": "lamzu",
-      "name": "Encoder"
+      "name": "Encoder",
+      "properties": {
+        "encoder_steps": "25",
+        "encoder_type": "mechanical"
+      }
     },
     {
       "maker": "lk",
-      "name": "E11"
+      "name": "E11",
+      "properties": {
+        "encoder_steps": 24,
+        "encoder_type": "mechanical"
+      }
     },
     {
       "maker": "ninjutso",
-      "name": "HyperScroll"
+      "name": "HyperScroll",
+      "properties": {
+        "encoder_steps": 24,
+        "encoder_type": "mechanical"
+      }
     },
     {
+      "__overridden": {
+        "encoder_steps": true
+      },
       "aliases": [
         "BlueEncoder"
       ],
       "maker": "pulsar",
-      "name": "Blue Encoder"
+      "name": "Blue Encoder",
+      "properties": {
+        "encoder_steps": "hellow",
+        "encoder_type": "mechanical"
+      }
     },
     {
       "aliases": [
         "OpticalEncoder"
       ],
       "maker": "raesha",
-      "name": "Optical Encoder"
+      "name": "Optical Encoder",
+      "properties": {
+        "encoder_steps": 24,
+        "encoder_type": "optical"
+      }
     },
     {
       "maker": "raesha",
-      "name": "Silver"
+      "name": "Silver",
+      "properties": {
+        "encoder_steps": 24,
+        "encoder_type": "mechanical"
+      }
     },
     {
       "maker": "raesha",
-      "name": "Yellow"
+      "name": "Yellow",
+      "properties": {
+        "encoder_steps": 24,
+        "encoder_type": "mechanical"
+      }
     },
     {
       "aliases": [
         "OpticalScrollWheel"
       ],
       "maker": "razer",
-      "name": "Optical Scroll Wheel"
+      "name": "Optical Scroll Wheel",
+      "properties": {
+        "encoder_steps": 24,
+        "encoder_type": "optical"
+      }
     },
     {
       "maker": "ttc",
-      "name": "Black"
+      "name": "Black",
+      "properties": {
+        "encoder_steps": 24,
+        "encoder_type": "mechanical"
+      }
     },
     {
       "maker": "ttc",
-      "name": "Blue"
+      "name": "Blue",
+      "properties": {
+        "encoder_steps": 24,
+        "encoder_type": "mechanical"
+      }
     },
     {
       "maker": "ttc",
-      "name": "Gold"
+      "name": "Gold",
+      "properties": {
+        "encoder_steps": 24,
+        "encoder_type": "mechanical"
+      }
+    },
+    {
+      "__overridden": {
+        "encoder_steps": true
+      },
+      "maker": "ttc",
+      "name": "Green",
+      "properties": {
+        "encoder_steps": "26",
+        "encoder_type": "mechanical"
+      }
+    },
+    {
+      "__overridden": {
+        "encoder_steps": true,
+        "encoder_type": true
+      },
+      "maker": "ttc",
+      "name": "Red",
+      "properties": {
+        "encoder_steps": "5",
+        "encoder_type": "mechanical"
+      }
     },
     {
       "maker": "ttc",
-      "name": "Green"
+      "name": "Silver",
+      "properties": {
+        "encoder_steps": 24,
+        "encoder_type": "mechanical"
+      }
     },
     {
       "maker": "ttc",
-      "name": "Red"
+      "name": "Teal",
+      "properties": {
+        "encoder_steps": 24,
+        "encoder_type": "mechanical"
+      }
     },
     {
+      "__overridden": {
+        "encoder_steps": true
+      },
       "maker": "ttc",
-      "name": "Silver"
-    },
-    {
-      "maker": "ttc",
-      "name": "Teal"
-    },
-    {
-      "maker": "ttc",
-      "name": "Unspecified"
+      "name": "Unspecified",
+      "properties": {
+        "encoder_steps": "30",
+        "encoder_type": "mechanical"
+      }
     },
     {
       "aliases": [
         "MagneticEncoder"
       ],
       "maker": "unspecified",
-      "name": "Magnetic Encoder"
+      "name": "Magnetic Encoder",
+      "properties": {
+        "encoder_type": "magnetic"
+      }
     },
     {
       "aliases": [
         "MechanicalEncoder"
       ],
       "maker": "unspecified",
-      "name": "Mechanical Encoder"
+      "name": "Mechanical Encoder",
+      "properties": {
+        "encoder_steps": 24,
+        "encoder_type": "mechanical"
+      }
     },
     {
       "aliases": [
         "OpticalEncoder"
       ],
       "maker": "unspecified",
-      "name": "Optical Encoder"
+      "name": "Optical Encoder",
+      "properties": {
+        "encoder_steps": 24,
+        "encoder_type": "optical"
+      }
     },
     {
       "aliases": [
         "OpticalEncoder"
       ],
       "maker": "unspecified",
-      "name": "Optical Encoder"
+      "name": "Optical Encoder",
+      "properties": {
+        "encoder_type": "optical"
+      }
     },
     {
       "aliases": [
@@ -190,7 +398,11 @@
         "Optical16steps"
       ],
       "maker": "zowie",
-      "name": "Optical (16 steps)"
+      "name": "Optical (16 steps)",
+      "properties": {
+        "encoder_steps": 16,
+        "encoder_type": "optical"
+      }
     },
     {
       "aliases": [
@@ -198,7 +410,11 @@
         "Optical24steps"
       ],
       "maker": "zowie",
-      "name": "Optical (24 steps)"
+      "name": "Optical (24 steps)",
+      "properties": {
+        "encoder_steps": 24,
+        "encoder_type": "optical"
+      }
     }
   ],
   "version": 1

@@ -109,3 +109,12 @@ test('loadConfig reads role-based LLM routing settings and safe fast-model defau
     assert.equal(config.llmPlanFallbackApiKey, 'k-fallback');
   });
 });
+
+test('loadConfig reads indexing helper toggle settings', () => {
+  withEnv({
+    INDEXING_HELPER_FILES_ENABLED: 'true'
+  }, () => {
+    const config = loadConfig();
+    assert.equal(config.indexingHelperFilesEnabled, true);
+  });
+});

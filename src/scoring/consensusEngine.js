@@ -13,6 +13,7 @@ import {
   parseNumber,
   splitListValue
 } from '../utils/common.js';
+import { buildFallbackFieldCandidateId } from '../utils/candidateIdentifier.js';
 
 const METHOD_WEIGHT = {
   network_json: 1,
@@ -89,6 +90,56 @@ function canonicalValue(field, value) {
 
   const display = normalizeWhitespace(value);
   return { display: display || 'unk', key: normalizeToken(display) || 'unk' };
+}
+
+// ---------------------------------------------------------------------------
+// selection_policy bonus — small tiebreaker applied to cluster scores
+// ---------------------------------------------------------------------------
+
+const POLICY_BONUS = 0.3;
+
+const LLM_METHODS = new Set(['llm_extract']);
+
+function computePolicySignal(cluster, policy) {
+  switch (policy) {
+    case 'best_evidence': {
+      return cluster.evidence.filter(
+        (e) => e.citation?.snippetHash || e.citation?.snippetId
+      ).length;
+    }
+    case 'prefer_deterministic': {
+      return cluster.evidence.filter((e) => !LLM_METHODS.has(e.method)).length;
+    }
+    case 'prefer_llm': {
+      return cluster.evidence.filter((e) => LLM_METHODS.has(e.method)).length;
+    }
+    case 'prefer_latest': {
+      if (!cluster.evidence.length) return 0;
+      return Math.max(
+        ...cluster.evidence.map((e) => new Date(e.ts || 0).getTime())
+      );
+    }
+    default:
+      return 0;
+  }
+}
+
+function applyPolicyBonus(clusters, policy) {
+  if (!policy || policy === 'best_confidence' || clusters.length < 2) {
+    return;
+  }
+  let bestSignal = -Infinity;
+  let bestIdx = -1;
+  for (let i = 0; i < clusters.length; i++) {
+    const signal = computePolicySignal(clusters[i], policy);
+    if (signal > bestSignal) {
+      bestSignal = signal;
+      bestIdx = i;
+    }
+  }
+  if (bestIdx >= 0 && bestSignal > 0) {
+    clusters[bestIdx].score += POLICY_BONUS;
+  }
 }
 
 function passTargetForField(field) {
@@ -269,7 +320,8 @@ export function runConsensusEngine({
   identityLock,
   productId,
   category,
-  config = {}
+  config = {},
+  fieldRulesEngine = null
 }) {
   const fields = unknownFieldMap(fieldOrder);
   const provenance = {};
@@ -335,7 +387,13 @@ export function runConsensusEngine({
   for (const field of fieldOrder) {
     const rows = byField.get(field) || [];
     candidates[field] = rows.map((row, index) => ({
-      candidate_id: `cand_${field}_${index + 1}`,
+      candidate_id: buildFallbackFieldCandidateId({
+        productId,
+        fieldKey: field,
+        value: row.value,
+        index: index + 1,
+        variant: 'candidate',
+      }),
       value: row.value,
       score: Number.parseFloat(Math.max(0, Math.min(1, row.score || 0)).toFixed(6)),
       host: row.host,
@@ -408,6 +466,15 @@ export function runConsensusEngine({
     }
 
     const clusters = clusterCandidates(rows);
+
+    // Apply selection_policy bonus if engine provides a string enum policy
+    const fieldRule = fieldRulesEngine?.getFieldRule?.(field);
+    const selectionPolicy = typeof fieldRule?.selection_policy === 'string'
+      ? fieldRule.selection_policy : null;
+    if (selectionPolicy) {
+      applyPolicyBonus(clusters, selectionPolicy);
+    }
+
     const { best, second } = selectBestCluster(clusters);
     const weightedMajority = !second || best.score >= (second.score * 1.1);
 
@@ -526,4 +593,63 @@ export function runConsensusEngine({
     newValuesProposed,
     agreementScore: agreementFieldCount ? agreementAccumulator / agreementFieldCount : 0
   };
+}
+
+// ---------------------------------------------------------------------------
+// Object-form selection_policy reducer — post-consensus list → scalar
+// ---------------------------------------------------------------------------
+
+export function applySelectionPolicyReducers({ fields, candidates, fieldRulesEngine }) {
+  const result = { fields: { ...fields }, applied: [] };
+  if (!fieldRulesEngine) {
+    return result;
+  }
+
+  for (const field of fieldRulesEngine.getAllFieldKeys()) {
+    const rule = fieldRulesEngine.getFieldRule(field);
+    const policy = rule?.selection_policy;
+    if (!policy || typeof policy !== 'object') {
+      continue;
+    }
+    if (!policy.source_field) {
+      continue;
+    }
+
+    const sourceFieldCandidates = candidates[policy.source_field];
+    if (!sourceFieldCandidates || sourceFieldCandidates.length === 0) {
+      continue;
+    }
+
+    const values = sourceFieldCandidates
+      .map((c) => Number.parseFloat(c.value))
+      .filter((v) => !Number.isNaN(v))
+      .sort((a, b) => a - b);
+
+    if (values.length === 0) {
+      continue;
+    }
+
+    if (values.length === 1) {
+      result.fields[field] = String(values[0]);
+      result.applied.push({ field, reason: 'single_value', value: values[0] });
+      continue;
+    }
+
+    const tolerance = policy.tolerance_ms || 0;
+    const range = values[values.length - 1] - values[0];
+
+    if (range <= tolerance) {
+      const mid = Math.floor(values.length / 2);
+      const median = values.length % 2 === 0
+        ? (values[mid - 1] + values[mid]) / 2
+        : values[mid];
+      result.fields[field] = String(median);
+      result.applied.push({ field, reason: 'median_within_tolerance', value: median });
+    } else {
+      result.fields[field] = 'unk';
+      result.applied.push({ field, reason: 'exceeds_tolerance', range, tolerance });
+    }
+  }
+
+  return result;
 }

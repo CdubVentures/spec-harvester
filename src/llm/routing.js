@@ -85,6 +85,107 @@ function normalizeProvider(value) {
   return '';
 }
 
+function providerFromModel(value) {
+  const token = normalized(value).toLowerCase();
+  if (!token) {
+    return '';
+  }
+  if (token.startsWith('gemini')) {
+    return 'gemini';
+  }
+  if (token.startsWith('deepseek')) {
+    return 'deepseek';
+  }
+  return 'openai';
+}
+
+function firstNonEmpty(values = []) {
+  for (const value of values) {
+    const token = normalized(value);
+    if (token) {
+      return token;
+    }
+  }
+  return '';
+}
+
+function providerDefaults(config = {}, provider = '', role = 'extract') {
+  const wanted = normalizeProvider(provider);
+  const baseCandidates = [];
+  const keyCandidates = [];
+  if (!wanted) {
+    return { baseUrl: '', apiKey: '' };
+  }
+
+  const roleKeys = roleKeySet(role);
+  const primaryRoleProvider = normalizeProvider(config[roleKeys.provider] || config.llmProvider || '');
+  if (primaryRoleProvider === wanted) {
+    baseCandidates.push(config[roleKeys.baseUrl]);
+    keyCandidates.push(config[roleKeys.apiKey]);
+  }
+
+  for (const keySet of Object.values(ROLE_KEYS)) {
+    const providerToken = normalizeProvider(config[keySet.provider] || '');
+    if (providerToken === wanted) {
+      baseCandidates.push(config[keySet.baseUrl]);
+      keyCandidates.push(config[keySet.apiKey]);
+    }
+    const fallbackProviderToken = normalizeProvider(config[keySet.fallbackProvider] || '');
+    if (fallbackProviderToken === wanted) {
+      baseCandidates.push(config[keySet.fallbackBaseUrl]);
+      keyCandidates.push(config[keySet.fallbackApiKey]);
+    }
+  }
+
+  if (wanted === 'gemini') {
+    baseCandidates.push('https://generativelanguage.googleapis.com/v1beta/openai');
+    keyCandidates.push(process.env.GEMINI_API_KEY || '');
+  } else if (wanted === 'deepseek') {
+    baseCandidates.push('https://api.deepseek.com');
+    keyCandidates.push(process.env.DEEPSEEK_API_KEY || '');
+  } else {
+    baseCandidates.push('https://api.openai.com');
+    keyCandidates.push(process.env.OPENAI_API_KEY || '');
+  }
+
+  baseCandidates.push(config.llmBaseUrl, config.openaiBaseUrl);
+  keyCandidates.push(config.llmApiKey, config.openaiApiKey);
+
+  return {
+    baseUrl: firstNonEmpty(baseCandidates),
+    apiKey: firstNonEmpty(keyCandidates)
+  };
+}
+
+function alignRouteToModelProvider(config = {}, route = {}) {
+  const next = { ...route };
+  const currentProvider = normalizeProvider(next.provider);
+  const inferredProvider = providerFromModel(next.model);
+  if (!inferredProvider) {
+    return next;
+  }
+  if (inferredProvider !== currentProvider) {
+    const defaults = providerDefaults(config, inferredProvider, next.role);
+    next.provider = inferredProvider;
+    if (defaults.baseUrl) {
+      next.baseUrl = defaults.baseUrl;
+    }
+    if (defaults.apiKey) {
+      next.apiKey = defaults.apiKey;
+    }
+    return next;
+  }
+
+  const defaults = providerDefaults(config, inferredProvider, next.role);
+  if (!next.baseUrl && defaults.baseUrl) {
+    next.baseUrl = defaults.baseUrl;
+  }
+  if (!next.apiKey && defaults.apiKey) {
+    next.apiKey = defaults.apiKey;
+  }
+  return next;
+}
+
 function roleKeySet(role) {
   return ROLE_KEYS[role] || ROLE_KEYS.extract;
 }
@@ -129,7 +230,7 @@ export function resolveLlmRoute(config = {}, { reason = '', role = '', modelOver
   if (modelOverride) {
     route.model = normalized(modelOverride);
   }
-  return route;
+  return alignRouteToModelProvider(config, route);
 }
 
 export function resolveLlmFallbackRoute(config = {}, { reason = '', role = '', modelOverride = '' } = {}) {
@@ -138,6 +239,7 @@ export function resolveLlmFallbackRoute(config = {}, { reason = '', role = '', m
   if (!fallback) {
     return null;
   }
+  const alignedFallback = alignRouteToModelProvider(config, fallback);
   if (modelOverride && normalized(modelOverride) === normalized(fallback.model)) {
     return null;
   }
@@ -146,10 +248,10 @@ export function resolveLlmFallbackRoute(config = {}, { reason = '', role = '', m
     role: resolvedRole,
     modelOverride
   });
-  if (routeFingerprint(primary) === routeFingerprint(fallback)) {
+  if (routeFingerprint(primary) === routeFingerprint(alignedFallback)) {
     return null;
   }
-  return fallback;
+  return alignedFallback;
 }
 
 export function hasLlmRouteApiKey(config = {}, { reason = '', role = '' } = {}) {
@@ -201,6 +303,7 @@ export async function callLlmWithRouting({
   reason = '',
   role = '',
   modelOverride = '',
+  requestOptions = null,
   system,
   user,
   jsonSchema,
@@ -209,6 +312,7 @@ export async function callLlmWithRouting({
   onUsage,
   reasoningMode = false,
   reasoningBudget = 0,
+  maxTokens = 0,
   timeoutMs = 40_000,
   logger
 }) {
@@ -223,12 +327,21 @@ export async function callLlmWithRouting({
     role: resolvedRole,
     modelOverride
   });
+  const effectiveRequestOptions = (
+    requestOptions && typeof requestOptions === 'object'
+      ? requestOptions
+      : (usageContext?.request_options && typeof usageContext.request_options === 'object'
+          ? usageContext.request_options
+          : null)
+  );
 
   logger?.info?.('llm_route_selected', {
     reason,
     role: resolvedRole,
     provider: primary.provider || null,
     model: primary.model || null,
+    base_url: primary.baseUrl || null,
+    fallback_base_url: fallback?.baseUrl || null,
     fallback_configured: Boolean(fallback)
   });
 
@@ -236,6 +349,7 @@ export async function callLlmWithRouting({
     system,
     user,
     jsonSchema,
+    requestOptions: effectiveRequestOptions,
     usageContext: {
       ...usageContext,
       reason,
@@ -245,6 +359,7 @@ export async function callLlmWithRouting({
     onUsage,
     reasoningMode: Boolean(reasoningMode),
     reasoningBudget: Number(reasoningBudget || 0),
+    maxTokens: Number(maxTokens || 0),
     timeoutMs,
     logger
   };
@@ -266,8 +381,10 @@ export async function callLlmWithRouting({
       role: resolvedRole,
       primary_provider: primary.provider || null,
       primary_model: primary.model || null,
+      primary_base_url: primary.baseUrl || null,
       fallback_provider: fallback.provider || null,
       fallback_model: fallback.model || null,
+      fallback_base_url: fallback.baseUrl || null,
       message: error.message
     });
     return callOpenAI({

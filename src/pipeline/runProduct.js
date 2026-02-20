@@ -1,4 +1,5 @@
-import { buildRunId, normalizeWhitespace } from '../utils/common.js';
+import crypto from 'node:crypto';
+import { buildRunId, normalizeWhitespace, wait } from '../utils/common.js';
 import { loadCategoryConfig } from '../categories/loader.js';
 import { SourcePlanner, buildSourceSummary } from '../planner/sourcePlanner.js';
 import { PlaywrightFetcher, DryRunFetcher, HttpFetcher } from '../fetcher/playwrightFetcher.js';
@@ -15,7 +16,8 @@ import {
   computeConfidence
 } from '../scoring/qualityScoring.js';
 import { evaluateValidationGate } from '../validator/qualityGate.js';
-import { runConsensusEngine } from '../scoring/consensusEngine.js';
+import { runConsensusEngine, applySelectionPolicyReducers } from '../scoring/consensusEngine.js';
+import { applyListUnionReducers } from '../scoring/listUnionReducer.js';
 import { buildIdentityObject, buildAbortedNormalized, buildValidatedNormalized } from '../normalizer/mouseNormalizer.js';
 import { exportRunArtifacts } from '../exporter/exporter.js';
 import { writeFinalOutputs } from '../exporter/finalExporter.js';
@@ -80,13 +82,33 @@ import { buildTrafficLight } from '../validator/trafficLight.js';
 import { normalizeFieldList, toRawFieldKey } from '../utils/fieldKeys.js';
 import { createFieldRulesEngine } from '../engine/fieldRulesEngine.js';
 import { applyRuntimeFieldRules } from '../engine/runtimeGate.js';
-import { appendEnumCurationSuggestions } from '../engine/curationSuggestions.js';
+import {
+  appendEnumCurationSuggestions,
+  appendComponentCurationSuggestions,
+  appendComponentReviewItems,
+  appendComponentIdentityObservations
+} from '../engine/curationSuggestions.js';
 import {
   writeCategoryReviewArtifacts,
   writeProductReviewArtifacts
 } from '../review/reviewGridData.js';
 import { CortexClient } from '../llm/cortex_client.js';
 import { AggressiveOrchestrator } from '../extract/aggressiveOrchestrator.js';
+import { createFrontier } from '../research/frontierDb.js';
+import { RuntimeTraceWriter } from '../runtime/runtimeTraceWriter.js';
+import { computeNeedSet } from '../indexlab/needsetEngine.js';
+import {
+  normalizeHttpUrlList,
+  shouldQueueLlmRetry,
+  buildNextLlmRetryRows,
+  collectPlannerPendingUrls,
+  normalizeResumeMode,
+  isResumeStateFresh,
+  resumeStateAgeHours,
+  selectReextractSeedUrls,
+  buildNextSuccessRows
+} from '../runtime/indexingResume.js';
+import { UberAggressiveOrchestrator } from '../research/uberAggressiveOrchestrator.js';
 import {
   availabilityClassForField,
   undisclosedThresholdForField
@@ -173,6 +195,92 @@ function hasKnownFieldValue(value) {
 }
 
 const PASS_TARGET_EXEMPT_FIELDS = new Set(['id', 'brand', 'model', 'base_model', 'category', 'sku']);
+
+function toInt(value, fallback = 0) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function toFloat(value, fallback = 0) {
+  const parsed = Number.parseFloat(String(value ?? ''));
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function toBool(value, fallback = false) {
+  if (value === undefined || value === null || value === '') {
+    return fallback;
+  }
+  const token = String(value).trim().toLowerCase();
+  return token === '1' || token === 'true' || token === 'yes' || token === 'on';
+}
+
+function sha256(value = '') {
+  return crypto.createHash('sha256').update(String(value || ''), 'utf8').digest('hex');
+}
+
+function resolveRuntimeControlKey(storage, config = {}) {
+  const raw = String(config.runtimeControlFile || '_runtime/control/runtime_overrides.json').trim();
+  if (!raw) {
+    return storage.resolveOutputKey('_runtime/control/runtime_overrides.json');
+  }
+  if (raw.startsWith(`${config.s3OutputPrefix || 'specs/outputs'}/`)) {
+    return raw;
+  }
+  return storage.resolveOutputKey(raw);
+}
+
+function resolveIndexingResumeKey(storage, category, productId) {
+  return storage.resolveOutputKey('_runtime', 'indexing_resume', category, `${productId}.json`);
+}
+
+function defaultRuntimeOverrides() {
+  return {
+    pause: false,
+    max_urls_per_product: null,
+    max_queries_per_product: null,
+    blocked_domains: [],
+    force_high_fields: [],
+    disable_llm: false,
+    disable_search: false,
+    notes: ''
+  };
+}
+
+function normalizeRuntimeOverrides(payload = {}) {
+  const input = payload && typeof payload === 'object' ? payload : {};
+  return {
+    ...defaultRuntimeOverrides(),
+    ...input,
+    pause: Boolean(input.pause),
+    max_urls_per_product: input.max_urls_per_product === null || input.max_urls_per_product === undefined
+      ? null
+      : Math.max(1, toInt(input.max_urls_per_product, 0)),
+    max_queries_per_product: input.max_queries_per_product === null || input.max_queries_per_product === undefined
+      ? null
+      : Math.max(1, toInt(input.max_queries_per_product, 0)),
+    blocked_domains: Array.isArray(input.blocked_domains)
+      ? [...new Set(input.blocked_domains.map((row) => String(row || '').trim().toLowerCase().replace(/^www\./, '')).filter(Boolean))]
+      : [],
+    force_high_fields: Array.isArray(input.force_high_fields)
+      ? [...new Set(input.force_high_fields.map((row) => String(row || '').trim()).filter(Boolean))]
+      : [],
+    disable_llm: Boolean(input.disable_llm),
+    disable_search: Boolean(input.disable_search),
+    notes: String(input.notes || '')
+  };
+}
+
+function applyRuntimeOverridesToPlanner(planner, overrides = {}) {
+  if (!planner || typeof planner !== 'object') {
+    return;
+  }
+  if (Number.isFinite(Number(overrides.max_urls_per_product)) && Number(overrides.max_urls_per_product) > 0) {
+    planner.maxUrls = Math.max(1, Number(overrides.max_urls_per_product));
+  }
+  for (const host of overrides.blocked_domains || []) {
+    planner.blockHost(host, 'runtime_override_blocked_domain');
+  }
+}
 
 function stableHash(value) {
   let hash = 0;
@@ -818,6 +926,10 @@ function helperSupportsProvisionalFill(helperContext, identityLock = {}) {
   );
 }
 
+function isIndexingHelperFlowEnabled(config = {}) {
+  return Boolean(config?.helperFilesEnabled && config?.indexingHelperFilesEnabled);
+}
+
 function emitFieldDecisionEvents({
   logger,
   fieldOrder,
@@ -905,6 +1017,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
   const logger = new EventLogger({
     storage,
     runtimeEventsKey: config.runtimeEventsKey || '_runtime/events.jsonl',
+    onEvent: config.onRuntimeEvent,
     context: {
       runId
     }
@@ -916,11 +1029,60 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
   const job = jobOverride || (await storage.readJson(s3Key));
   const productId = job.productId;
   const category = job.category || 'mouse';
+  const runtimeMode = String(roundContext?.mode || config.accuracyMode || 'balanced').trim().toLowerCase();
+  const uberAggressiveMode = runtimeMode === 'uber_aggressive';
   logger.setContext({
     category,
     productId
   });
+  const traceWriter = toBool(config.runtimeTraceEnabled, true)
+    ? new RuntimeTraceWriter({
+      storage,
+      runId,
+      productId
+    })
+    : null;
+  const runtimeControlKey = resolveRuntimeControlKey(storage, config);
+  let runtimeOverrides = defaultRuntimeOverrides();
+  let runtimeOverridesLastLoadMs = 0;
+  const loadRuntimeOverrides = async ({ force = false } = {}) => {
+    const now = Date.now();
+    if (!force && now - runtimeOverridesLastLoadMs < 3000) {
+      return runtimeOverrides;
+    }
+    runtimeOverridesLastLoadMs = now;
+    try {
+      const payload = await storage.readJsonOrNull(runtimeControlKey);
+      runtimeOverrides = normalizeRuntimeOverrides(payload || {});
+    } catch {
+      runtimeOverrides = defaultRuntimeOverrides();
+    }
+    return runtimeOverrides;
+  };
+
+  let frontierDb = null;
+  let uberOrchestrator = null;
+  if (uberAggressiveMode || toBool(config.uberAggressiveEnabled, false)) {
+    const rawFrontierKey = String(config.frontierDbPath || '_intel/frontier/frontier.json').trim();
+    const frontierKey = rawFrontierKey.startsWith(`${config.s3OutputPrefix || 'specs/outputs'}/`)
+      ? rawFrontierKey
+      : storage.resolveOutputKey(rawFrontierKey);
+    frontierDb = createFrontier({
+      storage,
+      key: frontierKey,
+      config: { ...config, _logger: logger }
+    });
+    await frontierDb.load();
+    uberOrchestrator = new UberAggressiveOrchestrator({
+      config,
+      logger,
+      frontier: frontierDb
+    });
+  }
   const categoryConfig = await loadCategoryConfig(category, { storage, config });
+  const previousFinalSpec = await storage.readJsonOrNull(
+    storage.resolveOutputKey(category, productId, 'final', 'spec.json')
+  );
   let runtimeFieldRulesEngine = null;
   try {
     runtimeFieldRulesEngine = await createFieldRulesEngine(category, {
@@ -954,6 +1116,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     : [];
   const targets = resolveTargets(job, categoryConfig);
   const anchors = job.anchors || {};
+  const indexingHelperFlowEnabled = isIndexingHelperFlowEnabled(config);
   let helperData = {
     enabled: false,
     active: [],
@@ -975,7 +1138,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       supportive_matched_count: 0
     }
   };
-  if (config.helperFilesEnabled) {
+  if (indexingHelperFlowEnabled) {
     try {
       helperData = await loadHelperCategoryData({
         config,
@@ -1001,6 +1164,11 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         message: error.message
       });
     }
+  } else {
+    logger.info('indexing_helper_flow_disabled', {
+      helper_files_enabled: Boolean(config.helperFilesEnabled),
+      indexing_helper_files_enabled: Boolean(config.indexingHelperFilesEnabled)
+    });
   }
   const categoryBrainLoaded = await loadCategoryBrain({
     storage,
@@ -1016,6 +1184,105 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     requiredFields,
     sourceIntel: sourceIntel.data
   });
+  await loadRuntimeOverrides({ force: true });
+  applyRuntimeOverridesToPlanner(planner, runtimeOverrides);
+  const indexingResumeKey = resolveIndexingResumeKey(storage, category, productId);
+  const resumeMode = normalizeResumeMode(config.indexingResumeMode);
+  const resumeMaxAgeHours = Math.max(0, toInt(config.indexingResumeMaxAgeHours, 48));
+  const resumeReextractEnabled = config.indexingReextractEnabled !== false;
+  const resumeReextractAfterHours = Math.max(0, toInt(config.indexingReextractAfterHours, 24));
+  const resumeReextractSeedLimit = Math.max(1, toInt(config.indexingReextractSeedLimit, 8));
+  const resumeSeedLimit = Math.max(4, toInt(config.indexingResumeSeedLimit, 24));
+  const resumePersistLimit = Math.max(
+    resumeSeedLimit * 4,
+    Math.max(40, toInt(config.indexingResumePersistLimit, 160))
+  );
+  const resumeRetryPersistLimit = Math.max(10, toInt(config.indexingResumeRetryPersistLimit, 80));
+  const rawPreviousResumeState = await storage.readJsonOrNull(indexingResumeKey).catch(() => null) || {};
+  const previousResumeStateAgeHours = resumeStateAgeHours(rawPreviousResumeState.updated_at);
+  const previousResumeStateFresh = isResumeStateFresh(
+    rawPreviousResumeState.updated_at,
+    resumeMaxAgeHours
+  );
+  const usePreviousResumeState =
+    resumeMode === 'force_resume' ||
+    (resumeMode === 'auto' && previousResumeStateFresh);
+  const previousResumeState = usePreviousResumeState ? rawPreviousResumeState : {};
+  if (resumeMode === 'start_over') {
+    logger.info('indexing_resume_start_over', {
+      resume_key: indexingResumeKey,
+      mode: resumeMode
+    });
+  } else if (!usePreviousResumeState && rawPreviousResumeState?.updated_at) {
+    logger.info('indexing_resume_expired', {
+      resume_key: indexingResumeKey,
+      mode: resumeMode,
+      max_age_hours: resumeMaxAgeHours,
+      state_age_hours: Number.isFinite(previousResumeStateAgeHours)
+        ? Number(previousResumeStateAgeHours.toFixed(2))
+        : null
+    });
+  }
+  const previousResumePendingAll = normalizeHttpUrlList(
+    previousResumeState.pending_urls || [],
+    resumePersistLimit * 2
+  );
+  const previousResumePendingSeed = previousResumePendingAll.slice(0, resumeSeedLimit);
+  const previousResumePendingUnseeded = previousResumePendingAll.slice(resumeSeedLimit, resumePersistLimit * 2);
+  const previousResumeRetryRows = Array.isArray(previousResumeState.llm_retry_urls)
+    ? previousResumeState.llm_retry_urls
+    : [];
+  const previousResumeSuccessRows = Array.isArray(previousResumeState.success_urls)
+    ? previousResumeState.success_urls
+    : [];
+  const previousResumeRetrySeedUrls = normalizeHttpUrlList(
+    previousResumeRetryRows.map((row) => row?.url),
+    resumeSeedLimit
+  );
+  const previousResumeReextractSeedUrls = resumeReextractEnabled
+    ? selectReextractSeedUrls({
+      successRows: previousResumeSuccessRows,
+      afterHours: resumeReextractAfterHours,
+      limit: resumeReextractSeedLimit
+    })
+    : [];
+  let resumeSeededPendingCount = 0;
+  let resumeSeededLlmRetryCount = 0;
+  let resumeSeededReextractCount = 0;
+  let resumePersistedPendingCount = 0;
+  let resumePersistedLlmRetryCount = 0;
+  let resumePersistedSuccessCount = 0;
+  for (const url of previousResumePendingSeed) {
+    if (planner.enqueue(url, 'resume_pending_seed', { forceApproved: true, forceBrandBypass: false })) {
+      resumeSeededPendingCount += 1;
+    }
+  }
+  for (const url of previousResumeRetrySeedUrls) {
+    if (planner.enqueue(url, 'resume_llm_retry_seed', { forceApproved: true, forceBrandBypass: false })) {
+      resumeSeededLlmRetryCount += 1;
+    }
+  }
+  for (const url of previousResumeReextractSeedUrls) {
+    if (planner.enqueue(url, 'resume_reextract_seed', { forceApproved: true, forceBrandBypass: false })) {
+      resumeSeededReextractCount += 1;
+    }
+  }
+  if (resumeSeededPendingCount > 0 || resumeSeededLlmRetryCount > 0 || resumeSeededReextractCount > 0) {
+    logger.info('indexing_resume_loaded', {
+      resume_key: indexingResumeKey,
+      pending_seeded: resumeSeededPendingCount,
+      llm_retry_seeded: resumeSeededLlmRetryCount,
+      reextract_seeded: resumeSeededReextractCount,
+      resume_mode: resumeMode,
+      resume_max_age_hours: resumeMaxAgeHours,
+      resume_state_age_hours: Number.isFinite(previousResumeStateAgeHours)
+        ? Number(previousResumeStateAgeHours.toFixed(2))
+        : null,
+      previous_pending_count: previousResumePendingAll.length,
+      previous_llm_retry_count: previousResumeRetryRows.length,
+      previous_success_count: previousResumeSuccessRows.length
+    });
+  }
 
   let learningProfile = null;
   if (config.selfImproveEnabled) {
@@ -1030,17 +1297,27 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
 
   const adapterSeedUrls = adapterManager.collectSeedUrls({ job });
   planner.seed(adapterSeedUrls, { forceBrandBypass: false });
-  planner.seed(helperContext.seed_urls || [], { forceBrandBypass: false });
+  if (indexingHelperFlowEnabled) {
+    planner.seed(helperContext.seed_urls || [], { forceBrandBypass: false });
+  }
 
+  const preferHttpFetcher = Boolean(!config.dryRun && config.preferHttpFetcher);
   let fetcher = config.dryRun
     ? new DryRunFetcher(config, logger)
-    : new PlaywrightFetcher(config, logger);
-  let fetcherMode = config.dryRun ? 'dryrun' : 'playwright';
+    : (preferHttpFetcher
+      ? new HttpFetcher(config, logger)
+      : new PlaywrightFetcher(config, logger));
+  let fetcherMode = config.dryRun ? 'dryrun' : (preferHttpFetcher ? 'http' : 'playwright');
   let fetcherStartFallbackReason = '';
 
   const sourceResults = [];
+  const attemptedSourceUrls = new Set();
+  const resumeCooldownSkippedUrls = new Set();
+  const resumeFetchFailedUrls = new Set();
+  const llmRetryReasonByUrl = new Map();
+  const successfulSourceMetaByUrl = new Map();
   const llmSatisfiedFields = new Set();
-  const helperSupportiveSyntheticSources = config.helperSupportiveEnabled
+  const helperSupportiveSyntheticSources = (indexingHelperFlowEnabled && config.helperSupportiveEnabled)
     ? buildSupportiveSyntheticSources({
       helperContext,
       job,
@@ -1103,7 +1380,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
   const llmVerifyForced = Boolean(roundContext?.force_verify_llm);
   const llmVerifyAggressiveAlways =
     Boolean(config.llmVerifyAggressiveAlways) &&
-    String(roundContext?.mode || '').toLowerCase() === 'aggressive';
+    ['aggressive', 'uber_aggressive'].includes(String(roundContext?.mode || '').toLowerCase());
   const llmVerifyEnabled = Boolean(
     llmVerifyAggressiveAlways ||
     (config.llmVerifyMode && (llmVerifySampled || llmVerifyForced))
@@ -1114,7 +1391,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     productId,
     runId,
     round: Number.parseInt(String(roundContext?.round ?? 0), 10) || 0,
-    mode: String(roundContext?.mode || config.accuracyMode || 'balanced').trim().toLowerCase(),
+    mode: runtimeMode,
     verification: {
       enabled: llmVerifyEnabled,
       done: false,
@@ -1124,6 +1401,8 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     },
     budgetGuard: llmBudgetGuard,
     costRates: llmCostRates,
+    traceWriter,
+    forcedHighFields: [],
     recordUsage: async (usageRow) => {
       llmCallCount += 1;
       llmCostUsd = Number.parseFloat((llmCostUsd + Number(usageRow.cost_usd || 0)).toFixed(8));
@@ -1163,9 +1442,19 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       });
     }
   };
+  // Merge runtime force_high_fields with escalated fields from prior round
+  const escalatedFromRound = Array.isArray(roundContext?.escalated_fields)
+    ? roundContext.escalated_fields.filter(Boolean)
+    : [];
+  llmContext.forcedHighFields = [
+    ...new Set([...(runtimeOverrides.force_high_fields || []), ...escalatedFromRound])
+  ];
 
+  const discoveryConfig = runtimeOverrides.disable_search
+    ? { ...config, discoveryEnabled: false, searchProvider: 'none' }
+    : config;
   const discoveryResult = await discoverCandidateSources({
-    config,
+    config: discoveryConfig,
     storage,
     categoryConfig,
     job,
@@ -1182,19 +1471,45 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       ),
       extraQueries: Array.isArray(roundContext?.extra_queries) ? roundContext.extra_queries : []
     },
-    llmContext
+    llmContext,
+    frontierDb,
+    runtimeTraceWriter: traceWriter
   });
 
   planner.seed(discoveryResult.approvedUrls || [], { forceBrandBypass: false });
   if (discoveryResult.enabled && config.maxCandidateUrls > 0 && config.fetchCandidateSources) {
     planner.seedCandidates(discoveryResult.candidateUrls || []);
   }
+  if (traceWriter) {
+    const plannerTrace = await traceWriter.writeJson({
+      section: 'planner',
+      prefix: 'queue_snapshot',
+      payload: {
+        ts: new Date().toISOString(),
+        pending_count:
+          (planner.manufacturerQueue?.length || 0) +
+          (planner.queue?.length || 0) +
+          (planner.candidateQueue?.length || 0),
+        blocked_hosts: [...(planner.blockedHosts || new Set())].slice(0, 60),
+        stats: planner.getStats()
+      },
+      ringSize: 20
+    });
+    logger.info('planner_queue_snapshot_written', {
+      pending_count:
+        (planner.manufacturerQueue?.length || 0) +
+        (planner.queue?.length || 0) +
+        (planner.candidateQueue?.length || 0),
+      blocked_hosts: [...(planner.blockedHosts || new Set())].slice(0, 12),
+      trace_path: plannerTrace.trace_path
+    });
+  }
 
   try {
     await fetcher.start();
   } catch (error) {
     fetcherStartFallbackReason = error.message;
-    if (config.dryRun) {
+    if (config.dryRun || fetcherMode === 'http') {
       throw error;
     }
     logger.warn('fetcher_start_failed', {
@@ -1209,8 +1524,29 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     });
   }
 
+  let runtimePauseAnnounced = false;
   const processPlannerQueue = async () => {
     while (planner.hasNext()) {
+      await loadRuntimeOverrides();
+      applyRuntimeOverridesToPlanner(planner, runtimeOverrides);
+      llmContext.forcedHighFields = runtimeOverrides.force_high_fields || [];
+      if (runtimeOverrides.pause) {
+        if (!runtimePauseAnnounced) {
+          logger.info('runtime_pause_applied', {
+            reason: 'runtime_override',
+            control_key: runtimeControlKey
+          });
+          runtimePauseAnnounced = true;
+        }
+        await wait(1000);
+        continue;
+      } else if (runtimePauseAnnounced) {
+        logger.info('runtime_pause_resumed', {
+          reason: 'runtime_override'
+        });
+        runtimePauseAnnounced = false;
+      }
+
       const elapsedSeconds = (Date.now() - startMs) / 1000;
       if (elapsedSeconds >= config.maxRunSeconds) {
         logger.warn('max_run_seconds_reached', { maxRunSeconds: config.maxRunSeconds });
@@ -1219,6 +1555,26 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
 
       const source = planner.next();
       if (!source) {
+        continue;
+      }
+      attemptedSourceUrls.add(String(source.url || '').trim());
+      if ((runtimeOverrides.blocked_domains || []).includes(String(source.host || '').toLowerCase().replace(/^www\./, ''))) {
+        logger.info('runtime_domain_block_applied', {
+          host: source.host,
+          url: source.url
+        });
+        resumeCooldownSkippedUrls.add(String(source.url || '').trim());
+        continue;
+      }
+      const cooldownDecision = frontierDb?.shouldSkipUrl?.(source.url) || { skip: false };
+      if (cooldownDecision.skip) {
+        logger.info('url_cooldown_applied', {
+          url: source.url,
+          status: null,
+          cooldown_seconds: null,
+          reason: cooldownDecision.reason || 'frontier_cooldown'
+        });
+        resumeCooldownSkippedUrls.add(String(source.url || '').trim());
         continue;
       }
 
@@ -1237,7 +1593,98 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
           url: source.url,
           message: error.message
         });
+        resumeFetchFailedUrls.add(String(source.url || '').trim());
+        frontierDb?.recordFetch?.({
+          productId,
+          url: source.url,
+          status: 0,
+          error: error.message
+        });
+        if (traceWriter) {
+          const fetchTrace = await traceWriter.writeJson({
+            section: 'fetch',
+            prefix: 'fetch',
+            payload: {
+              url: source.url,
+              host: source.host,
+              status: 0,
+              error: error.message
+            },
+            ringSize: Math.max(10, toInt(config.runtimeTraceFetchRing, 30))
+          });
+          logger.info('fetch_trace_written', {
+            url: source.url,
+            status: 0,
+            content_type: null,
+            trace_path: fetchTrace.trace_path
+          });
+        }
         continue;
+      }
+
+      const sourceStatusCode = Number.parseInt(String(pageData.status || 0), 10) || 0;
+      let fetchContentType = 'text/html';
+      const finalToken = String(pageData.finalUrl || source.url || '').toLowerCase();
+      if (finalToken.endsWith('.pdf')) {
+        fetchContentType = 'application/pdf';
+      } else if (finalToken.endsWith('.json')) {
+        fetchContentType = 'application/json';
+      } else if (!String(pageData.html || '').trim()) {
+        fetchContentType = 'application/octet-stream';
+      }
+      if (traceWriter) {
+        const fetchTrace = await traceWriter.writeJson({
+          section: 'fetch',
+          prefix: 'fetch',
+          payload: {
+            ts: new Date().toISOString(),
+            url: source.url,
+            final_url: pageData.finalUrl || source.url,
+            host: source.host,
+            status: sourceStatusCode,
+            content_type: fetchContentType,
+            title: pageData.title || '',
+            html_chars: String(pageData.html || '').length,
+            network_count: Array.isArray(pageData.networkResponses) ? pageData.networkResponses.length : 0
+          },
+          ringSize: Math.max(10, toInt(config.runtimeTraceFetchRing, 30))
+        });
+        logger.info('fetch_trace_written', {
+          url: source.url,
+          status: sourceStatusCode,
+          content_type: fetchContentType,
+          trace_path: fetchTrace.trace_path
+        });
+
+        const htmlPreview = String(pageData.html || '').slice(0, 200_000);
+        if (htmlPreview) {
+          const htmlTrace = await traceWriter.writeText({
+            section: 'fetch_html_preview',
+            prefix: 'fetch',
+            extension: 'html',
+            text: htmlPreview,
+            ringSize: Math.max(10, toInt(config.runtimeTraceFetchRing, 30)),
+            contentType: 'text/html; charset=utf-8'
+          });
+          logger.info('artifact_written', {
+            kind: 'html_preview',
+            path: htmlTrace.trace_path
+          });
+        }
+
+        const networkRows = Array.isArray(pageData.networkResponses) ? pageData.networkResponses.slice(0, 40) : [];
+        if (networkRows.length > 0) {
+          const networkTrace = await traceWriter.writeJson({
+            section: 'fetch_network_preview',
+            prefix: 'fetch',
+            payload: networkRows,
+            ringSize: Math.max(10, toInt(config.runtimeTraceFetchRing, 30))
+          });
+          logger.info('artifact_written', {
+            kind: 'network_preview',
+            path: networkTrace.trace_path
+          });
+        }
       }
 
       planner.discoverFromHtml(source.url, pageData.html);
@@ -1319,7 +1766,6 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         notes: []
       };
       let evidencePack = null;
-      const sourceStatusCode = Number.parseInt(String(pageData.status || 0), 10) || 0;
       const evidenceEligibleSource =
         !discoveryOnlySource &&
         sourceStatusCode > 0 &&
@@ -1374,9 +1820,11 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
 
       const llmEligibleSource =
         config.llmEnabled &&
+        !runtimeOverrides.disable_llm &&
         Boolean(evidencePack) &&
         sourceStatusCode < 400 &&
         llmTargetFieldsForSource.length > 0;
+      let llmSkipReason = '';
       if (llmEligibleSource) {
         llmExtraction = await extractCandidatesLLM({
           job,
@@ -1386,22 +1834,38 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
           targetFields: llmTargetFieldsForSource,
           config,
           logger,
-          llmContext
+          llmContext,
+          componentDBs: runtimeFieldRulesEngine?.componentDBs || {},
+          knownValues: runtimeFieldRulesEngine?.knownValues || {}
         });
       } else if (config.llmEnabled) {
+        llmSkipReason = discoveryOnlySource
+          ? 'discovery_only_source'
+          : sourceStatusCode >= 500
+            ? 'http_status_source_unavailable'
+            : sourceStatusCode >= 400
+              ? 'http_status_not_extractable'
+              : runtimeOverrides.disable_llm
+                ? 'runtime_override_disable_llm'
+                : llmTargetFieldsForSource.length === 0
+                  ? 'no_remaining_llm_target_fields'
+                  : 'source_not_extractable';
         logger.info('llm_extract_skipped_source', {
           url: source.url,
           status: sourceStatusCode || null,
-          reason: discoveryOnlySource
-            ? 'discovery_only_source'
-            : sourceStatusCode >= 500
-              ? 'http_status_source_unavailable'
-              : sourceStatusCode >= 400
-              ? 'http_status_not_extractable'
-              : llmTargetFieldsForSource.length === 0
-                ? 'no_remaining_llm_target_fields'
-              : 'source_not_extractable'
+          reason: llmSkipReason
         });
+        if (shouldQueueLlmRetry({
+          reason: llmSkipReason,
+          status: sourceStatusCode,
+          discoveryOnly: discoveryOnlySource
+        })) {
+          llmRetryReasonByUrl.set(sourceUrl, llmSkipReason);
+          logger.info('llm_retry_source_queued', {
+            url: sourceUrl,
+            reason: llmSkipReason
+          });
+        }
       }
 
       const llmFieldCandidates = (llmExtraction.fieldCandidates || []).filter((row) => {
@@ -1413,6 +1877,21 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         }
         return true;
       });
+      const llmNotesLower = (llmExtraction.notes || [])
+        .map((note) => String(note || '').toLowerCase())
+        .join(' | ');
+      if (
+        llmEligibleSource &&
+        llmFieldCandidates.length === 0 &&
+        (llmNotesLower.includes('budget guard') || llmNotesLower.includes('skipped by budget'))
+      ) {
+        const budgetReason = 'llm_budget_guard_blocked';
+        llmRetryReasonByUrl.set(sourceUrl, budgetReason);
+        logger.info('llm_retry_source_queued', {
+          url: sourceUrl,
+          reason: budgetReason
+        });
+      }
 
       const mergedFieldCandidates = dedupeCandidates([
         ...deterministicFieldCandidates,
@@ -1493,6 +1972,12 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         fingerprint,
         parserHealth
       });
+      if (!discoveryOnlySource && sourceStatusCode >= 200 && sourceStatusCode < 400) {
+        successfulSourceMetaByUrl.set(sourceUrl, {
+          last_success_at: new Date().toISOString(),
+          status: sourceStatusCode
+        });
+      }
 
       if (manufacturerBrandMismatch) {
         const removedCount = planner.blockHost(source.host, 'brand_mismatch');
@@ -1510,19 +1995,85 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         });
       }
 
+      const sourceFieldValueMap = {};
+      const knownCandidatesFromSource = mergedFieldCandidatesWithEvidence
+        .filter((candidate) => {
+          const value = String(candidate.value || '').trim().toLowerCase();
+          return value && value !== 'unk';
+        })
+        .map((candidate) => {
+          const field = String(candidate.field || '').trim();
+          if (field && sourceFieldValueMap[field] === undefined) {
+            sourceFieldValueMap[field] = String(candidate.value || '');
+          }
+          return field;
+        })
+        .filter(Boolean);
+
       if (
         source.approvedDomain &&
         identity.match &&
         (anchorCheck.majorConflicts || []).length === 0
       ) {
-        const newlyFilledFields = mergedFieldCandidatesWithEvidence
-          .filter((candidate) => {
-            const value = String(candidate.value || '').trim().toLowerCase();
-            return value && value !== 'unk';
-          })
-          .map((candidate) => candidate.field);
-        planner.markFieldsFilled(newlyFilledFields);
-        markSatisfiedLlmFields(llmSatisfiedFields, newlyFilledFields, anchors);
+        planner.markFieldsFilled(knownCandidatesFromSource);
+        markSatisfiedLlmFields(llmSatisfiedFields, knownCandidatesFromSource, anchors);
+      }
+
+      if (knownCandidatesFromSource.length > 0) {
+        const uniqueFields = [...new Set(knownCandidatesFromSource)];
+        logger.info('fields_filled_from_source', {
+          url: sourceUrl,
+          host: source.host,
+          filled_fields: uniqueFields.slice(0, 40),
+          count: uniqueFields.length
+        });
+        if (traceWriter) {
+          await traceWriter.appendJsonl({
+            section: 'fields',
+            filename: 'field_timeline.jsonl',
+            row: {
+              ts: new Date().toISOString(),
+              url: sourceUrl,
+              host: source.host,
+              fields: uniqueFields.slice(0, 60)
+            }
+          });
+        }
+      }
+
+      for (const conflict of llmExtraction.conflicts || []) {
+        const field = String(conflict?.field || '').trim();
+        if (!field) {
+          continue;
+        }
+        logger.info('field_conflict_detected', {
+          field,
+          value_a: String(conflict?.value_a || conflict?.left || ''),
+          value_b: String(conflict?.value_b || conflict?.right || ''),
+          sources: Array.isArray(conflict?.sources) ? conflict.sources.slice(0, 6) : []
+        });
+      }
+
+      frontierDb?.recordFetch?.({
+        productId,
+        url: source.url,
+        finalUrl: sourceUrl,
+        status: sourceStatusCode,
+        contentType: fetchContentType,
+        contentHash: sha256(String(pageData.html || '')),
+        bytes: String(pageData.html || '').length,
+        fieldsFound: [...new Set(knownCandidatesFromSource)],
+        confidence: toFloat(identity.score, 0),
+        conflictFlag: (anchorCheck.majorConflicts || []).length > 0
+      });
+      for (const field of [...new Set(knownCandidatesFromSource)]) {
+        frontierDb?.recordYield?.({
+          url: sourceUrl,
+          fieldKey: field,
+          valueHash: sha256(String(sourceFieldValueMap[field] || '')),
+          confidence: toFloat(identity.score, 0),
+          conflictFlag: false
+        });
       }
 
       const artifactHostKey = `${source.host}__${String(artifactSequence).padStart(4, '0')}`;
@@ -1655,6 +2206,62 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     await fetcher.stop();
   }
 
+  const resumePendingUrls = normalizeHttpUrlList(
+    [
+      ...collectPlannerPendingUrls(planner),
+      ...resumeCooldownSkippedUrls,
+      ...resumeFetchFailedUrls,
+      ...previousResumePendingUnseeded
+    ],
+    resumePersistLimit
+  );
+  const resumeLlmRetryRows = buildNextLlmRetryRows({
+    previousRows: previousResumeRetryRows,
+    newReasonByUrl: llmRetryReasonByUrl,
+    attemptedUrls: attemptedSourceUrls,
+    nowIso: new Date().toISOString(),
+    limit: resumeRetryPersistLimit
+  });
+  const resumeSuccessRows = buildNextSuccessRows({
+    previousRows: previousResumeSuccessRows,
+    newSuccessByUrl: successfulSourceMetaByUrl,
+    nowIso: new Date().toISOString(),
+    limit: Math.max(80, toInt(config.indexingResumeSuccessPersistLimit, 240))
+  });
+  const resumeStatePayload = {
+    category,
+    productId,
+    runId,
+    updated_at: new Date().toISOString(),
+    pending_urls: resumePendingUrls,
+    llm_retry_urls: resumeLlmRetryRows,
+    success_urls: resumeSuccessRows,
+    stats: {
+      seeded_pending_count: resumeSeededPendingCount,
+      seeded_llm_retry_count: resumeSeededLlmRetryCount,
+      seeded_reextract_count: resumeSeededReextractCount,
+      persisted_pending_count: resumePendingUrls.length,
+      persisted_llm_retry_count: resumeLlmRetryRows.length,
+      persisted_success_count: resumeSuccessRows.length,
+      cooldown_skipped_count: resumeCooldownSkippedUrls.size,
+      fetch_failed_count: resumeFetchFailedUrls.size
+    }
+  };
+  await storage.writeObject(
+    indexingResumeKey,
+    Buffer.from(`${JSON.stringify(resumeStatePayload, null, 2)}\n`, 'utf8'),
+    { contentType: 'application/json' }
+  );
+  resumePersistedPendingCount = resumePendingUrls.length;
+  resumePersistedLlmRetryCount = resumeLlmRetryRows.length;
+  resumePersistedSuccessCount = resumeSuccessRows.length;
+  logger.info('indexing_resume_written', {
+    resume_key: indexingResumeKey,
+    pending_urls: resumePersistedPendingCount,
+    llm_retry_urls: resumePersistedLlmRetryCount,
+    success_urls: resumePersistedSuccessCount
+  });
+
   const dedicated = await adapterManager.runDedicatedAdapters({
     job,
     runId,
@@ -1720,8 +2327,29 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     identityLock: job.identityLock || {},
     productId,
     category,
-    config
+    config,
+    fieldRulesEngine: runtimeFieldRulesEngine
   });
+
+  // Post-consensus: apply object-form selection_policy reducers (list → scalar)
+  if (runtimeFieldRulesEngine) {
+    const reduced = applySelectionPolicyReducers({
+      fields: consensus.fields,
+      candidates: consensus.candidates,
+      fieldRulesEngine: runtimeFieldRulesEngine
+    });
+    Object.assign(consensus.fields, reduced.fields);
+  }
+
+  // Post-consensus: apply item_union list merge (set_union / ordered_union)
+  if (runtimeFieldRulesEngine) {
+    const unionResult = applyListUnionReducers({
+      fields: consensus.fields,
+      candidates: consensus.candidates,
+      fieldRulesEngine: runtimeFieldRulesEngine
+    });
+    Object.assign(consensus.fields, unionResult.fields);
+  }
 
   let normalized;
   let provenance;
@@ -1729,7 +2357,8 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
   let fieldsBelowPassTarget;
   let criticalFieldsBelowPassTarget;
   let newValuesProposed;
-  const allowHelperProvisionalFill = helperSupportsProvisionalFill(helperContext, job.identityLock || {});
+  const allowHelperProvisionalFill =
+    indexingHelperFlowEnabled && helperSupportsProvisionalFill(helperContext, job.identityLock || {});
 
   if (!identityGate.validated || identityConfidence < 0.99) {
     normalized = buildAbortedNormalized({
@@ -1789,7 +2418,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     newValuesProposed = consensus.newValuesProposed;
   }
 
-  if (config.helperSupportiveFillMissing && (identityGate.validated || allowHelperProvisionalFill)) {
+  if (indexingHelperFlowEnabled && config.helperSupportiveFillMissing && (identityGate.validated || allowHelperProvisionalFill)) {
     const helperFill = applySupportiveFillToResult({
       helperContext,
       normalized,
@@ -1963,9 +2592,10 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     enabled: false,
     stage: 'disabled'
   };
-  if (config.aggressiveModeEnabled || String(roundContext?.mode || '').toLowerCase() === 'aggressive') {
+  let runtimeEvidencePack = selectAggressiveEvidencePack(sourceResults) || null;
+  if (config.aggressiveModeEnabled || ['aggressive', 'uber_aggressive'].includes(String(roundContext?.mode || '').toLowerCase())) {
     try {
-      const bestEvidencePack = selectAggressiveEvidencePack(sourceResults);
+      const bestEvidencePack = runtimeEvidencePack;
       const aggressiveDomHtml = selectAggressiveDomHtml(artifactsByHost);
       const aggressiveEvidencePack = bestEvidencePack
         ? {
@@ -2027,6 +2657,8 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     }
   }
 
+  const componentReviewQueue = [];
+  const identityObservations = [];
   const runtimeGateResult = applyRuntimeFieldRules({
     engine: runtimeFieldRulesEngine,
     fields: normalized.fields,
@@ -2034,7 +2666,10 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     fieldOrder,
     enforceEvidence: Boolean(config.fieldRulesEngineEnforceEvidence),
     strictEvidence: Boolean(config.fieldRulesEngineEnforceEvidence),
-    evidencePack: null
+    evidencePack: runtimeEvidencePack,
+    extractedValues: normalized.fields,
+    componentReviewQueue,
+    identityObservations,
   });
   normalized.fields = runtimeGateResult.fields;
   if ((runtimeGateResult.failures || []).length > 0) {
@@ -2072,14 +2707,17 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     criticalFieldsBelowPassTarget = [...criticalSet];
   }
   let curationSuggestionResult = null;
-  if ((runtimeGateResult.curation_suggestions || []).length > 0) {
+  const allSuggestions = runtimeGateResult.curation_suggestions || [];
+  const enumSuggestions = allSuggestions.filter(s => s.suggestion_type !== 'new_component');
+  const componentSuggestions = allSuggestions.filter(s => s.suggestion_type === 'new_component');
+  if (enumSuggestions.length > 0) {
     try {
       curationSuggestionResult = await appendEnumCurationSuggestions({
         config,
         category,
         productId,
         runId,
-        suggestions: runtimeGateResult.curation_suggestions || []
+        suggestions: enumSuggestions
       });
       logger.info('runtime_curation_suggestions_persisted', {
         category,
@@ -2090,6 +2728,87 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       });
     } catch (error) {
       logger.warn('runtime_curation_suggestions_failed', {
+        category,
+        productId,
+        runId,
+        message: error.message
+      });
+    }
+  }
+  if (componentSuggestions.length > 0) {
+    try {
+      const compResult = await appendComponentCurationSuggestions({
+        config,
+        category,
+        productId,
+        runId,
+        suggestions: componentSuggestions
+      });
+      logger.info('runtime_component_suggestions_persisted', {
+        category,
+        productId,
+        runId,
+        appended_count: compResult.appended_count,
+        total_count: compResult.total_count
+      });
+    } catch (error) {
+      logger.warn('runtime_component_suggestions_failed', {
+        category,
+        productId,
+        runId,
+        message: error.message
+      });
+    }
+  }
+
+  // Persist component review items (flagged for AI review)
+  // componentReviewQueue was passed to applyRuntimeFieldRules and populated in-place
+  if (componentReviewQueue.length > 0) {
+    try {
+      const reviewResult = await appendComponentReviewItems({
+        config,
+        category,
+        productId,
+        runId,
+        items: componentReviewQueue
+      });
+      logger.info('component_review_items_persisted', {
+        category,
+        productId,
+        runId,
+        appended_count: reviewResult.appended_count,
+        total_count: reviewResult.total_count
+      });
+    } catch (error) {
+      logger.warn('component_review_items_failed', {
+        category,
+        productId,
+        runId,
+        message: error.message
+      });
+    }
+  }
+
+  // Persist identity observations (successful matches)
+  // identityObservations was passed to applyRuntimeFieldRules and populated in-place
+  if (identityObservations.length > 0) {
+    try {
+      const obsResult = await appendComponentIdentityObservations({
+        config,
+        category,
+        productId,
+        runId,
+        observations: identityObservations
+      });
+      logger.info('component_identity_observations_persisted', {
+        category,
+        productId,
+        runId,
+        appended_count: obsResult.appended_count,
+        total_count: obsResult.total_count
+      });
+    } catch (error) {
+      logger.warn('component_identity_observations_failed', {
         category,
         productId,
         runId,
@@ -2187,6 +2906,16 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     fieldOrder,
     provenance,
     fieldReasoning
+  });
+  const needSet = computeNeedSet({
+    runId,
+    category,
+    productId,
+    fieldOrder,
+    provenance,
+    fieldRules: categoryConfig.fieldRules,
+    fieldReasoning,
+    constraintAnalysis
   });
 
   const parserHealthRows = sourceResults
@@ -2322,7 +3051,10 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       fetch_candidate_sources: Boolean(config.fetchCandidateSources),
       discovery_key: discoveryResult.discoveryKey,
       candidates_key: discoveryResult.candidatesKey,
-      candidate_count: discoveryResult.candidates.length
+      candidate_count: discoveryResult.candidates.length,
+      search_profile_key: discoveryResult.search_profile_key || null,
+      search_profile_run_key: discoveryResult.search_profile_run_key || null,
+      search_profile_latest_key: discoveryResult.search_profile_latest_key || null
     },
     searches_attempted: discoveryResult.search_attempts || [],
     urls_fetched: [...new Set(
@@ -2332,7 +3064,9 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         .filter(Boolean)
     )],
     helper_files: {
-      enabled: Boolean(config.helperFilesEnabled),
+      enabled: indexingHelperFlowEnabled,
+      global_helper_files_enabled: Boolean(config.helperFilesEnabled),
+      indexing_helper_files_enabled: Boolean(config.indexingHelperFilesEnabled),
       root: config.helperFilesRoot || 'helper_files',
       active_filtering_match: Boolean(helperContext.active_match),
       active_filtering_source: helperContext.active_match?.source || null,
@@ -2344,7 +3078,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       supportive_file_count: helperContext.stats?.supportive_file_count || 0,
       supportive_match_count: helperContext.stats?.supportive_matched_count || 0,
       supportive_synthetic_sources_used: helperSupportiveSyntheticSources.length,
-      supportive_fill_missing_enabled: Boolean(config.helperSupportiveFillMissing),
+      supportive_fill_missing_enabled: Boolean(indexingHelperFlowEnabled && config.helperSupportiveFillMissing),
       supportive_fields_filled_count: helperFilledFields.length,
       supportive_fields_filled: helperFilledFields,
       supportive_fields_filled_by_method: helperFilledByMethod,
@@ -2434,6 +3168,22 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       endpoint_suggestion_limit: config.endpointSuggestionLimit,
       endpoint_network_scan_limit: config.endpointNetworkScanLimit
     },
+    indexing_resume: {
+      key: indexingResumeKey,
+      mode: resumeMode,
+      max_age_hours: resumeMaxAgeHours,
+      state_age_hours: Number.isFinite(previousResumeStateAgeHours)
+        ? Number(previousResumeStateAgeHours.toFixed(2))
+        : null,
+      reextract_enabled: resumeReextractEnabled,
+      reextract_after_hours: resumeReextractAfterHours,
+      seeded_pending_count: resumeSeededPendingCount,
+      seeded_llm_retry_count: resumeSeededLlmRetryCount,
+      seeded_reextract_count: resumeSeededReextractCount,
+      persisted_pending_count: resumePersistedPendingCount,
+      persisted_llm_retry_count: resumePersistedLlmRetryCount,
+      persisted_success_count: resumePersistedSuccessCount
+    },
     manufacturer_research: {
       attempted_sources: manufacturerSources.length,
       identity_matched_sources: manufacturerSources.filter((source) => source.identity?.match).length,
@@ -2453,6 +3203,14 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     constraint_analysis: constraintAnalysis,
     field_reasoning: fieldReasoning,
     traffic_light: trafficLight,
+    needset: {
+      size: needSet.needset_size,
+      total_fields: needSet.total_fields,
+      reason_counts: needSet.reason_counts,
+      required_level_counts: needSet.required_level_counts,
+      top_fields: (needSet.needs || []).slice(0, 12).map((row) => row.field_key),
+      generated_at: needSet.generated_at
+    },
     top_evidence_references: buildTopEvidenceReferences(provenance, 100),
     parser_health: {
       source_count: parserHealthRows.length,
@@ -2463,6 +3221,99 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     round_context: roundContext || null,
     generated_at: new Date().toISOString()
   };
+
+  if (uberAggressiveMode || frontierDb) {
+    const researchBase = storage.resolveOutputKey(category, productId, 'runs', runId, 'research');
+    const searchPlanPayload = discoveryResult?.uber_search_plan || null;
+    const searchJournalRows = Array.isArray(discoveryResult?.search_journal) ? discoveryResult.search_journal : [];
+    const frontierSnapshot = frontierDb?.frontierSnapshot?.({ limit: 200 }) || null;
+    const previousFields = previousFinalSpec?.fields && typeof previousFinalSpec.fields === 'object'
+      ? previousFinalSpec.fields
+      : (previousFinalSpec || {});
+    const coverageDelta = uberOrchestrator?.buildCoverageDelta?.({
+      previousSpec: previousFields,
+      currentSpec: normalized?.fields || {},
+      fieldOrder
+    }) || {
+      previous_known_count: 0,
+      current_known_count: 0,
+      delta_known: 0,
+      gained_fields: [],
+      lost_fields: []
+    };
+
+    const searchPlanKey = `${researchBase}/search_plan.json`;
+    const searchJournalKey = `${researchBase}/search_journal.jsonl`;
+    const frontierSnapshotKey = `${researchBase}/frontier_snapshot.json`;
+    const coverageDeltaKey = `${researchBase}/coverage_delta.json`;
+    await storage.writeObject(
+      searchPlanKey,
+      Buffer.from(`${JSON.stringify(searchPlanPayload || {
+        source: 'none',
+        queries: discoveryResult?.queries || []
+      }, null, 2)}\n`, 'utf8'),
+      { contentType: 'application/json' }
+    );
+    await storage.writeObject(
+      searchJournalKey,
+      Buffer.from(
+        `${searchJournalRows.map((row) => JSON.stringify(row)).join('\n')}${searchJournalRows.length ? '\n' : ''}`,
+        'utf8'
+      ),
+      { contentType: 'application/x-ndjson' }
+    );
+    await storage.writeObject(
+      frontierSnapshotKey,
+      Buffer.from(`${JSON.stringify(frontierSnapshot || {}, null, 2)}\n`, 'utf8'),
+      { contentType: 'application/json' }
+    );
+    await storage.writeObject(
+      coverageDeltaKey,
+      Buffer.from(`${JSON.stringify(coverageDelta, null, 2)}\n`, 'utf8'),
+      { contentType: 'application/json' }
+    );
+
+    summary.research = {
+      ...(summary.research || {}),
+      mode: runtimeMode,
+      search_plan_key: searchPlanKey,
+      search_journal_key: searchJournalKey,
+      frontier_snapshot_key: frontierSnapshotKey,
+      coverage_delta_key: coverageDeltaKey
+    };
+  }
+
+  const runBase = storage.resolveOutputKey(category, productId, 'runs', runId);
+  const latestBase = storage.resolveOutputKey(category, productId, 'latest');
+  const needSetRunKey = `${runBase}/analysis/needset.json`;
+  const needSetLatestKey = `${latestBase}/needset.json`;
+  summary.needset = {
+    ...(summary.needset || {}),
+    key: needSetRunKey,
+    latest_key: needSetLatestKey
+  };
+  await storage.writeObject(
+    needSetRunKey,
+    Buffer.from(`${JSON.stringify(needSet, null, 2)}\n`, 'utf8'),
+    { contentType: 'application/json' }
+  );
+  await storage.writeObject(
+    needSetLatestKey,
+    Buffer.from(`${JSON.stringify(needSet, null, 2)}\n`, 'utf8'),
+    { contentType: 'application/json' }
+  );
+  logger.info('needset_computed', {
+    productId,
+    runId,
+    category,
+    needset_size: needSet.needset_size,
+    total_fields: needSet.total_fields,
+    reason_counts: needSet.reason_counts,
+    required_level_counts: needSet.required_level_counts,
+    snapshots: needSet.snapshots || [],
+    needs: needSet.needs || [],
+    needset_key: needSetRunKey
+  });
 
   logger.info('run_completed', {
     productId,
@@ -2480,6 +3331,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     llm_estimated_usage_count: llmEstimatedUsageCount,
     llm_retry_without_schema_count: llmRetryWithoutSchemaCount,
     llm_budget_blocked_reason: llmBudgetBlockedReason || null,
+    indexing_helper_flow_enabled: indexingHelperFlowEnabled,
     helper_active_match: Boolean(helperContext.active_match),
     helper_supportive_matches: helperContext.supportive_matches?.length || 0,
     helper_supportive_fields_filled: helperFilledFields.length,
@@ -2490,6 +3342,16 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     traffic_green_count: trafficLight.counts.green,
     traffic_yellow_count: trafficLight.counts.yellow,
     traffic_red_count: trafficLight.counts.red,
+    resume_mode: resumeMode,
+    resume_max_age_hours: resumeMaxAgeHours,
+    resume_reextract_enabled: resumeReextractEnabled,
+    resume_reextract_after_hours: resumeReextractAfterHours,
+    resume_seeded_pending_count: resumeSeededPendingCount,
+    resume_seeded_llm_retry_count: resumeSeededLlmRetryCount,
+    resume_seeded_reextract_count: resumeSeededReextractCount,
+    resume_persisted_pending_count: resumePersistedPendingCount,
+    resume_persisted_llm_retry_count: resumePersistedLlmRetryCount,
+    resume_persisted_success_count: resumePersistedSuccessCount,
     hypothesis_queue_count: summary.hypothesis_queue.length,
     hypothesis_followup_rounds: hypothesisFollowupRoundsExecuted,
     hypothesis_followup_seeded_urls: hypothesisFollowupSeededUrls,
@@ -2516,7 +3378,6 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     }
   }
 
-  const runBase = storage.resolveOutputKey(category, productId, 'runs', runId);
   const identityReportKey = `${runBase}/identity_report.json`;
   summary.identity_report = {
     ...(summary.identity_report || {}),
@@ -2620,7 +3481,8 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     sourceResults,
     runtimeEngine: runtimeFieldRulesEngine,
     runtimeFieldOrder: fieldOrder,
-    runtimeEnforceEvidence: Boolean(config.fieldRulesEngineEnforceEvidence)
+    runtimeEnforceEvidence: Boolean(config.fieldRulesEngineEnforceEvidence),
+    runtimeEvidencePack: runtimeEvidencePack || null
   });
   summary.final_export = finalExport;
 
@@ -2665,6 +3527,9 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     fieldReasoning,
     trafficLight
   });
+  if (frontierDb) {
+    await frontierDb.save();
+  }
 
   await logger.flush();
 

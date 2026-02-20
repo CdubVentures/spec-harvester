@@ -67,8 +67,12 @@ function modelForTask(task, tier, config = {}) {
   return String(config.cortexModelFast || 'gpt-5-low');
 }
 
-function transportForTier(tier) {
-  return tier === 'deep' ? 'async' : 'sync';
+function transportForTier(tier, config = {}) {
+  if (tier !== 'deep') {
+    return 'sync';
+  }
+  const asyncEnabled = toBool(config.cortexAsyncEnabled, true);
+  return asyncEnabled ? 'async' : 'sync';
 }
 
 export function buildCortexTaskPlan({ tasks = [], context = {}, config = {} } = {}) {
@@ -94,7 +98,7 @@ export function buildCortexTaskPlan({ tasks = [], context = {}, config = {} } = 
       ...task,
       tier,
       model: modelForTask(task, tier, config),
-      transport: transportForTier(tier)
+      transport: transportForTier(tier, config)
     });
   }
 

@@ -19,6 +19,67 @@ function normalizeProvider(value) {
   return 'none';
 }
 
+function activeProvidersForConfig(provider, {
+  bingReady,
+  googleReady,
+  searxngReady,
+  duckduckgoReady
+}) {
+  if (provider === 'none') {
+    return [];
+  }
+  if (provider === 'bing') {
+    return bingReady ? ['bing'] : [];
+  }
+  if (provider === 'google') {
+    return googleReady ? ['google'] : [];
+  }
+  if (provider === 'searxng') {
+    return searxngReady ? ['searxng'] : [];
+  }
+  if (provider === 'duckduckgo') {
+    return duckduckgoReady ? ['duckduckgo'] : [];
+  }
+
+  const active = [];
+  if (bingReady) active.push('bing');
+  if (googleReady) active.push('google');
+  if (searxngReady) active.push('searxng');
+  if (duckduckgoReady) active.push('duckduckgo');
+  return active;
+}
+
+function missingGoogleCredentials(provider, config) {
+  if (provider !== 'google' && provider !== 'dual') {
+    return [];
+  }
+  if (config.disableGoogleCse) {
+    return [];
+  }
+  const missing = [];
+  if (!config.googleCseKey) {
+    missing.push('GOOGLE_CSE_KEY');
+  }
+  if (!config.googleCseCx) {
+    missing.push('GOOGLE_CSE_CX');
+  }
+  return missing;
+}
+
+function missingBingCredentials(provider, config) {
+  if (provider !== 'bing' && provider !== 'dual') {
+    return [];
+  }
+  const missing = [];
+  if (!config.bingSearchEndpoint) {
+    missing.push('BING_SEARCH_ENDPOINT');
+  }
+  if (!config.bingSearchKey) {
+    missing.push('BING_SEARCH_KEY');
+  }
+  return missing;
+}
+
 function normalizeBingEndpoint(value) {
   if (!value) {
     return '';
@@ -309,6 +370,7 @@ export async function runSearchProviders({
   logger
 }) {
   const provider = normalizeProvider(config.searchProvider);
+  const googleCseDisabled = Boolean(config.disableGoogleCse);
   if (provider === 'none') {
     return [];
   }
@@ -372,7 +434,7 @@ export async function runSearchProviders({
   }
 
   if (provider === 'google' || provider === 'dual') {
-    if (config.googleCseKey && config.googleCseCx) {
+    if (!googleCseDisabled && config.googleCseKey && config.googleCseCx) {
       tasks.push(
         searchGoogleCse({
           key: config.googleCseKey,
@@ -393,41 +455,46 @@ export async function runSearchProviders({
 
   if (!tasks.length && provider === 'dual') {
     const searxBase = searxngBaseUrl(config);
+    const fallbackTasks = [];
     if (searxBase) {
-      try {
-        const rows = await searchSearxng({
+      fallbackTasks.push(
+        searchSearxng({
           baseUrl: searxBase,
           query,
           limit,
           timeoutMs: config.searxngTimeoutMs
-        });
-        return dedupeResults(rows);
-      } catch (error) {
-        logger?.warn?.('search_provider_failed', {
-          provider: 'searxng',
-          query,
-          message: error.message
-        });
-      }
+        }).catch((error) => {
+          logger?.warn?.('search_provider_failed', {
+            provider: 'searxng',
+            query,
+            message: error.message
+          });
+          return [];
+        })
+      );
     }
     if (config.duckduckgoEnabled !== false) {
-      try {
-        const rows = await searchDuckduckgo({
+      fallbackTasks.push(
+        searchDuckduckgo({
           baseUrl: duckduckgoBaseUrl(config),
           query,
           limit,
           timeoutMs: config.duckduckgoTimeoutMs
-        });
-        return dedupeResults(rows);
-      } catch (error) {
-        logger?.warn?.('search_provider_failed', {
-          provider: 'duckduckgo',
-          query,
-          message: error.message
-        });
-      }
+        }).catch((error) => {
+          logger?.warn?.('search_provider_failed', {
+            provider: 'duckduckgo',
+            query,
+            message: error.message
+          });
+          return [];
+        })
+      );
     }
-    return [];
+    if (!fallbackTasks.length) {
+      return [];
+    }
+    const rows = (await Promise.all(fallbackTasks)).flat();
+    return dedupeResults(rows);
   }
 
   if (!tasks.length) {
@@ -439,16 +506,40 @@ export async function runSearchProviders({
 
 export function searchProviderAvailability(config) {
   const provider = normalizeProvider(config.searchProvider);
+  const googleCseDisabled = Boolean(config.disableGoogleCse);
   const bingReady = Boolean(config.bingSearchEndpoint && config.bingSearchKey);
-  const googleReady = Boolean(config.googleCseKey && config.googleCseCx);
+  const googleReady = !googleCseDisabled && Boolean(config.googleCseKey && config.googleCseCx);
   const searxngReady = Boolean(searxngBaseUrl(config));
   const duckduckgoReady = config.duckduckgoEnabled !== false;
+  const activeProviders = activeProvidersForConfig(provider, {
+    bingReady,
+    googleReady,
+    searxngReady,
+    duckduckgoReady
+  });
+  let fallbackReason = null;
+  if (provider === 'dual' && !bingReady && !googleReady) {
+    if (searxngReady && duckduckgoReady) {
+      fallbackReason = 'dual_fallback_public_engines';
+    } else if (searxngReady) {
+      fallbackReason = 'dual_fallback_searxng_only';
+    } else if (duckduckgoReady) {
+      fallbackReason = 'dual_fallback_duckduckgo_only';
+    } else {
+      fallbackReason = 'no_provider_ready';
+    }
+  }
   return {
     provider,
     bing_ready: bingReady,
     google_ready: googleReady,
+    google_cse_disabled: googleCseDisabled,
     searxng_ready: searxngReady,
     duckduckgo_ready: duckduckgoReady,
+    active_providers: activeProviders,
+    google_missing_credentials: missingGoogleCredentials(provider, config),
+    bing_missing_credentials: missingBingCredentials(provider, config),
+    fallback_reason: fallbackReason,
     internet_ready:
       (provider === 'bing' && bingReady) ||
       (provider === 'google' && googleReady) ||

@@ -8,8 +8,12 @@
     "node": ">=20"
   },
   "scripts": {
+    "setup:bootstrap": "node tools/setup-deps.mjs",
+    "setup:gui": "node tools/specfactory-launcher.mjs",
+    "setup:exe": "node tools/build-setup-exe.mjs",
     "test": "node --test",
     "run:one": "node src/cli/spec.js run-one",
+    "run:indexlab": "node src/cli/spec.js indexlab",
     "run:adhoc": "node src/cli/spec.js run-ad-hoc",
     "run:batch": "node src/cli/spec.js run-batch",
     "discover": "node src/cli/spec.js discover",
@@ -23,17 +27,30 @@
     "rebuild-index": "node src/cli/spec.js rebuild-index",
     "smoke": "node src/cli/spec.js run-one --local --dry-run --s3key specs/inputs/mouse/products/mouse-razer-viper-v3-pro.json",
     "smoke:local": "node src/cli/smoke-local.js",
-    "test:s3": "node src/cli/spec.js test-s3"
+    "test:s3": "node src/cli/spec.js test-s3",
+    "gui:api": "node src/api/guiServer.js --port 8788 --local",
+    "gui:dev": "cd tools/gui-react && npm run dev",
+    "gui:build": "cd tools/gui-react && npm run build",
+    "gui:start": "npm run gui:build && npm run gui:api",
+    "gui:exe": "node tools/build-exe.mjs",
+    "docs:render:authority-diagrams": "node tools/render-authority-mermaid.mjs"
+  },
+  "devDependencies": {
+    "@mermaid-js/mermaid-cli": "^11.12.0",
+    "@yao-pkg/pkg": "^6.3.0",
+    "esbuild": "^0.25.0"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.862.0",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
+    "better-sqlite3": "^12.6.2",
     "chokidar": "^4.0.3",
     "exceljs": "^4.4.0",
-    "pdf-parse": "^1.1.1",
-    "playwright": "^1.54.2",
+    "pdf-parse": "^1.1.4",
+    "playwright": "^1.58.2",
     "semver": "^7.7.4",
+    "ws": "^8.19.0",
     "zod": "^4.3.6"
   }
 }

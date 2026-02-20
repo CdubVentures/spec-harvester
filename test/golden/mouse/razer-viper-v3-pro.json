@@ -1,0 +1,18 @@
+{
+  "product_id": "razer-viper-v3-pro",
+  "category": "mouse",
+  "description": "Razer Viper V3 Pro — flagship wireless gaming mouse",
+  "expected_fields": {
+    "weight": "54",
+    "sensor": "Focus Pro 4K",
+    "max_dpi": "35000",
+    "polling_rate": "4000",
+    "connectivity": "wireless",
+    "battery_life": "95",
+    "switches": "Razer Gen-3 Optical",
+    "shape": "ambidextrous",
+    "buttons": "5"
+  },
+  "required_evidence_fields": ["weight", "sensor", "max_dpi", "polling_rate"],
+  "notes": "Golden reference for regression testing. Values sourced from rtings.com and razer.com."
+}

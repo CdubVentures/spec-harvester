@@ -1,0 +1,525 @@
+/*----------------------------------------------------*/
+/* ==============================
+Blurred Images on Cards
+  ============================== */
+
+/* The blurred (low-res) image */
+.blurred {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  /* same object-fit as final image */
+  opacity: 1;
+  /* start fully visible */
+  z-index: 1;
+  transition: opacity 0.4s ease-out;
+  /* behind the full-res while it fades in */
+}
+
+/* The blurred image will fade out when we apply the .hidden class */
+.blurred.hidden {
+  opacity: 0;
+  /* transitions from 1 -> 0 */
+}
+
+/* The full-res image (starts transparent, fades in upon load) */
+.full-res {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  /* invisible initially */
+  z-index: 2;
+  /* on top of the blurred image */
+}
+
+/* When load finishes, we add "loaded" to fade in */
+.full-res.loaded {
+  opacity: 1;
+  /* transitions from 0 -> 1 */
+}
+
+/*----------------------------------------------------*/
+/* ==============================
+ Check Mark On Cards and Dat Filer
+  ============================== */
+
+.checkmark::after {
+  content: '';
+  position: absolute;
+  display: none;
+  left: 50%;
+  top: 50%;
+  width: 25%;
+  /* 20% of checkbox width */
+  height: 55%;
+  /* 40% of checkbox height */
+  border: solid var(--dark-color-1);
+  border-width: 0 0.175rem 0.175rem 0;
+  /* Use rem for thickness, adjustable */
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+
+.speedometer-text,
+.rating-text,
+.weight-text,
+.sensor-text,
+.gauge-text,
+.gradient-text,
+.mouse-feet-text {
+  font-family: var(--identity-font);
+  letter-spacing: var(--letter-spacing-wide);
+  fill: var(--white-color-1);
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  text-shadow: 0px 0px 8px rgba(0, 0, 0, 0.6);
+}
+
+
+.gauge-text {
+  letter-spacing: 0;
+  text-shadow: 2px 3px 8px rgba(0, 0, 0, 0.8);
+}
+
+/*----------------------------------------------------*/
+/* ==============================
+ Sensor Helper
+  ============================== */
+
+.gauge-helper-container {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  justify-content: center;
+  align-items: center;
+}
+
+.gauge-circle-svg {
+  position: relative;
+  justify-content: center;
+  align-items: center;
+  width: 2.35em;
+  height: 1.75em;
+  container-type: size
+}
+
+.gauge-outer-circle {
+  stroke-width: 5;
+  fill: none;
+  position: relative;
+  justify-content: center;
+  align-items: center;
+}
+
+.gauge-arc {
+  stroke-width: 5;
+  stroke-linecap: flate;
+  /* Gives rounded edges to the arc */
+  fill: none;
+  stroke-dasharray: 201 126;
+  /* 70% of the circle */
+  transform: rotate(142deg);
+  /* Rotates the arc to start at 7:30 and end at 4:30 */
+  transform-origin: 70px 70px;
+  /* Adjust the rotation around the center of the circle */
+}
+
+/* Add this to your existing CSS */
+.gauage-tick-mark {
+  stroke-width: 5;
+  stroke-linecap: flate;
+}
+
+.gauge-text {
+  font-size: 52.5cqh;
+}
+
+/*----------------------------------------------------*/
+/* ==============================
+ Sensor Helper
+  ============================== */
+
+.sensor-helper-container {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  justify-content: center;
+  align-items: center;
+}
+
+.sensor-circle-svg {
+  position: relative;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  overflow: visible;
+  width: 2.35em;
+  height: 1.7em;
+  container-type: size
+}
+
+.sensor-circle {
+  stroke-width: 12;
+  fill: none;
+  position: relative;
+  justify-content: center;
+  align-items: center;
+  stroke-dasharray: 250 60;
+  /* 70% of the circle */
+  transform: rotate(80deg);
+  /* Rotates the arc to start at 7:30 and end at 4:30 */
+  transform-origin: 70px 70px;
+
+
+}
+
+.sensor-arc {
+  stroke-width: 5;
+  stroke-linecap: flat;
+  /* Gives rounded edges to the arc */
+  fill: none;
+  stroke-dasharray: 138.5 126;
+  /* 70% of the circle */
+  transform: rotate(46deg);
+  /* Rotates the arc to start at 7:30 and end at 4:30 */
+  transform-origin: 70px 70px;
+  /* Adjust the rotation around the center of the circle */
+}
+
+/* Add this to your existing CSS */
+.sensor-tick-mark {
+  stroke-width: 4.5;
+  stroke-linecap: flat;
+}
+
+.sensor-text {
+  letter-spacing: -.35px;
+  font-size: 55cqh;
+}
+
+
+/*----------------------------------------------------*/
+/* ==============================
+  Gradient Helper
+   ============================== */
+
+/* SVG and Circle Styling */
+.gradient-helper-container {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  justify-content: center;
+  align-items: center;
+  overflow: visible;
+}
+
+.gradient-circle-svg {
+  stroke-width: 18;
+  overflow: visible;
+  width: 1.85em;
+  height: 1.75em;
+  container-type: size
+}
+
+
+.gradient-bg-circle {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.20);
+  stroke-width: 18;
+}
+
+.gauge-zero-label {
+  font-family: var(--identity-font);
+  font-weight: 500;
+  font-size: var(--font-size-18px);
+  fill: var(--white-color-1)
+}
+
+.gradient-text {
+  font-size: 55cqh;
+  text-align: center;
+  letter-spacing: -.35px;
+}
+
+/*----------------------------------------------------*/
+/*  speedomater  (replace block)  */
+/*----------------------------------------------------*/
+.speedometer-helper-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  overflow: visible;
+  padding: 0 .3em;
+}
+
+.speedometer-svg {
+  width: 1.75em;
+  height: 1.75em;
+  overflow: visible;
+  container-type: size;
+}
+
+.speedometer-shell path {
+  transition: fill .25s ease
+}
+
+.speedometer-needle-group {
+  transform-origin: 256px 256px;
+  transition: transform .25s ease
+}
+
+.speedometer-text {
+  font-family: var(--identity-font);
+  font-weight: bold;
+  letter-spacing: var(--letter-spacing-wide);
+  fill: var(--white-color-1);
+  text-shadow: 0 0 8px rgba(0, 0, 0, .6);
+  font-size: 55cqh;
+  letter-spacing: -.35px;
+  dominant-baseline: middle;
+}
+
+.speedometer-needle-group path {
+  fill: none;
+  stroke: var(--white-color-1)
+}
+
+/*----------------------------------------------------*/
+/* ==============================
+  rating Helper
+   ============================== */
+.mouse-feet-helper-container,
+.weight-helper-container,
+.rating-helper-container {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  justify-content: center;
+  align-items: center;
+}
+
+
+.rating-circle-svg {
+  stroke-width: 17;
+  height: 1.775em;
+  width: 1.775em;
+  container-type: inline-size
+}
+
+
+
+.mouse-feet-circle-fill,
+.weight-circle-fill,
+.rating-circle-fill {
+  fill: none;
+  stroke-linecap: flat;
+  stroke-width: 17;
+  transition: stroke-dashoffset 1s ease, stroke-width 1s ease;
+}
+
+.mouse-feet-bg-circle,
+.weight-bg-circle,
+.rating-bg-circle {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.20);
+}
+
+.rating-text {
+  font-size: 60cqw;
+  line-height: 1;
+}
+
+/*----------------------------------------------------*/
+/* ==============================
+  Mouse Feet
+   ============================== */
+/* ==============================
+  Wieght Helper
+   ============================== */
+
+.mouse-feet-circle-svg,
+.weight-circle-svg {
+  height: 1.775em;
+  width: 2.35em;
+  stroke-width: 17;
+  container-type: inline-size
+}
+
+
+
+/* Dividers should appear on top of the progress circle */
+.weight-quadrant-divider {
+  stroke: rgba(255, 255, 255, 0.4);
+  stroke-width: 5px;
+  stroke-linecap: flat;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Specific coordinates for the dividers within the fill area (r1 to r2) */
+.weight-quadrant-divider.vertical {
+  stroke-dasharray: none;
+}
+
+
+
+
+/*----------------------------------------------------*/
+/* ==============================
+   filter Tooktips
+   ============================== */
+/*----------------------------------------------------*/
+
+
+/****************************************************
+ * Tooltip Icon
+ ****************************************************/
+/*──────────────────────────────────────────────────────────────
+  .filter-spec-tooltip  – FULL BLOCK (arrow added, overflow fix)
+──────────────────────────────────────────────────────────────*/
+.filter-spec-tooltip {
+  position: absolute;
+  width: 80%;
+  width: min(100%, clamp(315px, 260.4545px + 9.0909vw, 365px));
+  max-width: clamp(315px, 260.4545px + 9.0909vw, 365px);
+  overflow: visible;
+  /* let arrow protrude */
+  opacity: 0;
+  z-index: 1;
+  visibility: hidden;
+  pointer-events: none;
+  background: linear-gradient(135deg,
+      var(--section-dusk-background-color) 0%,
+      var(--section-dark-background-color) 100%);
+  box-shadow:
+    0 0 0 1px var(--grey-color-4),
+    0 8px 24px rgba(0, 0, 0, 0.30),
+    0 2px 8px rgba(0, 0, 0, 0.20),
+    inset 0 1px 1px rgba(255, 255, 255, 0.05);
+
+  /* arrow constants */
+  --arrow-size: 6px;
+  /* sync with JS ARROW */
+  --arrow-left: 50%;
+  /* JS updates for centring */
+}
+
+/* arrow skeleton (hidden until oriented) */
+.filter-spec-tooltip::after {
+  content: "";
+  position: absolute;
+  width: 0;
+  height: 0;
+  border: var(--arrow-size) solid transparent;
+  left: var(--arrow-left);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+/* tooltip ABOVE icon – arrow at bottom, pointing down */
+.filter-spec-tooltip.tooltip-above::after {
+  top: 100%;
+  border-top-color: var(--card-color, var(--brand-accent-color, #00bfff));
+}
+
+/* tooltip BELOW icon – arrow at top, pointing up */
+.filter-spec-tooltip:not(.tooltip-above)::after {
+  bottom: 100%;
+  border-bottom-color: var(--card-color, var(--brand-accent-color, #00bfff));
+}
+
+.filter-spec-tooltip-scroller {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* keep wheel/touch events inside */
+  overflow-x: auto;
+  max-height: 400px;
+  padding: 1.5rem 1.65rem 1rem 1.65rem;
+}
+
+
+.filter-spec-tooltip.visible {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+
+}
+
+
+.egXXL-card .filter-spec-tooltip {
+  background: linear-gradient(135deg,
+      var(--egxxl-surface-5) 0%,
+      var(--egxxl-surface-2) 100%);
+}
+
+
+
+.filter-tooltip strong {
+  color: var(--grey-color-1) !important;
+}
+
+/* Tooltip Paragraph */
+.filter-tooltip .tooltip-text {
+  font-family: var(--identity-font) !important;
+  font-weight: var(--font-weight4) !important;
+  font-size: var(--font-size-14px) !important;
+  color: var(--grey-color-1) !important;
+  line-height: 1.5 !important;
+  letter-spacing: normal !important;
+  text-align: left !important;
+  margin: 0 0 0 0 !important;
+}
+
+/* New CSS for List Items in Tooltip */
+.filter-tooltip .tooltip-list {
+  padding: 0 0 0 1.5rem !important;
+  margin: 0 0 0 0 !important;
+}
+
+.filter-tooltip .tooltip-list-item {
+  font-family: var(--identity-font) !important;
+  font-weight: var(--font-weight4) !important;
+  font-size: var(--font-size-14px) !important;
+  color: var(--grey-color-1) !important;
+  letter-spacing: normal !important;
+  text-align: left !important;
+  line-height: 1.5 !important;
+  margin: 0.75rem 0 0.75rem 0 !important;
+  padding: 0 0 0 0 !important;
+}
+
+.filter-tooltip .tooltip-item {
+  margin: 1.2rem 0 0rem 0 !important;
+  padding: 0 0 0 0 !important;
+}
+
+.filter-tooltip .tooltip-item:first-child {
+  margin: 0 !important;
+  /* ⇦ remove the top gap for the first item */
+}
+
+.filter-tooltip strong {}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

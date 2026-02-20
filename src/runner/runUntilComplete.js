@@ -11,6 +11,14 @@ import {
   recordQueueRunResult,
   upsertQueueProduct
 } from '../queue/queueState.js';
+import {
+  ruleRequiredLevel,
+  ruleAvailability,
+  ruleDifficulty,
+  ruleEffort,
+  ruleAiMode,
+  ruleAiMaxCalls
+} from '../engine/ruleAccessors.js';
 
 function toInt(value, fallback = 0) {
   const parsed = Number.parseInt(String(value ?? ''), 10);
@@ -23,6 +31,9 @@ function toArray(value) {
 
 function normalizedMode(value, fallback = 'balanced') {
   const token = String(value || '').trim().toLowerCase();
+  if (token === 'uber_aggressive' || token === 'uber' || token === 'ultra') {
+    return 'uber_aggressive';
+  }
   if (token === 'aggressive') {
     return 'aggressive';
   }
@@ -150,32 +161,7 @@ function normalizeFieldContractToken(value) {
     .replace(/^_+|_+$/g, '');
 }
 
-function readRuleToken(rule = {}, key) {
-  const direct = rule?.[key];
-  if (direct !== undefined && direct !== null && String(direct).trim() !== '') {
-    return direct;
-  }
-  const nested = rule?.priority?.[key];
-  return nested !== undefined ? nested : '';
-}
-
-function inferRuleEffort(rule = {}) {
-  const effortRaw = Number.parseFloat(String(readRuleToken(rule, 'effort') || ''));
-  if (Number.isFinite(effortRaw) && effortRaw > 0) {
-    return effortRaw;
-  }
-  const difficulty = String(readRuleToken(rule, 'difficulty') || '').trim().toLowerCase();
-  if (difficulty === 'hard') {
-    return 8;
-  }
-  if (difficulty === 'medium') {
-    return 5;
-  }
-  if (difficulty === 'easy') {
-    return 2;
-  }
-  return 3;
-}
+// readRuleToken and inferRuleEffort replaced by ruleAccessors imports
 
 export function buildContractEffortPlan({
   missingRequiredFields = [],
@@ -201,10 +187,10 @@ export function buildContractEffortPlan({
 
   for (const field of dedupedRequired) {
     const rule = ruleMap[field] || ruleMap[`fields.${field}`] || {};
-    const requiredLevel = String(readRuleToken(rule, 'required_level') || '').trim().toLowerCase();
-    const availability = String(readRuleToken(rule, 'availability') || '').trim().toLowerCase();
-    const difficulty = String(readRuleToken(rule, 'difficulty') || '').trim().toLowerCase();
-    const effort = inferRuleEffort(rule);
+    const requiredLevel = ruleRequiredLevel(rule);
+    const availability = ruleAvailability(rule);
+    const difficulty = ruleDifficulty(rule);
+    const effort = ruleEffort(rule);
     totalEffort += effort;
 
     if (difficulty === 'hard') {
@@ -222,7 +208,9 @@ export function buildContractEffortPlan({
       required_level: requiredLevel || null,
       availability: availability || null,
       difficulty: difficulty || null,
-      effort
+      effort,
+      ai_mode: ruleAiMode(rule),
+      ai_max_calls: ruleAiMaxCalls(rule)
     });
   }
 
@@ -239,63 +227,279 @@ export function buildContractEffortPlan({
 export function selectRoundSearchProvider({
   baseConfig = {},
   discoveryEnabled = true,
-  missingRequiredCount = 0
+  missingRequiredCount = 0,
+  requiredSearchIteration = 0
 }) {
+  return resolveSearchProviderDecision({
+    baseConfig,
+    discoveryEnabled,
+    missingRequiredCount,
+    requiredSearchIteration
+  }).provider;
+}
+
+export function explainSearchProviderSelection({
+  baseConfig = {},
+  discoveryEnabled = true,
+  missingRequiredCount = 0,
+  requiredSearchIteration = 0
+}) {
+  const decision = resolveSearchProviderDecision({
+    baseConfig,
+    discoveryEnabled,
+    missingRequiredCount,
+    requiredSearchIteration
+  });
+  return {
+    provider: decision.provider,
+    reason_code: decision.reasonCode,
+    configured_provider: decision.configured,
+    discovery_enabled: decision.discoveryEnabled,
+    missing_required_count: decision.missingRequiredCount,
+    required_search_iteration: decision.requiredSearchIteration,
+    cse_rescue_only_mode: decision.cseRescueOnlyMode,
+    cse_rescue_required_iteration: decision.rescueIterationThreshold,
+    use_paid_rescue: decision.usePaidRescue,
+    paid_provider_ready: decision.canUsePaidProvider,
+    free_provider_ready: decision.hasFreeProvider,
+    searxng_ready: decision.searxngReady,
+    duckduckgo_ready: decision.duckduckgoReady,
+    bing_ready: decision.bingReady,
+    google_ready: decision.googleReady,
+    google_cse_disabled: decision.googleCseDisabled
+  };
+}
+
+function resolveSearchProviderDecision({
+  baseConfig = {},
+  discoveryEnabled = true,
+  missingRequiredCount = 0,
+  requiredSearchIteration = 0
+}) {
+  const normalizedMissingRequired = Math.max(0, toInt(missingRequiredCount, 0));
+  const normalizedRequiredIteration = Math.max(0, toInt(requiredSearchIteration, 0));
+
   if (!discoveryEnabled) {
-    return 'none';
+    return {
+      provider: 'none',
+      reasonCode: 'discovery_disabled',
+      configured: String(baseConfig.searchProvider || 'none').trim().toLowerCase(),
+      discoveryEnabled: false,
+      missingRequiredCount: normalizedMissingRequired,
+      requiredSearchIteration: normalizedRequiredIteration,
+      googleCseDisabled: Boolean(baseConfig.disableGoogleCse),
+      bingReady: false,
+      googleReady: false,
+      searxngReady: false,
+      duckduckgoReady: false,
+      hasFreeProvider: false,
+      cseRescueOnlyMode: baseConfig.cseRescueOnlyMode !== false,
+      rescueIterationThreshold: Math.max(1, toInt(baseConfig.cseRescueRequiredIteration, 2)),
+      canUsePaidProvider: false,
+      usePaidRescue: false
+    };
   }
 
   const configured = String(baseConfig.searchProvider || 'none').trim().toLowerCase();
+  const googleCseDisabled = Boolean(baseConfig.disableGoogleCse);
   const bingReady = Boolean(baseConfig.bingSearchEndpoint && baseConfig.bingSearchKey);
-  const googleReady = Boolean(baseConfig.googleCseKey && baseConfig.googleCseCx);
+  const googleReady = !googleCseDisabled && Boolean(baseConfig.googleCseKey && baseConfig.googleCseCx);
   const searxngReady = Boolean(baseConfig.searxngBaseUrl);
   const duckduckgoReady = baseConfig.duckduckgoEnabled !== false;
+  const hasFreeProvider = searxngReady || duckduckgoReady;
+  const cseRescueOnlyMode = baseConfig.cseRescueOnlyMode !== false;
+  const rescueIterationThreshold = Math.max(1, toInt(baseConfig.cseRescueRequiredIteration, 2));
+  const canUsePaidProvider = bingReady || googleReady;
+  const usePaidRescue =
+    canUsePaidProvider &&
+    (
+      !cseRescueOnlyMode ||
+      !hasFreeProvider ||
+      (
+        normalizedMissingRequired > 0 &&
+        normalizedRequiredIteration >= rescueIterationThreshold
+      )
+    );
+  const baseDecision = {
+    configured,
+    discoveryEnabled: true,
+    missingRequiredCount: normalizedMissingRequired,
+    requiredSearchIteration: normalizedRequiredIteration,
+    googleCseDisabled,
+    bingReady,
+    googleReady,
+    searxngReady,
+    duckduckgoReady,
+    hasFreeProvider,
+    cseRescueOnlyMode,
+    rescueIterationThreshold,
+    canUsePaidProvider,
+    usePaidRescue
+  };
 
   if (configured === 'bing') {
-    return bingReady ? 'bing' : (searxngReady ? 'searxng' : (duckduckgoReady ? 'duckduckgo' : 'none'));
-  }
-  if (configured === 'google') {
-    return googleReady ? 'google' : (searxngReady ? 'searxng' : (duckduckgoReady ? 'duckduckgo' : 'none'));
-  }
-  if (configured === 'dual') {
-    if (bingReady || googleReady) {
-      return 'dual';
-    }
-    if (searxngReady) {
-      return 'searxng';
-    }
-    return duckduckgoReady ? 'duckduckgo' : 'none';
-  }
-  if (configured === 'searxng') {
-    return searxngReady ? 'searxng' : (duckduckgoReady ? 'duckduckgo' : 'none');
-  }
-  if (configured === 'duckduckgo' || configured === 'ddg') {
-    return duckduckgoReady ? 'duckduckgo' : 'none';
-  }
-
-  if (missingRequiredCount > 0) {
-    if ((bingReady || googleReady) && searxngReady) {
-      return 'dual';
-    }
-    if (bingReady && googleReady) {
-      return 'dual';
-    }
     if (bingReady) {
-      return 'bing';
-    }
-    if (googleReady) {
-      return 'google';
+      return {
+        ...baseDecision,
+        provider: 'bing',
+        reasonCode: 'configured_bing_ready'
+      };
     }
     if (searxngReady) {
-      return 'searxng';
+      return {
+        ...baseDecision,
+        provider: 'searxng',
+        reasonCode: 'configured_bing_fallback_searxng'
+      };
     }
     if (duckduckgoReady) {
-      return 'duckduckgo';
+      return {
+        ...baseDecision,
+        provider: 'duckduckgo',
+        reasonCode: 'configured_bing_fallback_duckduckgo'
+      };
+    }
+    return {
+      ...baseDecision,
+      provider: 'none',
+      reasonCode: 'configured_bing_no_provider_ready'
+    };
+  }
+  if (configured === 'google') {
+    if (googleReady) {
+      return {
+        ...baseDecision,
+        provider: 'google',
+        reasonCode: 'configured_google_ready'
+      };
+    }
+    if (searxngReady) {
+      return {
+        ...baseDecision,
+        provider: 'searxng',
+        reasonCode: 'configured_google_fallback_searxng'
+      };
+    }
+    if (duckduckgoReady) {
+      return {
+        ...baseDecision,
+        provider: 'duckduckgo',
+        reasonCode: 'configured_google_fallback_duckduckgo'
+      };
+    }
+    return {
+      ...baseDecision,
+      provider: 'none',
+      reasonCode: 'configured_google_no_provider_ready'
+    };
+  }
+  if (configured === 'dual') {
+    if (usePaidRescue) {
+      return {
+        ...baseDecision,
+        provider: 'dual',
+        reasonCode: cseRescueOnlyMode ? 'configured_dual_paid_rescue' : 'configured_dual_paid_always'
+      };
+    }
+    if (searxngReady) {
+      return {
+        ...baseDecision,
+        provider: 'searxng',
+        reasonCode: 'configured_dual_free_searxng'
+      };
+    }
+    if (duckduckgoReady) {
+      return {
+        ...baseDecision,
+        provider: 'duckduckgo',
+        reasonCode: 'configured_dual_free_duckduckgo'
+      };
+    }
+    return {
+      ...baseDecision,
+      provider: 'none',
+      reasonCode: 'configured_dual_no_provider_ready'
+    };
+  }
+  if (configured === 'searxng') {
+    if (searxngReady) {
+      return {
+        ...baseDecision,
+        provider: 'searxng',
+        reasonCode: 'configured_searxng_ready'
+      };
+    }
+    if (duckduckgoReady) {
+      return {
+        ...baseDecision,
+        provider: 'duckduckgo',
+        reasonCode: 'configured_searxng_fallback_duckduckgo'
+      };
+    }
+    return {
+      ...baseDecision,
+      provider: 'none',
+      reasonCode: 'configured_searxng_no_provider_ready'
+    };
+  }
+  if (configured === 'duckduckgo' || configured === 'ddg') {
+    return {
+      ...baseDecision,
+      provider: duckduckgoReady ? 'duckduckgo' : 'none',
+      reasonCode: duckduckgoReady ? 'configured_duckduckgo_ready' : 'configured_duckduckgo_no_provider_ready'
+    };
+  }
+
+  if (normalizedMissingRequired > 0) {
+    if (usePaidRescue) {
+      if (bingReady && googleReady) {
+        return {
+          ...baseDecision,
+          provider: 'dual',
+          reasonCode: cseRescueOnlyMode ? 'auto_paid_rescue_dual' : 'auto_paid_dual'
+        };
+      }
+      if (bingReady) {
+        return {
+          ...baseDecision,
+          provider: 'bing',
+          reasonCode: cseRescueOnlyMode ? 'auto_paid_rescue_bing' : 'auto_paid_bing'
+        };
+      }
+      if (googleReady) {
+        return {
+          ...baseDecision,
+          provider: 'google',
+          reasonCode: cseRescueOnlyMode ? 'auto_paid_rescue_google' : 'auto_paid_google'
+        };
+      }
+    }
+    if (searxngReady) {
+      return {
+        ...baseDecision,
+        provider: 'searxng',
+        reasonCode: 'auto_free_searxng_for_missing_required'
+      };
+    }
+    if (duckduckgoReady) {
+      return {
+        ...baseDecision,
+        provider: 'duckduckgo',
+        reasonCode: 'auto_free_duckduckgo_for_missing_required'
+      };
     }
   } else if (searxngReady || duckduckgoReady) {
-    return searxngReady ? 'searxng' : 'duckduckgo';
+    return {
+      ...baseDecision,
+      provider: searxngReady ? 'searxng' : 'duckduckgo',
+      reasonCode: searxngReady ? 'auto_free_searxng_no_required_gap' : 'auto_free_duckduckgo_no_required_gap'
+    };
   }
-  return 'none';
+  return {
+    ...baseDecision,
+    provider: 'none',
+    reasonCode: 'no_provider_ready'
+  };
 }
 
 export function evaluateRequiredSearchExhaustion({
@@ -392,6 +596,8 @@ export function buildRoundConfig(baseConfig, {
   previousValidated,
   requiredSearchIteration
 } = {}) {
+  const aggressiveLike = mode === 'aggressive' || mode === 'uber_aggressive';
+  const uberMode = mode === 'uber_aggressive';
   const expectedCount = toInt(availabilityEffort.expected_count, 0);
   const sometimesCount = toInt(availabilityEffort.sometimes_count, 0);
   const rareCount = toInt(availabilityEffort.rare_count, 0);
@@ -406,12 +612,12 @@ export function buildRoundConfig(baseConfig, {
   const aggressiveThoroughFromRound = Math.max(1, toInt(baseConfig.aggressiveThoroughFromRound, 2));
   const profile = round === 0
     ? 'fast'
-    : mode === 'aggressive'
+    : aggressiveLike
       ? (round >= aggressiveThoroughFromRound ? 'thorough' : 'standard')
       : (round >= 2 ? 'thorough' : 'standard');
   const aggressiveRound1UrlCap = Math.max(24, toInt(baseConfig.aggressiveRound1MaxUrls, 90));
   const aggressiveRound1CandidateCap = Math.max(32, toInt(baseConfig.aggressiveRound1MaxCandidateUrls, 120));
-  const aggressiveRound1 = mode === 'aggressive' && round === 1;
+  const aggressiveRound1 = aggressiveLike && round === 1;
   const next = applyRunProfile(
     {
       ...baseConfig,
@@ -429,7 +635,7 @@ export function buildRoundConfig(baseConfig, {
           ? Math.min(baseConfig.maxUrlsPerProduct || 20, 24)
           : (
             round >= 2
-              ? Math.max(baseConfig.maxUrlsPerProduct || 20, 160)
+              ? Math.max(baseConfig.maxUrlsPerProduct || 20, uberMode ? 220 : 160)
               : (aggressiveRound1
                 ? Math.min(Math.max(baseConfig.maxUrlsPerProduct || 20, 60), aggressiveRound1UrlCap)
                 : Math.max(baseConfig.maxUrlsPerProduct || 20, 60))
@@ -439,7 +645,7 @@ export function buildRoundConfig(baseConfig, {
           ? Math.min(baseConfig.maxCandidateUrls || 50, 40)
           : (
             round >= 2
-              ? Math.max(baseConfig.maxCandidateUrls || 50, 220)
+              ? Math.max(baseConfig.maxCandidateUrls || 50, uberMode ? 300 : 220)
               : (aggressiveRound1
                 ? Math.min(Math.max(baseConfig.maxCandidateUrls || 50, 90), aggressiveRound1CandidateCap)
                 : Math.max(baseConfig.maxCandidateUrls || 50, 90))
@@ -447,6 +653,14 @@ export function buildRoundConfig(baseConfig, {
     },
     profile
   );
+
+  if (uberMode && round > 0) {
+    next.discoveryMaxQueries = Math.max(next.discoveryMaxQueries || 0, Math.max(12, toInt(baseConfig.discoveryMaxQueries, 8) + 4));
+    next.maxUrlsPerProduct = Math.max(next.maxUrlsPerProduct || 0, Math.max(120, toInt(baseConfig.uberMaxUrlsPerProduct, 25)));
+    next.maxCandidateUrls = Math.max(next.maxCandidateUrls || 0, Math.max(180, toInt(baseConfig.maxCandidateUrls, 50) + 40));
+    next.maxPagesPerDomain = Math.max(next.maxPagesPerDomain || 0, Math.max(3, toInt(baseConfig.uberMaxUrlsPerDomain, 6)));
+    next.maxManufacturerUrlsPerProduct = Math.max(next.maxManufacturerUrlsPerProduct || 0, Math.max(24, toInt(baseConfig.maxManufacturerUrlsPerProduct, 20)));
+  }
 
   if (expectedCount > 0) {
     next.discoveryMaxQueries = Math.max(next.discoveryMaxQueries || 0, 10 + Math.min(14, expectedCount * 2));
@@ -483,7 +697,7 @@ export function buildRoundConfig(baseConfig, {
 
     if (hasExplicitMissingCounts) {
       const aggressiveShouldContinue =
-        mode === 'aggressive' &&
+        aggressiveLike &&
         (
           resolvedMissingCritical > 0 ||
           resolvedPreviousValidated === false
@@ -507,18 +721,26 @@ export function buildRoundConfig(baseConfig, {
 
     next.discoveryEnabled = discoveryEnabled;
     next.fetchCandidateSources = fetchCandidateSources;
-    next.searchProvider = selectRoundSearchProvider({
+    const searchProviderSelection = explainSearchProviderSelection({
       baseConfig,
       discoveryEnabled,
-      missingRequiredCount: resolvedMissingRequired
+      missingRequiredCount: resolvedMissingRequired,
+      requiredSearchIteration: requiredIteration
     });
+    next.searchProvider = searchProviderSelection.provider;
+    next.searchProviderSelection = searchProviderSelection;
     if (!discoveryEnabled) {
       next.searchProvider = 'none';
+      next.searchProviderSelection = {
+        ...searchProviderSelection,
+        provider: 'none',
+        reason_code: 'discovery_disabled'
+      };
     }
   }
 
   const aggressiveKeepRoundOpen =
-    mode === 'aggressive' &&
+    aggressiveLike &&
     (
       resolvedMissingCritical > 0 ||
       resolvedPreviousValidated === false
@@ -532,7 +754,7 @@ export function buildRoundConfig(baseConfig, {
     next.maxManufacturerUrlsPerProduct = Math.max(12, Math.min(next.maxUrlsPerProduct || 24, 24));
   }
 
-  if (mode === 'aggressive') {
+  if (aggressiveLike) {
     const aggressiveRoundCallFloor = Math.max(1, toInt(baseConfig.aggressiveLlmMaxCallsPerRound, 16));
     const aggressiveTotalCallFloor = Math.max(
       aggressiveRoundCallFloor,
@@ -589,11 +811,12 @@ function makeLlmTargetFields({
     toArray(categoryConfig.schema?.critical_fields),
     { fieldOrder: categoryConfig.fieldOrder || [] }
   );
-  const aggressiveMode = mode === 'aggressive';
+  const uberMode = mode === 'uber_aggressive';
+  const aggressiveMode = mode === 'aggressive' || uberMode;
   const aggressiveTargetCap = Math.max(
     requiredFallback.length || 1,
     Math.min(
-      Math.max(1, toInt(config.aggressiveLlmTargetMaxFields, 75)),
+      Math.max(1, toInt(config.aggressiveLlmTargetMaxFields, uberMode ? 110 : 75)),
       Math.max(1, toArray(categoryConfig.fieldOrder).length || 75)
     )
   );
@@ -682,7 +905,7 @@ export function resolveMissingRequiredForPlanning({
   if (Boolean(previousSummary.validated)) {
     return previousMissing;
   }
-  if (mode === 'aggressive') {
+  if (mode === 'aggressive' || mode === 'uber_aggressive') {
     return requiredDefaults;
   }
   const criticalMissing = normalizeFieldList(
@@ -776,7 +999,10 @@ export async function runUntilComplete({
   const categoryBrain = await loadCategoryBrain({ storage, category });
   const fieldAvailabilityArtifact = categoryBrain?.artifacts?.fieldAvailability?.value || {};
   const normalizedModeValue = normalizedMode(mode, config.accuracyMode || 'balanced');
-  let roundsLimit = normalizedRoundCount(maxRounds, normalizedModeValue === 'aggressive' ? 8 : 4);
+  const defaultRounds = normalizedModeValue === 'uber_aggressive'
+    ? Math.max(8, toInt(config.uberMaxRounds, 6))
+    : (normalizedModeValue === 'aggressive' ? 8 : 4);
+  let roundsLimit = normalizedRoundCount(maxRounds, defaultRounds);
   const rounds = [];
 
   await upsertQueueProduct({
@@ -805,6 +1031,8 @@ export async function runUntilComplete({
   let requiredSearchIteration = 0;
   let expectedRetryOverrideCount = 0;
   let forcedExpectedRetryFields = [];
+  const fieldCallCounts = new Map();
+  let escalatedFields = [];  // Fields that failed extraction in prior round → escalate model
 
   for (let round = 0; round < roundsLimit; round += 1) {
     const roundHint = makeRoundHint(round);
@@ -869,6 +1097,30 @@ export async function runUntilComplete({
       previousValidated: previousSummary?.validated,
       requiredSearchIteration
     });
+    const providerSelection = roundConfig.searchProviderSelection || explainSearchProviderSelection({
+      baseConfig: config,
+      discoveryEnabled: roundConfig.discoveryEnabled,
+      missingRequiredCount,
+      requiredSearchIteration
+    });
+    logger.info('search_provider_selected', {
+      round,
+      provider: providerSelection.provider,
+      reason_code: providerSelection.reason_code,
+      configured_provider: providerSelection.configured_provider,
+      required_search_iteration: providerSelection.required_search_iteration,
+      missing_required_count: providerSelection.missing_required_count,
+      cse_rescue_only_mode: providerSelection.cse_rescue_only_mode,
+      cse_rescue_required_iteration: providerSelection.cse_rescue_required_iteration,
+      use_paid_rescue: providerSelection.use_paid_rescue,
+      paid_provider_ready: providerSelection.paid_provider_ready,
+      free_provider_ready: providerSelection.free_provider_ready,
+      google_ready: providerSelection.google_ready,
+      bing_ready: providerSelection.bing_ready,
+      searxng_ready: providerSelection.searxng_ready,
+      duckduckgo_ready: providerSelection.duckduckgo_ready,
+      google_cse_disabled: providerSelection.google_cse_disabled
+    });
     let llmTargetFields = makeLlmTargetFields({
       previousSummary,
       categoryConfig,
@@ -879,6 +1131,27 @@ export async function runUntilComplete({
     if (forcedExpectedRetryFields.length > 0) {
       llmTargetFields = [...new Set([...llmTargetFields, ...forcedExpectedRetryFields])];
       forcedExpectedRetryFields = [];
+    }
+    // Per-field call budget enforcement: exclude fields that have exhausted ai_max_calls
+    const ruleMap = categoryConfig?.fieldRules?.fields || {};
+    const budgetExhaustedFields = [];
+    llmTargetFields = llmTargetFields.filter((field) => {
+      const key = normalizeFieldContractToken(field);
+      const rule = ruleMap[key] || ruleMap[`fields.${key}`] || {};
+      const maxCalls = ruleAiMaxCalls(rule);
+      const currentCalls = fieldCallCounts.get(key) || 0;
+      if (currentCalls >= maxCalls) {
+        budgetExhaustedFields.push(key);
+        return false;
+      }
+      return true;
+    });
+    if (budgetExhaustedFields.length > 0) {
+      logger.info('field_budget_exhausted', {
+        round,
+        fields: budgetExhaustedFields,
+        remaining_target_count: llmTargetFields.length
+      });
     }
     const jobOverride = buildRoundRequirements(job, llmTargetFields, previousSummary, missingRequiredForPlanning);
 
@@ -900,10 +1173,32 @@ export async function runUntilComplete({
         availability: availabilityEffort,
         contract_effort: contractEffort,
         extra_queries: extraQueries,
-        llm_target_fields: llmTargetFields
+        llm_target_fields: llmTargetFields,
+        escalated_fields: escalatedFields
       }
     });
     finalResult = roundResult;
+    // Increment per-field call counts for all fields targeted this round
+    for (const field of llmTargetFields) {
+      const key = normalizeFieldContractToken(field);
+      fieldCallCounts.set(key, (fieldCallCounts.get(key) || 0) + 1);
+    }
+    // Dynamic escalation: fields targeted this round that are still missing → escalate next round
+    const stillMissing = new Set(
+      (roundResult.summary?.missing_required_fields || [])
+        .map((f) => normalizeFieldContractToken(f))
+        .filter(Boolean)
+    );
+    escalatedFields = llmTargetFields
+      .map((f) => normalizeFieldContractToken(f))
+      .filter((f) => stillMissing.has(f));
+    if (escalatedFields.length > 0) {
+      logger.info('fields_escalated_for_next_round', {
+        round,
+        count: escalatedFields.length,
+        fields: escalatedFields.slice(0, 10)
+      });
+    }
     logger.info('round_completed', {
       round,
       run_id: roundResult.runId,
@@ -957,6 +1252,9 @@ export async function runUntilComplete({
       round,
       round_profile: roundConfig.runProfile,
       run_id: roundResult.runId,
+      search_provider: providerSelection.provider,
+      search_provider_reason: providerSelection.reason_code || null,
+      search_provider_used_paid_rescue: Boolean(providerSelection.use_paid_rescue),
       validated: progress.validated,
       missing_required_count: progress.missingRequiredCount,
       critical_missing_count: progress.criticalCount,

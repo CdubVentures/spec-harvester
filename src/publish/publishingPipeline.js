@@ -8,6 +8,7 @@ import { createFieldRulesEngine } from '../engine/fieldRulesEngine.js';
 import { applyRuntimeFieldRules } from '../engine/runtimeGate.js';
 import { buildAccuracyReport } from '../testing/goldenFiles.js';
 import { buildReviewMetrics } from '../review/overrideWorkflow.js';
+import { ruleBlockPublishUnk, ruleEvidenceRequired } from '../engine/ruleAccessors.js';
 
 function nowIso() {
   return new Date().toISOString();
@@ -969,6 +970,134 @@ async function writeBulkExports(storage, category, format = 'all') {
     ...written
   };
 }
+
+export function checkPublishBlockers({ engine, fields = {} }) {
+  if (!engine) {
+    return { blocked: false, publish_blocked_fields: [] };
+  }
+  const blocked = [];
+  for (const field of engine.getAllFieldKeys()) {
+    const rule = engine.getFieldRule(field);
+    if (!ruleBlockPublishUnk(rule || {})) {
+      continue;
+    }
+    if (!hasKnownValue(fields[field])) {
+      blocked.push({
+        field,
+        reason: rule?.priority?.publish_gate_reason || rule?.publish_gate_reason || 'missing_required'
+      });
+    }
+  }
+  return {
+    blocked: blocked.length > 0,
+    publish_blocked_fields: blocked
+  };
+}
+
+const ALLOWED_PUBLISH_GATES = ['none', 'identity_complete', 'required_complete', 'evidence_complete', 'all_validations_pass', 'strict'];
+
+function hasEvidenceProvenance(fieldProvenance) {
+  if (!fieldProvenance || typeof fieldProvenance !== 'object') {
+    return false;
+  }
+  if (Array.isArray(fieldProvenance.evidence) && fieldProvenance.evidence.length > 0) {
+    return true;
+  }
+  if (fieldProvenance.url || fieldProvenance.snippet_id) {
+    return true;
+  }
+  return false;
+}
+
+export function evaluatePublishGate({
+  engine,
+  fields = {},
+  provenance = {},
+  runtimeGate = {},
+  gate
+}) {
+  const effectiveGate = gate || engine?.getPublishGate?.() || 'required_complete';
+  if (!effectiveGate || effectiveGate === 'none') {
+    return { pass: true, gate: effectiveGate, blockers: [] };
+  }
+
+  const blockers = [];
+  const gateChecks = {
+    identity_complete: ['identity_complete'],
+    required_complete: ['identity_complete', 'required_complete'],
+    evidence_complete: ['identity_complete', 'required_complete', 'evidence_complete'],
+    all_validations_pass: ['identity_complete', 'required_complete', 'evidence_complete', 'all_validations_pass'],
+    strict: ['identity_complete', 'required_complete', 'evidence_complete', 'all_validations_pass', 'strict']
+  };
+  const checks = gateChecks[effectiveGate] || gateChecks.required_complete;
+
+  if (checks.includes('identity_complete')) {
+    for (const { key } of (engine?.getFieldsByRequiredLevel?.('identity') || [])) {
+      if (!hasKnownValue(fields[key])) {
+        blockers.push({ field: key, gate_check: 'identity_complete', reason: 'missing_identity_field' });
+      }
+    }
+  }
+
+  if (checks.includes('required_complete')) {
+    for (const { key } of (engine?.getRequiredFields?.() || [])) {
+      if (blockers.some((b) => b.field === key)) {
+        continue;
+      }
+      if (!hasKnownValue(fields[key])) {
+        blockers.push({ field: key, gate_check: 'required_complete', reason: 'missing_required_field' });
+      }
+    }
+  }
+
+  if (checks.includes('evidence_complete')) {
+    for (const field of (engine?.getAllFieldKeys?.() || [])) {
+      const rule = engine.getFieldRule(field);
+      if (!ruleEvidenceRequired(rule || {})) {
+        continue;
+      }
+      if (!hasKnownValue(fields[field])) {
+        continue;
+      }
+      if (!hasEvidenceProvenance(provenance[field])) {
+        blockers.push({ field, gate_check: 'evidence_complete', reason: 'missing_evidence' });
+      }
+    }
+  }
+
+  if (checks.includes('all_validations_pass')) {
+    for (const failure of toArray(runtimeGate?.failures)) {
+      if (blockers.some((b) => b.field === failure.field)) {
+        continue;
+      }
+      blockers.push({
+        field: failure.field,
+        gate_check: 'all_validations_pass',
+        reason: failure.reason_code || 'validation_failed'
+      });
+    }
+  }
+
+  if (checks.includes('strict')) {
+    for (const warning of toArray(runtimeGate?.warnings)) {
+      if (blockers.some((b) => b.field === warning.field && b.gate_check === 'strict')) {
+        continue;
+      }
+      blockers.push({
+        field: warning.field,
+        gate_check: 'strict',
+        reason: warning.reason_code || 'cross_validation_warning'
+      });
+    }
+  }
+
+  return {
+    pass: blockers.length === 0,
+    gate: effectiveGate,
+    blockers
+  };
+}
+
 async function publishSingleProduct({ storage, config, category, productId }) {
   const latest = await readLatestArtifacts(storage, category, productId);
   const override = await readOverrideDoc({ config, category, productId });
@@ -1009,17 +1138,44 @@ async function publishSingleProduct({ storage, config, category, productId }) {
     evidencePack: null
   });
 
-  const requiredMissing = engine.getRequiredFields()
-    .map((row) => normalizeFieldKey(row.key))
-    .filter((field) => !hasKnownValue(runtimeGate.fields[field]));
-  const validationFailed = (runtimeGate.failures || []).length > 0 || requiredMissing.length > 0;
-  if (validationFailed) {
+  // Gate 1: Data quality — always active (normalization / cross-validation / evidence failures)
+  if ((runtimeGate.failures || []).length > 0) {
     return {
       ok: false,
       product_id: productId,
       reason: 'validation_failed_after_merge',
       runtime_gate: runtimeGate,
-      required_missing_fields: requiredMissing
+      required_missing_fields: []
+    };
+  }
+
+  // Gate 2: Category-level publish gate (enum policy: none → identity_complete → ... → strict)
+  const gateResult = evaluatePublishGate({
+    engine,
+    fields: runtimeGate.fields,
+    provenance: mergedProvenance,
+    runtimeGate
+  });
+  if (!gateResult.pass) {
+    return {
+      ok: false,
+      product_id: productId,
+      reason: 'publish_gate_blocked',
+      publish_gate: gateResult.gate,
+      publish_gate_blockers: gateResult.blockers,
+      runtime_gate: runtimeGate
+    };
+  }
+
+  // Gate 3: Per-field block_publish_when_unk overrides
+  const publishBlockers = checkPublishBlockers({ engine, fields: runtimeGate.fields });
+  if (publishBlockers.blocked) {
+    return {
+      ok: false,
+      product_id: productId,
+      reason: 'publish_blocked_unk_fields',
+      publish_blocked_fields: publishBlockers.publish_blocked_fields,
+      runtime_gate: runtimeGate
     };
   }
 
@@ -1074,7 +1230,8 @@ async function publishSingleProduct({ storage, config, category, productId }) {
     publish_validation: {
       runtime_failures: runtimeGate.failures || [],
       runtime_warnings: runtimeGate.warnings || [],
-      required_missing_fields: requiredMissing,
+      required_missing_fields: [],
+      publish_gate: gateResult.gate,
       evidence_warnings: warnings
     }
   };
@@ -1521,16 +1678,22 @@ export async function buildLlmMetrics({
   storage,
   config = {},
   period = 'week',
-  model = ''
+  model = '',
+  category = '',
+  runLimit = 120
 }) {
   const days = parsePeriodDays(period, 7);
   const cutoff = Date.now() - (days * 24 * 60 * 60 * 1000);
+  const normalizedCategory = normalizeToken(category);
   const text = await storage.readTextOrNull('_billing/ledger.jsonl') || await storage.readTextOrNull(storage.resolveOutputKey('_billing', 'ledger.jsonl')) || '';
   const rows = parseJsonLines(text)
     .filter((row) => parseDateMs(row.ts) >= cutoff)
+    .filter((row) => !normalizedCategory || normalizeToken(row.category || '') === normalizedCategory)
     .filter((row) => !model || normalizeToken(row.model || '') === normalizeToken(model));
 
   const byModelMap = new Map();
+  const byProviderMap = new Map();
+  const byRunMap = new Map();
   const products = new Set();
   let totalCost = 0;
   let totalCalls = 0;
@@ -1540,6 +1703,13 @@ export async function buildLlmMetrics({
   for (const row of rows) {
     const provider = String(row.provider || 'unknown').trim();
     const modelName = String(row.model || 'unknown').trim();
+    const rowRunId = String(row.runId || row.run_id || '').trim();
+    const rowProductId = String(row.productId || row.product_id || '').trim();
+    const rowCategory = String(row.category || '').trim();
+    const rowReason = String(row.reason || 'extract').trim();
+    const rowTs = String(row.ts || '').trim();
+    const rowDay = rowTs.slice(0, 10) || 'unknown_day';
+    const runKey = rowRunId || `${rowDay}::${rowProductId || 'unknown_product'}`;
     const key = `${provider}:${modelName}`;
     if (!byModelMap.has(key)) {
       byModelMap.set(key, {
@@ -1553,6 +1723,37 @@ export async function buildLlmMetrics({
       });
     }
     const bucket = byModelMap.get(key);
+    if (!byProviderMap.has(provider)) {
+      byProviderMap.set(provider, {
+        provider,
+        calls: 0,
+        cost_usd: 0,
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        products: new Set()
+      });
+    }
+    const providerBucket = byProviderMap.get(provider);
+    if (!byRunMap.has(runKey)) {
+      byRunMap.set(runKey, {
+        session_id: runKey,
+        run_id: rowRunId || null,
+        is_session_fallback: !rowRunId,
+        started_at: rowTs || null,
+        last_call_at: rowTs || null,
+        category: rowCategory || null,
+        product_id: rowProductId || null,
+        calls: 0,
+        cost_usd: 0,
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        providers: new Set(),
+        models: new Set(),
+        reasons: new Set(),
+        products: new Set()
+      });
+    }
+    const runBucket = byRunMap.get(runKey);
     const cost = toNumber(row.cost_usd, 0);
     const prompt = toInt(row.prompt_tokens, 0);
     const completion = toInt(row.completion_tokens, 0);
@@ -1561,10 +1762,43 @@ export async function buildLlmMetrics({
     bucket.cost_usd += cost;
     bucket.prompt_tokens += prompt;
     bucket.completion_tokens += completion;
-    if (row.productId) {
-      bucket.products.add(String(row.productId));
-      products.add(String(row.productId));
+    if (rowProductId) {
+      bucket.products.add(rowProductId);
+      products.add(rowProductId);
     }
+    providerBucket.calls += 1;
+    providerBucket.cost_usd += cost;
+    providerBucket.prompt_tokens += prompt;
+    providerBucket.completion_tokens += completion;
+    if (rowProductId) {
+      providerBucket.products.add(rowProductId);
+    }
+
+    runBucket.calls += 1;
+    runBucket.cost_usd += cost;
+    runBucket.prompt_tokens += prompt;
+    runBucket.completion_tokens += completion;
+    if (rowTs) {
+      const startedMs = parseDateMs(runBucket.started_at);
+      const lastMs = parseDateMs(runBucket.last_call_at);
+      const currentMs = parseDateMs(rowTs);
+      if (!startedMs || (currentMs && currentMs < startedMs)) {
+        runBucket.started_at = rowTs;
+      }
+      if (!lastMs || (currentMs && currentMs > lastMs)) {
+        runBucket.last_call_at = rowTs;
+      }
+    }
+    if (!runBucket.product_id && rowProductId) {
+      runBucket.product_id = rowProductId;
+    }
+    if (!runBucket.category && rowCategory) {
+      runBucket.category = rowCategory;
+    }
+    if (provider) runBucket.providers.add(provider);
+    if (modelName) runBucket.models.add(modelName);
+    if (rowReason) runBucket.reasons.add(rowReason);
+    if (rowProductId) runBucket.products.add(rowProductId);
 
     totalCost += cost;
     totalCalls += 1;
@@ -1584,6 +1818,46 @@ export async function buildLlmMetrics({
       products: row.products.size
     }))
     .sort((a, b) => b.cost_usd - a.cost_usd || a.model.localeCompare(b.model));
+  const byProvider = [...byProviderMap.values()]
+    .map((row) => ({
+      provider: row.provider,
+      calls: row.calls,
+      cost_usd: Number.parseFloat(row.cost_usd.toFixed(8)),
+      avg_cost_per_call: row.calls > 0 ? Number.parseFloat((row.cost_usd / row.calls).toFixed(8)) : 0,
+      prompt_tokens: row.prompt_tokens,
+      completion_tokens: row.completion_tokens,
+      products: row.products.size
+    }))
+    .sort((a, b) => b.cost_usd - a.cost_usd || a.provider.localeCompare(b.provider));
+  const byRun = [...byRunMap.values()]
+    .map((row) => {
+      const startedMs = parseDateMs(row.started_at);
+      const lastMs = parseDateMs(row.last_call_at);
+      const spanSeconds = startedMs && lastMs && lastMs >= startedMs
+        ? Math.floor((lastMs - startedMs) / 1000)
+        : 0;
+      return {
+        session_id: row.session_id,
+        run_id: row.run_id,
+        is_session_fallback: row.is_session_fallback,
+        started_at: row.started_at,
+        last_call_at: row.last_call_at,
+        span_seconds: spanSeconds,
+        category: row.category,
+        product_id: row.product_id,
+        calls: row.calls,
+        cost_usd: Number.parseFloat(row.cost_usd.toFixed(8)),
+        avg_cost_per_call: row.calls > 0 ? Number.parseFloat((row.cost_usd / row.calls).toFixed(8)) : 0,
+        prompt_tokens: row.prompt_tokens,
+        completion_tokens: row.completion_tokens,
+        providers: [...row.providers].sort(),
+        models: [...row.models].sort(),
+        reasons: [...row.reasons].sort(),
+        unique_products: row.products.size
+      };
+    })
+    .sort((a, b) => parseDateMs(b.last_call_at) - parseDateMs(a.last_call_at))
+    .slice(0, Math.max(10, toInt(runLimit, 120)));
 
   const budgetMonthly = toNumber(config.llmMonthlyBudgetUsd, 0);
   const periodBudget = budgetMonthly > 0
@@ -1593,6 +1867,7 @@ export async function buildLlmMetrics({
   return {
     period_days: days,
     period: normalizeToken(period),
+    category: category || null,
     model_filter: model || null,
     generated_at: nowIso(),
     total_calls: totalCalls,
@@ -1601,7 +1876,9 @@ export async function buildLlmMetrics({
     total_completion_tokens: completionTokens,
     unique_products: products.size,
     avg_cost_per_product: products.size > 0 ? Number.parseFloat((totalCost / products.size).toFixed(8)) : 0,
+    by_provider: byProvider,
     by_model: byModel,
+    by_run: byRun,
     budget: {
       monthly_usd: budgetMonthly,
       period_budget_usd: periodBudget,

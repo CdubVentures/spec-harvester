@@ -12,12 +12,75 @@
         ],
         "maker": "B",
         "primary_identifier": "C",
-        "properties": []
+        "properties": [
+          {
+            "column": "D",
+            "constraints": [],
+            "field_key": "flawless_sensor",
+            "key": "flawless_sensor",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "E",
+            "constraints": [],
+            "field_key": "sensor_type",
+            "key": "sensor_type",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "F",
+            "constraints": [],
+            "field_key": "dpi",
+            "key": "dpi",
+            "type": "number",
+            "unit": "dpi",
+            "variance_policy": "upper_bound"
+          },
+          {
+            "column": "G",
+            "constraints": [],
+            "field_key": "ips",
+            "key": "ips",
+            "type": "number",
+            "unit": "ips",
+            "variance_policy": "upper_bound"
+          },
+          {
+            "column": "H",
+            "constraints": [],
+            "field_key": "acceleration",
+            "key": "acceleration",
+            "type": "number",
+            "unit": "g",
+            "variance_policy": "upper_bound"
+          },
+          {
+            "column": "I",
+            "constraints": [
+              "sensor_date <= release_date"
+            ],
+            "field_key": "sensor_date",
+            "key": "sensor_date",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          }
+        ]
       },
       "sheet": "sensors",
       "start_row": 2,
       "stop_after_blank_primary": 10,
-      "type": "sensor"
+      "type": "sensor",
+      "priority": {
+        "required_level": "required",
+        "availability": "expected",
+        "difficulty": "medium",
+        "effort": 8
+      }
     },
     {
       "auto_derive_aliases": true,
@@ -30,12 +93,53 @@
         ],
         "maker": "B",
         "primary_identifier": "C",
-        "properties": []
+        "properties": [
+          {
+            "column": "D",
+            "constraints": [],
+            "field_key": "switch_type",
+            "key": "switch_type",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "E",
+            "constraints": [],
+            "key": "switch_life_span",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "F",
+            "constraints": [],
+            "field_key": "click_force",
+            "key": "click_force",
+            "type": "number",
+            "unit": "gf",
+            "variance_policy": "override_allowed"
+          },
+          {
+            "column": "G",
+            "constraints": [],
+            "key": "releasing_force",
+            "type": "number",
+            "unit": "gf",
+            "variance_policy": "authoritative"
+          }
+        ]
       },
       "sheet": "switches",
       "start_row": 2,
       "stop_after_blank_primary": 10,
-      "type": "switch"
+      "type": "switch",
+      "priority": {
+        "required_level": "required",
+        "availability": "expected",
+        "difficulty": "hard",
+        "effort": 8
+      }
     },
     {
       "auto_derive_aliases": true,
@@ -48,12 +152,43 @@
         ],
         "maker": "B",
         "primary_identifier": "C",
-        "properties": []
+        "properties": [
+          {
+            "column": "D",
+            "constraints": [],
+            "key": "encoder_type",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "E",
+            "constraints": [],
+            "key": "encoder_steps",
+            "type": "number",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "F",
+            "constraints": [],
+            "key": "encoder_life_span",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          }
+        ]
       },
       "sheet": "encoder",
       "start_row": 2,
       "stop_after_blank_primary": 10,
-      "type": "encoder"
+      "type": "encoder",
+      "priority": {
+        "required_level": "expected",
+        "availability": "sometimes",
+        "difficulty": "medium",
+        "effort": 5
+      }
     },
     {
       "auto_derive_aliases": true,
@@ -69,7 +204,13 @@
       "sheet": "material",
       "start_row": 2,
       "stop_after_blank_primary": 10,
-      "type": "material"
+      "type": "material",
+      "priority": {
+        "required_level": "expected",
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3
+      }
     }
   ],
   "enum_lists": [
@@ -81,7 +222,13 @@
       "row_end": 0,
       "row_start": 2,
       "sheet": "data_lists",
-      "value_column": "D"
+      "value_column": "D",
+      "priority": {
+        "required_level": "expected",
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3
+      }
     },
     {
       "delimiter": "",
@@ -91,7 +238,13 @@
       "row_end": 0,
       "row_start": 2,
       "sheet": "data_lists",
-      "value_column": "E"
+      "value_column": "E",
+      "priority": {
+        "required_level": "expected",
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3
+      }
     },
     {
       "delimiter": "",
@@ -101,7 +254,13 @@
       "row_end": 0,
       "row_start": 2,
       "sheet": "data_lists",
-      "value_column": "F"
+      "value_column": "F",
+      "priority": {
+        "required_level": "expected",
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3
+      }
     },
     {
       "delimiter": "",
@@ -111,7 +270,13 @@
       "row_end": 0,
       "row_start": 2,
       "sheet": "data_lists",
-      "value_column": "G"
+      "value_column": "G",
+      "priority": {
+        "required_level": "expected",
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3
+      }
     },
     {
       "delimiter": "",
@@ -121,7 +286,13 @@
       "row_end": 0,
       "row_start": 2,
       "sheet": "data_lists",
-      "value_column": "H"
+      "value_column": "H",
+      "priority": {
+        "required_level": "expected",
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3
+      }
     },
     {
       "delimiter": "",
@@ -131,7 +302,13 @@
       "row_end": 0,
       "row_start": 2,
       "sheet": "data_lists",
-      "value_column": "L"
+      "value_column": "L",
+      "priority": {
+        "required_level": "expected",
+        "availability": "sometimes",
+        "difficulty": "medium",
+        "effort": 5
+      }
     },
     {
       "delimiter": "",
@@ -141,7 +318,13 @@
       "row_end": 0,
       "row_start": 2,
       "sheet": "data_lists",
-      "value_column": "N"
+      "value_column": "N",
+      "priority": {
+        "required_level": "expected",
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3
+      }
     },
     {
       "delimiter": "",
@@ -151,7 +334,13 @@
       "row_end": 0,
       "row_start": 2,
       "sheet": "data_lists",
-      "value_column": "P"
+      "value_column": "P",
+      "priority": {
+        "required_level": "required",
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 6
+      }
     },
     {
       "delimiter": "",
@@ -161,7 +350,13 @@
       "row_end": 0,
       "row_start": 2,
       "sheet": "data_lists",
-      "value_column": "Q"
+      "value_column": "Q",
+      "priority": {
+        "required_level": "required",
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 6
+      }
     },
     {
       "delimiter": "",
@@ -171,7 +366,13 @@
       "row_end": 0,
       "row_start": 2,
       "sheet": "data_lists",
-      "value_column": "R"
+      "value_column": "R",
+      "priority": {
+        "required_level": "required",
+        "availability": "expected",
+        "difficulty": "medium",
+        "effort": 6
+      }
     },
     {
       "delimiter": "",
@@ -181,7 +382,13 @@
       "row_end": 0,
       "row_start": 2,
       "sheet": "data_lists",
-      "value_column": "S"
+      "value_column": "S",
+      "priority": {
+        "required_level": "expected",
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3
+      }
     },
     {
       "delimiter": "",
@@ -191,7 +398,13 @@
       "row_end": 0,
       "row_start": 2,
       "sheet": "data_lists",
-      "value_column": "T"
+      "value_column": "T",
+      "priority": {
+        "required_level": "expected",
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3
+      }
     },
     {
       "delimiter": "",
@@ -201,7 +414,13 @@
       "row_end": 0,
       "row_start": 2,
       "sheet": "data_lists",
-      "value_column": "U"
+      "value_column": "U",
+      "priority": {
+        "required_level": "expected",
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3
+      }
     },
     {
       "delimiter": "",
@@ -211,7 +430,13 @@
       "row_end": 0,
       "row_start": 2,
       "sheet": "data_lists",
-      "value_column": "V"
+      "value_column": "V",
+      "priority": {
+        "required_level": "expected",
+        "availability": "expected",
+        "difficulty": "medium",
+        "effort": 3
+      }
     },
     {
       "delimiter": "",
@@ -221,7 +446,13 @@
       "row_end": 0,
       "row_start": 2,
       "sheet": "data_lists",
-      "value_column": "W"
+      "value_column": "W",
+      "priority": {
+        "required_level": "expected",
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3
+      }
     }
   ],
   "enum_sources": [
@@ -12072,10 +12303,37 @@
     "sheet": "dataEntry",
     "source": "column_range"
   },
+  "manual_enum_values": {
+    "coating": [
+      "A",
+      "help"
+    ],
+    "connection": [
+      "1",
+      "2",
+      "he"
+    ],
+    "connectivity": [
+      "1",
+      "2.5"
+    ],
+    "feet_material": [
+      "l"
+    ],
+    "form_factor": [
+      "lets"
+    ],
+    "switch_type": [
+      "eqwe",
+      "yay"
+    ]
+  },
   "product_table": {
     "brand_row": 3,
     "data_row_start": 2,
     "header_row": 1,
+    "id_row": 0,
+    "identifier_row": 0,
     "key_column": "B",
     "layout": "matrix",
     "model_row": 4,

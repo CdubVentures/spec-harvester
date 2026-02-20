@@ -1,5 +1,8 @@
 import path from 'node:path';
+import fsSync from 'node:fs';
 import { gzipBuffer, toNdjson } from '../utils/common.js';
+import { SpecDb } from '../db/specDb.js';
+import { buildScopedItemCandidateId } from '../utils/candidateIdentifier.js';
 
 function jsonBuffer(value) {
   return Buffer.from(JSON.stringify(value, null, 2), 'utf8');
@@ -32,7 +35,9 @@ function compactSummary(summary) {
     identity_report: summary.identity_report || null,
     hypothesis_queue: summary.hypothesis_queue || [],
     constraint_analysis: summary.constraint_analysis || {},
+    runtime_engine: summary.runtime_engine || {},
     field_reasoning: summary.field_reasoning || {},
+    needset: summary.needset || null,
     parser_health: summary.parser_health || {},
     temporal_evidence: summary.temporal_evidence || {},
     endpoint_mining: summary.endpoint_mining || {},
@@ -134,6 +139,7 @@ export async function exportRunArtifacts({
   normalized,
   provenance,
   candidates,
+  specDb,
   summary,
   events,
   markdownSummary,
@@ -272,8 +278,160 @@ export async function exportRunArtifacts({
 
   await Promise.all(writes);
 
+  // Dual-write to SpecDb — resolve lazily if not passed in
+  let db = specDb;
+  if (!db) {
+    try {
+      const dbPath = path.join('.specfactory_tmp', category, 'spec.sqlite');
+      fsSync.accessSync(dbPath);
+      db = new SpecDb({ dbPath, category });
+    } catch { /* no DB available */ }
+  }
+  if (db) {
+    try {
+      exportToSpecDb({ specDb: db, category, productId, runId, normalized, provenance, candidates, summary });
+    } catch (err) {
+      // Best-effort — don't fail the export if SpecDb write fails
+      if (typeof console !== 'undefined') console.error('[exporter] SpecDb dual-write error:', err.message);
+    } finally {
+      // Close if we opened it ourselves
+      if (!specDb && db) try { db.close(); } catch { /* */ }
+    }
+  }
+
   return {
     runBase,
     latestBase
   };
+}
+
+/** Dual-write pipeline outputs into SpecDb tables */
+function exportToSpecDb({ specDb, category, productId, runId, normalized, provenance, candidates, summary }) {
+  const fields = normalized?.fields || {};
+  const isObj = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+  const usedCandidateIds = new Set();
+  const reserveCandidateId = (candidateIdBase) => {
+    let next = String(candidateIdBase || '').trim();
+    if (!next) return next;
+    if (!usedCandidateIds.has(next)) {
+      usedCandidateIds.add(next);
+      return next;
+    }
+    let ordinal = 1;
+    while (usedCandidateIds.has(`${next}::dup_${ordinal}`)) ordinal += 1;
+    next = `${next}::dup_${ordinal}`;
+    usedCandidateIds.add(next);
+    return next;
+  };
+
+  const tx = specDb.db.transaction(() => {
+    // 1. Product run record
+    specDb.upsertProductRun({
+      product_id: productId,
+      run_id: runId,
+      is_latest: true,
+      summary: summary || {},
+      validated: summary?.validated || false,
+      confidence: summary?.confidence ?? 0,
+      cost_usd_run: summary?.cost_usd ?? 0,
+      sources_attempted: summary?.sources_attempted ?? 0,
+      run_at: new Date().toISOString()
+    });
+
+    // 2. Item field state from normalized
+    for (const [fieldKey, rawValue] of Object.entries(fields)) {
+      const prov = isObj(provenance) ? provenance[fieldKey] : null;
+      const nextValue = rawValue != null ? String(rawValue) : null;
+      specDb.upsertItemFieldState({
+        productId,
+        fieldKey,
+        value: nextValue,
+        confidence: prov?.confidence ?? 0,
+        source: 'pipeline',
+        overridden: false,
+        needsAiReview: (prov?.confidence ?? 0) < 0.8,
+        aiReviewComplete: false
+      });
+      specDb.syncItemListLinkForFieldValue({
+        productId,
+        fieldKey,
+        value: nextValue,
+      });
+    }
+
+    // 3. Candidates
+    if (isObj(candidates)) {
+      for (const [fieldKey, fieldCandidates] of Object.entries(candidates)) {
+        if (!Array.isArray(fieldCandidates)) continue;
+        for (let i = 0; i < fieldCandidates.length; i++) {
+          const c = fieldCandidates[i];
+          if (!isObj(c)) continue;
+          const baseCandidateId = buildScopedItemCandidateId({
+            productId,
+            fieldKey,
+            rawCandidateId: c.candidate_id || c.id || '',
+            value: c.value ?? '',
+            sourceHost: c.source_host ?? c.evidence?.host ?? '',
+            sourceMethod: c.source_method ?? c.method ?? c.evidence?.method ?? '',
+            index: c.rank ?? i,
+            runId: runId || '',
+          });
+          const candidateId = reserveCandidateId(baseCandidateId);
+          specDb.insertCandidate({
+            candidate_id: candidateId,
+            category,
+            product_id: productId,
+            field_key: fieldKey,
+            value: c.value ?? null,
+            normalized_value: c.normalized_value ?? null,
+            score: c.score ?? c.confidence ?? 0,
+            rank: c.rank ?? i,
+            source_url: c.source_url ?? c.evidence?.url ?? null,
+            source_host: c.source_host ?? c.evidence?.host ?? null,
+            source_root_domain: c.source_root_domain ?? c.evidence?.rootDomain ?? null,
+            source_tier: c.source_tier ?? c.evidence?.tier ?? null,
+            source_method: c.source_method ?? c.evidence?.method ?? null,
+            approved_domain: c.approved_domain ?? c.evidence?.approvedDomain ?? false,
+            snippet_id: c.snippet_id ?? null,
+            snippet_hash: c.snippet_hash ?? null,
+            snippet_text: c.snippet_text ?? null,
+            quote: c.quote ?? c.evidence?.quote ?? null,
+            quote_span_start: c.quote_span?.[0] ?? null,
+            quote_span_end: c.quote_span?.[1] ?? null,
+            evidence_url: c.evidence_url ?? c.evidence?.url ?? null,
+            evidence_retrieved_at: c.evidence_retrieved_at ?? c.evidence?.retrieved_at ?? null,
+            extracted_at: c.extracted_at || new Date().toISOString(),
+            run_id: runId
+          });
+        }
+      }
+    }
+
+    // 4. Update queue product with run results
+    const existingQueue = specDb.getQueueProduct(productId);
+    if (existingQueue) {
+      specDb.upsertQueueProduct({
+        product_id: productId,
+        status: summary?.validated ? 'complete' : existingQueue.status,
+        last_run_id: runId,
+        rounds_completed: (existingQueue.rounds_completed || 0) + 1,
+        cost_usd_total: (existingQueue.cost_usd_total || 0) + (summary?.cost_usd ?? 0),
+        attempts_total: (existingQueue.attempts_total || 0) + 1,
+        last_completed_at: new Date().toISOString(),
+        last_summary: summary ? JSON.stringify(summary) : null,
+        // Preserve existing fields
+        s3key: existingQueue.s3key,
+        priority: existingQueue.priority,
+        retry_count: existingQueue.retry_count,
+        max_attempts: existingQueue.max_attempts,
+        next_retry_at: existingQueue.next_retry_at,
+        next_action_hint: existingQueue.next_action_hint,
+        last_urls_attempted: existingQueue.last_urls_attempted,
+        last_error: existingQueue.last_error,
+        last_started_at: existingQueue.last_started_at,
+        dirty_flags: existingQueue.dirty_flags
+      });
+    }
+  });
+  tx();
 }

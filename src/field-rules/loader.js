@@ -2,6 +2,30 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 const cache = new Map();
+const signatureCache = new Map();
+const CACHE_MISSING = 'missing';
+const SIGNATURE_TTL_MS = 1000;
+
+/**
+ * Invalidate cached field rules so that component/enum edits take effect
+ * immediately without requiring a process restart.
+ * @param {string} [category] - If provided, only invalidate caches for this category.
+ *                               If omitted, clears all cached field rules.
+ */
+export function invalidateFieldRulesCache(category) {
+  if (category) {
+    const catLower = String(category).trim().toLowerCase();
+    for (const key of cache.keys()) {
+      if (String(key).toLowerCase().includes(catLower)) cache.delete(key);
+    }
+    for (const key of signatureCache.keys()) {
+      if (String(key).toLowerCase().includes(catLower)) signatureCache.delete(key);
+    }
+  } else {
+    cache.clear();
+    signatureCache.clear();
+  }
+}
 
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -23,6 +47,14 @@ function normalizeFieldKey(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
+}
+
+function normalizeCategory(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/_+$/g, '');
 }
 
 async function fileExists(filePath) {
@@ -48,6 +80,96 @@ async function readJsonIfExists(filePath) {
 
 function keyForCache(category, helperRoot) {
   return `${helperRoot}::${category}`;
+}
+
+async function statSignature(filePath, label) {
+  try {
+    const stat = await fs.stat(filePath);
+    const mtime = Number.isFinite(stat.mtimeMs) ? Math.trunc(stat.mtimeMs) : 0;
+    return `${label}:${mtime}:${stat.size}`;
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return `${label}:${CACHE_MISSING}`;
+    }
+    throw error;
+  }
+}
+
+async function dirJsonSignature(dirPath, label) {
+  let entries = [];
+  try {
+    entries = await fs.readdir(dirPath, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return `${label}:${CACHE_MISSING}`;
+    }
+    throw error;
+  }
+
+  const parts = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.json')) {
+      continue;
+    }
+    const fullPath = path.join(dirPath, entry.name);
+    try {
+      const stat = await fs.stat(fullPath);
+      const mtime = Number.isFinite(stat.mtimeMs) ? Math.trunc(stat.mtimeMs) : 0;
+      parts.push(`${entry.name}:${mtime}:${stat.size}`);
+    } catch (error) {
+      if (error?.code !== 'ENOENT') {
+        throw error;
+      }
+    }
+  }
+  parts.sort((left, right) => left.localeCompare(right));
+  return `${label}:${parts.join(',') || CACHE_MISSING}`;
+}
+
+async function buildFieldRulesSignature(helperRoot, category) {
+  const generatedRoot = path.join(helperRoot, category, '_generated');
+  const componentRoot = path.join(generatedRoot, 'component_db');
+  const overrideDir = path.join(helperRoot, category, '_overrides', 'components');
+
+  const [
+    fieldRulesSig,
+    knownValuesSig,
+    parseTemplatesSig,
+    crossRulesSig,
+    uiCatalogSig,
+    componentDbSig,
+    overridesSig
+  ] = await Promise.all([
+    statSignature(path.join(generatedRoot, 'field_rules.json'), 'field_rules'),
+    statSignature(path.join(generatedRoot, 'known_values.json'), 'known_values'),
+    statSignature(path.join(generatedRoot, 'parse_templates.json'), 'parse_templates'),
+    statSignature(path.join(generatedRoot, 'cross_validation_rules.json'), 'cross_validation_rules'),
+    statSignature(path.join(generatedRoot, 'ui_field_catalog.json'), 'ui_field_catalog'),
+    dirJsonSignature(componentRoot, 'component_db'),
+    dirJsonSignature(overrideDir, 'component_overrides')
+  ]);
+
+  return [
+    fieldRulesSig,
+    knownValuesSig,
+    parseTemplatesSig,
+    crossRulesSig,
+    uiCatalogSig,
+    componentDbSig,
+    overridesSig
+  ].join('|');
+}
+
+async function getFieldRulesSignature(helperRoot, category) {
+  const cacheKey = keyForCache(category, helperRoot);
+  const now = Date.now();
+  const cached = signatureCache.get(cacheKey);
+  if (cached && (now - cached.at) < SIGNATURE_TTL_MS) {
+    return cached.value;
+  }
+  const value = await buildFieldRulesSignature(helperRoot, category);
+  signatureCache.set(cacheKey, { at: now, value });
+  return value;
 }
 
 function normalizeComponentEntry(rawEntry = {}, fallbackName = '') {
@@ -207,7 +329,7 @@ async function readComponentDbs(componentRoot) {
     if (!isObject(payload)) {
       continue;
     }
-    const key = normalizeFieldKey(path.basename(entry.name, '.json'));
+    const key = normalizeFieldKey(payload.component_type || path.basename(entry.name, '.json'));
     if (!key) {
       continue;
     }
@@ -221,28 +343,23 @@ function resolveComponentDb(componentDBs = {}, dbName = '') {
   if (!normalized) {
     return null;
   }
-  if (isObject(componentDBs[normalized])) {
-    return componentDBs[normalized];
-  }
-  if (normalized.endsWith('s') && isObject(componentDBs[normalized.slice(0, -1)])) {
-    return componentDBs[normalized.slice(0, -1)];
-  }
-  if (isObject(componentDBs[`${normalized}s`])) {
-    return componentDBs[`${normalized}s`];
-  }
-  return null;
+  return isObject(componentDBs[normalized]) ? componentDBs[normalized] : null;
 }
 
 export async function loadFieldRules(category, options = {}) {
-  const normalizedCategory = normalizeFieldKey(category);
+  const normalizedCategory = normalizeCategory(category);
   if (!normalizedCategory) {
     throw new Error('category_required');
   }
 
   const helperRoot = path.resolve(options.config?.helperFilesRoot || 'helper_files');
   const cacheKey = keyForCache(normalizedCategory, helperRoot);
-  if (!options.reload && cache.has(cacheKey)) {
-    return cache.get(cacheKey);
+  const cached = cache.get(cacheKey);
+  if (!options.reload && cached) {
+    const cacheSignature = await getFieldRulesSignature(helperRoot, normalizedCategory);
+    if (cached.signature === cacheSignature) {
+      return cached.loaded;
+    }
   }
 
   const generatedRoot = path.join(helperRoot, normalizedCategory, '_generated');
@@ -251,6 +368,7 @@ export async function loadFieldRules(category, options = {}) {
     throw new Error(`missing_field_rules:${fieldRulesPath}`);
   }
 
+  const overrideDir = path.join(helperRoot, normalizedCategory, '_overrides', 'components');
   const [rulesRaw, knownRaw, parseRaw, crossRaw, uiRaw, componentDBs] = await Promise.all([
     readJsonIfExists(fieldRulesPath),
     readJsonIfExists(path.join(generatedRoot, 'known_values.json')),
@@ -259,6 +377,57 @@ export async function loadFieldRules(category, options = {}) {
     readJsonIfExists(path.join(generatedRoot, 'ui_field_catalog.json')),
     readComponentDbs(path.join(generatedRoot, 'component_db'))
   ]);
+
+  // Merge component overrides into loaded component DBs at runtime
+  try {
+    const overrideEntries = await fs.readdir(overrideDir, { withFileTypes: true });
+    for (const entry of overrideEntries) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+      try {
+        const ovr = JSON.parse(await fs.readFile(path.join(overrideDir, entry.name), 'utf8'));
+        if (!ovr?.componentType || !ovr?.name) continue;
+        if (!isObject(ovr?.properties) && !isObject(ovr?.identity)) continue;
+        const typeKey = normalizeFieldKey(ovr.componentType);
+        const db = componentDBs[typeKey];
+        if (!db?.entries) continue;
+        const nameToken = normalizeToken(ovr.name);
+        // Find the matching entry via the index or by iterating entries
+        const matched = db.__index?.get(nameToken) || db.__index?.get(nameToken.replace(/\s+/g, ''));
+        if (matched && isObject(ovr.properties) && isObject(matched.properties)) {
+          for (const [prop, val] of Object.entries(ovr.properties)) {
+            if (val !== undefined && val !== null && val !== '') {
+              matched.properties[prop] = val;
+              if (!matched.__overridden) matched.__overridden = {};
+              matched.__overridden[prop] = true;
+            }
+          }
+        }
+        // Apply identity overrides (name, maker, aliases, links)
+        if (matched && isObject(ovr.identity)) {
+          if (ovr.identity.name) matched.canonical_name = ovr.identity.name;
+          if (ovr.identity.maker) matched.maker = ovr.identity.maker;
+          if (Array.isArray(ovr.identity.aliases)) {
+            // Replace aliases entirely so removals propagate; the override
+            // file is the authoritative alias list when present.
+            matched.aliases = ovr.identity.aliases;
+          }
+          if (Array.isArray(ovr.identity.links)) matched.links = ovr.identity.links;
+        }
+        // Update the index for any new aliases from identity overrides
+        if (matched && Array.isArray(ovr.identity?.aliases) && db.__index) {
+          for (const alias of ovr.identity.aliases) {
+            const aliasToken = normalizeToken(alias);
+            if (aliasToken) {
+              db.__index.set(aliasToken, matched);
+              db.__index.set(aliasToken.replace(/\s+/g, ''), matched);
+            }
+          }
+        }
+      } catch { /* skip corrupt override files */ }
+    }
+  } catch (err) {
+    if (err?.code !== 'ENOENT') { /* overrides dir doesn't exist, that's fine */ }
+  }
 
   const rules = isObject(rulesRaw) ? rulesRaw : {};
   const knownValues = normalizeKnownValues(knownRaw || {});
@@ -277,7 +446,9 @@ export async function loadFieldRules(category, options = {}) {
     uiFieldCatalog
   };
 
-  cache.set(cacheKey, loaded);
+  const signature = await buildFieldRulesSignature(helperRoot, normalizedCategory);
+  signatureCache.set(cacheKey, { at: Date.now(), value: signature });
+  cache.set(cacheKey, { signature, loaded });
   return loaded;
 }
 
@@ -362,4 +533,5 @@ export async function getCrossValidationRules(category, options = {}) {
 
 export function clearFieldRulesCache() {
   cache.clear();
+  signatureCache.clear();
 }

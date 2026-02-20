@@ -1,0 +1,17 @@
+{
+  "product_id": "pulsar-x2-v2",
+  "category": "mouse",
+  "description": "Pulsar X2V2 — ultralight competitive gaming mouse",
+  "expected_fields": {
+    "weight": "52",
+    "sensor": "PAW3395",
+    "max_dpi": "26000",
+    "polling_rate": "4000",
+    "connectivity": "wireless",
+    "switches": "Kailh GM 8.0",
+    "shape": "symmetrical",
+    "buttons": "5"
+  },
+  "required_evidence_fields": ["weight", "sensor", "max_dpi", "polling_rate"],
+  "notes": "Golden reference for Pulsar ultralight. Values sourced from rtings.com and pulsar.gg."
+}

@@ -220,7 +220,12 @@ export async function validateCandidatesLLM({
         reason: 'validate',
         host: '',
         url_count: 0,
-        evidence_chars: JSON.stringify(payload).length
+        evidence_chars: JSON.stringify(payload).length,
+        traceWriter: llmContext.traceWriter || null,
+        trace_context: {
+          purpose: 'validate_candidates',
+          target_fields: normalizedUncertain
+        }
       },
       costRates: llmContext.costRates || config,
       onUsage: async (usageRow) => {
@@ -246,6 +251,8 @@ export async function validateCandidatesLLM({
 
     return {
       enabled: true,
+      llm_validate_model: config.llmModelValidate || config.llmModelExtract || '',
+      llm_validate_provider: config.llmProvider || '',
       ...decisions
     };
   } catch (error) {

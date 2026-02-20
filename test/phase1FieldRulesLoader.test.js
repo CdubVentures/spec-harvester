@@ -55,6 +55,7 @@ test('loadFieldRules returns assembled artifacts for downstream systems', async 
       rules: [{ rule_id: 'wireless_battery_required' }]
     });
     await writeJson(path.join(generatedRoot, 'component_db', 'sensors.json'), {
+      component_type: 'sensor',
       db_name: 'sensors',
       category: 'mouse',
       entries: {
@@ -176,6 +177,7 @@ test('lookupComponent resolves by canonical and alias tokens', async () => {
       rules: []
     });
     await writeJson(path.join(generatedRoot, 'component_db', 'sensors.json'), {
+      component_type: 'sensor',
       db_name: 'sensors',
       entries: {
         PAW3395: {
@@ -186,21 +188,21 @@ test('lookupComponent resolves by canonical and alias tokens', async () => {
       }
     });
 
-    const byCanonical = await lookupComponent('mouse', 'sensors', 'PAW3395', {
+    const byCanonical = await lookupComponent('mouse', 'sensor', 'PAW3395', {
       config: {
         helperFilesRoot: helperRoot
       }
     });
     assert.equal(byCanonical?.canonical_name, 'PAW3395');
 
-    const byAlias = await lookupComponent('mouse', 'sensors', 'pixart 3395', {
+    const byAlias = await lookupComponent('mouse', 'sensor', 'pixart 3395', {
       config: {
         helperFilesRoot: helperRoot
       }
     });
     assert.equal(byAlias?.canonical_name, 'PAW3395');
 
-    const missing = await lookupComponent('mouse', 'sensors', 'not-a-sensor', {
+    const missing = await lookupComponent('mouse', 'sensor', 'not-a-sensor', {
       config: {
         helperFilesRoot: helperRoot
       }

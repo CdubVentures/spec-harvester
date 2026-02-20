@@ -3,6 +3,12 @@ import path from 'node:path';
 import { toPosixKey } from '../s3/storage.js';
 import { normalizeToken, normalizeWhitespace } from '../utils/common.js';
 import { upsertQueueProduct } from '../queue/queueState.js';
+import { slugify as canonicalSlugify } from '../catalog/slugify.js';
+import {
+  evaluateIdentityGate,
+  loadCanonicalIdentityIndex,
+  registerCanonicalIdentity
+} from '../catalog/identityGate.js';
 
 const CACHE = new Map();
 const CACHE_TTL_MS = 45_000;
@@ -44,10 +50,7 @@ function hasValue(value) {
 }
 
 function slug(value) {
-  return String(value || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+  return canonicalSlugify(value);
 }
 
 function normalizeBrand(value) {
@@ -779,12 +782,6 @@ export function applySupportiveFillToResult({
   };
 }
 
-function buildProductId(category, brand, model, variant) {
-  return [slug(category), slug(brand), slug(model), slug(variant)]
-    .filter(Boolean)
-    .join('-');
-}
-
 export async function syncJobsFromActiveFiltering({
   storage,
   config,
@@ -800,6 +797,7 @@ export async function syncJobsFromActiveFiltering({
       active_rows: 0,
       created: 0,
       skipped_existing: 0,
+      skipped_identity_gate: 0,
       failed: 0
     };
   }
@@ -814,21 +812,51 @@ export async function syncJobsFromActiveFiltering({
   const configuredLimit = Math.max(0, Number.parseInt(String(config.helperActiveSyncLimit || 0), 10) || 0);
   const effectiveLimit = limit > 0 ? limit : configuredLimit;
   const bounded = effectiveLimit > 0 ? rows.slice(0, effectiveLimit) : rows;
+  const canonicalIndex = await loadCanonicalIdentityIndex({ config, category });
   let created = 0;
   let skippedExisting = 0;
+  let skippedIdentityGate = 0;
   let failed = 0;
 
   for (const row of bounded) {
     const brand = asString(row.brand);
     const model = asString(row.model);
-    const variant = asString(row.variant);
+    const rawVariant = asString(row.variant);
     if (!brand || !model) {
       continue;
     }
-    const productId = buildProductId(category, brand, model, variant);
-    if (!productId) {
+    const gate = evaluateIdentityGate({
+      category,
+      brand,
+      model,
+      variant: rawVariant,
+      canonicalIndex
+    });
+    if (!gate.valid) {
+      skippedIdentityGate += 1;
+      logger?.info?.('identity_gate_rejected', {
+        category,
+        brand,
+        model,
+        variant: rawVariant,
+        reason: gate.reason,
+        canonicalProductId: gate.canonicalProductId
+      });
       continue;
     }
+
+    const identity = gate.normalized;
+    const productId = identity.productId;
+    const variant = identity.variant;
+    if (!productId) continue;
+    registerCanonicalIdentity({
+      canonicalIndex,
+      brand: identity.brand,
+      model: identity.model,
+      variant,
+      productId
+    });
+
     const s3key = toPosixKey(config.s3InputPrefix, category, 'products', `${productId}.json`);
     const exists = await storage.objectExists(s3key);
     if (exists) {
@@ -885,6 +913,7 @@ export async function syncJobsFromActiveFiltering({
     active_rows: rows.length,
     created,
     skipped_existing: skippedExisting,
+    skipped_identity_gate: skippedIdentityGate,
     failed
   };
 }

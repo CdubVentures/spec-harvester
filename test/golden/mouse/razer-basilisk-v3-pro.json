@@ -1,0 +1,18 @@
+{
+  "product_id": "razer-basilisk-v3-pro",
+  "category": "mouse",
+  "description": "Razer Basilisk V3 Pro — feature-rich wireless ergonomic gaming mouse",
+  "expected_fields": {
+    "weight": "112",
+    "sensor": "Focus Pro 26K",
+    "max_dpi": "26000",
+    "polling_rate": "1000",
+    "connectivity": "wireless",
+    "battery_life": "90",
+    "switches": "Razer Gen-3 Optical",
+    "shape": "ergonomic",
+    "buttons": "11"
+  },
+  "required_evidence_fields": ["weight", "sensor", "max_dpi", "polling_rate"],
+  "notes": "Golden reference for regression testing. Values sourced from manufacturer specs and review sites."
+}

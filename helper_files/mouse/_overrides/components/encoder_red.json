@@ -1,0 +1,9 @@
+{
+  "componentType": "encoder",
+  "name": "Red",
+  "properties": {
+    "encoder_type": "mechanical",
+    "encoder_steps": "5"
+  },
+  "updated_at": "2026-02-16T08:03:49.217Z"
+}

@@ -1,0 +1,21 @@
+﻿flowchart TD
+  U["GUI/API mutation request"] --> R{"ID provided?"}
+
+  R -->|"itemFieldStateId"| I1["Resolve Item Field Slot by id"]
+  R -->|"componentValueId\ncomponentIdentityId"| C1["Resolve Component Slot/Identity by id"]
+  R -->|"listValueId\nenumListId"| E1["Resolve Enum Value/List by id"]
+  R -->|"legacy payload"| F["Fallback resolve by product+field\nor type+name+maker\nor field+value"]
+
+  I1 --> I2["Write item_field_state slot\n+ grid_key lane state"]
+  I2 --> I3["No master propagation\nitem is never authoritative"]
+
+  C1 --> C2["Write component_values\ncomponent_identity\n+ component_key lane"]
+  C2 --> C3{"policy check"}
+  C3 -->|"authoritative"| C4["Push value to linked\nitem_field_state slots"]
+  C3 -->|"variance or constraints"| C5["Re-evaluate linked items\nre-flag needs_ai_review"]
+
+  E1 --> E2["Write list_values\nenum_lists\n+ enum_key lane"]
+  E2 --> E3{"action"}
+  E3 -->|"accept or add"| E4["Keep/create value slot\nsync links"]
+  E3 -->|"rename"| E5["Rename by listValueId\nrelink item_list_links\nrewrite item slot values"]
+  E3 -->|"remove"| E6["Delete by listValueId\nclear item_list_links\nclear or reflag item slots"]

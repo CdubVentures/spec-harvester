@@ -93,7 +93,12 @@ export async function writeSummaryMarkdownLLM({
         reason: 'write',
         host: '',
         url_count: 0,
-        evidence_chars: JSON.stringify(payload).length
+        evidence_chars: JSON.stringify(payload).length,
+        traceWriter: llmContext.traceWriter || null,
+        trace_context: {
+          purpose: 'write_summary',
+          target_fields: []
+        }
       },
       costRates: llmContext.costRates || config,
       onUsage: async (usageRow) => {

@@ -1,0 +1,18 @@
+{
+  "product_id": "wlmouse-beast-x",
+  "category": "mouse",
+  "description": "WLMouse Beast X — ultralight wireless gaming mouse with magnesium alloy shell",
+  "expected_fields": {
+    "weight": "35",
+    "sensor": "PixArt PAW3950",
+    "max_dpi": "26000",
+    "polling_rate": "8000",
+    "connectivity": "wireless",
+    "battery_life": "60",
+    "switches": "Kailh GM 8.0",
+    "shape": "symmetrical",
+    "buttons": "5"
+  },
+  "required_evidence_fields": ["weight", "sensor", "max_dpi", "polling_rate"],
+  "notes": "Golden reference for regression testing. Values sourced from manufacturer specs and review sites."
+}

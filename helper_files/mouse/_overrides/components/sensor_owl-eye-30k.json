@@ -1,0 +1,8 @@
+{
+  "componentType": "sensor",
+  "name": "Owl-Eye 30K",
+  "properties": {
+    "acceleration": "30"
+  },
+  "updated_at": "2026-02-16T09:13:47.915Z"
+}

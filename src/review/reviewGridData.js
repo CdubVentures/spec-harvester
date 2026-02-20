@@ -3,6 +3,9 @@ import path from 'node:path';
 import { nowIso } from '../utils/common.js';
 import { loadCategoryConfig } from '../categories/loader.js';
 import { loadQueueState } from '../queue/queueState.js';
+import { ruleRequiredLevel } from '../engine/ruleAccessors.js';
+import { confidenceColor } from './confidenceColor.js';
+import { buildFallbackFieldCandidateId } from '../utils/candidateIdentifier.js';
 
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -40,9 +43,70 @@ function normalizePathToken(value, fallback = 'unknown') {
   return token || fallback;
 }
 
+function humanizeSlugToken(value) {
+  return String(value || '')
+    .split(/[^a-z0-9]+/i)
+    .map((part) => String(part || '').trim())
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function inferIdentityFromProductId(productId, category = '') {
+  const tokens = normalizeToken(productId)
+    .split('-')
+    .map((part) => String(part || '').trim())
+    .filter(Boolean);
+  if (tokens.length === 0) {
+    return { brand: '', model: '', variant: '' };
+  }
+
+  const normalizedCategory = normalizeToken(category);
+  if (normalizedCategory && tokens[0] === normalizedCategory) {
+    tokens.shift();
+  }
+  if (tokens.length === 0) {
+    return { brand: '', model: '', variant: '' };
+  }
+
+  const brandToken = tokens.shift() || '';
+  let modelTokens = [...tokens];
+  let variantToken = '';
+  if (modelTokens.length >= 2) {
+    const tail = modelTokens[modelTokens.length - 1];
+    const prev = modelTokens[modelTokens.length - 2];
+    if (tail && tail === prev) {
+      variantToken = tail;
+      modelTokens = modelTokens.slice(0, -1);
+    }
+  }
+
+  return {
+    brand: humanizeSlugToken(brandToken),
+    model: humanizeSlugToken(modelTokens.join(' ')),
+    variant: humanizeSlugToken(variantToken)
+  };
+}
+
 function hasKnownValue(value) {
   const token = String(value ?? '').trim().toLowerCase();
   return token !== '' && token !== 'unk' && token !== 'unknown' && token !== 'n/a' && token !== 'null';
+}
+
+function resolveOverrideFilePath({ config = {}, category, productId }) {
+  const helperRoot = path.resolve(config.helperFilesRoot || 'helper_files');
+  return path.join(helperRoot, category, '_overrides', `${productId}.overrides.json`);
+}
+
+async function readOverrideFile(filePath) {
+  try {
+    const raw = await fs.readFile(filePath, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (isObject(parsed)) return parsed;
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+  return null;
 }
 
 function parseExcelRowFromCell(cell) {
@@ -107,15 +171,16 @@ function reviewKeys(storage, category, productId) {
 
 function normalizeFieldContract(rule = {}) {
   const contract = isObject(rule.contract) ? rule.contract : {};
-  const requiredLevel = String(
-    rule.required_level ||
-    (isObject(rule.priority) ? rule.priority.required_level : '')
-  ).trim().toLowerCase();
+  const level = ruleRequiredLevel(rule);
+  const comp = isObject(rule.component) ? rule.component : null;
+  const enu = isObject(rule.enum) ? rule.enum : null;
   return {
     type: String(contract.type || 'string'),
-    required: requiredLevel === 'required' || requiredLevel === 'critical' || requiredLevel === 'identity',
+    required: level === 'required' || level === 'critical' || level === 'identity',
     units: contract.unit || null,
-    enum_name: String(rule.enum_name || '').trim() || null
+    enum_name: String(rule.enum_name || '').trim() || null,
+    component_type: comp?.type || null,
+    enum_source: enu?.source || null,
   };
 }
 
@@ -275,7 +340,7 @@ export async function buildReviewLayout({
   };
 }
 
-async function readLatestArtifacts(storage, category, productId) {
+export async function readLatestArtifacts(storage, category, productId) {
   const latestBase = storage.resolveOutputKey(category, productId, 'latest');
   const normalized = await storage.readJsonOrNull(`${latestBase}/normalized.json`);
   const provenance = await storage.readJsonOrNull(`${latestBase}/provenance.json`);
@@ -294,13 +359,62 @@ async function readLatestArtifacts(storage, category, productId) {
   };
 }
 
-function buildFieldState({
+function dbSourceLabel(source) {
+  const token = normalizeToken(source);
+  if (token === 'component_db' || token === 'known_values' || token === 'workbook') return 'Excel Import';
+  if (token === 'pipeline') return 'Pipeline';
+  if (token === 'user') return 'user';
+  return String(source || '').trim();
+}
+
+function dbSourceMethod(source) {
+  const token = normalizeToken(source);
+  if (token === 'component_db' || token === 'known_values' || token === 'workbook') return 'workbook_import';
+  if (token === 'pipeline') return 'pipeline_extract';
+  if (token === 'user') return 'manual_override';
+  return null;
+}
+
+function toSpecDbCandidateRow(row = {}) {
+  const quoteStart = row.quote_span_start;
+  const quoteEnd = row.quote_span_end;
+  const quoteSpan = Number.isFinite(Number(quoteStart)) && Number.isFinite(Number(quoteEnd))
+    ? [Number(quoteStart), Number(quoteEnd)]
+    : null;
+  return {
+    candidate_id: row.candidate_id || '',
+    value: row.value ?? null,
+    score: row.score ?? 0,
+    source_id: row.source_host || row.source_root_domain || row.source_method || '',
+    host: row.source_host || '',
+    tier: row.source_tier ?? null,
+    method: row.source_method || '',
+    evidence: {
+      url: row.evidence_url || row.source_url || '',
+      retrieved_at: row.evidence_retrieved_at || row.extracted_at || '',
+      snippet_id: row.snippet_id || '',
+      snippet_hash: row.snippet_hash || '',
+      quote: row.quote || '',
+      quote_span: quoteSpan,
+      snippet_text: row.snippet_text || '',
+      source_id: row.source_host || row.source_root_domain || row.source_method || '',
+    },
+    llm_extract_model: row.llm_extract_model || null,
+    llm_extract_provider: row.llm_extract_provider || null,
+    llm_validate_model: row.llm_validate_model || null,
+    llm_validate_provider: row.llm_validate_provider || null,
+  };
+}
+
+export function buildFieldState({
   field,
   candidates,
   normalized,
   provenance,
   summary,
-  includeCandidates = true
+  includeCandidates = true,
+  category = '',
+  productId = ''
 }) {
   const fieldKey = normalizeField(field);
   const normalizedFields = isObject(normalized.fields) ? normalized.fields : {};
@@ -326,44 +440,70 @@ function buildFieldState({
     normalizedCandidates = candidateRows.map((candidate, index) => {
       const evidence = candidateEvidenceFromRows(candidate, provenanceRow);
       return {
-        candidate_id: String(candidate.candidate_id || `cand_${fieldKey}_${index + 1}`),
+        candidate_id: String(candidate.candidate_id || buildFallbackFieldCandidateId({
+          productId,
+          fieldKey,
+          value: candidate.value,
+          index: index + 1,
+          variant: 'candidate',
+        })),
         value: candidate.value ?? 'unk',
         score: candidateScore(candidate, provenanceRow),
         source_id: String(candidate.source_id || evidence.source_id || candidate.host || '').trim(),
         source: String(candidate.host || '').trim(),
         tier: toInt(candidate.tier, 0) || null,
         method: String(candidate.method || '').trim() || null,
-        evidence
+        evidence,
+        llm_extract_model: candidate.llm_extract_model || null,
+        llm_extract_provider: candidate.llm_extract_provider || null,
+        llm_validate_model: candidate.llm_validate_model || null,
+        llm_validate_provider: candidate.llm_validate_provider || null
       };
     });
 
     if (normalizedCandidates.length === 0 && hasKnownValue(selectedValue)) {
+      // When no pipeline candidates exist and value has no provenance host,
+      // it likely originates from a workbook import — populate source info.
+      const provenanceHost = String(provenanceRow.host || '').trim();
+      const isWorkbookOrigin = !provenanceHost;
+      const baseEvidence = candidateEvidenceFromRows({}, provenanceRow);
       normalizedCandidates.push({
-        candidate_id: `cand_${fieldKey}_selected`,
+        candidate_id: buildFallbackFieldCandidateId({
+          productId,
+          fieldKey,
+          value: selectedValue,
+          index: 0,
+          variant: 'selected',
+        }),
         value: selectedValue,
         score: Math.max(0, Math.min(1, selectedConfidence || 0.5)),
-        source_id: '',
-        source: '',
+        source_id: isWorkbookOrigin ? 'workbook' : '',
+        source: isWorkbookOrigin ? 'Excel Import' : '',
         tier: null,
-        method: 'selected_value',
-        evidence: candidateEvidenceFromRows({}, provenanceRow)
+        method: isWorkbookOrigin ? 'workbook_import' : 'selected_value',
+        evidence: isWorkbookOrigin ? {
+          ...baseEvidence,
+          quote: category ? `Imported from ${category}Data.xlsm` : baseEvidence.quote,
+          snippet_text: category ? `Imported from ${category}Data.xlsm` : baseEvidence.snippet_text,
+          retrieved_at: summary.generated_at || baseEvidence.retrieved_at,
+          source_id: 'workbook',
+        } : baseEvidence,
       });
     }
   }
 
-  let color = 'gray';
-  if (hasKnownValue(selectedValue)) {
-    color = 'green';
-    if (selectedConfidence < 0.85) {
-      color = 'yellow';
-    }
-    if (selectedConfidence < 0.6 || reasonCodes.includes('constraint_conflict')) {
-      color = 'red';
-    }
-  }
-  if (reasonCodes.includes('critical_field_below_pass_target') || reasonCodes.includes('below_pass_target')) {
-    color = 'red';
-  }
+  const color = hasKnownValue(selectedValue)
+    ? confidenceColor(selectedConfidence, reasonCodes)
+    : 'gray';
+
+  // Always extract top-candidate source info for tooltips (even when full candidates omitted)
+  const topCand = candidateRows[0];
+  const topSource = topCand ? String(topCand.host || '').trim() : '';
+  const topMethod = topCand ? String(topCand.method || '').trim() : '';
+  const topTier = topCand ? (toInt(topCand.tier, 0) || null) : null;
+  const topEvidence = topCand ? candidateEvidenceFromRows(topCand, provenanceRow) : null;
+  const topEvidenceUrl = topEvidence?.url || '';
+  const topEvidenceQuote = topEvidence?.quote || '';
 
   return {
     selected: {
@@ -375,7 +515,13 @@ function buildFieldState({
     needs_review: reasonCodes.length > 0,
     reason_codes: reasonCodes,
     candidate_count: candidateRows.length,
-    candidates: normalizedCandidates
+    candidates: normalizedCandidates,
+    accepted_candidate_id: null,
+    source: topSource,
+    method: topMethod,
+    tier: topTier,
+    evidence_url: topEvidenceUrl,
+    evidence_quote: topEvidenceQuote
   };
 }
 
@@ -385,43 +531,230 @@ export async function buildProductReviewPayload({
   category,
   productId,
   layout = null,
-  includeCandidates = true
+  includeCandidates = true,
+  specDb = null,
 }) {
   const resolvedLayout = layout || await buildReviewLayout({ storage, config, category });
   const latest = await readLatestArtifacts(storage, category, productId);
   const rows = {};
-  let reviewFieldCount = 0;
+  let reviewableFlags = 0;
+  let missingCount = 0;
 
-  for (const row of resolvedLayout.rows || []) {
-    const field = normalizeField(row.key);
-    rows[field] = buildFieldState({
-      field,
-      candidates: latest.candidates,
-      normalized: latest.normalized,
-      provenance: latest.provenance,
-      summary: latest.summary,
-      includeCandidates
-    });
-    if (rows[field].needs_review) {
-      reviewFieldCount += 1;
+  let useSpecDb = false;
+  let dbHasAnyState = false;
+  let dbProduct = null;
+  let dbFieldRowsByField = new Map();
+  let dbCandidatesByField = {};
+
+  if (specDb) {
+    try {
+      useSpecDb = true;
+      const dbFieldRows = toArray(specDb.getItemFieldState(productId));
+      dbHasAnyState = dbFieldRows.length > 0;
+      dbFieldRowsByField = new Map(dbFieldRows.map((row) => [normalizeField(row.field_key), row]));
+      dbCandidatesByField = specDb.getCandidatesForProduct(productId) || {};
+      dbProduct = specDb.getProduct(productId) || null;
+    } catch {
+      useSpecDb = false;
+      dbHasAnyState = false;
+      dbFieldRowsByField = new Map();
+      dbCandidatesByField = {};
     }
   }
 
+  // Read override file only in JSON-primary mode.
+  const overridePath = resolveOverrideFilePath({ config, category, productId });
+  const overrideDoc = useSpecDb ? null : await readOverrideFile(overridePath);
+  const overrides = isObject(overrideDoc?.overrides) ? overrideDoc.overrides : {};
+
+  for (const row of resolvedLayout.rows || []) {
+    const field = normalizeField(row.key);
+    const dbFieldRow = useSpecDb ? dbFieldRowsByField.get(field) : null;
+
+    if (dbFieldRow) {
+      const selectedValue = dbFieldRow.value != null && String(dbFieldRow.value).trim() !== ''
+        ? dbFieldRow.value
+        : 'unk';
+      const selectedConfidence = Math.max(0, Math.min(1, toNumber(dbFieldRow.confidence, hasKnownValue(selectedValue) ? 1 : 0)));
+      const dbCandidateRows = toArray(dbCandidatesByField[field]).map(toSpecDbCandidateRow);
+      const acceptedCandidate = dbFieldRow.accepted_candidate_id
+        ? dbCandidateRows.find((c) => normalizeToken(c.candidate_id) === normalizeToken(dbFieldRow.accepted_candidate_id))
+        : null;
+
+      const provenanceEvidence = acceptedCandidate?.evidence ? [acceptedCandidate.evidence] : [];
+      const state = buildFieldState({
+        field,
+        candidates: { [field]: dbCandidateRows },
+        normalized: { fields: { [field]: selectedValue } },
+        provenance: {
+          [field]: {
+            value: selectedValue,
+            confidence: selectedConfidence,
+            host: acceptedCandidate?.host || '',
+            evidence: provenanceEvidence,
+          }
+        },
+        summary: latest.summary,
+        includeCandidates,
+        category,
+        productId,
+      });
+
+      const needsReview = Boolean(dbFieldRow.needs_ai_review);
+      const reasonCodes = needsReview
+        ? (state.reason_codes.length > 0 ? state.reason_codes : ['needs_ai_review'])
+        : [];
+      const color = hasKnownValue(selectedValue)
+        ? confidenceColor(selectedConfidence, reasonCodes)
+        : 'gray';
+
+      state.selected = {
+        value: selectedValue,
+        confidence: selectedConfidence,
+        status: needsReview ? 'needs_review' : 'ok',
+        color,
+      };
+      state.needs_review = needsReview;
+      state.reason_codes = reasonCodes;
+      state.candidate_count = dbCandidateRows.length;
+      state.overridden = Boolean(dbFieldRow.overridden);
+      state.slot_id = dbFieldRow.id ?? null;
+      state.accepted_candidate_id = state.overridden
+        ? null
+        : (dbFieldRow.accepted_candidate_id || acceptedCandidate?.candidate_id || null);
+      state.source_timestamp = String(dbFieldRow.updated_at || '').trim() || null;
+
+      if (state.overridden) {
+        state.source = 'user';
+        state.method = 'manual_override';
+        state.tier = null;
+      } else if (acceptedCandidate) {
+        state.source = String(acceptedCandidate.host || '').trim();
+        state.method = String(acceptedCandidate.method || '').trim() || null;
+        state.tier = toInt(acceptedCandidate.tier, 0) || null;
+        state.evidence_url = acceptedCandidate.evidence?.url || '';
+        state.evidence_quote = acceptedCandidate.evidence?.quote || '';
+      } else if (dbFieldRow.source) {
+        state.source = dbSourceLabel(dbFieldRow.source);
+        state.method = dbSourceMethod(dbFieldRow.source);
+        state.tier = null;
+      }
+
+      rows[field] = state;
+    } else if (useSpecDb) {
+      rows[field] = buildFieldState({
+        field,
+        candidates: {},
+        normalized: { fields: {} },
+        provenance: {},
+        summary: {},
+        includeCandidates,
+        category,
+        productId,
+      });
+    } else {
+      rows[field] = buildFieldState({
+        field,
+        candidates: latest.candidates,
+        normalized: latest.normalized,
+        provenance: latest.provenance,
+        summary: latest.summary,
+        includeCandidates,
+        category,
+        productId,
+      });
+    }
+
+    // Apply override on top of pipeline data (JSON-primary mode only).
+    const ovr = overrides[field];
+    if (isObject(ovr) && ovr.override_value != null) {
+      rows[field].selected = {
+        value: ovr.override_value,
+        confidence: 1.0,
+        status: 'ok',
+        color: 'green'
+      };
+      rows[field].needs_review = false;
+      rows[field].reason_codes = [];
+      // Only show OVR badge for manual entries — candidate acceptance is confirmation, not override
+      rows[field].overridden = ovr.override_source === 'manual_entry';
+      rows[field].accepted_candidate_id = rows[field].overridden
+        ? null
+        : String(ovr.candidate_id || '').trim() || null;
+      // Surface the timestamp from override provenance
+      rows[field].source_timestamp = ovr.overridden_at || ovr.set_at || null;
+
+      // Populate source from override provenance so tooltip/drawer show correct source
+      if (ovr.override_source === 'manual_entry') {
+        rows[field].source = 'user';
+        rows[field].method = 'manual_override';
+        rows[field].tier = null;
+      } else if (isObject(ovr.source)) {
+        rows[field].source = String(ovr.source.host || '').trim();
+        rows[field].method = String(ovr.source.method || '').trim();
+        rows[field].tier = toInt(ovr.source.tier, 0) || null;
+      }
+      if (isObject(ovr.override_provenance)) {
+        rows[field].evidence_url = String(ovr.override_provenance.url || '').trim();
+        rows[field].evidence_quote = String(ovr.override_provenance.quote || '').trim();
+      }
+    }
+
+    if (rows[field].needs_review) {
+      if (hasKnownValue(rows[field].selected.value)) {
+        reviewableFlags += 1;
+      } else {
+        missingCount += 1;
+      }
+    }
+  }
+
+  const fallbackConfidence = toNumber(latest.summary.confidence, 0);
+  const fallbackCoverage = toNumber(latest.summary.coverage_overall_percent, 0) / 100;
+  const computedCoverage = resolvedLayout.rows.length > 0
+    ? (resolvedLayout.rows.length - missingCount) / resolvedLayout.rows.length
+    : 0;
+  const knownFieldStates = Object.values(rows).filter((state) => hasKnownValue(state?.selected?.value));
+  const computedConfidence = knownFieldStates.length > 0
+    ? knownFieldStates.reduce((sum, state) => sum + toNumber(state?.selected?.confidence, 0), 0) / knownFieldStates.length
+    : 0;
+  const confidence = useSpecDb && computedConfidence > 0 ? computedConfidence : fallbackConfidence;
+  const coverage = useSpecDb ? computedCoverage : fallbackCoverage;
+
   const identity = isObject(latest.normalized.identity) ? latest.normalized.identity : {};
+  const inferredIdentity = inferIdentityFromProductId(productId, category);
+  const updatedAt = (() => {
+    if (useSpecDb) {
+      let maxTs = 0;
+      for (const state of Object.values(rows)) {
+        const ts = parseDateMs(state?.source_timestamp || '');
+        if (ts > maxTs) maxTs = ts;
+      }
+      if (maxTs > 0) return new Date(maxTs).toISOString();
+    }
+    return String(latest.summary.generated_at || nowIso());
+  })();
+
   return {
     product_id: productId,
     category,
     identity: {
-      brand: identity.brand || '',
-      model: identity.model || '',
-      variant: identity.variant || ''
+      id: toInt(identity.id, toInt(dbProduct?.id, 0)),
+      identifier: String(identity.identifier || dbProduct?.identifier || '').trim(),
+      brand: String(identity.brand || dbProduct?.brand || inferredIdentity.brand || '').trim(),
+      model: String(identity.model || dbProduct?.model || inferredIdentity.model || '').trim(),
+      variant: String(identity.variant || dbProduct?.variant || inferredIdentity.variant || '').trim()
     },
     fields: rows,
     metrics: {
-      confidence: toNumber(latest.summary.confidence, 0),
-      coverage: toNumber(latest.summary.coverage_overall, 0),
-      flags: reviewFieldCount,
-      updated_at: String(latest.summary.generated_at || nowIso())
+      confidence,
+      coverage,
+      flags: reviewableFlags,
+      missing: missingCount,
+      has_run: useSpecDb
+        ? dbHasAnyState
+        : !!(latest.summary.generated_at && (confidence > 0 || coverage > 0)),
+      updated_at: updatedAt
     }
   };
 }
@@ -549,9 +882,10 @@ export async function buildReviewQueue({
   config = {},
   category,
   status = 'needs_review',
-  limit = 200
+  limit = 200,
+  specDb = null,
 }) {
-  const loaded = await loadQueueState({ storage, category });
+  const loaded = await loadQueueState({ storage, category, specDb });
   const products = Object.values(loaded.state.products || {});
   const rows = [];
 
@@ -568,14 +902,17 @@ export async function buildReviewQueue({
     }
     const flags = toInt(reviewQueue?.count, 0);
     const confidence = toNumber(latest.summary.confidence, 0);
-    const coverage = toNumber(latest.summary.coverage_overall, 0);
+    const coverage = toNumber(latest.summary.coverage_overall_percent, 0) / 100;
     const identity = isObject(latest.normalized.identity) ? latest.normalized.identity : {};
+    const inferredIdentity = inferIdentityFromProductId(productId, category);
     const item = {
       product_id: productId,
       category,
-      brand: String(identity.brand || '').trim(),
-      model: String(identity.model || '').trim(),
-      variant: String(identity.variant || '').trim(),
+      id: toInt(identity.id, 0),
+      identifier: String(identity.identifier || '').trim(),
+      brand: String(identity.brand || inferredIdentity.brand || '').trim(),
+      model: String(identity.model || inferredIdentity.model || '').trim(),
+      variant: String(identity.variant || inferredIdentity.variant || '').trim(),
       coverage,
       confidence,
       flags,
@@ -614,14 +951,16 @@ export async function writeCategoryReviewArtifacts({
   config = {},
   category,
   status = 'needs_review',
-  limit = 200
+  limit = 200,
+  specDb = null,
 }) {
   const items = await buildReviewQueue({
     storage,
     config,
     category,
     status,
-    limit
+    limit,
+    specDb,
   });
   const key = `_review/${normalizePathToken(category)}/queue.json`;
   const payload = {

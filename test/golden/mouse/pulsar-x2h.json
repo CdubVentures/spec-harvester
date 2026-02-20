@@ -1,0 +1,18 @@
+{
+  "product_id": "pulsar-x2h",
+  "category": "mouse",
+  "description": "Pulsar X2H — ultralight wireless ergonomic gaming mouse",
+  "expected_fields": {
+    "weight": "54",
+    "sensor": "PixArt PAW3395",
+    "max_dpi": "26000",
+    "polling_rate": "1000",
+    "connectivity": "wireless",
+    "battery_life": "70",
+    "switches": "Kailh GM 8.0",
+    "shape": "ergonomic",
+    "buttons": "5"
+  },
+  "required_evidence_fields": ["weight", "sensor", "max_dpi", "polling_rate"],
+  "notes": "Golden reference for regression testing. Values sourced from manufacturer specs and review sites."
+}

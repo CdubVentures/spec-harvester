@@ -194,21 +194,59 @@ function buildTopYieldRows(fieldYield, limit = 20) {
 
 export async function loadCategoryBrain({
   storage,
-  category
+  category,
+  specDb = null,
+  config = {}
 }) {
+  const fallbackFactories = {
+    field_lexicon: defaultFieldLexicon,
+    constraints: defaultFieldConstraints,
+    field_yield: defaultFieldYield,
+    identity_grammar: defaultIdentityGrammar,
+    query_templates: defaultQueryLearning,
+    source_promotions: () => ({ version: 1, updated_at: nowIso(), history: [] }),
+    stats: () => defaultStats(category),
+    field_availability: defaultFieldAvailability
+  };
+
+  /* --- SQLite primary path --- */
+  if (specDb) {
+    const dbArtifacts = specDb.getCategoryBrainArtifacts(category);
+    const hasResults = dbArtifacts && Object.keys(dbArtifacts).length > 0;
+
+    if (hasResults) {
+      const resolve = (name) => {
+        const value = dbArtifacts[name] || fallbackFactories[name]();
+        const key = artifactKey(storage, category, `${name}.json`);
+        return { key, value };
+      };
+
+      return {
+        category,
+        artifacts: {
+          lexicon:          resolve('field_lexicon'),
+          constraints:      resolve('constraints'),
+          fieldYield:       resolve('field_yield'),
+          identityGrammar:  resolve('identity_grammar'),
+          queryTemplates:   resolve('query_templates'),
+          sourcePromotions: resolve('source_promotions'),
+          stats:            resolve('stats'),
+          fieldAvailability: resolve('field_availability')
+        }
+      };
+    }
+  }
+
+  /* --- JSON / storage fallback path --- */
   const [lexicon, constraints, fieldYield, identityGrammar, queryTemplates, sourcePromotions, stats, fieldAvailability] = await Promise.all([
-    readArtifact(storage, category, 'field_lexicon.json', defaultFieldLexicon),
-    readArtifact(storage, category, 'constraints.json', defaultFieldConstraints),
-    readArtifact(storage, category, 'field_yield.json', defaultFieldYield),
-    readArtifact(storage, category, 'identity_grammar.json', defaultIdentityGrammar),
-    readArtifact(storage, category, 'query_templates.json', defaultQueryLearning),
-    readArtifact(storage, category, 'source_promotions.json', () => ({
-      version: 1,
-      updated_at: nowIso(),
-      history: []
-    })),
-    readArtifact(storage, category, 'stats.json', () => defaultStats(category)),
-    readArtifact(storage, category, 'field_availability.json', defaultFieldAvailability)
+    readArtifact(storage, category, 'field_lexicon.json', fallbackFactories.field_lexicon),
+    readArtifact(storage, category, 'constraints.json', fallbackFactories.constraints),
+    readArtifact(storage, category, 'field_yield.json', fallbackFactories.field_yield),
+    readArtifact(storage, category, 'identity_grammar.json', fallbackFactories.identity_grammar),
+    readArtifact(storage, category, 'query_templates.json', fallbackFactories.query_templates),
+    readArtifact(storage, category, 'source_promotions.json', fallbackFactories.source_promotions),
+    readArtifact(storage, category, 'stats.json', fallbackFactories.stats),
+    readArtifact(storage, category, 'field_availability.json', fallbackFactories.field_availability)
   ]);
 
   return {
@@ -236,11 +274,14 @@ export async function updateCategoryBrain({
   provenance,
   sourceResults,
   discoveryResult,
-  runId
+  runId,
+  specDb = null
 }) {
   const loaded = await loadCategoryBrain({
     storage,
-    category
+    category,
+    specDb,
+    config
   });
 
   const seenAt = nowIso();
@@ -305,33 +346,50 @@ export async function updateCategoryBrain({
     sourcePromotions.history = sourcePromotions.history.slice(-200);
   }
 
-  const writes = await Promise.all([
-    writeArtifact(storage, loaded.artifacts.lexicon.key, lexicon),
-    writeArtifact(storage, loaded.artifacts.constraints.key, constraints),
-    writeArtifact(storage, loaded.artifacts.fieldYield.key, fieldYield),
-    writeArtifact(storage, loaded.artifacts.identityGrammar.key, identityGrammar),
-    writeArtifact(storage, loaded.artifacts.queryTemplates.key, queryTemplates),
-    writeArtifact(storage, loaded.artifacts.sourcePromotions.key, sourcePromotions),
-    writeArtifact(storage, loaded.artifacts.stats.key, stats),
-    writeArtifact(
-      storage,
-      loaded.artifacts.fieldAvailability?.key || artifactKey(storage, category, 'field_availability.json'),
-      fieldAvailability
-    )
-  ]);
+  const artifactMap = {
+    field_lexicon:      { key: loaded.artifacts.lexicon.key, value: lexicon },
+    constraints:        { key: loaded.artifacts.constraints.key, value: constraints },
+    field_yield:        { key: loaded.artifacts.fieldYield.key, value: fieldYield },
+    identity_grammar:   { key: loaded.artifacts.identityGrammar.key, value: identityGrammar },
+    query_templates:    { key: loaded.artifacts.queryTemplates.key, value: queryTemplates },
+    source_promotions:  { key: loaded.artifacts.sourcePromotions.key, value: sourcePromotions },
+    stats:              { key: loaded.artifacts.stats.key, value: stats },
+    field_availability: {
+      key: loaded.artifacts.fieldAvailability?.key || artifactKey(storage, category, 'field_availability.json'),
+      value: fieldAvailability
+    }
+  };
+
+  /* --- SQLite primary writes --- */
+  if (specDb) {
+    for (const [artifactName, { value }] of Object.entries(artifactMap)) {
+      specDb.upsertCategoryBrainArtifact(category, artifactName, value);
+    }
+  }
+
+  /* --- JSON / storage writes (fallback or dual-write) --- */
+  const writeJson = !specDb || config?.brainJsonWrite === true;
+  const keys = {};
+
+  if (writeJson) {
+    const writes = await Promise.all(
+      Object.entries(artifactMap).map(([name, { key, value }]) =>
+        writeArtifact(storage, key, value)
+      )
+    );
+    const names = Object.keys(artifactMap);
+    for (let i = 0; i < names.length; i++) {
+      keys[names[i]] = writes[i];
+    }
+  } else {
+    for (const [name, { key }] of Object.entries(artifactMap)) {
+      keys[name] = key;
+    }
+  }
 
   return {
     category,
-    keys: {
-      field_lexicon: writes[0],
-      constraints: writes[1],
-      field_yield: writes[2],
-      identity_grammar: writes[3],
-      query_templates: writes[4],
-      source_promotions: writes[5],
-      stats: writes[6],
-      field_availability: writes[7]
-    },
+    keys,
     promotion_update: promotionUpdate
   };
 }

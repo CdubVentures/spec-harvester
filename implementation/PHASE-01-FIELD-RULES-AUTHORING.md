@@ -534,6 +534,240 @@ When initializing a new category, the system generates a starter `field_catalog.
 
 ---
 
+## RUNTIME FIELD CONTRACT: NORMALIZED PROJECTION
+
+The full `field_rules.json` (276 KB) is not consumed by the review grid. Instead, `normalizeFieldContract()` in `src/review/reviewGridData.js` distills each field into a compact 6-property object:
+
+```javascript
+function normalizeFieldContract(rule = {}) {
+  const contract = isObject(rule.contract) ? rule.contract : {};
+  const level = ruleRequiredLevel(rule);
+  const comp = isObject(rule.component) ? rule.component : null;
+  const enu = isObject(rule.enum) ? rule.enum : null;
+  return {
+    type:           String(contract.type || 'string'),
+    required:       level === 'required' || level === 'critical' || level === 'identity',
+    units:          contract.unit || null,
+    enum_name:      String(rule.enum_name || '').trim() || null,
+    component_type: comp?.type || null,
+    enum_source:    enu?.source || null,
+  };
+}
+```
+
+| Property | Source in Rule | Usage |
+|----------|---------------|-------|
+| `type` | `contract.type` | Cell rendering (number input, text, boolean toggle) |
+| `required` | `priority.required_level` via `ruleRequiredLevel()` | Red-dot indicator; true for `required`, `critical`, `identity` |
+| `units` | `contract.unit` | Suffix display in grid cells |
+| `enum_name` | `rule.enum_name` (legacy) | Dropdown population (fallback path) |
+| `component_type` | `rule.component.type` | Component picker trigger; determines shared AI review lane |
+| `enum_source` | `rule.enum.source` | Dropdown population; determines shared AI review lane |
+
+**Critical behavior:** `component_type` and `enum_source` determine whether a field gets the shared (purple) AI review lane in the two-lane review model. Fields with neither are primary-only (teal).
+
+---
+
+## HOW LISTS WORK WITH SOURCES AND THE FIELD CONTRACT
+
+### List Value Lifecycle
+
+```
+Excel data_lists sheet
+  -> compile-rules -> known_values.json (compiled snapshot)
+                   -> field_rules.json enum_buckets (embedded copy)
+                   -> list_values table (SQLite runtime store)
+
+Pipeline suggestion
+  -> _suggestions/enums.json (pending review)
+  -> user accepts -> manual_enum_values in workbook_map.json (survives recompile)
+                  -> known_values.json patched in-place
+                  -> list_values table updated
+```
+
+### List Value Change Propagation
+
+When a list value changes, the field contract drives how it cascades to all affected items:
+
+**Add:** No impact on existing products. New value available for future extraction/override.
+
+**Remove (`cascadeEnumChange({ action: 'remove' })`):**
+1. Find affected products via `specDb.getProductsByFieldValue(field, value)` or filesystem scan
+2. Clear stored values: `item_field_state.value = NULL`, `needs_ai_review = 1`
+3. Remove list links from `item_list_links`
+4. Rewrite each product's `normalized.json` on disk (delete the field entry)
+5. Mark all affected products stale with `priority = 1` and `dirty_flags: [{ reason: 'enum_removed', field, value }]`
+
+**Rename (`cascadeEnumChange({ action: 'rename' })`):**
+1. Atomic updates to `workbook_map.json` and `known_values.json` (remove old, add new)
+2. SQLite transaction: delete old `list_values` row, insert new, `UPDATE item_field_state SET value = newValue WHERE LOWER(TRIM(value)) = LOWER(TRIM(oldValue))`, re-point `item_list_links` foreign keys
+3. Rewrite affected `normalized.json` files with new value
+4. Mark products stale with `dirty_flags: [{ reason: 'enum_renamed' }]`
+
+### List Candidates and Sources
+
+List values carry source provenance identical to field candidates:
+
+| Source | `source_id` | Confidence | Color | Candidate ID |
+|--------|-------------|------------|-------|--------------|
+| Excel workbook | `workbook` | 1.0 | green | `wb_enum_{field}_{value}` |
+| Pipeline (accepted) | `pipeline` | 1.0 | green | `pl_enum_{field}_{value}` |
+| Manual | `manual` | 1.0 | green | `man_enum_{field}_{value}` |
+| Pipeline (pending) | `pipeline` | 0.6 | yellow | `pl_enum_{field}_{value}` |
+
+SpecDb enrichment:
+- `getCandidatesByListValue(field, listValueId)` — candidates from `candidates` table joined via `item_list_links`
+- `getProductsForListValue(field, value)` — products linked via `item_list_links` JOIN `list_values`
+- `getProductsForFieldValue(field, value)` — fallback via direct `item_field_state` string match
+
+---
+
+## HOW COMPONENTS WORK WITH SOURCES AND THE FIELD CONTRACT
+
+### Component Variance Policies
+
+Each component property has a `__variance_policies` entry in the compiled component DB that defines enforcement:
+
+```json
+// sensors.json item
+{
+  "name": "Focus Pro 45K",
+  "maker": "razer",
+  "properties": { "dpi": 45000, "ips": 900, "acceleration": 85 },
+  "__variance_policies": {
+    "dpi": "upper_bound",
+    "ips": "upper_bound",
+    "acceleration": "upper_bound"
+  },
+  "__constraints": {
+    "sensor_date": ["sensor_date <= release_date"]
+  }
+}
+```
+
+The variance evaluator (`src/review/varianceEvaluator.js`) implements 5 policies:
+
+| Policy | Behavior | Numeric Check | Action on Component Value Change |
+|--------|----------|---------------|----------------------------------|
+| `authoritative` | Exact match required (case-insensitive) | Strips commas, trailing units | Value **pushed directly** to all linked products |
+| `upper_bound` | Product must be <= component | `productValue <= dbValue` | Violations flagged `needs_ai_review=1` |
+| `lower_bound` | Product must be >= component | `productValue >= dbValue` | Violations flagged `needs_ai_review=1` |
+| `range` | Within +/-10% tolerance | `abs(product - db) / db <= 0.1` | Violations flagged `needs_ai_review=1` |
+| `override_allowed` | Any value permitted | No check | Stale-marking only |
+
+**Skip logic:** `null`, `unk`, `n/a`, and sentinel strings skip enforcement.
+
+### Component Value Change Propagation
+
+When a component property value changes (via `POST /review-components/{cat}/component-override`), `cascadeComponentChange()` orchestrates:
+
+**Step 1 — Find affected products:**
+- Primary: `item_component_links` query by `(componentType, componentName, componentMaker)`
+- Fallback: `item_field_state` value match or filesystem `normalized.json` scan
+
+**Step 2 — Authoritative propagation:**
+```
+pushAuthoritativeValueToLinkedProducts()
+  -> UPDATE item_field_state SET value = newValue, confidence = 1.0, source = 'component_db', needs_ai_review = 0
+  -> Rewrite normalized.json for each product
+  -> Mark stale with priority = 1
+```
+
+**Step 3 — Bound/range evaluation:**
+```
+evaluateAndFlagLinkedProducts()
+  -> For each linked product, check current value vs. new component value
+  -> Violating: needs_ai_review = 1
+  -> Compliant: needs_ai_review = 0
+  -> Mark stale with priority = 2
+```
+
+**Step 4 — Constraint evaluation (always runs if constraints exist):**
+```
+evaluateConstraintsForLinkedProducts()
+  -> Inline expression evaluator handles <=, >=, !=, ==, <, > operators
+  -> Resolves variables against both componentProps and productValues
+  -> Violations: needs_ai_review = 1, priority bumped +1
+```
+
+**Step 5 — SpecDb dual-write:**
+- Component `component_values` row upserted with `source='user'`, `overridden=true`
+- On revert: `source='component_db'`, `overridden=false`
+
+### Component Candidates and Sources
+
+Component properties draw candidates from three source tiers:
+
+1. **Workbook** (`source_id: 'workbook'`) — compiled Excel values. Score=1.0, highest trust.
+2. **Pipeline** (`source_id: 'pipeline'`) — values seen on real products during extraction. Score=0.5-0.6. Quote shows which products contributed.
+3. **SpecDb** (`source_id: 'specdb'`) — extraction candidates from `candidates` table, joined through `item_component_links`. Source shows `{host} ({count} products)`.
+
+`getCandidatesForComponentProperty()` in specDb.js joins `candidates` with `item_component_links` to find all candidates for a `(component_type, component_name, field_key)` combination.
+
+When variance policies exist, `evaluateVarianceBatch()` checks actual `item_field_state` values and attaches `variance_violations` showing count, total products, and up to 5 offending product IDs with their values and reasons.
+
+---
+
+## TWO-LANE AI REVIEW MODEL
+
+### Architecture
+
+Every field value on every product has two independent AI review lanes tracked in `key_review_state`:
+
+| Lane | Color | Scope | Badge |
+|------|-------|-------|-------|
+| **Primary** (Item) | Teal | Per-product field value correctness | Teal "AI" pill in grid |
+| **Shared** (Component/Enum) | Purple | Component DB or enum list consistency | Purple "AI" pill in grid |
+
+### How Lanes Are Determined
+
+**Primary lane** applies to ALL fields on all products that have run data.
+
+**Shared lane** applies only to fields that have a component or enum connection, determined by `normalizeFieldContract()`:
+- `component_type` is set (e.g., `"sensor"`, `"switch"`, `"encoder"`, `"material"`)
+- `enum_source` is set (e.g., `"data_lists.connection"`, `"data_lists.sensor_type"`)
+- `enum_name` is set
+
+### State Machine
+
+Each lane independently tracks:
+- `ai_confirm_*_status`: `'pending'` | `'confirmed'` | `'rejected'` | `'not_run'`
+- `user_accept_*_status`: `'accepted'` | null
+- `user_override_ai_*`: boolean
+
+A field's AI badge disappears when:
+- The lane status is confirmed/rejected (AI has reviewed)
+- The user has accepted the lane result
+- The user has overridden the AI for that lane
+- Missing `key_review_state` row = treated as `pending` (teal badge shows)
+
+### Review Grid Display
+
+In `ReviewMatrix.tsx`, each cell derives two-lane state:
+
+```typescript
+const kr = fieldState?.keyReview;
+const hasFieldData = p.hasRun !== false && !!fieldState;
+// Primary: no row = AI never ran = pending
+const hasPendingAIPrimary = hasFieldData && (kr
+  ? kr.primaryStatus === 'pending' && kr.userAcceptPrimary !== 'accepted' && !kr.overridePrimary
+  : true);
+// Shared: only for fields with component/enum connection
+const hasSharedLane = !!(row.field_rule.component_type || row.field_rule.enum_source || row.field_rule.enum_name);
+const hasPendingAIShared = hasFieldData && (hasSharedLane
+  ? kr ? kr.sharedStatus === 'pending' && kr.userAcceptShared !== 'accepted' && !kr.overrideShared : true
+  : false);
+```
+
+### Cell Drawer
+
+When a cell is clicked, the drawer shows:
+- **Current Value section**: Teal banner "Item AI Review: Pending" with Confirm/Accept; Purple banner "Shared AI Review: Pending" with Confirm/Accept
+- **Candidates section**: One teal "Run AI Review" button; each candidate card has teal styling and a "Confirm AI" button
+- Actions fire `POST /review/{cat}/key-review-confirm` and `POST /review/{cat}/key-review-accept`
+
+---
+
 ## WHAT PHASE 2 EXPECTS FROM THIS PHASE
 
 Phase 2 (Artifact Compilation Pipeline) will:

@@ -7,7 +7,9 @@
     "variant": "",
     "sku": "CH-9315311-NA",
     "mpn": "",
-    "gtin": ""
+    "gtin": "",
+    "id": 42,
+    "identifier": "119c3efc"
   },
   "seedUrls": [],
   "anchors": {}

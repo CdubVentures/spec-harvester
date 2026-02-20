@@ -790,8 +790,27 @@ export function brandExpansionPlanKey(config, category, brandKey, date = new Dat
   );
 }
 
-export async function loadSourceIntel({ storage, config, category }) {
+export async function loadSourceIntel({ storage, config, category, specDb = null }) {
   const key = sourceIntelKey(config, category);
+
+  if (specDb) {
+    try {
+      const sqliteData = specDb.loadSourceIntelDomains(category);
+      if (sqliteData && sqliteData.domains && Object.keys(sqliteData.domains).length > 0) {
+        return {
+          key,
+          data: {
+            category: sqliteData.category || category,
+            updated_at: sqliteData.updated_at || null,
+            domains: sqliteData.domains
+          }
+        };
+      }
+    } catch {
+      // Fall through to JSON loading
+    }
+  }
+
   const existing = await storage.readJsonOrNull(key);
 
   return {
@@ -863,9 +882,10 @@ export async function generateSourceExpansionPlans({
   storage,
   config,
   category,
-  categoryConfig
+  categoryConfig,
+  specDb = null
 }) {
-  const loaded = await loadSourceIntel({ storage, config, category });
+  const loaded = await loadSourceIntel({ storage, config, category, specDb });
   return writeExpansionPlans({
     storage,
     config,
@@ -886,9 +906,10 @@ export async function persistSourceIntel({
   sourceResults,
   provenance,
   categoryConfig,
-  constraintAnalysis = null
+  constraintAnalysis = null,
+  specDb = null
 }) {
-  const loaded = await loadSourceIntel({ storage, config, category });
+  const loaded = await loadSourceIntel({ storage, config, category, specDb });
   const current = loaded.data;
   const domains = { ...(current.domains || {}) };
   const perDomainRunSeen = new Set();
@@ -1088,9 +1109,19 @@ export async function persistSourceIntel({
     domains
   };
 
-  await storage.writeObject(loaded.key, Buffer.from(JSON.stringify(payload, null, 2), 'utf8'), {
-    contentType: 'application/json'
-  });
+  if (specDb) {
+    try {
+      specDb.persistSourceIntelFull(category, domains);
+    } catch {
+      // SQLite write failed; JSON fallback below will still run
+    }
+  }
+
+  if (config.intelJsonWrite || !specDb) {
+    await storage.writeObject(loaded.key, Buffer.from(JSON.stringify(payload, null, 2), 'utf8'), {
+      contentType: 'application/json'
+    });
+  }
 
   const suggestions = applyPromotionThresholds(domains);
   const suggestionKey = promotionSuggestionsKey(config, category);
@@ -1131,7 +1162,8 @@ export async function persistSourceIntel({
         brand,
         model,
         variant
-      }
+      },
+      specDb
     });
   } catch {
     sourceCorpus = null;

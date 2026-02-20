@@ -24,6 +24,13 @@ function getHost(url) {
   }
 }
 
+function canonicalizeQueueUrl(parsedUrl) {
+  const normalized = new URL(parsedUrl.toString());
+  // Fragments are client-side only and should not create distinct fetch jobs.
+  normalized.hash = '';
+  return normalized.toString();
+}
+
 function hostInSet(host, hostSet) {
   if (hostSet.has(host)) {
     return true;
@@ -519,7 +526,7 @@ export class SourcePlanner {
       return false;
     }
 
-    const normalizedUrl = parsed.toString();
+    const normalizedUrl = canonicalizeQueueUrl(parsed);
     if (this.visitedUrls.has(normalizedUrl)) {
       return false;
     }

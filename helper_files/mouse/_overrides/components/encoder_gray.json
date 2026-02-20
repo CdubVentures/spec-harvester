@@ -1,0 +1,9 @@
+{
+  "componentType": "encoder",
+  "name": "Gray",
+  "properties": {
+    "encoder_steps": "24",
+    "encoder_type": "mechanical"
+  },
+  "updated_at": "2026-02-16T03:03:34.752Z"
+}

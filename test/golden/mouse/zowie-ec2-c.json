@@ -1,0 +1,18 @@
+{
+  "product_id": "zowie-ec2-c",
+  "category": "mouse",
+  "description": "Zowie EC2-C — lightweight wired ergonomic eSports mouse",
+  "expected_fields": {
+    "weight": "73",
+    "sensor": "PixArt 3360",
+    "max_dpi": "3200",
+    "polling_rate": "1000",
+    "connectivity": "wired",
+    "battery_life": null,
+    "switches": "Huano",
+    "shape": "ergonomic",
+    "buttons": "5"
+  },
+  "required_evidence_fields": ["weight", "sensor", "max_dpi", "polling_rate"],
+  "notes": "Golden reference for regression testing. Values sourced from manufacturer specs and review sites."
+}

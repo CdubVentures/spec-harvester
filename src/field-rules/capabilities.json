@@ -1,0 +1,252 @@
+{
+  "_doc": "Canonical registry of all supported field rule knobs. CI test fails if a knob is emitted without a consumer.",
+  "_version": 1,
+  "knobs": {
+    "contract.type": {
+      "status": "live",
+      "consumer": "src/engine/fieldRulesEngine.js:normalizeCandidate",
+      "description": "Field data type (string, number, integer, object, component_ref)"
+    },
+    "contract.shape": {
+      "status": "live",
+      "consumer": "src/engine/fieldRulesEngine.js:normalizeCandidate",
+      "description": "Value shape (scalar, list)"
+    },
+    "contract.unit": {
+      "status": "live",
+      "consumer": "src/engine/fieldRulesEngine.js:normalizeCandidate",
+      "description": "Measurement unit for numeric fields"
+    },
+    "contract.range": {
+      "status": "live",
+      "consumer": "src/engine/fieldRulesEngine.js:validateRange",
+      "description": "Min/max bounds for numeric values"
+    },
+    "contract.rounding.decimals": {
+      "status": "live",
+      "consumer": "src/engine/fieldRulesEngine.js:normalizeCandidate",
+      "description": "Decimal places for rounding numeric values"
+    },
+    "contract.rounding.mode": {
+      "status": "deferred",
+      "consumer": null,
+      "reason": "Only 'nearest' mode exists; will wire when floor/ceil needed",
+      "description": "Rounding mode (nearest, floor, ceil)"
+    },
+    "contract.list_rules.dedupe": {
+      "status": "live",
+      "consumer": "src/engine/fieldRulesEngine.js:normalizeCandidate",
+      "description": "Remove duplicate list items (case-insensitive)"
+    },
+    "contract.list_rules.sort": {
+      "status": "live",
+      "consumer": "src/engine/runtimeGate.js:applyRuntimeFieldRules",
+      "description": "Sort order for list fields (asc, desc, none)"
+    },
+    "contract.list_rules.min_items": {
+      "status": "live",
+      "consumer": "src/engine/runtimeGate.js:applyRuntimeFieldRules",
+      "description": "Minimum list item count (reject if below)"
+    },
+    "contract.list_rules.max_items": {
+      "status": "live",
+      "consumer": "src/engine/runtimeGate.js:applyRuntimeFieldRules",
+      "description": "Maximum list item count (truncate if above)"
+    },
+    "contract.list_rules.item_union": {
+      "status": "live",
+      "consumer": "src/scoring/listUnionReducer.js:applyListUnionReducers",
+      "description": "List merge policy across sources (set_union, ordered_union)"
+    },
+    "contract.unknown_token": {
+      "status": "deferred",
+      "consumer": null,
+      "reason": "Runtime hardcodes 'unk'; will wire when categories need different tokens",
+      "description": "Canonical unknown value marker"
+    },
+    "contract.unknown_reason_required": {
+      "status": "deferred",
+      "consumer": null,
+      "reason": "Always true; will wire for opt-out scenarios",
+      "description": "Whether unknown values require a reason"
+    },
+    "enum.policy": {
+      "status": "live",
+      "consumer": "src/engine/fieldRulesEngine.js:buildRuleEnumSpec",
+      "description": "Enum validation mode (open, open_prefer_known, closed)"
+    },
+    "enum.source": {
+      "status": "live",
+      "consumer": "src/engine/fieldRulesEngine.js:buildRuleEnumSpec",
+      "description": "Enum value source reference (known_values or component_db)"
+    },
+    "enum.match.strategy": {
+      "status": "live",
+      "consumer": "src/engine/fieldRulesEngine.js:normalizeCandidate",
+      "description": "Enum matching strategy (exact, alias)"
+    },
+    "enum.match.fuzzy_threshold": {
+      "status": "live",
+      "consumer": "src/engine/fieldRulesEngine.js:normalizeCandidate + src/extract/componentResolver.js:resolveFromCandidates",
+      "description": "Per-field fuzzy match threshold for component DB matching"
+    },
+    "enum.new_value_policy": {
+      "status": "live",
+      "consumer": "src/engine/fieldRulesEngine.js:normalizeCandidate",
+      "description": "Policy for handling new values not in the enum list"
+    },
+    "evidence.required": {
+      "status": "live",
+      "consumer": "src/engine/runtimeGate.js:applyRuntimeFieldRules",
+      "description": "Whether evidence audit is enforced for this field"
+    },
+    "evidence.min_evidence_refs": {
+      "status": "live",
+      "consumer": "src/engine/runtimeGate.js:applyRuntimeFieldRules",
+      "description": "Minimum distinct evidence references required"
+    },
+    "evidence.tier_preference": {
+      "status": "deferred",
+      "consumer": null,
+      "reason": "Documents preferred tiers; runtime uses fixed tier weighting in consensusEngine",
+      "description": "Preferred evidence tier ordering"
+    },
+    "evidence.conflict_policy": {
+      "status": "deferred",
+      "consumer": null,
+      "reason": "Documents intent; runtime uses fixed consensus logic",
+      "description": "How to resolve conflicting evidence"
+    },
+    "selection_policy": {
+      "status": "live",
+      "consumer": "src/scoring/consensusEngine.js:applyPolicyBonus + applySelectionPolicyReducers",
+      "description": "Consensus winner selection policy (string enum or object reducer)"
+    },
+    "component.type": {
+      "status": "live",
+      "consumer": "src/extract/componentResolver.js:resolveFromCandidates",
+      "description": "Component database type for matching (sensor, switch, encoder, material)"
+    },
+    "priority.required_level": {
+      "status": "live",
+      "consumer": "src/runner/runUntilComplete.js + src/review/reviewGridData.js",
+      "description": "Field priority level (identity, required, critical, expected, optional)"
+    },
+    "priority.availability": {
+      "status": "live",
+      "consumer": "src/runner/runUntilComplete.js:buildContractEffortPlan",
+      "description": "Field availability expectation (expected, sometimes, rare)"
+    },
+    "priority.difficulty": {
+      "status": "live",
+      "consumer": "src/runner/runUntilComplete.js:buildContractEffortPlan",
+      "description": "Field extraction difficulty (easy, medium, hard)"
+    },
+    "priority.effort": {
+      "status": "live",
+      "consumer": "src/runner/runUntilComplete.js:inferRuleEffort",
+      "description": "Weighted effort score for search budget allocation"
+    },
+    "priority.publish_gate": {
+      "status": "live",
+      "consumer": "src/publish/publishingPipeline.js",
+      "description": "Whether this field gates publication"
+    },
+    "priority.block_publish_when_unk": {
+      "status": "live",
+      "consumer": "src/publish/publishingPipeline.js",
+      "description": "Block publication when this field is unknown"
+    },
+    "parse.template": {
+      "status": "live",
+      "consumer": "src/engine/fieldRulesEngine.js:normalizeCandidate",
+      "description": "Parse template for value normalization"
+    },
+    "parse.unit": {
+      "status": "live",
+      "consumer": "src/engine/fieldRulesEngine.js:normalizeCandidate",
+      "description": "Expected unit for parsing"
+    },
+    "parse.delimiters": {
+      "status": "live",
+      "consumer": "src/engine/fieldRulesEngine.js:normalizeCandidate",
+      "description": "Delimiters for list value parsing"
+    },
+    "parse.token_map": {
+      "status": "live",
+      "consumer": "src/engine/fieldRulesEngine.js:normalizeCandidate",
+      "description": "Token normalization map (e.g., grey -> gray)"
+    },
+    "unknown_reason_default": {
+      "status": "deferred",
+      "consumer": null,
+      "reason": "Always 'not_found_after_search'; runtime hardcodes same",
+      "description": "Default reason when field value is unknown"
+    },
+    "ai_assist.mode": {
+      "status": "live",
+      "consumer": "src/llm/fieldBatching.js:getRuleDifficulty + buildFieldBatches + src/llm/extractCandidatesLLM.js:verification routing",
+      "description": "AI assist level (off, advisory, planner, judge). Auto-derived from priority+difficulty when not set."
+    },
+    "ai_assist.model_strategy": {
+      "status": "live",
+      "consumer": "src/llm/fieldBatching.js:resolveBatchModel",
+      "description": "Model tier strategy (auto, force_fast, force_deep)"
+    },
+    "ai_assist.max_calls": {
+      "status": "live",
+      "consumer": "src/runner/runUntilComplete.js:fieldCallCounts budget enforcement",
+      "description": "Maximum LLM calls for this field across all rounds. Auto-derived from effort when not set."
+    },
+    "ai_assist.max_tokens": {
+      "status": "live",
+      "consumer": "src/llm/fieldBatching.js:resolveBatchModel → src/llm/extractCandidatesLLM.js → openaiClient.js:body.max_tokens",
+      "description": "Per-field token budget for LLM output. Auto-derived from mode: advisory=4096, planner=8192, judge=16384. Batch uses MAX across fields."
+    },
+    "ai_assist.reasoning_note": {
+      "status": "live",
+      "consumer": "src/llm/extractCandidatesLLM.js:buildPromptFieldContracts (passed as extraction_guidance to LLM)",
+      "description": "Per-field extraction guidance injected into LLM prompts. Auto-generated from field properties when not explicitly set."
+    },
+    "ui.label": {
+      "status": "ui_only",
+      "consumer": "React GUI (tools/gui-react/)",
+      "description": "Human-readable field label"
+    },
+    "ui.group": {
+      "status": "live",
+      "consumer": "src/engine/fieldRulesEngine.js:buildUiGroupIndex + React GUI",
+      "description": "Field grouping for display"
+    },
+    "ui.order": {
+      "status": "ui_only",
+      "consumer": "React GUI (tools/gui-react/)",
+      "description": "Display order within group"
+    },
+    "ui.input_control": {
+      "status": "ui_only",
+      "consumer": "React GUI (tools/gui-react/src/components/common/EnumConfigurator.tsx)",
+      "description": "UI widget type for manual editing"
+    },
+    "ui.display_decimals": {
+      "status": "ui_only",
+      "consumer": "React GUI (tools/gui-react/)",
+      "description": "Decimal places for display rendering"
+    },
+    "ui.surfaces": {
+      "status": "ui_only",
+      "consumer": "React GUI (tools/gui-react/)",
+      "description": "Surface visibility flags (spec_table, radar, hub_cards, etc.)"
+    },
+    "ui.tooltip_md": {
+      "status": "ui_only",
+      "consumer": "React GUI (tools/gui-react/)",
+      "description": "Markdown tooltip content"
+    },
+    "ui.tooltip_source": {
+      "status": "ui_only",
+      "consumer": "src/api/guiServer.js + React GUI",
+      "description": "Source reference for tooltip content"
+    }
+  }
+}

@@ -4,6 +4,7 @@ import {
   S3Client,
   GetObjectCommand,
   PutObjectCommand,
+  DeleteObjectCommand,
   ListObjectsV2Command,
   HeadObjectCommand
 } from '@aws-sdk/client-s3';
@@ -107,6 +108,16 @@ class S3Storage {
     return buffer.toString('utf8');
   }
 
+  async readBuffer(key) {
+    const result = await this.client.send(
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: key
+      })
+    );
+    return await streamToBuffer(result.Body);
+  }
+
   async readJsonOrNull(key) {
     try {
       return await this.readJson(key);
@@ -167,6 +178,15 @@ class S3Storage {
       }
       throw error;
     }
+  }
+
+  async deleteObject(key) {
+    await this.client.send(
+      new DeleteObjectCommand({
+        Bucket: this.bucket,
+        Key: key
+      })
+    );
   }
 
   resolveOutputKey(...parts) {
@@ -258,6 +278,11 @@ class LocalStorage {
     return await fs.readFile(fullPath, 'utf8');
   }
 
+  async readBuffer(key) {
+    const fullPath = this.resolveLocalPath(key);
+    return await fs.readFile(fullPath);
+  }
+
   async readJsonOrNull(key) {
     try {
       return await this.readJson(key);
@@ -302,6 +327,17 @@ class LocalStorage {
         return false;
       }
       throw err;
+    }
+  }
+
+  async deleteObject(key) {
+    const fullPath = this.resolveLocalPath(key);
+    try {
+      await fs.unlink(fullPath);
+    } catch (err) {
+      if (err.code !== 'ENOENT') {
+        throw err;
+      }
     }
   }
 
@@ -403,6 +439,10 @@ class DualMirroredStorage {
     return this.local.readTextOrNull(key);
   }
 
+  async readBuffer(key) {
+    return this.local.readBuffer(key);
+  }
+
   async writeObject(key, body, metadata = {}) {
     await this.local.writeObject(key, body, metadata);
     await this.mirrorWriteObject(key, body, metadata);
@@ -415,6 +455,21 @@ class DualMirroredStorage {
 
   async objectExists(key) {
     return this.local.objectExists(key);
+  }
+
+  async deleteObject(key) {
+    await this.local.deleteObject(key);
+    const mirrorKey = this.mapMirrorKey(key);
+    if (mirrorKey) {
+      try {
+        await this.s3.deleteObject(mirrorKey);
+      } catch (error) {
+        this._mirrorErrors += 1;
+        process.stderr.write(
+          `[spec-harvester] mirror_delete_failed key=${mirrorKey} message=${error.message}\n`
+        );
+      }
+    }
   }
 
   resolveOutputKey(...parts) {

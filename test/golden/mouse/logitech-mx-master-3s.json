@@ -1,0 +1,18 @@
+{
+  "product_id": "logitech-mx-master-3s",
+  "category": "mouse",
+  "description": "Logitech MX Master 3S — premium wireless productivity mouse",
+  "expected_fields": {
+    "weight": "141",
+    "sensor": "Darkfield 8000",
+    "max_dpi": "8000",
+    "polling_rate": "1000",
+    "connectivity": "wireless",
+    "battery_life": "70",
+    "switches": "Quiet Click",
+    "shape": "ergonomic",
+    "buttons": "7"
+  },
+  "required_evidence_fields": ["weight", "sensor", "max_dpi", "polling_rate"],
+  "notes": "Golden reference for regression testing. Values sourced from manufacturer specs and review sites."
+}

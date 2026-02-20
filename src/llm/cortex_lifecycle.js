@@ -41,7 +41,7 @@ export class CortexLifecycle {
     this.composeFile = String(config.CHATMOCK_COMPOSE_FILE || '').trim()
       || path.join(String(config.CHATMOCK_DIR || '').trim(), 'docker-compose.yml');
     this.chatmockDir = String(config.CHATMOCK_DIR || '').trim() || path.dirname(this.composeFile);
-    this.baseUrlNoV1 = stripTrailingV1(config.CORTEX_BASE_URL) || 'http://localhost:8000';
+    this.baseUrlNoV1 = stripTrailingV1(config.CORTEX_BASE_URL) || 'http://localhost:5001';
     this.autoStart = boolFromEnv(config.CORTEX_AUTO_START, false);
     this.ensureReadyTimeoutMs = Math.max(1_000, toInt(config.CORTEX_ENSURE_READY_TIMEOUT_MS, 15_000));
     this.startReadyTimeoutMs = Math.max(3_000, toInt(config.CORTEX_START_READY_TIMEOUT_MS, 60_000));

@@ -7,7 +7,9 @@
     "variant": "",
     "sku": "GM-AORUS-M2",
     "mpn": "",
-    "gtin": ""
+    "gtin": "",
+    "id": 10,
+    "identifier": "08be9e3f"
   },
   "seedUrls": [],
   "anchors": {}

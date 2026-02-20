@@ -1,0 +1,18 @@
+{
+  "product_id": "hyperx-pulsefire-haste-2",
+  "category": "mouse",
+  "description": "HyperX Pulsefire Haste 2 — ultralight wired gaming mouse with 8K polling",
+  "expected_fields": {
+    "weight": "53",
+    "sensor": "PixArt PAW3395",
+    "max_dpi": "26000",
+    "polling_rate": "8000",
+    "connectivity": "wired",
+    "battery_life": null,
+    "switches": "HyperX Mechanical",
+    "shape": "symmetrical",
+    "buttons": "6"
+  },
+  "required_evidence_fields": ["weight", "sensor", "max_dpi", "polling_rate"],
+  "notes": "Golden reference for regression testing. Values sourced from manufacturer specs and review sites."
+}

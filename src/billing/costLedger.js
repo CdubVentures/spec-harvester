@@ -73,8 +73,13 @@ function parseIsoMs(value) {
 
 function normalizeEntry(entry = {}) {
   const ts = entry.ts || nowIso();
+  const tsStr = String(ts);
+  const month = tsStr.slice(0, 7);   // YYYY-MM
+  const day = tsStr.slice(0, 10);     // YYYY-MM-DD
   return {
     ts,
+    month,
+    day,
     provider: String(entry.provider || 'unknown'),
     model: String(entry.model || 'unknown'),
     category: String(entry.category || ''),
@@ -92,6 +97,31 @@ function normalizeEntry(entry = {}) {
     evidence_chars: safeInt(entry.evidence_chars, 0),
     estimated_usage: Boolean(entry.estimated_usage),
     meta: entry.meta && typeof entry.meta === 'object' ? entry.meta : {}
+  };
+}
+
+function toDbEntry(normalized) {
+  return {
+    ts: normalized.ts,
+    month: normalized.month,
+    day: normalized.day,
+    provider: normalized.provider,
+    model: normalized.model,
+    category: normalized.category,
+    product_id: normalized.productId,
+    run_id: normalized.runId,
+    round: normalized.round,
+    prompt_tokens: normalized.prompt_tokens,
+    completion_tokens: normalized.completion_tokens,
+    cached_prompt_tokens: normalized.cached_prompt_tokens,
+    total_tokens: normalized.total_tokens,
+    cost_usd: normalized.cost_usd,
+    reason: normalized.reason,
+    host: normalized.host,
+    url_count: normalized.url_count,
+    evidence_chars: normalized.evidence_chars,
+    estimated_usage: normalized.estimated_usage ? 1 : 0,
+    meta: JSON.stringify(normalized.meta || {})
   };
 }
 
@@ -397,7 +427,17 @@ async function writeBillingDigest({
   };
 }
 
-export async function readMonthlyRollup({ storage, month }) {
+export async function readMonthlyRollup({ storage, month, specDb = null }) {
+  if (specDb) {
+    try {
+      const result = specDb.getBillingRollup(month);
+      if (result) {
+        return result;
+      }
+    } catch {
+      // fall through to JSON path
+    }
+  }
   const key = monthlyRollupKey(storage, month);
   const legacyKey = legacyMonthlyRollupKey(storage, month);
   return (await storage.readJsonOrNull(key)) ||
@@ -405,7 +445,17 @@ export async function readMonthlyRollup({ storage, month }) {
     emptyRollup(month);
 }
 
-export async function readLedgerMonth({ storage, month }) {
+export async function readLedgerMonth({ storage, month, specDb = null }) {
+  if (specDb) {
+    try {
+      const entries = specDb.getBillingEntriesForMonth(month);
+      if (entries) {
+        return entries;
+      }
+    } catch {
+      // fall through to JSON path
+    }
+  }
   const key = ledgerKey(storage, month);
   const legacyKey = legacyLedgerKey(storage, month);
   const text = await storage.readTextOrNull(key) ||
@@ -432,7 +482,8 @@ export async function writeMonthlyRollup({ storage, month, rollup }) {
 export async function appendCostLedgerEntry({
   storage,
   config,
-  entry
+  entry,
+  specDb = null
 }) {
   if (!storage || !config || !entry) {
     return { entry: null, ledgerKey: null, monthlyRollupKey: null };
@@ -440,68 +491,107 @@ export async function appendCostLedgerEntry({
 
   const normalized = normalizeEntry(entry);
   const month = monthFromTs(normalized.ts);
-  const key = ledgerKey(storage, month);
-  const legacyKey = legacyLedgerKey(storage, month);
-  const flatKey = flatLedgerKey(storage);
-  const legacyFlatKey = legacyFlatLedgerKey(storage);
-  const previous = await storage.readTextOrNull(key) ||
-    await storage.readTextOrNull(legacyKey);
-  const existingRows = parseLedgerText(previous);
-  existingRows.push(normalized);
-  await storage.writeObject(
-    key,
-    Buffer.from(serializeLedgerRows(existingRows), 'utf8'),
-    { contentType: 'application/x-ndjson' }
-  );
-  await storage.writeObject(
-    legacyKey,
-    Buffer.from(serializeLedgerRows(existingRows), 'utf8'),
-    { contentType: 'application/x-ndjson' }
-  );
-  const previousFlat = await storage.readTextOrNull(flatKey) ||
-    await storage.readTextOrNull(legacyFlatKey);
-  const flatRows = parseLedgerText(previousFlat);
-  flatRows.push(normalized);
-  await storage.writeObject(
-    flatKey,
-    Buffer.from(serializeLedgerRows(flatRows), 'utf8'),
-    { contentType: 'application/x-ndjson' }
-  );
-  await storage.writeObject(
-    legacyFlatKey,
-    Buffer.from(serializeLedgerRows(flatRows), 'utf8'),
-    { contentType: 'application/x-ndjson' }
-  );
 
-  const monthly = await readMonthlyRollup({ storage, month });
-  applyEntryToRollup(monthly, normalized);
-  const rollupKey = await writeMonthlyRollup({ storage, month, rollup: monthly });
-  const digest = await writeBillingDigest({
-    storage,
-    month,
-    rollup: monthly,
-    rows: existingRows,
-    config
-  });
+  // SQLite primary write
+  if (specDb) {
+    try {
+      specDb.insertBillingEntry(toDbEntry(normalized));
+    } catch {
+      // fall through — JSON path below will still run if billingJsonWrite is set
+    }
+  }
 
+  // Skip JSON/NDJSON writes when specDb is available and billingJsonWrite is not forced
+  const writeJson = config.billingJsonWrite || !specDb;
+
+  if (writeJson) {
+    const key = ledgerKey(storage, month);
+    const legacyKey = legacyLedgerKey(storage, month);
+    const flatKey = flatLedgerKey(storage);
+    const legacyFlatKey = legacyFlatLedgerKey(storage);
+    const previous = await storage.readTextOrNull(key) ||
+      await storage.readTextOrNull(legacyKey);
+    const existingRows = parseLedgerText(previous);
+    existingRows.push(normalized);
+    await storage.writeObject(
+      key,
+      Buffer.from(serializeLedgerRows(existingRows), 'utf8'),
+      { contentType: 'application/x-ndjson' }
+    );
+    await storage.writeObject(
+      legacyKey,
+      Buffer.from(serializeLedgerRows(existingRows), 'utf8'),
+      { contentType: 'application/x-ndjson' }
+    );
+    const previousFlat = await storage.readTextOrNull(flatKey) ||
+      await storage.readTextOrNull(legacyFlatKey);
+    const flatRows = parseLedgerText(previousFlat);
+    flatRows.push(normalized);
+    await storage.writeObject(
+      flatKey,
+      Buffer.from(serializeLedgerRows(flatRows), 'utf8'),
+      { contentType: 'application/x-ndjson' }
+    );
+    await storage.writeObject(
+      legacyFlatKey,
+      Buffer.from(serializeLedgerRows(flatRows), 'utf8'),
+      { contentType: 'application/x-ndjson' }
+    );
+
+    const monthly = await readMonthlyRollup({ storage, month, specDb });
+    applyEntryToRollup(monthly, normalized);
+    const rollupKey = await writeMonthlyRollup({ storage, month, rollup: monthly });
+    const digest = await writeBillingDigest({
+      storage,
+      month,
+      rollup: monthly,
+      rows: existingRows,
+      config
+    });
+
+    return {
+      entry: normalized,
+      ledgerKey: key,
+      legacyLedgerKey: legacyKey,
+      flatLedgerKey: flatKey,
+      legacyFlatLedgerKey: legacyFlatKey,
+      monthlyRollupKey: rollupKey,
+      digestKey: digest.digestKey,
+      latestDigestKey: digest.latestDigestKey
+    };
+  }
+
+  // specDb-only path (no JSON writes)
   return {
     entry: normalized,
-    ledgerKey: key,
-    legacyLedgerKey: legacyKey,
-    flatLedgerKey: flatKey,
-    legacyFlatLedgerKey: legacyFlatKey,
-    monthlyRollupKey: rollupKey,
-    digestKey: digest.digestKey,
-    latestDigestKey: digest.latestDigestKey
+    ledgerKey: null,
+    legacyLedgerKey: null,
+    flatLedgerKey: null,
+    legacyFlatLedgerKey: null,
+    monthlyRollupKey: null,
+    digestKey: null,
+    latestDigestKey: null
   };
 }
 
 export async function readBillingSnapshot({
   storage,
   month = monthFromTs(nowIso()),
-  productId = ''
+  productId = '',
+  specDb = null
 }) {
-  const monthly = await readMonthlyRollup({ storage, month });
+  if (specDb) {
+    try {
+      const result = specDb.getBillingSnapshot(month, productId);
+      if (result) {
+        return result;
+      }
+    } catch {
+      // fall through to JSON path
+    }
+  }
+
+  const monthly = await readMonthlyRollup({ storage, month, specDb });
   const product = monthly.by_product?.[productId] || {
     cost_usd: 0,
     calls: 0,
@@ -522,10 +612,40 @@ export async function readBillingSnapshot({
 export async function buildBillingReport({
   storage,
   month = monthFromTs(nowIso()),
-  config = {}
+  config = {},
+  specDb = null
 }) {
-  const monthly = await readMonthlyRollup({ storage, month });
-  const rows = await readLedgerMonth({ storage, month });
+  if (specDb) {
+    try {
+      const rollup = specDb.getBillingRollup(month);
+      const rows = specDb.getBillingEntriesForMonth(month);
+      if (rollup) {
+        const digest = await writeBillingDigest({
+          storage,
+          month,
+          rollup,
+          rows: rows || [],
+          config
+        });
+        return {
+          month,
+          totals: rollup.totals,
+          by_day: rollup.by_day,
+          by_category: rollup.by_category,
+          by_product: rollup.by_product,
+          by_model: rollup.by_model,
+          by_reason: rollup.by_reason,
+          digest_key: digest.digestKey,
+          latest_digest_key: digest.latestDigestKey
+        };
+      }
+    } catch {
+      // fall through to JSON path
+    }
+  }
+
+  const monthly = await readMonthlyRollup({ storage, month, specDb });
+  const rows = await readLedgerMonth({ storage, month, specDb });
   const digest = await writeBillingDigest({
     storage,
     month,

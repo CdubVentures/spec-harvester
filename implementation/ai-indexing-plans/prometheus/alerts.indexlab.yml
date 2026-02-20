@@ -1,0 +1,34 @@
+groups:
+  - name: indexlab_accuracy_and_reliability
+    rules:
+      - alert: High404Rate
+        expr: sum(rate(harvester_fetch_total{status_class="404"}[5m])) > 2
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "High 404 rate"
+          description: "Fetch 404s are elevated; check url_health cooldown and repair queries."
+
+      - alert: EvidencePolicyViolations
+        expr: sum(rate(harvester_evidence_policy_violation_total[5m])) > 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "Evidence policy violations detected"
+          description: "Values were accepted or emitted without meeting evidence policy; investigate extraction/prime sources."
+
+      - alert: ExtractionSchemaFailureSpike
+        expr: sum(rate(harvester_llm_schema_fail_total{role="extract"}[10m])) > 0.2
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Extraction schema failures spiking"
+          description: "LLM extraction JSON/schema failures elevated; review prompt contract assembly and batching."
+
+      - alert: ConvergenceStalled
+        expr: max_over_time(harvester_needset_size[10m]) - min_over_time(harvester_needset_size[10m]) < 1
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "NeedSet not shrinking"
+          description: "Convergence stalled; may be stuck on blocked domain, conflict, or missing Tier-1 artifacts."

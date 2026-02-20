@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { normalizeWhitespace } from '../utils/common.js';
+import { filterReadableHtml } from '../extract/readabilityFilter.js';
 
 function toText(value, maxChars = 5000) {
   const text = typeof value === 'string' ? value : JSON.stringify(value || {});
@@ -58,7 +59,8 @@ function fieldHintsFromText(text, targetFields = []) {
 }
 
 function stripHtml(html) {
-  return String(html || '')
+  const readable = filterReadableHtml(html);
+  return String(readable || '')
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')

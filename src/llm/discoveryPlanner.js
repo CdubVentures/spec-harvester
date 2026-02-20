@@ -155,7 +155,12 @@ export async function planDiscoveryQueriesLLM({
           reason: pass.reason,
           host: '',
           url_count: 0,
-          evidence_chars: payloadSize
+          evidence_chars: payloadSize,
+          traceWriter: llmContext.traceWriter || null,
+          trace_context: {
+            purpose: 'discovery_query_plan',
+            target_fields: missingCriticalFields || []
+          }
         },
         costRates: llmContext.costRates || config,
         onUsage: async (usageRow) => {

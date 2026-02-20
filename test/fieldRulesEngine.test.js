@@ -56,7 +56,7 @@ async function createEngineFixtureRoot() {
         required_level: 'critical',
         difficulty: 'easy',
         availability: 'always',
-        component_db_ref: 'sensors',
+        component_db_ref: 'sensor',
         contract: {
           type: 'string',
           shape: 'scalar'
@@ -133,6 +133,7 @@ async function createEngineFixtureRoot() {
   });
 
   await writeJson(path.join(generatedRoot, 'component_db', 'sensors.json'), {
+    component_type: 'sensor',
     db_name: 'sensors',
     entries: {
       PAW3395: {
@@ -173,7 +174,7 @@ async function createAdvancedEngineFixtureRoot() {
         required_level: 'critical',
         difficulty: 'easy',
         availability: 'always',
-        component_db_ref: 'sensors',
+        component_db_ref: 'sensor',
         contract: { type: 'component_ref', shape: 'scalar' }
       },
       dpi: {
@@ -264,7 +265,7 @@ async function createAdvancedEngineFixtureRoot() {
         trigger_field: 'dpi',
         check: {
           type: 'component_db_lookup',
-          db: 'sensors',
+          db: 'sensor',
           lookup_field: 'sensor',
           compare_field: 'max_dpi',
           tolerance_percent: 0
@@ -301,6 +302,7 @@ async function createAdvancedEngineFixtureRoot() {
   });
 
   await writeJson(path.join(generatedRoot, 'component_db', 'sensors.json'), {
+    component_type: 'sensor',
     db_name: 'sensors',
     entries: {
       PAW3395: {

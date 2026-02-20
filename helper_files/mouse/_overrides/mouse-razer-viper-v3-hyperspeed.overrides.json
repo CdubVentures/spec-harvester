@@ -1,0 +1,98 @@
+{
+  "category": "mouse",
+  "created_at": "2026-02-16T10:30:35.984Z",
+  "overrides": {
+    "form_factor": {
+      "candidate_id": "manual_snp_form_factor_mlp19x3l",
+      "candidate_index": null,
+      "field": "form_factor",
+      "overridden_at": "2026-02-16T10:30:35.984Z",
+      "overridden_by": null,
+      "override_provenance": {
+        "quote": "Manually set to \"hey \" via GUI",
+        "quote_span": null,
+        "retrieved_at": "2026-02-16T10:30:35.983Z",
+        "snippet_hash": null,
+        "snippet_id": null,
+        "source_id": null,
+        "url": "gui://manual-entry"
+      },
+      "override_reason": null,
+      "override_source": "manual_entry",
+      "override_value": "hey",
+      "set_at": "2026-02-16T10:30:35.984Z",
+      "source": {
+        "evidence_key": "gui://manual-entry",
+        "host": "manual-override.local",
+        "method": "manual_override",
+        "source_id": null,
+        "tier": 1
+      },
+      "validated": null,
+      "value": "hey"
+    },
+    "height": {
+      "candidate_id": "manual_snp_height_mlp1dhae",
+      "candidate_index": null,
+      "field": "height",
+      "overridden_at": "2026-02-16T10:33:22.117Z",
+      "overridden_by": null,
+      "override_provenance": {
+        "quote": "Manually set to \"14\" via GUI",
+        "quote_span": null,
+        "retrieved_at": "2026-02-16T10:33:22.104Z",
+        "snippet_hash": null,
+        "snippet_id": null,
+        "source_id": null,
+        "url": "gui://manual-entry"
+      },
+      "override_reason": null,
+      "override_source": "manual_entry",
+      "override_value": "14",
+      "set_at": "2026-02-16T10:33:22.117Z",
+      "source": {
+        "evidence_key": "gui://manual-entry",
+        "host": "manual-override.local",
+        "method": "manual_override",
+        "source_id": null,
+        "tier": 1
+      },
+      "validated": null,
+      "value": "14"
+    },
+    "lngth": {
+      "candidate_id": "manual_snp_lngth_mlp1vkvt",
+      "candidate_index": null,
+      "field": "lngth",
+      "overridden_at": "2026-02-16T10:47:26.584Z",
+      "overridden_by": null,
+      "override_provenance": {
+        "quote": "Manually set to \"test \" via GUI",
+        "quote_span": null,
+        "retrieved_at": "2026-02-16T10:47:26.578Z",
+        "snippet_hash": null,
+        "snippet_id": null,
+        "source_id": null,
+        "url": "gui://manual-entry"
+      },
+      "override_reason": null,
+      "override_source": "manual_entry",
+      "override_value": "test",
+      "set_at": "2026-02-16T10:47:26.584Z",
+      "source": {
+        "evidence_key": "gui://manual-entry",
+        "host": "manual-override.local",
+        "method": "manual_override",
+        "source_id": null,
+        "tier": 1
+      },
+      "validated": null,
+      "value": "test"
+    }
+  },
+  "product_id": "mouse-razer-viper-v3-hyperspeed",
+  "review_started_at": "2026-02-16T10:30:35.984Z",
+  "review_status": "in_progress",
+  "updated_at": "2026-02-16T10:47:26.584Z",
+  "version": 1
+}

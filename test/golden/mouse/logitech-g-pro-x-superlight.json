@@ -1,0 +1,18 @@
+{
+  "product_id": "logitech-g-pro-x-superlight",
+  "category": "mouse",
+  "description": "Logitech G PRO X SUPERLIGHT — lightweight wireless eSports mouse",
+  "expected_fields": {
+    "weight": "63",
+    "sensor": "HERO 25K",
+    "max_dpi": "25600",
+    "polling_rate": "1000",
+    "connectivity": "wireless",
+    "battery_life": "70",
+    "switches": "Omron",
+    "shape": "ambidextrous",
+    "buttons": "5"
+  },
+  "required_evidence_fields": ["weight", "sensor", "max_dpi", "polling_rate"],
+  "notes": "Golden reference for regression testing. Values sourced from manufacturer specs and review sites."
+}

@@ -2,12 +2,14 @@
   "productId": "mouse-logitech-g-pro-x-superlight-2",
   "category": "mouse",
   "identityLock": {
-    "brand": "Logitech",
-    "model": "G Pro X Superlight 2",
+    "brand": "Logitech G",
+    "model": "Pro X Superlight 2",
     "variant": "",
     "sku": "",
     "mpn": "",
-    "gtin": ""
+    "gtin": "",
+    "id": 101,
+    "identifier": "e3e0576c"
   },
   "seedUrls": [],
   "anchors": {}
