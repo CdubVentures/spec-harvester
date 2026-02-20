@@ -60,6 +60,7 @@ Emit structured events at boundaries:
 - `fetch_started/fetch_finished`
 - `parse_started/parse_finished`
 - `index_started/index_finished`
+- `llm_started/llm_finished/llm_failed` (purpose/model/provider/tokens)
 - `needset_computed` (Phase 1 will add the payload)
 - `error`
 
@@ -68,9 +69,15 @@ Event envelope:
 {
   "run_id": "r_...",
   "ts": "2026-02-18T12:34:56.789Z",
-  "stage": "fetch",
-  "event": "fetch_finished",
-  "payload": { "url": "...", "status": 200, "ms": 842, "fetcher": "http" }
+  "stage": "llm",
+  "event": "llm_started",
+  "payload": {
+    "reason": "discovery_planner",
+    "route_role": "plan",
+    "provider": "gemini",
+    "model": "gemini-2.5-flash-lite",
+    "max_tokens_applied": 2048
+  }
 }
 ```
 
@@ -99,10 +106,12 @@ Even if you don’t deploy Prometheus yet, define counters in code (Phase 5 will
    - Stage timeline updates (search/fetch/parse/index)
    - Active jobs table shows URLs
    - Counts move (pages checked, fetched OK, 404s)
+   - LLM overview gauge and pending-call bars move while calls are in flight
 
-### Expected screenshots (what “done” looks like)
+### Expected screenshots (what "done" looks like)
 - A timeline waterfall with at least `fetch` and `parse` segments.
 - A live table with URLs and statuses (200/404 etc).
+- Overview section showing pending LLM rows with purpose/model and non-zero counts during active calls.
 
 ## Engineering notes
 - Keep the event stream append-only and resilient to crashes (flush per event or per batch).

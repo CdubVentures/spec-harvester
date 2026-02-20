@@ -367,6 +367,29 @@ test('normalizeCandidate converts units and enforces range', async () => {
   }
 });
 
+test('normalizeCandidate enforces scalar shape for array and object payloads', async () => {
+  const fixture = await createEngineFixtureRoot();
+  try {
+    const engine = await FieldRulesEngine.create('mouse', {
+      config: { helperFilesRoot: fixture.helperRoot }
+    });
+
+    const singleton = engine.normalizeCandidate('connection', ['wireless']);
+    assert.equal(singleton.ok, true);
+    assert.equal(singleton.normalized, 'wireless');
+
+    const arrayMismatch = engine.normalizeCandidate('connection', ['wireless', 'bluetooth']);
+    assert.equal(arrayMismatch.ok, false);
+    assert.equal(arrayMismatch.reason_code, 'shape_mismatch');
+
+    const objectMismatch = engine.normalizeCandidate('connection', { value: 'wireless', source: 'pipeline' });
+    assert.equal(objectMismatch.ok, false);
+    assert.equal(objectMismatch.reason_code, 'shape_mismatch');
+  } finally {
+    await fs.rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test('enforceEnumPolicy supports alias resolution and closed-policy rejection', async () => {
   const fixture = await createEngineFixtureRoot();
   try {

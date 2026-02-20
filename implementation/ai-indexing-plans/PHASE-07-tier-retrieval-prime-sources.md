@@ -88,3 +88,26 @@ Proof steps:
 - Prime sources can be built without external search when evidence already exists.
 - Evidence policy satisfaction is visible per field.
 
+## Implemented update (2026-02-19)
+- Added Phase 07 fallback evidence pool from `sourceResults` when provenance evidence is sparse/empty.
+- Fallback sources include:
+  - `llmEvidencePack.snippets`
+  - candidate evidence refs (`evidenceRefs`)
+  - candidate inline evidence rows (`candidate.evidence`)
+- Builder now emits pool diagnostics in summary:
+  - `evidence_pool_provenance_size`
+  - `evidence_pool_fallback_size`
+  - `evidence_pool_fallback_used`
+
+Code touchpoints:
+- `src/retrieve/tierAwareRetriever.js`
+- `src/retrieve/primeSourcesBuilder.js`
+- `src/pipeline/runProduct.js`
+
+Live proof from run `20260219221853-19af54`:
+- `fields_with_hits: 40`
+- `refs_selected_total: 199`
+- `evidence_pool_provenance_size: 0`
+- `evidence_pool_fallback_size: 28`
+- `evidence_pool_fallback_used: true`
+

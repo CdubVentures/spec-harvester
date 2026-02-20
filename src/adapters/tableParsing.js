@@ -1,4 +1,5 @@
 import { normalizeWhitespace, parseNumber, splitListValue } from '../utils/common.js';
+import { load as loadHtml } from 'cheerio';
 
 const KEY_TO_FIELD = [
   { pattern: /weight/i, field: 'weight' },
@@ -24,6 +25,99 @@ const KEY_TO_FIELD = [
 
 function stripTags(html) {
   return normalizeWhitespace(String(html || '').replace(/<[^>]+>/g, ' '));
+}
+
+function dedupePairs(rows) {
+  const seen = new Set();
+  const out = [];
+
+  for (const row of rows || []) {
+    const key = normalizeWhitespace(row?.key || '');
+    const value = normalizeWhitespace(row?.value || '');
+    if (!key || !value) {
+      continue;
+    }
+
+    const signature = `${key.toLowerCase()}::${value.toLowerCase()}`;
+    if (seen.has(signature)) {
+      continue;
+    }
+    seen.add(signature);
+    out.push({ key, value });
+  }
+
+  return out;
+}
+
+function extractPairsWithCheerio(html) {
+  const $ = loadHtml(String(html || ''));
+  const rows = [];
+
+  $('table').each((_, table) => {
+    $(table)
+      .find('tr')
+      .each((__, tr) => {
+        const cells = $(tr)
+          .children('th,td')
+          .map((___, cell) => normalizeWhitespace($(cell).text()))
+          .get()
+          .filter(Boolean);
+
+        if (cells.length < 2) {
+          return;
+        }
+
+        rows.push({
+          key: cells[0],
+          value: cells.slice(1).join(' | ')
+        });
+      });
+  });
+
+  $('dl').each((_, dl) => {
+    let currentTerm = '';
+    $(dl)
+      .children('dt,dd')
+      .each((__, node) => {
+        const tag = String(node.tagName || '').toLowerCase();
+        const text = normalizeWhitespace($(node).text());
+        if (!text) {
+          return;
+        }
+
+        if (tag === 'dt') {
+          currentTerm = text;
+          return;
+        }
+
+        if (tag === 'dd' && currentTerm) {
+          rows.push({
+            key: currentTerm,
+            value: text
+          });
+        }
+      });
+  });
+
+  return dedupePairs(rows);
+}
+
+function extractPairsWithRegex(html) {
+  const rows = [];
+  const tableRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  for (const match of html.matchAll(tableRegex)) {
+    const row = match[1];
+    const cells = [...row.matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((cell) => stripTags(cell[1]));
+    if (cells.length < 2) {
+      continue;
+    }
+    const key = cells[0];
+    const value = cells.slice(1).join(' | ');
+    if (key && value) {
+      rows.push({ key, value });
+    }
+  }
+  return dedupePairs(rows);
 }
 
 function normalizeFieldValue(field, raw) {
@@ -64,21 +158,21 @@ function normalizeFieldValue(field, raw) {
 }
 
 export function extractTablePairs(html) {
-  const rows = [];
-  const tableRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-  for (const match of html.matchAll(tableRegex)) {
-    const row = match[1];
-    const cells = [...row.matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((cell) => stripTags(cell[1]));
-    if (cells.length < 2) {
-      continue;
-    }
-    const key = cells[0];
-    const value = cells[1];
-    if (key && value) {
-      rows.push({ key, value });
-    }
+  const source = String(html || '');
+  if (!source.trim()) {
+    return [];
   }
-  return rows;
+
+  try {
+    const domPairs = extractPairsWithCheerio(source);
+    if (domPairs.length > 0) {
+      return domPairs;
+    }
+  } catch {
+    // fall through to regex fallback
+  }
+
+  return extractPairsWithRegex(source);
 }
 
 export function mapPairsToFieldCandidates(pairs, method = 'html_table') {

@@ -1,92 +1,131 @@
-# Deep Spec Harvester — Phased Implementation Plan (Accuracy‑Max)
-
-This phase file is written as an **implementation prompt for senior software engineers**.
-It includes: exact deliverables, file touchpoints, schemas/events, test strategy, and **GUI proof**.
-
-**Guiding principles**
-- Accuracy is the primary objective (95%+ on technical specs).
-- Evidence tiers and confidence gates control *what happens next*.
-- Discovery is need‑driven (missing/low-confidence/conflict fields) — no endless key/alias loops.
-- Indexing is deterministic (content_hash dedupe + stable snippet IDs), so results are replayable and auditable.
-- The GUI must prove each phase works before moving to the next.
-
-Repo context (from your `src.zip`):
-- Pipeline orchestrator: `src/pipeline/runProduct.js`
-- Discovery orchestrator: `src/discovery/searchDiscovery.js`
-- Search providers: `src/search/searchProviders.js` (includes SearXNG support)
-- Frontier / URL health: `src/research/frontierDb.js` + `src/research/frontierSqlite.js`
-- LLM extraction + batching: `src/llm/extractCandidatesLLM.js`, `src/llm/fieldBatching.js`
-- Validation: `src/llm/validateCandidatesLLM.js`, `src/validator/qualityGate.js`, `src/engine/runtimeGate.js`
-- Consensus: `src/scoring/consensusEngine.js`
-- GUI server: `src/api/guiServer.js` (WS support + review grid)
-
----
-
-# Phase 04 — 404/410/403/429 control loop + repair search + bad_url_patterns
-
+# Deep Spec Harvester - Phase 04 URL Health and Self-Healing
 
 ## Goal
-Stop 404/blocked churn and make discovery **self-healing**:
-- 404/410 → cooldown + repair search
-- repeated template failures → bad_url_patterns
-- 403/429/blocked pages → domain cooldown + reduced concurrency + alternative sources
+Stop 404/410/403/429 churn and make discovery self-healing with:
+- cooldown-aware URL skip behavior
+- repair query emission for dead links
+- blocked-domain suppression
+- repeated dead-path detection
+- GUI proof for all of the above
 
-## Deliverables
-- URL health integration in fetch pipeline
-- Repair search job emission
-- bad_url_patterns learning
-- GUI: URL health table + repair events + repeat-404 list
+## Implemented Status (2026-02-19)
 
-## Implementation
+### 1) Pipeline wiring is active
+Phase 04 checks now run in the main fetch loop.
 
-### 4.1 Use existing Frontier DB hooks
-You already have:
+File touchpoints:
+- `src/pipeline/runProduct.js`
 - `src/research/frontierDb.js`
 - `src/research/frontierSqlite.js`
 
-Wire the fetch pipeline so EVERY fetch does:
-- pre-check: `frontierDb.shouldSkipUrl(url)` (cooldown / dead pattern)
-- post-record: `frontierDb.recordFetch({url, status, finalUrl, ...})`
+Runtime flow:
+1. Pre-fetch: `frontierDb.shouldSkipUrl(source.url)`
+2. If skip: emit `url_cooldown_applied` and continue
+3. Fetch attempt runs
+4. Post-fetch: `frontierDb.recordFetch(...)`
+5. For `404/410`: emit one repair query per domain per run
+6. For repeated blocked outcomes (`403/429` or blocked-like errors): apply host block in planner
 
-If these are already partially wired, make them mandatory in IndexLab mode and the main pipeline.
+### 2) Repair query emission (404/410)
+Implemented event:
+- `repair_query_enqueued`
 
-### 4.2 404/410 behavior
-On fetch finish:
-- if status in [404,410]:
-  - increment fail_count
-  - set `cooldown_until = now + backoff(fail_count)`
-  - emit `trigger_repair_query(domain, brand, model)` event once per domain per run (dedupe)
+Current payload fields:
+- `domain`
+- `query`
+- `status`
+- `reason`
+- `source_url`
+- `cooldown_until`
+- `provider`
+- `doc_hint` (`manual_or_spec`)
+- `field_targets` (top required fields)
 
-Repair query template:
-- `site:{domain} "{brand} {model}" (spec OR manual OR pdf OR "user guide")`
+Current template:
+- `site:{domain} "{brand} {model} {variant}" (spec OR manual OR pdf OR "user guide")`
 
-### 4.3 Block behavior (403/429/captcha)
-Treat as blocked:
-- increment blocked_count
-- set longer cooldown
-- reduce per-host concurrency (Phase 5 introduces concurrency controls)
-- switch doc_hint to alternative sources (Tier‑2 lab reviews)
+Dedupe rule:
+- one emitted repair query per domain per run
 
-### 4.4 bad_url_patterns
-If a pattern repeatedly 404s:
-- pattern = normalized path template (e.g., `/support/{model}/downloads`)
-- once fail_count>=N for multiple URLs on same domain:
-  - `log_bad_url_pattern(domain, pattern)`
-  - future `shouldSkipUrl` bypasses it
+### 3) Blocked-domain cooldown behavior
+Implemented event:
+- `blocked_domain_cooldown_applied`
 
-### 4.5 GUI proof
-Add panels:
-- URL Health table (url, last_status, fail_count, cooldown_until)
-- Repeat 404 list (group by domain+pattern)
-- Repair queries fired (with timestamps)
+Trigger:
+- repeated blocked outcomes for same domain (`403`, `429`, or blocked-like fetch errors)
 
-Proof steps:
-- Force a known-dead URL
-- confirm:
-  - it’s cooled down
-  - repeated attempts skip
-  - repair query fired once
+Effect:
+- planner host block via `planner.blockHost(...)`
+- emits event with threshold and removed queue count
 
-## Exit criteria
-- 404 churn drops (repeat hits stop).
-- Repair search produces new candidate URLs in the same run.
+### 4) bad_url_patterns behavior
+Implemented in both Frontier backends:
+- JSON backend: path pattern skip in `src/research/frontierDb.js`
+- SQLite backend: sibling path pattern skip in `src/research/frontierSqlite.js`
+
+Skip reason:
+- `path_dead_pattern`
+
+How it is learned:
+- repeated 404s for same `(domain, path_sig)` with no successful fetches
+
+### 5) Config knobs (active)
+Added in `src/config.js`:
+- `FRONTIER_COOLDOWN_403_BASE` (default `1800` seconds)
+- `FRONTIER_BLOCKED_DOMAIN_THRESHOLD` (default `2`)
+- `FRONTIER_REPAIR_SEARCH_ENABLED` (default `true`)
+
+Also used:
+- existing 404/410/429 and path-threshold frontier knobs remain effective
+
+### 6) API and GUI proof surfaces
+Domain checklist API now includes:
+- `repair_queries`
+- `bad_url_patterns`
+- normalized `outcome_counts` per domain
+- `host_budget_score`, `host_budget_state`, and `cooldown_seconds_remaining`
+
+File touchpoint:
+- `src/api/guiServer.js` (`buildIndexingDomainChecklist`)
+
+GUI panel implemented:
+- `URL Health & Repair (Phase 04)` in `tools/gui-react/src/pages/indexing/IndexingPage.tsx`
+
+Panel sections:
+- summary counters (404/410, blocked, cooldowns, repair queries, bad patterns)
+- host budget summary (average budget + blocked/backoff host counts)
+- domain health table
+- repair queries table
+- bad URL patterns table
+
+Pipeline/overview integration:
+- `phase 04` state chip in pipeline stage row
+- session metric `URL Cooldowns Active` now backed by real phase-04 data
+
+### 7) Test coverage
+Phase 04 behavior covered by:
+- `test/frontierDb.test.js`
+- `test/frontierSqlite.test.js`
+- `test/indexingDomainChecklistApi.test.js`
+
+## GUI Proof Checklist
+Use one run and verify:
+1. Start IndexLab run with discovery enabled.
+2. In `URL Health & Repair (Phase 04)`, confirm domain rows appear.
+3. Trigger or observe dead URL(s) and confirm:
+   - `url_cooldown_applied` effects in next retry values
+   - `404 / 410` and repeat counters increase
+4. Confirm repair queries appear in `Repair Queries Fired`.
+5. Confirm repeated dead patterns appear in `Bad URL Patterns`.
+6. Confirm session metric `URL Cooldowns Active` is non-placeholder and updates.
+
+## Exit Criteria
+- Cooldown skips are visible and deterministic.
+- 404/410 trigger repair query intents once per domain per run.
+- Repeated blocked domains are suppressed after threshold.
+- bad URL path patterns are learned and skipped.
+- GUI proves all signals for the selected run.
+
+## Hand-off to Next Phase
+Phase 04 is now the URL-health signal producer.
+Phase 05 should focus on parallel fetch/parse throughput while preserving these cooldown and repair protections.

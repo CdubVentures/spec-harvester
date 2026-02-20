@@ -102,6 +102,10 @@ test('domain checklist endpoint returns shape with loop metrics', { timeout: 60_
     assert.equal(typeof row.evidence_used, 'number');
     assert.equal(typeof row.fields_covered, 'number');
     assert.equal(typeof row.status, 'string');
+    assert.equal(typeof row.host_budget_score, 'number');
+    assert.equal(typeof row.host_budget_state, 'string');
+    assert.equal(typeof row.cooldown_seconds_remaining, 'number');
+    assert.equal(typeof row.outcome_counts, 'object');
     assert.equal(typeof row.url_count, 'number');
     assert.equal(Array.isArray(row.urls), true);
   }
@@ -303,4 +307,109 @@ test('domain checklist marks domain good when indexed signal exists even with 40
   assert.ok(urlRow);
   assert.equal(urlRow.err_404_count, 1);
   assert.equal(urlRow.indexed, true);
+});
+
+test('domain checklist exposes fetch outcomes and cooldown countdown fields', { timeout: 60_000 }, async (t) => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'indexing-checklist-outcomes-'));
+  const outputRoot = path.join(tempRoot, 'out');
+  const category = 'mouse';
+  const productId = 'mouse-test-outcome-001';
+  const runId = 'run-outcome-001';
+  const targetUrl = 'https://example.com/specs/mouse-test-outcome-001';
+
+  const runtimeEventsPath = path.join(outputRoot, '_runtime', 'events.jsonl');
+  await writeJsonl(runtimeEventsPath, [
+    {
+      ts: '2026-02-18T10:00:00.000Z',
+      event: 'source_fetch_started',
+      category,
+      productId,
+      runId,
+      url: targetUrl,
+      role: 'retailer'
+    },
+    {
+      ts: '2026-02-18T10:00:02.000Z',
+      event: 'source_fetch_failed',
+      category,
+      productId,
+      runId,
+      url: targetUrl,
+      status: 0,
+      message: 'HTTP 429 rate limit'
+    },
+    {
+      ts: '2026-02-18T10:00:03.000Z',
+      event: 'source_fetch_started',
+      category,
+      productId,
+      runId,
+      url: targetUrl,
+      role: 'retailer'
+    },
+    {
+      ts: '2026-02-18T10:00:05.000Z',
+      event: 'source_processed',
+      category,
+      productId,
+      runId,
+      url: targetUrl,
+      status: 403,
+      outcome: 'bot_challenge'
+    },
+    {
+      ts: '2026-02-18T10:00:06.000Z',
+      event: 'url_cooldown_applied',
+      category,
+      productId,
+      runId,
+      url: targetUrl,
+      reason: 'cooldown',
+      next_retry_ts: '2099-12-31T00:00:00.000Z'
+    }
+  ]);
+
+  const port = await getFreePort();
+  const proc = spawn(
+    process.execPath,
+    ['src/api/guiServer.js', '--port', String(port), '--local'],
+    {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        LOCAL_MODE: 'true',
+        LOCAL_OUTPUT_ROOT: outputRoot
+      },
+      stdio: ['ignore', 'ignore', 'pipe']
+    }
+  );
+
+  let stderr = '';
+  proc.stderr.on('data', (chunk) => {
+    stderr += chunk.toString();
+  });
+
+  t.after(async () => {
+    if (!proc.killed) proc.kill('SIGTERM');
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  });
+
+  const healthUrl = `http://127.0.0.1:${port}/api/v1/health`;
+  await waitForHttpReady(healthUrl);
+
+  const target = `http://127.0.0.1:${port}/api/v1/indexing/domain-checklist/${encodeURIComponent(category)}?windowMinutes=180&productId=${encodeURIComponent(productId)}&runId=${encodeURIComponent(runId)}&includeUrls=true`;
+  const response = await fetch(target);
+  assert.equal(response.status, 200, `unexpected status ${response.status} stderr=${stderr}`);
+  const payload = await response.json();
+
+  const row = payload.rows.find((entry) => entry.domain === 'example.com');
+  assert.ok(row);
+  assert.equal(typeof row.cooldown_seconds_remaining, 'number');
+  assert.equal(row.cooldown_seconds_remaining > 0, true);
+  assert.equal(typeof row.host_budget_score, 'number');
+  assert.equal(typeof row.host_budget_state, 'string');
+  assert.equal(typeof row.outcome_counts?.rate_limited, 'number');
+  assert.equal(typeof row.outcome_counts?.bot_challenge, 'number');
+  assert.equal((row.outcome_counts?.rate_limited || 0) > 0, true);
+  assert.equal((row.outcome_counts?.bot_challenge || 0) > 0, true);
 });

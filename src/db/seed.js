@@ -14,6 +14,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { buildComponentIdentifier } from '../utils/componentIdentifier.js';
 import { buildScopedItemCandidateId } from '../utils/candidateIdentifier.js';
+import {
+  isKnownSlotValue,
+  normalizeSlotValueForShape,
+  slotValueComparableToken,
+  slotValueToText,
+} from '../utils/slotValueShape.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -33,6 +39,46 @@ function isObject(v) {
 
 function normalizeToken(v) {
   return String(v || '').trim().toLowerCase();
+}
+
+function isKnownToken(v) {
+  const token = normalizeToken(v);
+  return token !== '' && token !== 'unk' && token !== 'unknown' && token !== 'n/a' && token !== 'null';
+}
+
+function extractComponentTypeFromRule(rule) {
+  if (!isObject(rule)) return null;
+  const directType = String(rule?.component?.type || rule?.component_type || '').trim();
+  if (directType) return directType;
+  const enumSource = String(rule?.enum?.source || rule?.enum_source || '').trim();
+  if (enumSource.toLowerCase().startsWith('component_db.')) {
+    const suffix = enumSource.slice('component_db.'.length);
+    const parsed = String(suffix.split('.')[0] || '').trim();
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+function expandListLinkValues(value) {
+  if (Array.isArray(value)) {
+    return [...new Set(value.map((entry) => String(entry ?? '').trim()).filter(Boolean))];
+  }
+  const raw = String(value ?? '').trim();
+  if (!raw) return [];
+  const split = raw
+    .split(/[,;|/]+/)
+    .map((part) => String(part ?? '').trim())
+    .filter(Boolean);
+  const ordered = split.length > 1 ? split : [raw];
+  const seen = new Set();
+  const out = [];
+  for (const token of ordered) {
+    const key = token.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(token);
+  }
+  return out;
 }
 
 function toScopedCandidateId({
@@ -75,19 +121,22 @@ function reserveCandidateId(usedIds, candidateIdBase) {
 
 function buildFieldMeta(fieldRules) {
   const meta = {};
-  const fields = fieldRules.rules?.fields;
+  const fields = isObject(fieldRules?.rules?.fields)
+    ? fieldRules.rules.fields
+    : (isObject(fieldRules?.fields) ? fieldRules.fields : null);
   if (!isObject(fields)) return meta;
 
   for (const [fieldKey, rule] of Object.entries(fields)) {
     if (!isObject(rule)) continue;
-    const component = isObject(rule.component) ? rule.component : null;
-    const shape = rule.output_shape || rule.contract?.shape || 'scalar';
+    const componentType = extractComponentTypeFromRule(rule);
+    const shape = String(rule.output_shape || rule.contract?.shape || 'scalar').trim().toLowerCase() || 'scalar';
     const isList = shape === 'list';
-    const isComponentField = component != null && component.type != null;
+    const isComponentField = Boolean(componentType);
     meta[fieldKey] = {
       is_component_field: isComponentField,
-      component_type: isComponentField ? component.type : null,
+      component_type: isComponentField ? componentType : null,
       is_list_field: isList,
+      shape,
       enum_policy: rule.enum?.policy ?? null
     };
   }
@@ -253,7 +302,10 @@ async function seedListValues(db, fieldRules, config, category) {
       const policy = enumDef.policy || 'open';
       const values = Array.isArray(enumDef.values) ? enumDef.values : [];
       for (const value of values) {
-        const trimmed = String(value || '').trim();
+        const rawEnumValue = isObject(value)
+          ? (value.canonical ?? value.value ?? '')
+          : value;
+        const trimmed = String(rawEnumValue || '').trim();
         if (!trimmed) continue;
         rows.push({
           fieldKey,
@@ -391,6 +443,32 @@ async function seedProducts(db, config, category, fieldRules, fieldMeta) {
       // Collect per-source candidates from the latest run when latest/candidates.json is empty
       const perSourceCandidates = await collectPerSourceCandidates(outputRoot, productId, normalized.runId);
       const usedCandidateIds = new Set();
+      const bestCandidateByField = new Map();
+      const bestCandidateByFieldValue = new Map();
+      const candidateCountByField = new Map();
+
+      const registerCandidateSelection = ({ fieldKey, candidateId, value, score }) => {
+        const key = String(fieldKey || '').trim();
+        const id = String(candidateId || '').trim();
+        if (!key || !id) return;
+        const scoreNum = Number(score);
+        const normalizedScore = Number.isFinite(scoreNum) ? scoreNum : 0;
+        candidateCountByField.set(key, Number(candidateCountByField.get(key) || 0) + 1);
+
+        const priorField = bestCandidateByField.get(key);
+        if (!priorField || normalizedScore > priorField.score) {
+          bestCandidateByField.set(key, { candidateId: id, score: normalizedScore });
+        }
+
+        const shape = fieldMeta[key]?.shape || 'scalar';
+        const valueToken = slotValueComparableToken(value, shape);
+        if (!valueToken || valueToken === 'unk' || valueToken === 'unknown' || valueToken === 'n/a' || valueToken === 'null') return;
+        const valueMapKey = `${key}::${valueToken}`;
+        const priorValue = bestCandidateByFieldValue.get(valueMapKey);
+        if (!priorValue || normalizedScore > priorValue.score) {
+          bestCandidateByFieldValue.set(valueMapKey, { candidateId: id, score: normalizedScore });
+        }
+      };
 
       const tx = db.db.transaction(() => {
         // Step 3a: Insert candidates from latest/candidates.json (merged format: {fieldKey: [...]})
@@ -398,15 +476,20 @@ async function seedProducts(db, config, category, fieldRules, fieldMeta) {
           for (const [fieldKey, fieldCandidates] of Object.entries(candidates)) {
             if (!Array.isArray(fieldCandidates)) continue;
             const fm = fieldMeta[fieldKey] || {};
+            const shape = fm.shape || 'scalar';
             for (let i = 0; i < fieldCandidates.length; i++) {
               const c = fieldCandidates[i];
               if (!isObject(c)) continue;
+              const normalizedCandidateValue = normalizeSlotValueForShape(c.value ?? null, shape).value;
+              if (!isKnownSlotValue(normalizedCandidateValue, shape)) continue;
+              const candidateTextValue = slotValueToText(normalizedCandidateValue, shape);
+              if (!candidateTextValue || !isKnownToken(candidateTextValue)) continue;
               const baseCandidateId = toScopedCandidateId({
                 productId,
                 rawCandidateId: c.candidate_id || c.id,
                 fieldKey,
-                value: c.value ?? '',
-                sourceHost: c.source_host ?? c.evidence?.host ?? '',
+                value: candidateTextValue,
+                sourceHost: c.source_host ?? c.host ?? c.evidence?.host ?? '',
                 sourceMethod: c.source_method ?? c.method ?? c.evidence?.method ?? '',
                 index: i,
                 runId: c.run_id ?? normalized.runId ?? '',
@@ -417,16 +500,18 @@ async function seedProducts(db, config, category, fieldRules, fieldMeta) {
                 category,
                 product_id: productId,
                 field_key: fieldKey,
-                value: c.value ?? null,
-                normalized_value: c.normalized_value ?? null,
+                value: candidateTextValue,
+                normalized_value: isKnownToken(c.normalized_value)
+                  ? String(c.normalized_value).trim()
+                  : normalizeToken(candidateTextValue),
                 score: c.score ?? c.confidence ?? 0,
                 rank: c.rank ?? i,
-                source_url: c.source_url ?? c.evidence?.url ?? null,
-                source_host: c.source_host ?? c.evidence?.host ?? null,
-                source_root_domain: c.source_root_domain ?? c.evidence?.rootDomain ?? null,
-                source_tier: c.source_tier ?? c.evidence?.tier ?? null,
-                source_method: c.source_method ?? c.evidence?.method ?? null,
-                approved_domain: c.approved_domain ?? c.evidence?.approvedDomain ?? false,
+                source_url: c.source_url ?? c.url ?? c.evidence?.url ?? null,
+                source_host: c.source_host ?? c.host ?? c.evidence?.host ?? null,
+                source_root_domain: c.source_root_domain ?? c.rootDomain ?? c.evidence?.rootDomain ?? null,
+                source_tier: c.source_tier ?? c.tier ?? c.evidence?.tier ?? null,
+                source_method: c.source_method ?? c.method ?? c.evidence?.method ?? null,
+                approved_domain: c.approved_domain ?? c.approvedDomain ?? c.evidence?.approvedDomain ?? false,
                 snippet_id: c.snippet_id ?? null,
                 snippet_hash: c.snippet_hash ?? null,
                 snippet_text: c.snippet_text ?? null,
@@ -442,6 +527,12 @@ async function seedProducts(db, config, category, fieldRules, fieldMeta) {
                 extracted_at: c.extracted_at || new Date().toISOString(),
                 run_id: c.run_id ?? normalized.runId ?? null
               });
+              registerCandidateSelection({
+                fieldKey,
+                candidateId,
+                value: candidateTextValue,
+                score: c.score ?? c.confidence ?? 0,
+              });
             }
           }
         }
@@ -452,12 +543,17 @@ async function seedProducts(db, config, category, fieldRules, fieldMeta) {
           const fieldKey = normalizeToken(psc.field);
           if (!fieldKey) continue;
           const fm = fieldMeta[fieldKey] || {};
+          const shape = fm.shape || 'scalar';
+          const normalizedCandidateValue = normalizeSlotValueForShape(psc.value ?? null, shape).value;
+          if (!isKnownSlotValue(normalizedCandidateValue, shape)) continue;
+          const candidateTextValue = slotValueToText(normalizedCandidateValue, shape);
+          if (!candidateTextValue || !isKnownToken(candidateTextValue)) continue;
           const sourceHost = psc._source_host || '';
           const baseCandidateId = toScopedCandidateId({
             productId,
             rawCandidateId: psc.candidate_id || psc.id || '',
             fieldKey,
-            value: psc.value ?? '',
+            value: candidateTextValue,
             sourceHost,
             sourceMethod: psc.method || 'unk',
             index: psc._rank ?? 0,
@@ -469,8 +565,8 @@ async function seedProducts(db, config, category, fieldRules, fieldMeta) {
             category,
             product_id: productId,
             field_key: fieldKey,
-            value: psc.value ?? null,
-            normalized_value: null,
+            value: candidateTextValue,
+            normalized_value: normalizeToken(candidateTextValue),
             score: psc.score ?? psc.confidence ?? 0.5,
             rank: psc._rank ?? 0,
             source_url: psc._source_url || null,
@@ -494,6 +590,12 @@ async function seedProducts(db, config, category, fieldRules, fieldMeta) {
             extracted_at: new Date().toISOString(),
             run_id: normalized.runId ?? null
           });
+          registerCandidateSelection({
+            fieldKey,
+            candidateId,
+            value: candidateTextValue,
+            score: psc.score ?? psc.confidence ?? 0.5,
+          });
         }
 
         // Step 4: Insert item_field_state from normalized + provenance + overrides
@@ -504,31 +606,47 @@ async function seedProducts(db, config, category, fieldRules, fieldMeta) {
           const prov = isObject(provenance) ? provenance[fieldKey] : null;
           const ovr = overrideMap[fieldKey];
           const isOverridden = isObject(ovr);
+          const shape = fieldMeta[fieldKey]?.shape || 'scalar';
 
           const value = isOverridden ? (ovr.value ?? ovr.override_value ?? rawValue) : rawValue;
+          const normalizedSlotValue = normalizeSlotValueForShape(value, shape).value;
+          const valueText = slotValueToText(normalizedSlotValue, shape);
+          const hasKnownSlot = isKnownSlotValue(normalizedSlotValue, shape);
           const confidence = isOverridden ? 1.0 : (prov?.confidence ?? 0);
           const source = isOverridden ? 'override' : 'pipeline';
-          const candidateId = isOverridden
+          let candidateId = isOverridden
             ? toScopedCandidateId({
               productId,
               rawCandidateId: ovr.candidate_id ?? null,
               fieldKey,
-              value: ovr.value ?? ovr.override_value ?? rawValue ?? '',
+              value: valueText ?? '',
               sourceHost: ovr.source?.host ?? '',
               sourceMethod: ovr.source?.method ?? ovr.override_source ?? '',
               index: 0,
             })
             : null;
+          if (!isOverridden && hasKnownSlot && valueText) {
+            const valueToken = slotValueComparableToken(valueText, shape);
+            const exactMatch = valueToken
+              ? bestCandidateByFieldValue.get(`${fieldKey}::${valueToken}`)
+              : null;
+            if (exactMatch?.candidateId) {
+              candidateId = exactMatch.candidateId;
+            } else if (Number(candidateCountByField.get(fieldKey) || 0) === 1) {
+              candidateId = bestCandidateByField.get(fieldKey)?.candidateId || null;
+            }
+          }
 
+          const knownValue = hasKnownSlot;
           db.upsertItemFieldState({
             productId,
             fieldKey,
-            value: value != null ? String(value) : null,
+            value: valueText ?? null,
             confidence,
             source,
             acceptedCandidateId: candidateId,
             overridden: isOverridden,
-            needsAiReview: !isOverridden && confidence < 0.8,
+            needsAiReview: !isOverridden && knownValue && confidence < 0.8,
             aiReviewComplete: false
           });
         }
@@ -538,7 +656,8 @@ async function seedProducts(db, config, category, fieldRules, fieldMeta) {
         for (const [fieldKey, fm] of Object.entries(fieldMeta)) {
           if (!fm.is_component_field || !fm.component_type) continue;
           const rawValue = fields[fieldKey];
-          const rawValueText = String(rawValue ?? '').trim();
+          const normalizedComponentValue = normalizeSlotValueForShape(rawValue, fm.shape || 'scalar').value;
+          const rawValueText = String(slotValueToText(normalizedComponentValue, fm.shape || 'scalar') || '').trim();
           if (!rawValueText || normalizeToken(rawValueText) === 'unk' || normalizeToken(rawValueText) === 'n/a') continue;
 
           const compType = fm.component_type;
@@ -587,10 +706,17 @@ async function seedProducts(db, config, category, fieldRules, fieldMeta) {
         for (const [fieldKey, fm] of Object.entries(fieldMeta)) {
           if (!fm.is_list_field) continue;
           const rawValue = fields[fieldKey];
-          if (!rawValue || normalizeToken(rawValue) === 'unk') continue;
+          db.removeItemListLinksForField(productId, fieldKey);
+          const normalizedListValue = normalizeSlotValueForShape(rawValue, 'list').value;
+          if (!isKnownSlotValue(normalizedListValue, 'list')) continue;
 
-          const listRow = db.getListValueByFieldAndValue(fieldKey, String(rawValue));
-          if (listRow) {
+          const valueTokens = expandListLinkValues(slotValueToText(normalizedListValue, 'list'));
+          const linkedIds = new Set();
+          for (const token of valueTokens) {
+            const listRow = db.getListValueByFieldAndValue(fieldKey, token);
+            if (!listRow?.id) continue;
+            if (linkedIds.has(listRow.id)) continue;
+            linkedIds.add(listRow.id);
             db.upsertItemListLink({
               productId,
               fieldKey,
@@ -604,11 +730,17 @@ async function seedProducts(db, config, category, fieldRules, fieldMeta) {
           for (const [fieldKey, ovr] of Object.entries(overrideMap)) {
             if (!isObject(ovr)) continue;
             if (!ovr.candidate_id) continue;
+            const shape = fieldMeta[fieldKey]?.shape || 'scalar';
+            const normalizedOverrideValue = normalizeSlotValueForShape(
+              ovr.value ?? ovr.override_value ?? null,
+              shape
+            ).value;
+            const overrideValueText = slotValueToText(normalizedOverrideValue, shape);
             const candidateId = toScopedCandidateId({
               productId,
               rawCandidateId: ovr.candidate_id,
               fieldKey,
-              value: ovr.value ?? ovr.override_value ?? '',
+              value: overrideValueText ?? '',
               sourceHost: ovr.source?.host ?? '',
               sourceMethod: ovr.source?.method ?? ovr.override_source ?? '',
               index: 0,
@@ -623,8 +755,10 @@ async function seedProducts(db, config, category, fieldRules, fieldMeta) {
                 category,
                 product_id: productId,
                 field_key: fieldKey,
-                value: ovr.value ?? ovr.override_value ?? null,
-                normalized_value: null,
+                value: overrideValueText ?? null,
+                normalized_value: isKnownToken(overrideValueText)
+                  ? normalizeToken(overrideValueText)
+                  : null,
                 score: 1.0,
                 rank: 0,
                 source_url: ovr.override_provenance?.url ?? ovr.source?.evidence_key ?? null,
@@ -1131,6 +1265,7 @@ function seedSourceAndKeyReview(db, category, fieldMeta) {
         targetKind: 'grid_key',
         itemIdentifier: ifs.product_id,
         fieldKey: ifs.field_key,
+        itemFieldStateId: ifs.id,
         requiredLevel: route?.required_level ?? null,
         availability: route?.availability ?? null,
         difficulty: route?.difficulty ?? null,
@@ -1184,6 +1319,7 @@ function seedSourceAndKeyReview(db, category, fieldMeta) {
         componentIdentifier,
         propertyKey: cv.property_key,
         fieldKey: cv.property_key,
+        componentValueId: cv.id,
         requiredLevel: route?.required_level ?? null,
         availability: route?.availability ?? null,
         difficulty: route?.difficulty ?? null,
@@ -1232,6 +1368,8 @@ function seedSourceAndKeyReview(db, category, fieldMeta) {
         targetKind: 'enum_key',
         fieldKey: lv.field_key,
         enumValueNorm: enumValueNorm,
+        listValueId: lv.id,
+        enumListId: lv.list_id ?? null,
         requiredLevel: route?.required_level ?? null,
         availability: route?.availability ?? null,
         difficulty: route?.difficulty ?? null,
@@ -1267,28 +1405,71 @@ function seedSourceAndKeyReview(db, category, fieldMeta) {
 
       let stateRow = null;
       if (rev.context_type === 'item') {
-        stateRow = db.db.prepare(
-          "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'grid_key' AND item_identifier = ? AND field_key = ?"
+        const ifsRow = db.db.prepare(
+          'SELECT id FROM item_field_state WHERE category = ? AND product_id = ? AND field_key = ? LIMIT 1'
         ).get(db.category, cand.product_id, cand.field_key);
+        if (ifsRow?.id) {
+          stateRow = db.db.prepare(
+            "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'grid_key' AND item_field_state_id = ?"
+          ).get(db.category, ifsRow.id);
+        }
+        if (!stateRow) {
+          stateRow = db.db.prepare(
+            "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'grid_key' AND item_identifier = ? AND field_key = ?"
+          ).get(db.category, cand.product_id, cand.field_key);
+        }
       } else if (rev.context_type === 'component') {
         const link = db.db.prepare(
           'SELECT * FROM item_component_links WHERE category = ? AND product_id = ? AND field_key = ?'
         ).get(db.category, cand.product_id, cand.field_key);
         if (link) {
+          const cvRow = db.db.prepare(
+            `SELECT id
+             FROM component_values
+             WHERE category = ?
+               AND component_type = ?
+               AND component_name = ?
+               AND component_maker = ?
+               AND property_key = ?
+             LIMIT 1`
+          ).get(
+            db.category,
+            link.component_type,
+            link.component_name,
+            link.component_maker || '',
+            cand.field_key
+          );
+          if (cvRow?.id) {
+            stateRow = db.db.prepare(
+              "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'component_key' AND component_value_id = ?"
+            ).get(db.category, cvRow.id);
+          }
           const compId = buildComponentIdentifier(
             link.component_type,
             link.component_name,
             link.component_maker || ''
           );
-          stateRow = db.db.prepare(
-            "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'component_key' AND component_identifier = ? AND property_key = ?"
-          ).get(db.category, compId, cand.field_key);
+          if (!stateRow) {
+            stateRow = db.db.prepare(
+              "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'component_key' AND component_identifier = ? AND property_key = ?"
+            ).get(db.category, compId, cand.field_key);
+          }
         }
       } else if (rev.context_type === 'list') {
         const norm = String(cand.value || '').trim().toLowerCase();
-        stateRow = db.db.prepare(
-          "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'enum_key' AND field_key = ? AND enum_value_norm = ?"
+        const lvRow = db.db.prepare(
+          'SELECT id FROM list_values WHERE category = ? AND field_key = ? AND normalized_value = ? LIMIT 1'
         ).get(db.category, cand.field_key, norm);
+        if (lvRow?.id) {
+          stateRow = db.db.prepare(
+            "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'enum_key' AND list_value_id = ?"
+          ).get(db.category, lvRow.id);
+        }
+        if (!stateRow) {
+          stateRow = db.db.prepare(
+            "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'enum_key' AND field_key = ? AND enum_value_norm = ?"
+          ).get(db.category, cand.field_key, norm);
+        }
       }
 
       if (!stateRow) continue;
@@ -1435,10 +1616,32 @@ export async function seedSpecDb({ db, config, category, fieldRules, logger }) {
     logger.log?.('info', `[seed] Component review queue: ${crqResult.count}`);
   }
 
+  // Clear stale candidate pointers before deriving source/key-review tables.
+  const preIntegrityResult = typeof db.pruneOrphanCandidateReferences === 'function'
+    ? db.pruneOrphanCandidateReferences()
+    : null;
+  if (logger && preIntegrityResult) {
+    const totalCleared = Object.values(preIntegrityResult).reduce((sum, value) => sum + (Number(value) || 0), 0);
+    if (totalCleared > 0) {
+      logger.log?.('info', `[seed] Candidate pointer cleanup (pre-key-review): ${JSON.stringify(preIntegrityResult)}`);
+    }
+  }
+
   // Step 9: Backfill source + key review tables from existing data
   const skrResult = seedSourceAndKeyReview(db, category, fieldMeta);
   if (logger) {
     logger.log?.('info', `[seed] Source & Key Review: ${skrResult.sourceRegistryCount} sources, ${skrResult.sourceAssertionCount} assertions, ${skrResult.keyReviewStateCount} review states, ${skrResult.keyReviewAuditCount} audit entries`);
+  }
+
+  // Re-run after key-review backfill to clear stale selected_candidate_id on legacy rows.
+  const postIntegrityResult = typeof db.pruneOrphanCandidateReferences === 'function'
+    ? db.pruneOrphanCandidateReferences()
+    : null;
+  if (logger && postIntegrityResult) {
+    const totalCleared = Object.values(postIntegrityResult).reduce((sum, value) => sum + (Number(value) || 0), 0);
+    if (totalCleared > 0) {
+      logger.log?.('info', `[seed] Candidate pointer cleanup (post-key-review): ${JSON.stringify(postIntegrityResult)}`);
+    }
   }
 
   const duration_ms = Date.now() - start;

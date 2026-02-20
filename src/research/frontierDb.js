@@ -87,6 +87,7 @@ export class FrontierDb {
     this.cooldown404RepeatSeconds = Math.max(0, toInt(config.frontierCooldown404RepeatSeconds, 14 * 24 * 60 * 60));
     this.cooldown410Seconds = Math.max(0, toInt(config.frontierCooldown410Seconds, 90 * 24 * 60 * 60));
     this.cooldownTimeoutSeconds = Math.max(0, toInt(config.frontierCooldownTimeoutSeconds, 6 * 60 * 60));
+    this.cooldown403BaseSeconds = Math.max(60, toInt(config.frontierCooldown403BaseSeconds, 30 * 60));
     this.cooldown429BaseSeconds = Math.max(60, toInt(config.frontierCooldown429BaseSeconds, 15 * 60));
     this.pathPenaltyNotfoundThreshold = Math.max(2, toInt(config.frontierPathPenaltyNotfoundThreshold, 3));
   }
@@ -265,6 +266,10 @@ export class FrontierDb {
     } else if (code === 410) {
       seconds = this.cooldown410Seconds;
       reason = 'status_410';
+    } else if (code === 403) {
+      const exponent = Math.max(0, Math.min(4, fetchCount - 1));
+      seconds = this.cooldown403BaseSeconds * (2 ** exponent);
+      reason = 'status_403_backoff';
     } else if (code === 429) {
       const exponent = Math.max(0, Math.min(4, fetchCount - 1));
       seconds = this.cooldown429BaseSeconds * (2 ** exponent);

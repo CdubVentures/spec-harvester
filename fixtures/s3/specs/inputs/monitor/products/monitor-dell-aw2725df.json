@@ -1,0 +1,17 @@
+{
+  "productId": "monitor-dell-aw2725df",
+  "category": "monitor",
+  "identityLock": {
+    "brand": "Dell",
+    "model": "AW2725DF",
+    "variant": "",
+    "sku": "",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [
+    "https://www.rtings.com/monitor/reviews/dell/alienware-aw2725df",
+    "https://www.dell.com/en-us/shop/alienware-27-360hz-qd-oled-gaming-monitor-aw2725df/apd/210-bmgh/monitors-monitor-accessories"
+  ],
+  "anchors": {}
+}

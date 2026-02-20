@@ -162,7 +162,7 @@ test('extractCandidatesLLM drops non-auditable candidates when evidence verifier
       },
       evidencePack: {
         references: [{ id: 'ref-sensor', url: 'https://example.com/spec' }],
-        snippets: [{ id: 'ref-sensor', normalized_text: 'Connectivity: wireless only' }]
+        snippets: [{ id: 'ref-sensor', normalized_text: 'Sensor type: optical tracking module' }]
       },
       config: {
         llmEnabled: true,
@@ -182,4 +182,3 @@ test('extractCandidatesLLM drops non-auditable candidates when evidence verifier
     global.fetch = originalFetch;
   }
 });
-

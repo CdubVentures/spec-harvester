@@ -13,9 +13,11 @@ export function isKeyReviewLanePending({
   override,
 }: LanePendingInput): boolean {
   const statusNorm = String(status || '').trim().toLowerCase();
-  const userAcceptNorm = String(userAcceptStatus || '').trim().toLowerCase();
-  if (statusNorm === 'confirmed') return false;
-  if (userAcceptNorm === 'accepted') return false;
+  // User accept is independent from AI confirm; pending is controlled by AI lane status.
+  void userAcceptStatus;
   if (Boolean(override)) return false;
-  return true;
+  if (statusNorm === 'pending') return true;
+  if (!statusNorm || statusNorm === 'not_run' || statusNorm === 'unknown') return false;
+  if (statusNorm === 'confirmed' || statusNorm === 'rejected' || statusNorm === 'accepted') return false;
+  return false;
 }

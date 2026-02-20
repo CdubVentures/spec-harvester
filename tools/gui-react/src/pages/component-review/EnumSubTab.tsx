@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useQuery, useMutation, type QueryClient } from '@tanstack/react-query';
+import { useMutation, type QueryClient } from '@tanstack/react-query';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import { api } from '../../api/client';
 import { InlineCellEditor } from '../../components/common/InlineCellEditor';
@@ -9,10 +9,9 @@ import { FlagIcon } from '../../components/common/FlagIcon';
 import { FlagsSection } from '../../components/common/FlagsSection';
 import { LinkedProductsList } from '../../components/common/LinkedProductsList';
 import { useComponentReviewStore } from '../../stores/componentReviewStore';
-import { humanizeField } from '../../utils/fieldNormalize';
+import { hasKnownValue, humanizeField } from '../../utils/fieldNormalize';
 import { sourceBadgeClass, SOURCE_BADGE_FALLBACK } from '../../utils/colors';
-import { buildPipelineEnumCandidateId } from '../../utils/candidateIdentifier';
-import type { EnumReviewPayload, EnumFieldReview, EnumValueReviewItem, ComponentReviewDocument } from '../../types/componentReview';
+import type { EnumReviewPayload, EnumFieldReview, EnumValueReviewItem } from '../../types/componentReview';
 
 interface EnumSubTabProps {
   data: EnumReviewPayload;
@@ -31,6 +30,26 @@ function enumToCellState(valueItem: EnumValueReviewItem): ReviewValueCellState {
     reason_codes: valueItem.needs_review ? ['needs_review'] : [],
     source: valueItem.source,
   };
+}
+
+function hasActionablePending(item: EnumValueReviewItem): boolean {
+  if (!item?.needs_review) return false;
+  const candidateRows = (item.candidates || []).filter((candidate) => {
+    const candidateId = String(candidate?.candidate_id || '').trim();
+    return Boolean(candidateId) && hasKnownValue(candidate?.value);
+  });
+  return candidateRows.some((candidate) => {
+    if (candidate?.is_synthetic_selected) return false;
+    const sharedStatus = String(candidate?.shared_review_status || '').trim().toLowerCase();
+    return sharedStatus ? sharedStatus === 'pending' : true;
+  });
+}
+
+function toPositiveId(value: unknown): number | null {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  const id = Math.trunc(n);
+  return id > 0 ? id : null;
 }
 
 function FieldListItem({
@@ -55,7 +74,7 @@ function FieldListItem({
       <div className="flex items-center gap-2 flex-shrink-0 ml-2">
         <span className="text-[10px] text-gray-400">{field.metrics.total}</span>
         {(() => {
-          const pipelineReviewCount = field.values.filter((v) => v.needs_review && v.source === 'pipeline').length;
+          const pipelineReviewCount = field.values.filter((v) => hasActionablePending(v) && v.source === 'pipeline').length;
           const otherFlagCount = field.metrics.flags - pipelineReviewCount;
           return (
             <>
@@ -123,7 +142,7 @@ function ValueRow({
     );
   }
 
-  const isPipelineReview = item.needs_review && item.source === 'pipeline';
+  const isPipelineReview = hasActionablePending(item) && item.source === 'pipeline';
 
   return (
     <div>
@@ -193,103 +212,6 @@ function ValueRow({
 }
 
 export function EnumSubTab({ data, category, queryClient }: EnumSubTabProps) {
-  // Fetch component review items to extract enum values from product_attributes
-  const { data: componentReviewDoc } = useQuery({
-    queryKey: ['componentReview', category],
-    queryFn: () => api.get<ComponentReviewDocument>(`/review-components/${category}/component-review`),
-    staleTime: 30_000,
-  });
-
-  // Merge data with synthetic enum values extracted from product_attributes
-  const enrichedData = useMemo<EnumReviewPayload>(() => {
-    if (!componentReviewDoc?.items?.length) return data;
-
-    // Build set of existing enum field keys from the data
-    const existingFieldKeys = new Set(data.fields.map(f => f.field));
-
-    // Extract enum values from product_attributes of pending component review items
-    const discoveredByField = new Map<string, Map<string, { product_id: string; created_at: string }>>();
-    for (const item of componentReviewDoc.items) {
-      if (item.status !== 'pending_ai' || !item.product_attributes) continue;
-      for (const [attrKey, attrVal] of Object.entries(item.product_attributes)) {
-        if (!existingFieldKeys.has(attrKey)) continue;
-        if (!discoveredByField.has(attrKey)) discoveredByField.set(attrKey, new Map());
-        const valMap = discoveredByField.get(attrKey)!;
-        // Split arrays AND comma-separated strings into individual values
-        const rawValues = Array.isArray(attrVal) ? attrVal.map(String) : [String(attrVal)];
-        const values: string[] = [];
-        for (const rv of rawValues) {
-          if (rv.includes(',')) {
-            values.push(...rv.split(',').map(s => s.trim()).filter(Boolean));
-          } else {
-            values.push(rv);
-          }
-        }
-        for (const v of values) {
-          const trimmed = v.trim();
-          if (!trimmed) continue;
-          if (!valMap.has(trimmed.toLowerCase())) {
-            valMap.set(trimmed.toLowerCase(), { product_id: item.product_id || '', created_at: item.created_at });
-          }
-        }
-      }
-    }
-
-    if (discoveredByField.size === 0) return data;
-
-    // Merge discovered values into existing fields
-    const enrichedFields = data.fields.map(field => {
-      const discovered = discoveredByField.get(field.field);
-      if (!discovered) return field;
-
-      const existingValues = new Set(field.values.map(v => v.value.toLowerCase()));
-      const newValues: EnumValueReviewItem[] = [];
-      for (const [lowerVal, meta] of discovered) {
-        if (existingValues.has(lowerVal)) continue;
-        newValues.push({
-          value: lowerVal,
-          source: 'pipeline',
-          source_timestamp: meta.created_at,
-          confidence: 0.3,
-          color: 'yellow',
-          needs_review: true,
-          candidates: [{
-            candidate_id: buildPipelineEnumCandidateId({ fieldKey: field.field, value: lowerVal }),
-            value: lowerVal,
-            score: 0.5,
-            source_id: 'pipeline',
-            source: `Pipeline (${meta.product_id || 'extraction'})`,
-            tier: null,
-            method: 'product_extraction',
-            evidence: {
-              url: '',
-              retrieved_at: meta.created_at || '',
-              snippet_id: '',
-              snippet_hash: '',
-              quote: `Extracted from product pipeline${meta.product_id ? `: ${meta.product_id}` : ''}`,
-              quote_span: null,
-              snippet_text: 'Pipeline extraction',
-              source_id: 'pipeline',
-            },
-          }],
-        });
-      }
-
-      if (newValues.length === 0) return field;
-      const mergedValues = [...field.values, ...newValues];
-      return {
-        ...field,
-        values: mergedValues,
-        metrics: {
-          total: mergedValues.length,
-          flags: mergedValues.filter(v => v.needs_review).length,
-        },
-      };
-    });
-
-    return { ...data, fields: enrichedFields };
-  }, [data, componentReviewDoc?.items]);
-
   // Individual selectors to avoid re-renders from unrelated store changes
   const selectedEnumField = useComponentReviewStore((s) => s.selectedEnumField);
   const setSelectedEnumField = useComponentReviewStore((s) => s.setSelectedEnumField);
@@ -363,42 +285,6 @@ export function EnumSubTab({ data, category, queryClient }: EnumSubTabProps) {
     );
   }
 
-  function optimisticConfirm(field: string, valueIndex: number) {
-    const now = new Date().toISOString();
-    queryClient.setQueryData<EnumReviewPayload>(
-      ['enumReviewData', category],
-      (old) => {
-        if (!old) return old;
-        return {
-          ...old,
-          fields: old.fields.map((f) => {
-            if (f.field !== field) return f;
-            return {
-              ...f,
-              values: f.values.map((v, i) =>
-                i === valueIndex
-                  ? {
-                    ...v,
-                    needs_review: false,
-                    source_timestamp: now,
-                    overridden: false,
-                    color: (v.source === 'manual' || v.source === 'workbook' || Boolean(v.accepted_candidate_id))
-                      ? 'green'
-                      : 'gray',
-                  }
-                  : v,
-              ),
-              metrics: {
-                ...f.metrics,
-                flags: f.values.filter((v, i) => i !== valueIndex && v.needs_review).length,
-              },
-            };
-          }),
-        };
-      },
-    );
-  }
-
   const acceptMutation = useMutation({
     mutationFn: (body: {
       field: string;
@@ -456,7 +342,8 @@ export function EnumSubTab({ data, category, queryClient }: EnumSubTabProps) {
       listValueId,
       enumListId,
     }),
-    onMutate: async ({ field, newValue: newVal, valueIndex }) => {
+    onMutate: async ({ field, newValue: newVal, valueIndex, listValueId }) => {
+      if (!toPositiveId(listValueId)) return;
       queryClient.setQueryData<EnumReviewPayload>(
         ['enumReviewData', category],
         (old) => {
@@ -493,14 +380,14 @@ export function EnumSubTab({ data, category, queryClient }: EnumSubTabProps) {
   });
 
   useEffect(() => {
-    if (!selectedEnumField && enrichedData.fields.length > 0) {
-      setSelectedEnumField(enrichedData.fields[0].field);
+    if (!selectedEnumField && data.fields.length > 0) {
+      setSelectedEnumField(data.fields[0].field);
     }
-  }, [selectedEnumField, enrichedData.fields, setSelectedEnumField]);
+  }, [selectedEnumField, data.fields, setSelectedEnumField]);
 
   const selectedFieldData = useMemo(
-    () => enrichedData.fields.find((field) => field.field === selectedEnumField),
-    [enrichedData.fields, selectedEnumField],
+    () => data.fields.find((field) => field.field === selectedEnumField),
+    [data.fields, selectedEnumField],
   );
 
   const resolvedSelectedValueIndex = useMemo(() => {
@@ -529,6 +416,11 @@ export function EnumSubTab({ data, category, queryClient }: EnumSubTabProps) {
     if (editingIndex == null || !editText.trim() || !selectedEnumField || !selectedFieldData) return;
     const oldVal = selectedFieldData.values[editingIndex]?.value;
     if (!oldVal || editText.trim() === oldVal) { setEditingIndex(null); return; }
+    const slotId = toPositiveId(selectedFieldData.values[editingIndex]?.list_value_id);
+    if (!slotId) {
+      setEditingIndex(null);
+      return;
+    }
 
     const trimmed = editText.trim();
     const field = selectedEnumField;
@@ -547,13 +439,13 @@ export function EnumSubTab({ data, category, queryClient }: EnumSubTabProps) {
     });
 
     try {
-      const slotId = selectedFieldData.values[editingIndex]?.list_value_id;
+      const enumListId = toPositiveId(selectedFieldData.enum_list_id);
       await api.post(`/review-components/${category}/enum-rename`, {
         field,
         oldValue: oldVal,
         newValue: trimmed,
-        listValueId: slotId ?? undefined,
-        enumListId: selectedFieldData.enum_list_id ?? undefined,
+        listValueId: slotId,
+        enumListId: enumListId ?? undefined,
       });
     } catch (err) {
       console.error('Enum rename failed:', err);
@@ -567,6 +459,8 @@ export function EnumSubTab({ data, category, queryClient }: EnumSubTabProps) {
 
   const handleAddValue = useCallback(async () => {
     if (!newValue.trim() || !selectedEnumField) return;
+    const enumListId = toPositiveId(selectedFieldData?.enum_list_id);
+    if (!enumListId) return;
 
     const trimmed = newValue.trim();
     const field = selectedEnumField;
@@ -590,7 +484,7 @@ export function EnumSubTab({ data, category, queryClient }: EnumSubTabProps) {
         field,
         action: 'add',
         value: trimmed,
-        enumListId: selectedFieldData?.enum_list_id ?? undefined,
+        enumListId,
       });
     } catch (err) {
       console.error('Failed to add enum value:', err);
@@ -621,10 +515,10 @@ export function EnumSubTab({ data, category, queryClient }: EnumSubTabProps) {
       <div className="grid grid-cols-[220px,1fr] gap-3" style={{ minHeight: '400px' }}>
         <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-y-auto max-h-[calc(100vh-320px)]">
           <div className="sticky top-0 bg-gray-50 dark:bg-gray-800 px-3 py-2 border-b border-gray-200 dark:border-gray-700">
-            <p className="text-xs font-medium text-gray-500">Fields ({enrichedData.fields.length})</p>
+            <p className="text-xs font-medium text-gray-500">Fields ({data.fields.length})</p>
           </div>
           <div className="p-1 space-y-0.5">
-            {enrichedData.fields.map((field) => (
+            {data.fields.map((field) => (
               <FieldListItem
                 key={field.field}
                 field={field}
@@ -649,7 +543,7 @@ export function EnumSubTab({ data, category, queryClient }: EnumSubTabProps) {
                     {humanizeField(selectedFieldData.field)} - {selectedFieldData.values.length} values
                   </p>
                   {(() => {
-                    const pipelineCount = selectedFieldData.values.filter((v) => v.needs_review && v.source === 'pipeline').length;
+                    const pipelineCount = selectedFieldData.values.filter((v) => hasActionablePending(v) && v.source === 'pipeline').length;
                     const otherCount = selectedFieldData.metrics.flags - pipelineCount;
                     return (
                       <div className="flex items-center gap-1.5">
@@ -728,11 +622,17 @@ export function EnumSubTab({ data, category, queryClient }: EnumSubTabProps) {
             const vi = selectedValueItem;
             const fd = selectedFieldData;
             const viIndex = resolvedSelectedValueIndex;
+            const listValueId = toPositiveId(vi.list_value_id);
+            const enumListId = toPositiveId(fd.enum_list_id);
+            const canMutateValueSlot = Boolean(listValueId);
             const drawerBadges: Array<{ label: string; className: string }> = [];
             if (vi.needs_review) {
               drawerBadges.push({ label: 'needs_review', className: 'bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-200' });
             }
-            const isAccepted = !vi.needs_review && (vi.source === 'manual' || vi.source === 'workbook' || Boolean(vi.accepted_candidate_id));
+            const hasMeaningfulValue = hasKnownValue(vi.value);
+            const isAccepted = hasMeaningfulValue
+              && !vi.needs_review
+              && (vi.source === 'manual' || vi.source === 'workbook' || Boolean(vi.accepted_candidate_id));
             const drawerIsPending = acceptMutation.isPending || removeMutation.isPending || drawerRenameMutation.isPending;
 
             const extraActions = (
@@ -746,35 +646,37 @@ export function EnumSubTab({ data, category, queryClient }: EnumSubTabProps) {
                     field,
                     action: 'remove',
                     value,
-                    listValueId: vi.list_value_id ?? undefined,
-                    enumListId: fd.enum_list_id ?? undefined,
+                    listValueId: listValueId ?? undefined,
+                    enumListId: enumListId ?? undefined,
                   });
                   optimisticRemove(field, idx);
                   setSelectedValueIndex(null);
                 }}
-                disabled={removeMutation.isPending}
+                disabled={removeMutation.isPending || !canMutateValueSlot}
                 className="w-full px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
               >
                 {removeMutation.isPending ? 'Removing...' : 'Remove Value'}
               </button>
             );
 
-            const hasSharedPending = Boolean(vi.needs_review);
+            const hasSharedPending = hasActionablePending(vi);
             const pendingSharedCandidateIds = hasSharedPending
-              ? (vi.candidates || [])
-                .filter((c) => String(c.value ?? '').trim().toLowerCase() === String(vi.value || '').trim().toLowerCase())
-                .map((c) => c.candidate_id)
+              ? (() => {
+                const candidates = (vi.candidates || []).filter((candidate) => {
+                  const candidateId = String(candidate?.candidate_id || '').trim();
+                  return Boolean(candidateId) && hasKnownValue(candidate?.value);
+                });
+                const pendingCandidates = candidates.filter((candidate) => {
+                  if (candidate?.is_synthetic_selected) return false;
+                  const sharedStatus = String(candidate?.shared_review_status || '').trim().toLowerCase();
+                  return !sharedStatus || sharedStatus === 'pending';
+                });
+                const matches = pendingCandidates
+                  .map((candidate) => String(candidate?.candidate_id || '').trim())
+                  .filter(Boolean);
+                return [...new Set(matches)];
+              })()
               : [];
-            if (hasSharedPending && pendingSharedCandidateIds.length === 0) {
-              const fallbackAcceptedId = String(vi.accepted_candidate_id || '').trim();
-              if (fallbackAcceptedId && (vi.candidates || []).some((candidate) => String(candidate?.candidate_id || '').trim() === fallbackAcceptedId)) {
-                pendingSharedCandidateIds.push(fallbackAcceptedId);
-              }
-              if (pendingSharedCandidateIds.length === 0) {
-                const firstCandidateId = String(vi.candidates?.[0]?.candidate_id || '').trim();
-                if (firstCandidateId) pendingSharedCandidateIds.push(firstCandidateId);
-              }
-            }
 
             return (
               <CellDrawer
@@ -796,6 +698,7 @@ export function EnumSubTab({ data, category, queryClient }: EnumSubTabProps) {
                 pendingSharedCandidateIds={pendingSharedCandidateIds}
                 candidateUiContext="shared"
                 onManualOverride={(newVal) => {
+                  if (!canMutateValueSlot) return;
                   const trimmed = String(newVal || '').trim();
                   if (!trimmed) return;
                   openEnumDrawer(fd.field, trimmed);
@@ -805,15 +708,15 @@ export function EnumSubTab({ data, category, queryClient }: EnumSubTabProps) {
                     oldValue: vi.value,
                     newValue: trimmed,
                     valueIndex: viIndex,
-                    listValueId: vi.list_value_id ?? undefined,
-                    enumListId: fd.enum_list_id ?? undefined,
+                    listValueId: listValueId ?? undefined,
+                    enumListId: enumListId ?? undefined,
                   });
                 }}
                 manualOverrideLabel="Rename Value"
                 manualOverridePlaceholder="Enter corrected value..."
                 isPending={drawerIsPending}
                 candidates={vi.candidates ?? []}
-                onAcceptCandidate={(candidateId, candidate) => {
+                onAcceptCandidate={canMutateValueSlot ? (candidateId, candidate) => {
                   const cid = String(candidateId || '').trim();
                   const acceptedValue = String(candidate.value ?? '').trim();
                   if (!cid || !acceptedValue) return;
@@ -827,20 +730,33 @@ export function EnumSubTab({ data, category, queryClient }: EnumSubTabProps) {
                     oldValue: String(vi.value ?? '').trim(),
                     candidateId,
                     candidateSource: candidate.source_id || candidate.source || '',
-                    listValueId: vi.list_value_id ?? undefined,
-                    enumListId: fd.enum_list_id ?? undefined,
+                    listValueId: listValueId ?? undefined,
+                    enumListId: enumListId ?? undefined,
                   });
-                }}
-                onConfirmShared={hasSharedPending ? () => {
-                  const confirmValue = String(vi.value ?? '').trim();
+                } : undefined}
+                onConfirmSharedCandidate={hasSharedPending && canMutateValueSlot ? (candidateId, candidate) => {
+                  const candidateValue = String(candidate?.value ?? '').trim();
+                  const confirmValue = candidateValue || String(vi.value ?? '').trim();
                   if (!confirmValue) return;
-                  optimisticConfirm(fd.field, viIndex);
                   acceptMutation.mutate({
                     field: fd.field,
                     action: 'confirm',
                     value: confirmValue,
-                    listValueId: vi.list_value_id ?? undefined,
-                    enumListId: fd.enum_list_id ?? undefined,
+                    candidateId: String(candidateId || '').trim() || undefined,
+                    candidateSource: candidate.source_id || candidate.source || '',
+                    listValueId: listValueId ?? undefined,
+                    enumListId: enumListId ?? undefined,
+                  });
+                } : undefined}
+                onConfirmShared={hasSharedPending && canMutateValueSlot ? () => {
+                  const confirmValue = String(vi.value ?? '').trim();
+                  if (!confirmValue) return;
+                  acceptMutation.mutate({
+                    field: fd.field,
+                    action: 'confirm',
+                    value: confirmValue,
+                    listValueId: listValueId ?? undefined,
+                    enumListId: enumListId ?? undefined,
                   });
                 } : undefined}
                 extraActions={extraActions}

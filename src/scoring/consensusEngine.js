@@ -306,6 +306,10 @@ function resolveCitationFromCandidate(source, candidate, evidenceIndexCache) {
         'llm_extract'
       ).trim(),
       referenceUrl: url,
+      fileUri: String(snippet?.file_uri || reference?.file_uri || '').trim(),
+      mimeType: String(snippet?.mime_type || reference?.mime_type || '').trim(),
+      contentHash: String(snippet?.content_hash || reference?.content_hash || '').trim(),
+      surface: String(snippet?.surface || reference?.surface || '').trim(),
       evidenceRefs
     };
   }
@@ -411,6 +415,10 @@ export function runConsensusEngine({
         snippet_hash: row.citation?.snippetHash || '',
         source_id: row.citation?.sourceId || '',
         quote: row.citation?.quote || '',
+        file_uri: row.citation?.fileUri || '',
+        mime_type: row.citation?.mimeType || '',
+        content_hash: row.citation?.contentHash || '',
+        surface: row.citation?.surface || '',
         quote_span: null,
         snippet_text: row.citation?.quote || ''
       }
@@ -553,6 +561,10 @@ export function runConsensusEngine({
         snippet_hash: evidence.citation?.snippetHash || '',
         source_id: evidence.citation?.sourceId || '',
         quote: evidence.citation?.quote || '',
+        file_uri: evidence.citation?.fileUri || '',
+        mime_type: evidence.citation?.mimeType || '',
+        content_hash: evidence.citation?.contentHash || '',
+        surface: evidence.citation?.surface || '',
         retrieved_at: evidence.citation?.retrievedAt || evidence.ts,
         extraction_method: evidence.citation?.extractionMethod || evidence.method,
         evidence_refs: evidence.citation?.evidenceRefs || []

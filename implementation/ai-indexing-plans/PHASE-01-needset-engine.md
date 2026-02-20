@@ -104,6 +104,21 @@ Expose via GUI:
 - Add NeedSet reason tags for policy gaps: tier_pref_unmet, min_refs_fail, publish_gate_block.
 - Persist policy snapshot per row so Phase 09 can explain planner choices deterministically.
 
+### 1.6 Ambiguity-aware extraction gating (implemented)
+- Compute catalog sibling count for `brand + model`:
+  - `family_model_count`
+- Derive ambiguity level:
+  - `easy` (1)
+  - `medium` (2-3)
+  - `hard` (4-5)
+  - `very_hard` (6-8)
+  - `extra_hard` (9+)
+- Keep **publish gate** strict.
+- Add separate **extraction gate**:
+  - `extraction_gate_open=true` for variant-empty `easy/medium` (when no hard identity conflicts).
+  - `extraction_gate_open=false` for `hard/very_hard/extra_hard` or identity conflicts.
+- Include `family_model_count`, `ambiguity_level`, and `extraction_gate_open` in `identity_lock_state` payload and GUI.
+
 ## GUI proof
 ### Required GUI panels
 1) **NeedSet table** with:

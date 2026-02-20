@@ -6,6 +6,12 @@ import { loadQueueState } from '../queue/queueState.js';
 import { ruleRequiredLevel } from '../engine/ruleAccessors.js';
 import { confidenceColor } from './confidenceColor.js';
 import { buildFallbackFieldCandidateId } from '../utils/candidateIdentifier.js';
+import {
+  isKnownSlotValue,
+  normalizeSlotValueForShape,
+  slotValueComparableToken,
+  slotValueToText,
+} from '../utils/slotValueShape.js';
 
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -89,8 +95,7 @@ function inferIdentityFromProductId(productId, category = '') {
 }
 
 function hasKnownValue(value) {
-  const token = String(value ?? '').trim().toLowerCase();
-  return token !== '' && token !== 'unk' && token !== 'unknown' && token !== 'n/a' && token !== 'null';
+  return isKnownSlotValue(value, 'scalar') || isKnownSlotValue(value, 'list');
 }
 
 function resolveOverrideFilePath({ config = {}, category, productId }) {
@@ -176,6 +181,7 @@ function normalizeFieldContract(rule = {}) {
   const enu = isObject(rule.enum) ? rule.enum : null;
   return {
     type: String(contract.type || 'string'),
+    shape: String(contract.shape || 'scalar').trim().toLowerCase() || 'scalar',
     required: level === 'required' || level === 'critical' || level === 'identity',
     units: contract.unit || null,
     enum_name: String(rule.enum_name || '').trim() || null,
@@ -375,6 +381,30 @@ function dbSourceMethod(source) {
   return null;
 }
 
+function extractHostFromUrl(rawUrl) {
+  const url = String(rawUrl || '').trim();
+  if (!url) return '';
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+function candidateSourceLabel(candidate = {}, evidence = {}) {
+  const host = String(candidate.host || '').trim();
+  if (host) return host;
+  const source = String(candidate.source || '').trim();
+  if (source) return source;
+  const sourceId = String(candidate.source_id || evidence.source_id || '').trim();
+  if (sourceId) {
+    const mapped = dbSourceLabel(sourceId);
+    return mapped || sourceId;
+  }
+  const evidenceUrl = String(evidence.url || candidate.url || '').trim();
+  return extractHostFromUrl(evidenceUrl);
+}
+
 function toSpecDbCandidateRow(row = {}) {
   const quoteStart = row.quote_span_start;
   const quoteEnd = row.quote_span_end;
@@ -386,7 +416,7 @@ function toSpecDbCandidateRow(row = {}) {
     value: row.value ?? null,
     score: row.score ?? 0,
     source_id: row.source_host || row.source_root_domain || row.source_method || '',
-    host: row.source_host || '',
+    host: row.source_host || row.source_root_domain || '',
     tier: row.source_tier ?? null,
     method: row.source_method || '',
     evidence: {
@@ -414,43 +444,46 @@ export function buildFieldState({
   summary,
   includeCandidates = true,
   category = '',
-  productId = ''
+  productId = '',
+  fieldShape = 'scalar',
+  acceptedCandidateId = null,
+  overridden = false,
 }) {
   const fieldKey = normalizeField(field);
+  const normalizedShape = String(fieldShape || 'scalar').trim().toLowerCase() || 'scalar';
   const normalizedFields = isObject(normalized.fields) ? normalized.fields : {};
-  const selectedValue = Object.prototype.hasOwnProperty.call(normalizedFields, fieldKey)
+  const rawSelectedValue = Object.prototype.hasOwnProperty.call(normalizedFields, fieldKey)
     ? normalizedFields[fieldKey]
     : 'unk';
+  const selectedShapeValue = normalizeSlotValueForShape(rawSelectedValue, normalizedShape).value;
+  const selectedValue = normalizedShape === 'list'
+    ? (slotValueToText(selectedShapeValue, normalizedShape) ?? 'unk')
+    : selectedShapeValue;
   const provenanceRow = isObject(provenance[fieldKey]) ? provenance[fieldKey] : {};
-  const selectedConfidence = toNumber(provenanceRow.confidence, 0);
+  const selectedConfidenceHint = Math.max(0, Math.min(1, toNumber(provenanceRow.confidence, 0)));
   const candidateRows = toArray(candidates[fieldKey]);
-  const hasConflict = toArray(summary.constraint_analysis?.contradictions).some((row) =>
-    toArray(row?.fields).map((token) => normalizeField(token)).includes(fieldKey)
-  );
-  const reasonCodes = inferReasonCodes({
-    field: fieldKey,
-    selectedValue,
-    selectedConfidence,
-    summary,
-    hasConflict
-  });
-
-  let normalizedCandidates = [];
-  if (includeCandidates) {
-    normalizedCandidates = candidateRows.map((candidate, index) => {
+  let normalizedCandidates = candidateRows
+    .map((candidate, index) => {
+      const normalizedCandidateValue = normalizeSlotValueForShape(candidate.value, normalizedShape).value;
+      if (!isKnownSlotValue(normalizedCandidateValue, normalizedShape)) {
+        return null;
+      }
       const evidence = candidateEvidenceFromRows(candidate, provenanceRow);
+      const source = candidateSourceLabel(candidate, evidence);
       return {
         candidate_id: String(candidate.candidate_id || buildFallbackFieldCandidateId({
           productId,
           fieldKey,
-          value: candidate.value,
+          value: normalizedCandidateValue,
           index: index + 1,
           variant: 'candidate',
         })),
-        value: candidate.value ?? 'unk',
+        value: normalizedShape === 'list'
+          ? (slotValueToText(normalizedCandidateValue, normalizedShape) ?? 'unk')
+          : normalizedCandidateValue,
         score: candidateScore(candidate, provenanceRow),
         source_id: String(candidate.source_id || evidence.source_id || candidate.host || '').trim(),
-        source: String(candidate.host || '').trim(),
+        source,
         tier: toInt(candidate.tier, 0) || null,
         method: String(candidate.method || '').trim() || null,
         evidence,
@@ -459,64 +492,118 @@ export function buildFieldState({
         llm_validate_model: candidate.llm_validate_model || null,
         llm_validate_provider: candidate.llm_validate_provider || null
       };
-    });
+    })
+    .filter(Boolean);
 
-    if (normalizedCandidates.length === 0 && hasKnownValue(selectedValue)) {
-      // When no pipeline candidates exist and value has no provenance host,
-      // it likely originates from a workbook import — populate source info.
-      const provenanceHost = String(provenanceRow.host || '').trim();
-      const isWorkbookOrigin = !provenanceHost;
-      const baseEvidence = candidateEvidenceFromRows({}, provenanceRow);
-      normalizedCandidates.push({
-        candidate_id: buildFallbackFieldCandidateId({
-          productId,
-          fieldKey,
-          value: selectedValue,
-          index: 0,
-          variant: 'selected',
-        }),
+  if (!overridden && normalizedCandidates.length === 0 && hasKnownValue(selectedValue)) {
+    // No candidate rows exist yet; preserve selected value as a synthetic candidate for slot provenance.
+    const provenanceHost = String(provenanceRow.host || '').trim();
+    const provenanceSourceToken = normalizeToken(provenanceRow.source || provenanceRow.source_id || '');
+    const fallbackSourceToken = provenanceSourceToken || (provenanceHost ? '' : 'workbook');
+    const fallbackSource = fallbackSourceToken
+      ? (dbSourceLabel(fallbackSourceToken) || fallbackSourceToken)
+      : '';
+    const baseEvidence = candidateEvidenceFromRows({}, provenanceRow);
+    normalizedCandidates.push({
+      candidate_id: buildFallbackFieldCandidateId({
+        productId,
+        fieldKey,
         value: selectedValue,
-        score: Math.max(0, Math.min(1, selectedConfidence || 0.5)),
-        source_id: isWorkbookOrigin ? 'workbook' : '',
-        source: isWorkbookOrigin ? 'Excel Import' : '',
-        tier: null,
-        method: isWorkbookOrigin ? 'workbook_import' : 'selected_value',
-        evidence: isWorkbookOrigin ? {
-          ...baseEvidence,
-          quote: category ? `Imported from ${category}Data.xlsm` : baseEvidence.quote,
-          snippet_text: category ? `Imported from ${category}Data.xlsm` : baseEvidence.snippet_text,
-          retrieved_at: summary.generated_at || baseEvidence.retrieved_at,
-          source_id: 'workbook',
-        } : baseEvidence,
-      });
+        index: 0,
+        variant: 'selected',
+      }),
+      value: selectedValue,
+      score: Math.max(0, Math.min(1, selectedConfidenceHint || 0.5)),
+      source_id: fallbackSourceToken || '',
+      source: fallbackSource,
+      tier: null,
+      method: dbSourceMethod(fallbackSourceToken) || 'selected_value',
+      evidence: {
+        ...baseEvidence,
+        quote: category ? `Imported from ${category}Data.xlsm` : baseEvidence.quote,
+        snippet_text: category ? `Imported from ${category}Data.xlsm` : baseEvidence.snippet_text,
+        retrieved_at: summary.generated_at || baseEvidence.retrieved_at,
+        source_id: fallbackSourceToken || baseEvidence.source_id || '',
+      },
+      is_synthetic_selected: true,
+    });
+  }
+
+  if (normalizedCandidates.length > 1) {
+    normalizedCandidates.sort((left, right) => toNumber(right.score, 0) - toNumber(left.score, 0));
+  }
+
+  const acceptedCandidate = !overridden && String(acceptedCandidateId || '').trim()
+    ? normalizedCandidates.find((candidate) => normalizeToken(candidate.candidate_id) === normalizeToken(acceptedCandidateId))
+    : null;
+  const topCandidate = normalizedCandidates[0] || null;
+  const selectedToken = slotValueComparableToken(selectedValue, normalizedShape);
+  const topToken = topCandidate ? slotValueComparableToken(topCandidate.value, normalizedShape) : '';
+
+  let selectedCandidate = null;
+  let resolvedSelectedValue = selectedValue;
+  let resolvedSelectedConfidence = selectedConfidenceHint;
+  if (!overridden) {
+    if (acceptedCandidate) {
+      selectedCandidate = acceptedCandidate;
+      resolvedSelectedValue = acceptedCandidate.value;
+      resolvedSelectedConfidence = Math.max(selectedConfidenceHint, toNumber(acceptedCandidate.score, selectedConfidenceHint));
+    } else if (topCandidate) {
+      selectedCandidate = topCandidate;
+      if (!selectedToken || selectedToken !== topToken) {
+        resolvedSelectedValue = topCandidate.value;
+      }
+      resolvedSelectedConfidence = Math.max(selectedConfidenceHint, toNumber(topCandidate.score, selectedConfidenceHint));
+    } else if (!hasKnownValue(resolvedSelectedValue)) {
+      resolvedSelectedValue = 'unk';
+      resolvedSelectedConfidence = 0;
     }
   }
 
-  const color = hasKnownValue(selectedValue)
-    ? confidenceColor(selectedConfidence, reasonCodes)
+  const hasConflict = toArray(summary.constraint_analysis?.contradictions).some((row) =>
+    toArray(row?.fields).map((token) => normalizeField(token)).includes(fieldKey)
+  );
+  const reasonCodes = inferReasonCodes({
+    field: fieldKey,
+    selectedValue: resolvedSelectedValue,
+    selectedConfidence: resolvedSelectedConfidence,
+    summary,
+    hasConflict
+  });
+
+  const color = hasKnownValue(resolvedSelectedValue)
+    ? confidenceColor(resolvedSelectedConfidence, reasonCodes)
     : 'gray';
 
-  // Always extract top-candidate source info for tooltips (even when full candidates omitted)
-  const topCand = candidateRows[0];
-  const topSource = topCand ? String(topCand.host || '').trim() : '';
-  const topMethod = topCand ? String(topCand.method || '').trim() : '';
-  const topTier = topCand ? (toInt(topCand.tier, 0) || null) : null;
-  const topEvidence = topCand ? candidateEvidenceFromRows(topCand, provenanceRow) : null;
+  const sourceCandidate = selectedCandidate || topCandidate;
+  const topEvidence = sourceCandidate
+    ? (isObject(sourceCandidate.evidence)
+      ? sourceCandidate.evidence
+      : candidateEvidenceFromRows(sourceCandidate, provenanceRow))
+    : null;
+  const topSource = sourceCandidate
+    ? (String(sourceCandidate.source || '').trim() || candidateSourceLabel(sourceCandidate, topEvidence || {}))
+    : '';
+  const topMethod = sourceCandidate
+    ? (String(sourceCandidate.method || '').trim() || null)
+    : null;
+  const topTier = sourceCandidate ? (toInt(sourceCandidate.tier, 0) || null) : null;
   const topEvidenceUrl = topEvidence?.url || '';
   const topEvidenceQuote = topEvidence?.quote || '';
 
   return {
     selected: {
-      value: selectedValue,
-      confidence: selectedConfidence,
+      value: resolvedSelectedValue,
+      confidence: resolvedSelectedConfidence,
       status: reasonCodes.length > 0 ? 'needs_review' : 'ok',
       color
     },
     needs_review: reasonCodes.length > 0,
     reason_codes: reasonCodes,
-    candidate_count: candidateRows.length,
-    candidates: normalizedCandidates,
-    accepted_candidate_id: null,
+    candidate_count: normalizedCandidates.length,
+    candidates: includeCandidates ? normalizedCandidates : [],
+    accepted_candidate_id: overridden ? null : (acceptedCandidate?.candidate_id || null),
+    selected_candidate_id: overridden ? null : (selectedCandidate?.candidate_id || null),
     source: topSource,
     method: topMethod,
     tier: topTier,
@@ -554,6 +641,31 @@ export async function buildProductReviewPayload({
       dbFieldRowsByField = new Map(dbFieldRows.map((row) => [normalizeField(row.field_key), row]));
       dbCandidatesByField = specDb.getCandidatesForProduct(productId) || {};
       dbProduct = specDb.getProduct(productId) || null;
+
+      // ID-first invariant: every grid field must have a persisted slot row.
+      // This guarantees itemFieldStateId exists for all drawer mutations.
+      const layoutFields = toArray(resolvedLayout?.rows)
+        .map((row) => normalizeField(row?.key))
+        .filter(Boolean);
+      const missingFields = layoutFields.filter((field) => !dbFieldRowsByField.has(field));
+      if (missingFields.length > 0) {
+        for (const fieldKey of missingFields) {
+          specDb.upsertItemFieldState({
+            productId,
+            fieldKey,
+            value: 'unk',
+            confidence: 0,
+            source: 'pipeline',
+            acceptedCandidateId: null,
+            overridden: false,
+            needsAiReview: false,
+            aiReviewComplete: false,
+          });
+        }
+        const refreshedRows = toArray(specDb.getItemFieldState(productId));
+        dbHasAnyState = refreshedRows.length > 0;
+        dbFieldRowsByField = new Map(refreshedRows.map((row) => [normalizeField(row.field_key), row]));
+      }
     } catch {
       useSpecDb = false;
       dbHasAnyState = false;
@@ -569,19 +681,17 @@ export async function buildProductReviewPayload({
 
   for (const row of resolvedLayout.rows || []) {
     const field = normalizeField(row.key);
+    const fieldShape = String(row?.field_rule?.shape || 'scalar').trim().toLowerCase() || 'scalar';
     const dbFieldRow = useSpecDb ? dbFieldRowsByField.get(field) : null;
 
     if (dbFieldRow) {
-      const selectedValue = dbFieldRow.value != null && String(dbFieldRow.value).trim() !== ''
-        ? dbFieldRow.value
-        : 'unk';
-      const selectedConfidence = Math.max(0, Math.min(1, toNumber(dbFieldRow.confidence, hasKnownValue(selectedValue) ? 1 : 0)));
       const dbCandidateRows = toArray(dbCandidatesByField[field]).map(toSpecDbCandidateRow);
-      const acceptedCandidate = dbFieldRow.accepted_candidate_id
-        ? dbCandidateRows.find((c) => normalizeToken(c.candidate_id) === normalizeToken(dbFieldRow.accepted_candidate_id))
-        : null;
-
-      const provenanceEvidence = acceptedCandidate?.evidence ? [acceptedCandidate.evidence] : [];
+      const isOverridden = Boolean(dbFieldRow.overridden);
+      const selectedShapeValue = normalizeSlotValueForShape(
+        dbFieldRow.value != null && String(dbFieldRow.value).trim() !== '' ? dbFieldRow.value : 'unk',
+        fieldShape
+      ).value;
+      const selectedValue = slotValueToText(selectedShapeValue, fieldShape) ?? 'unk';
       const state = buildFieldState({
         field,
         candidates: { [field]: dbCandidateRows },
@@ -589,54 +699,60 @@ export async function buildProductReviewPayload({
         provenance: {
           [field]: {
             value: selectedValue,
-            confidence: selectedConfidence,
-            host: acceptedCandidate?.host || '',
-            evidence: provenanceEvidence,
+            confidence: Math.max(0, Math.min(1, toNumber(dbFieldRow.confidence, 0))),
+            host: '',
+            source: dbFieldRow.source || '',
+            evidence: [],
           }
         },
         summary: latest.summary,
         includeCandidates,
         category,
         productId,
+        fieldShape,
+        acceptedCandidateId: dbFieldRow.accepted_candidate_id || null,
+        overridden: isOverridden,
       });
 
       const needsReview = Boolean(dbFieldRow.needs_ai_review);
       const reasonCodes = needsReview
         ? (state.reason_codes.length > 0 ? state.reason_codes : ['needs_ai_review'])
         : [];
-      const color = hasKnownValue(selectedValue)
+      const selectedConfidence = isOverridden
+        ? 1
+        : Math.max(
+          Math.max(0, Math.min(1, toNumber(dbFieldRow.confidence, 0))),
+          Math.max(0, Math.min(1, toNumber(state.selected?.confidence, 0)))
+        );
+      const color = hasKnownValue(state.selected?.value)
         ? confidenceColor(selectedConfidence, reasonCodes)
         : 'gray';
 
       state.selected = {
-        value: selectedValue,
+        value: isOverridden ? selectedValue : state.selected.value,
         confidence: selectedConfidence,
         status: needsReview ? 'needs_review' : 'ok',
         color,
       };
       state.needs_review = needsReview;
       state.reason_codes = reasonCodes;
-      state.candidate_count = dbCandidateRows.length;
-      state.overridden = Boolean(dbFieldRow.overridden);
+      state.candidate_count = Number.isFinite(Number(state.candidate_count))
+        ? Number(state.candidate_count)
+        : dbCandidateRows.length;
+      state.overridden = isOverridden;
       state.slot_id = dbFieldRow.id ?? null;
       state.accepted_candidate_id = state.overridden
         ? null
-        : (dbFieldRow.accepted_candidate_id || acceptedCandidate?.candidate_id || null);
+        : (state.accepted_candidate_id || String(dbFieldRow.accepted_candidate_id || '').trim() || null);
       state.source_timestamp = String(dbFieldRow.updated_at || '').trim() || null;
 
       if (state.overridden) {
         state.source = 'user';
         state.method = 'manual_override';
         state.tier = null;
-      } else if (acceptedCandidate) {
-        state.source = String(acceptedCandidate.host || '').trim();
-        state.method = String(acceptedCandidate.method || '').trim() || null;
-        state.tier = toInt(acceptedCandidate.tier, 0) || null;
-        state.evidence_url = acceptedCandidate.evidence?.url || '';
-        state.evidence_quote = acceptedCandidate.evidence?.quote || '';
       } else if (dbFieldRow.source) {
-        state.source = dbSourceLabel(dbFieldRow.source);
-        state.method = dbSourceMethod(dbFieldRow.source);
+        state.source = state.source || dbSourceLabel(dbFieldRow.source);
+        state.method = state.method || dbSourceMethod(dbFieldRow.source);
         state.tier = null;
       }
 
@@ -651,6 +767,7 @@ export async function buildProductReviewPayload({
         includeCandidates,
         category,
         productId,
+        fieldShape,
       });
     } else {
       rows[field] = buildFieldState({
@@ -662,14 +779,17 @@ export async function buildProductReviewPayload({
         includeCandidates,
         category,
         productId,
+        fieldShape,
       });
     }
 
     // Apply override on top of pipeline data (JSON-primary mode only).
     const ovr = overrides[field];
     if (isObject(ovr) && ovr.override_value != null) {
+      const overrideShapeValue = normalizeSlotValueForShape(ovr.override_value, fieldShape).value;
+      const overrideValue = slotValueToText(overrideShapeValue, fieldShape) ?? 'unk';
       rows[field].selected = {
-        value: ovr.override_value,
+        value: overrideValue,
         confidence: 1.0,
         status: 'ok',
         color: 'green'

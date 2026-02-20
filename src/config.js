@@ -1,5 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {
+  buildDefaultModelPricingMap,
+  LLM_PRICING_AS_OF,
+  LLM_PRICING_SOURCES,
+  mergeModelPricingMaps
+} from './billing/modelPricingCatalog.js';
+import { normalizeDynamicFetchPolicyMap } from './fetcher/dynamicFetchPolicy.js';
 
 function parseIntEnv(name, defaultValue) {
   const raw = process.env[name];
@@ -59,6 +66,72 @@ function normalizeModelPricingMap(input = {}) {
     };
   }
   return output;
+}
+
+function normalizePricingSources(input = {}) {
+  const output = {
+    openai: String(LLM_PRICING_SOURCES.openai || ''),
+    gemini: String(LLM_PRICING_SOURCES.gemini || ''),
+    deepseek: String(LLM_PRICING_SOURCES.deepseek || '')
+  };
+  if (!input || typeof input !== 'object') {
+    return output;
+  }
+  for (const [key, value] of Object.entries(input)) {
+    const token = String(key || '').trim().toLowerCase();
+    if (!token) continue;
+    output[token] = String(value || '').trim();
+  }
+  return output;
+}
+
+function toTokenInt(value, fallback = 0) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(0, parsed);
+}
+
+function normalizeModelOutputTokenMap(input = {}) {
+  const output = {};
+  if (!input || typeof input !== 'object') {
+    return output;
+  }
+  for (const [rawModel, rawConfig] of Object.entries(input)) {
+    const model = String(rawModel || '').trim();
+    if (!model || !rawConfig || typeof rawConfig !== 'object') continue;
+    const defaultOutputTokens = toTokenInt(
+      rawConfig.defaultOutputTokens
+      ?? rawConfig.default_output_tokens
+      ?? rawConfig.default
+      ?? rawConfig.defaultTokens,
+      0
+    );
+    const maxOutputTokens = toTokenInt(
+      rawConfig.maxOutputTokens
+      ?? rawConfig.max_output_tokens
+      ?? rawConfig.max
+      ?? rawConfig.maximum,
+      0
+    );
+    output[model] = {
+      defaultOutputTokens: defaultOutputTokens > 0 ? defaultOutputTokens : 0,
+      maxOutputTokens: maxOutputTokens > 0 ? maxOutputTokens : 0
+    };
+  }
+  return output;
+}
+
+function parseTokenPresetList(value, fallback = []) {
+  const parsed = String(value || '')
+    .split(/[,\s]+/g)
+    .map((item) => Number.parseInt(String(item || ''), 10))
+    .filter((n) => Number.isFinite(n) && n > 0)
+    .map((n) => Math.max(128, Math.min(262144, Number(n))))
+    .sort((a, b) => a - b);
+  if (parsed.length === 0) {
+    return [...fallback];
+  }
+  return [...new Set(parsed)];
 }
 
 function hasS3EnvCreds() {
@@ -388,7 +461,12 @@ export function loadConfig(overrides = {}) {
     llmWriteFallbackApiKey: process.env.LLM_WRITE_FALLBACK_API_KEY || '',
     llmSerpRerankEnabled: parseBoolEnv('LLM_SERP_RERANK_ENABLED', false),
     llmModelCatalog: process.env.LLM_MODEL_CATALOG || '',
-    llmModelPricingMap: normalizeModelPricingMap(parseJsonEnv('LLM_MODEL_PRICING_JSON', {})),
+    llmModelPricingMap: mergeModelPricingMaps(
+      buildDefaultModelPricingMap(),
+      normalizeModelPricingMap(parseJsonEnv('LLM_MODEL_PRICING_JSON', {}))
+    ),
+    llmPricingAsOf: String(process.env.LLM_PRICING_AS_OF || LLM_PRICING_AS_OF),
+    llmPricingSources: normalizePricingSources(parseJsonEnv('LLM_PRICING_SOURCES_JSON', LLM_PRICING_SOURCES)),
     cortexEnabled: parseBoolEnv('CORTEX_ENABLED', false),
     chatmockDir: process.env.CHATMOCK_DIR || defaultChatmockDir(),
     chatmockComposeFile: process.env.CHATMOCK_COMPOSE_FILE
@@ -438,16 +516,23 @@ export function loadConfig(overrides = {}) {
     frontierCooldown404RepeatSeconds: parseIntEnv('FRONTIER_COOLDOWN_404_REPEAT', 14 * 24 * 60 * 60),
     frontierCooldown410Seconds: parseIntEnv('FRONTIER_COOLDOWN_410', 90 * 24 * 60 * 60),
     frontierCooldownTimeoutSeconds: parseIntEnv('FRONTIER_COOLDOWN_TIMEOUT', 6 * 60 * 60),
+    frontierCooldown403BaseSeconds: parseIntEnv('FRONTIER_COOLDOWN_403_BASE', 30 * 60),
     frontierCooldown429BaseSeconds: parseIntEnv('FRONTIER_COOLDOWN_429_BASE', 15 * 60),
+    frontierBlockedDomainThreshold: parseIntEnv('FRONTIER_BLOCKED_DOMAIN_THRESHOLD', 2),
+    frontierRepairSearchEnabled: parseBoolEnv('FRONTIER_REPAIR_SEARCH_ENABLED', true),
     runtimeTraceEnabled: parseBoolEnv('RUNTIME_TRACE_ENABLED', true),
     runtimeTraceFetchRing: parseIntEnv('RUNTIME_TRACE_FETCH_RING', 30),
     runtimeTraceLlmRing: parseIntEnv('RUNTIME_TRACE_LLM_RING', 50),
+    runtimeTraceLlmPayloads: parseBoolEnv('RUNTIME_TRACE_LLM_PAYLOADS', true),
     indexingResumeMode: (process.env.INDEXING_RESUME_MODE || 'auto').trim().toLowerCase(),
     indexingResumeMaxAgeHours: parseIntEnv('INDEXING_RESUME_MAX_AGE_HOURS', 48),
     indexingResumeSeedLimit: parseIntEnv('INDEXING_RESUME_SEED_LIMIT', 24),
     indexingResumePersistLimit: parseIntEnv('INDEXING_RESUME_PERSIST_LIMIT', 160),
     indexingResumeRetryPersistLimit: parseIntEnv('INDEXING_RESUME_RETRY_PERSIST_LIMIT', 80),
     indexingResumeSuccessPersistLimit: parseIntEnv('INDEXING_RESUME_SUCCESS_PERSIST_LIMIT', 240),
+    indexingSchemaPacketsValidationEnabled: parseBoolEnv('INDEXING_SCHEMA_PACKETS_VALIDATION_ENABLED', true),
+    indexingSchemaPacketsValidationStrict: parseBoolEnv('INDEXING_SCHEMA_PACKETS_VALIDATION_STRICT', true),
+    indexingSchemaPacketsSchemaRoot: process.env.INDEXING_SCHEMA_PACKETS_SCHEMA_ROOT || '',
     indexingReextractEnabled: parseBoolEnv('INDEXING_REEXTRACT_ENABLED', true),
     indexingReextractAfterHours: parseIntEnv('INDEXING_REEXTRACT_AFTER_HOURS', 24),
     indexingReextractSeedLimit: parseIntEnv('INDEXING_REEXTRACT_SEED_LIMIT', 8),
@@ -499,9 +584,24 @@ export function loadConfig(overrides = {}) {
     llmVerifyAggressiveAlways: parseBoolEnv('LLM_VERIFY_AGGRESSIVE_ALWAYS', false),
     llmVerifyAggressiveBatchCount: parseIntEnv('LLM_VERIFY_AGGRESSIVE_BATCH_COUNT', 3),
     llmMaxOutputTokens: parseIntEnv('LLM_MAX_OUTPUT_TOKENS', 1200),
-    llmCostInputPer1M: parseFloatEnv('LLM_COST_INPUT_PER_1M', 0.28),
-    llmCostOutputPer1M: parseFloatEnv('LLM_COST_OUTPUT_PER_1M', 0.42),
-    llmCostCachedInputPer1M: parseFloatEnv('LLM_COST_CACHED_INPUT_PER_1M', 0),
+    llmMaxOutputTokensPlan: parseIntEnv('LLM_MAX_OUTPUT_TOKENS_PLAN', parseIntEnv('LLM_MAX_OUTPUT_TOKENS', 1200)),
+    llmMaxOutputTokensFast: parseIntEnv('LLM_MAX_OUTPUT_TOKENS_FAST', parseIntEnv('LLM_MAX_OUTPUT_TOKENS', 1200)),
+    llmMaxOutputTokensTriage: parseIntEnv('LLM_MAX_OUTPUT_TOKENS_TRIAGE', parseIntEnv('LLM_MAX_OUTPUT_TOKENS', 1200)),
+    llmMaxOutputTokensReasoning: parseIntEnv('LLM_MAX_OUTPUT_TOKENS_REASONING', parseIntEnv('LLM_REASONING_BUDGET', 32768)),
+    llmMaxOutputTokensExtract: parseIntEnv('LLM_MAX_OUTPUT_TOKENS_EXTRACT', parseIntEnv('LLM_EXTRACT_MAX_TOKENS', 1200)),
+    llmMaxOutputTokensValidate: parseIntEnv('LLM_MAX_OUTPUT_TOKENS_VALIDATE', parseIntEnv('LLM_MAX_OUTPUT_TOKENS', 1200)),
+    llmMaxOutputTokensWrite: parseIntEnv('LLM_MAX_OUTPUT_TOKENS_WRITE', parseIntEnv('LLM_MAX_OUTPUT_TOKENS', 1200)),
+    llmMaxOutputTokensPlanFallback: parseIntEnv('LLM_MAX_OUTPUT_TOKENS_PLAN_FALLBACK', parseIntEnv('LLM_MAX_OUTPUT_TOKENS_PLAN', 1200)),
+    llmMaxOutputTokensExtractFallback: parseIntEnv('LLM_MAX_OUTPUT_TOKENS_EXTRACT_FALLBACK', parseIntEnv('LLM_MAX_OUTPUT_TOKENS_EXTRACT', 1200)),
+    llmMaxOutputTokensValidateFallback: parseIntEnv('LLM_MAX_OUTPUT_TOKENS_VALIDATE_FALLBACK', parseIntEnv('LLM_MAX_OUTPUT_TOKENS_VALIDATE', 1200)),
+    llmMaxOutputTokensWriteFallback: parseIntEnv('LLM_MAX_OUTPUT_TOKENS_WRITE_FALLBACK', parseIntEnv('LLM_MAX_OUTPUT_TOKENS_WRITE', 1200)),
+    llmOutputTokenPresets: parseTokenPresetList(
+      process.env.LLM_OUTPUT_TOKEN_PRESETS,
+      [256, 384, 512, 768, 1024, 1536, 2048, 3072, 4096, 8192]
+    ),
+    llmCostInputPer1M: parseFloatEnv('LLM_COST_INPUT_PER_1M', 1.25),
+    llmCostOutputPer1M: parseFloatEnv('LLM_COST_OUTPUT_PER_1M', 10),
+    llmCostCachedInputPer1M: parseFloatEnv('LLM_COST_CACHED_INPUT_PER_1M', 0.125),
     llmCostInputPer1MDeepseekChat: parseFloatEnv('LLM_COST_INPUT_PER_1M_DEEPSEEK_CHAT', -1),
     llmCostOutputPer1MDeepseekChat: parseFloatEnv('LLM_COST_OUTPUT_PER_1M_DEEPSEEK_CHAT', -1),
     llmCostCachedInputPer1MDeepseekChat: parseFloatEnv('LLM_COST_CACHED_INPUT_PER_1M_DEEPSEEK_CHAT', -1),
@@ -521,10 +621,11 @@ export function loadConfig(overrides = {}) {
     llmMaxEvidenceChars: parseIntEnv('LLM_MAX_EVIDENCE_CHARS', 60_000),
     deepseekModelVersion: process.env.DEEPSEEK_MODEL_VERSION || '',
     deepseekContextLength: process.env.DEEPSEEK_CONTEXT_LENGTH || '',
-    deepseekChatMaxOutputDefault: process.env.DEEPSEEK_CHAT_MAX_OUTPUT_DEFAULT || '',
-    deepseekChatMaxOutputMaximum: process.env.DEEPSEEK_CHAT_MAX_OUTPUT_MAXIMUM || '',
-    deepseekReasonerMaxOutputDefault: process.env.DEEPSEEK_REASONER_MAX_OUTPUT_DEFAULT || '',
-    deepseekReasonerMaxOutputMaximum: process.env.DEEPSEEK_REASONER_MAX_OUTPUT_MAXIMUM || '',
+    deepseekChatMaxOutputDefault: parseIntEnv('DEEPSEEK_CHAT_MAX_OUTPUT_DEFAULT', 2048),
+    deepseekChatMaxOutputMaximum: parseIntEnv('DEEPSEEK_CHAT_MAX_OUTPUT_MAXIMUM', 4096),
+    deepseekReasonerMaxOutputDefault: parseIntEnv('DEEPSEEK_REASONER_MAX_OUTPUT_DEFAULT', 4096),
+    deepseekReasonerMaxOutputMaximum: parseIntEnv('DEEPSEEK_REASONER_MAX_OUTPUT_MAXIMUM', 8192),
+    llmModelOutputTokenMap: normalizeModelOutputTokenMap(parseJsonEnv('LLM_MODEL_OUTPUT_TOKEN_MAP_JSON', {})),
     deepseekFeatures: process.env.DEEPSEEK_FEATURES || '',
     accuracyMode: (process.env.ACCURACY_MODE || 'balanced').trim().toLowerCase(),
     importsRoot: process.env.IMPORTS_ROOT || 'imports',
@@ -549,7 +650,30 @@ export function loadConfig(overrides = {}) {
     pageGotoTimeoutMs: parseIntEnv('PAGE_GOTO_TIMEOUT_MS', 30_000),
     pageNetworkIdleTimeoutMs: parseIntEnv('PAGE_NETWORK_IDLE_TIMEOUT_MS', 6_000),
     postLoadWaitMs: parseIntEnv('POST_LOAD_WAIT_MS', 0),
+    articleExtractorV2Enabled: parseBoolEnv('ARTICLE_EXTRACTOR_V2', true),
+    articleExtractorMinChars: parseIntEnv('ARTICLE_EXTRACTOR_MIN_CHARS', 700),
+    articleExtractorMinScore: parseIntEnv('ARTICLE_EXTRACTOR_MIN_SCORE', 45),
+    articleExtractorMaxChars: parseIntEnv('ARTICLE_EXTRACTOR_MAX_CHARS', 24_000),
+    dynamicCrawleeEnabled: parseBoolEnv('DYNAMIC_CRAWLEE_ENABLED', true),
+    crawleeHeadless: parseBoolEnv('CRAWLEE_HEADLESS', true),
+    crawleeRequestHandlerTimeoutSecs: parseIntEnv('CRAWLEE_REQUEST_HANDLER_TIMEOUT_SECS', 75),
+    dynamicFetchRetryBudget: parseIntEnv('DYNAMIC_FETCH_RETRY_BUDGET', 2),
+    dynamicFetchRetryBackoffMs: parseIntEnv('DYNAMIC_FETCH_RETRY_BACKOFF_MS', 1200),
+    dynamicFetchPolicyMap: normalizeDynamicFetchPolicyMap(
+      parseJsonEnv('DYNAMIC_FETCH_POLICY_MAP_JSON', {})
+    ),
     preferHttpFetcher: parseBoolEnv('PREFER_HTTP_FETCHER', false),
+    capturePageScreenshotEnabled: parseBoolEnv('CAPTURE_PAGE_SCREENSHOT_ENABLED', true),
+    capturePageScreenshotFormat: String(process.env.CAPTURE_PAGE_SCREENSHOT_FORMAT || 'jpeg').trim().toLowerCase() === 'png'
+      ? 'png'
+      : 'jpeg',
+    capturePageScreenshotQuality: parseIntEnv('CAPTURE_PAGE_SCREENSHOT_QUALITY', 62),
+    capturePageScreenshotMaxBytes: parseIntEnv('CAPTURE_PAGE_SCREENSHOT_MAX_BYTES', 2_200_000),
+    capturePageScreenshotSelectors: String(
+      process.env.CAPTURE_PAGE_SCREENSHOT_SELECTORS ||
+      'table,[data-spec-table],.specs-table,.spec-table,.specifications'
+    ).trim(),
+    domSnippetMaxChars: parseIntEnv('DOM_SNIPPET_MAX_CHARS', 3600),
     autoScrollEnabled: parseBoolEnv('AUTO_SCROLL_ENABLED', false),
     autoScrollPasses: parseIntEnv('AUTO_SCROLL_PASSES', 0),
     autoScrollDelayMs: parseIntEnv('AUTO_SCROLL_DELAY_MS', 900),
@@ -629,7 +753,82 @@ export function loadConfig(overrides = {}) {
   merged.llmWriteBaseUrl = merged.llmWriteBaseUrl || merged.llmBaseUrl;
   merged.llmWriteApiKey = merged.llmWriteApiKey || merged.llmApiKey;
   merged.cortexModelRerankFast = merged.cortexModelRerankFast || merged.cortexModelSearchFast || merged.llmModelTriage || merged.llmModelFast;
-  merged.llmModelPricingMap = normalizeModelPricingMap(merged.llmModelPricingMap || {});
+  merged.llmModelPricingMap = normalizeModelPricingMap(
+    mergeModelPricingMaps(buildDefaultModelPricingMap(), merged.llmModelPricingMap || {})
+  );
+  merged.llmPricingAsOf = String(merged.llmPricingAsOf || LLM_PRICING_AS_OF);
+  merged.llmPricingSources = normalizePricingSources(merged.llmPricingSources || LLM_PRICING_SOURCES);
+  merged.llmModelOutputTokenMap = normalizeModelOutputTokenMap(merged.llmModelOutputTokenMap || {});
+  merged.llmOutputTokenPresets = parseTokenPresetList(
+    merged.llmOutputTokenPresets,
+    [256, 384, 512, 768, 1024, 1536, 2048, 3072, 4096, 8192]
+  );
+  merged.llmMaxOutputTokensPlan = toTokenInt(merged.llmMaxOutputTokensPlan, toTokenInt(merged.llmMaxOutputTokens, 1200));
+  merged.llmMaxOutputTokensFast = toTokenInt(merged.llmMaxOutputTokensFast, merged.llmMaxOutputTokensPlan);
+  merged.llmMaxOutputTokensTriage = toTokenInt(merged.llmMaxOutputTokensTriage, merged.llmMaxOutputTokensFast);
+  merged.llmMaxOutputTokensReasoning = toTokenInt(merged.llmMaxOutputTokensReasoning, toTokenInt(merged.llmReasoningBudget, merged.llmMaxOutputTokens));
+  merged.llmMaxOutputTokensExtract = toTokenInt(merged.llmMaxOutputTokensExtract, merged.llmMaxOutputTokensPlan);
+  merged.llmMaxOutputTokensValidate = toTokenInt(merged.llmMaxOutputTokensValidate, merged.llmMaxOutputTokensPlan);
+  merged.llmMaxOutputTokensWrite = toTokenInt(merged.llmMaxOutputTokensWrite, merged.llmMaxOutputTokensPlan);
+  merged.llmMaxOutputTokensPlanFallback = toTokenInt(merged.llmMaxOutputTokensPlanFallback, merged.llmMaxOutputTokensPlan);
+  merged.llmMaxOutputTokensExtractFallback = toTokenInt(merged.llmMaxOutputTokensExtractFallback, merged.llmMaxOutputTokensExtract);
+  merged.llmMaxOutputTokensValidateFallback = toTokenInt(merged.llmMaxOutputTokensValidateFallback, merged.llmMaxOutputTokensValidate);
+  merged.llmMaxOutputTokensWriteFallback = toTokenInt(merged.llmMaxOutputTokensWriteFallback, merged.llmMaxOutputTokensWrite);
+
+  const upsertTokenProfile = (modelName, defaults = {}) => {
+    const model = String(modelName || '').trim();
+    if (!model) return;
+    const existing = merged.llmModelOutputTokenMap[model] || {};
+    const defaultOutputTokens = toTokenInt(
+      existing.defaultOutputTokens,
+      toTokenInt(defaults.defaultOutputTokens, 0)
+    );
+    const maxOutputTokens = toTokenInt(
+      existing.maxOutputTokens,
+      toTokenInt(defaults.maxOutputTokens, 0)
+    );
+    merged.llmModelOutputTokenMap[model] = {
+      defaultOutputTokens,
+      maxOutputTokens
+    };
+  };
+
+  upsertTokenProfile('deepseek-chat', {
+    defaultOutputTokens: merged.deepseekChatMaxOutputDefault,
+    maxOutputTokens: merged.deepseekChatMaxOutputMaximum
+  });
+  upsertTokenProfile('deepseek-reasoner', {
+    defaultOutputTokens: merged.deepseekReasonerMaxOutputDefault,
+    maxOutputTokens: merged.deepseekReasonerMaxOutputMaximum
+  });
+  upsertTokenProfile('gemini-2.5-flash-lite', {
+    defaultOutputTokens: 2048,
+    maxOutputTokens: 8192
+  });
+  upsertTokenProfile('gemini-2.5-flash', {
+    defaultOutputTokens: 3072,
+    maxOutputTokens: 8192
+  });
+  upsertTokenProfile('gpt-5-low', {
+    defaultOutputTokens: 3072,
+    maxOutputTokens: 16384
+  });
+  upsertTokenProfile('gpt-5.1-low', {
+    defaultOutputTokens: 3072,
+    maxOutputTokens: 16384
+  });
+  upsertTokenProfile('gpt-5.1-high', {
+    defaultOutputTokens: 4096,
+    maxOutputTokens: 16384
+  });
+  upsertTokenProfile('gpt-5.2-high', {
+    defaultOutputTokens: 4096,
+    maxOutputTokens: 16384
+  });
+  upsertTokenProfile('gpt-5.2-xhigh', {
+    defaultOutputTokens: 6144,
+    maxOutputTokens: 16384
+  });
   merged.llmTimeoutMs = merged.llmTimeoutMs || merged.openaiTimeoutMs;
   merged.openaiApiKey = merged.llmApiKey;
   merged.openaiBaseUrl = merged.llmBaseUrl;

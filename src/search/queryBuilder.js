@@ -136,6 +136,80 @@ function sanitizeAlias(value) {
   return clean(String(value || '').toLowerCase());
 }
 
+const GENERIC_GUARD_TOKENS = new Set([
+  'gaming',
+  'mouse',
+  'mice',
+  'wireless',
+  'wired',
+  'edition',
+  'black',
+  'white',
+  'mini',
+  'ultra',
+  'pro',
+  'plus',
+  'core',
+  'version',
+  'series',
+  'usb',
+  'rgb'
+]);
+
+function compactToken(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+function extractIdentityTokens(value, { minLength = 2 } = {}) {
+  return [...new Set(
+    String(value || '')
+      .toLowerCase()
+      .split(/[^a-z0-9]+/g)
+      .map((token) => token.trim())
+      .filter((token) => token.length >= Math.max(1, minLength))
+  )];
+}
+
+function extractDigitGroups(value) {
+  return [...new Set(
+    String(value || '')
+      .toLowerCase()
+      .match(/\d{2,}/g) || []
+  )];
+}
+
+function buildVariantGuardTerms(identity = {}) {
+  const brand = clean(identity.brand || '').toLowerCase();
+  const model = clean(identity.model || '').toLowerCase();
+  const variant = clean(identity.variant || '').toLowerCase();
+  const product = clean([brand, model, variant].filter(Boolean).join(' '));
+  const modelVariant = clean([model, variant].filter(Boolean).join(' '));
+  const productCompact = compactToken(product);
+  const brandCompact = compactToken(brand);
+  const modelCompact = compactToken(modelVariant || model);
+  const tokens = [...new Set([
+    ...extractIdentityTokens(modelVariant || model, { minLength: 2 }),
+    ...extractIdentityTokens(variant, { minLength: 2 })
+  ])]
+    .filter((token) => !GENERIC_GUARD_TOKENS.has(token))
+    .slice(0, 10);
+  const digitGroups = extractDigitGroups(modelVariant || model).slice(0, 6);
+
+  return [...new Set([
+    product,
+    clean([brand, model].filter(Boolean).join(' ')),
+    modelVariant || model,
+    brandCompact,
+    modelCompact,
+    productCompact,
+    ...tokens,
+    ...digitGroups
+  ].map((value) => clean(value).toLowerCase()).filter(Boolean))]
+    .slice(0, 16);
+}
+
 function buildModelAliasCandidates(identity = {}) {
   const model = clean(identity.model || '');
   const variant = clean(identity.variant || '');
@@ -154,16 +228,43 @@ function buildModelAliasCandidates(identity = {}) {
   return [...new Set([compact, spaced, hyphen, raw, spacedRaw, hyphenRaw].filter(Boolean))];
 }
 
-export function buildDeterministicAliases(identity = {}, maxAliases = 12) {
+export function buildDeterministicAliases(identity = {}, maxAliases = 12, rejectLog = null) {
   const brand = clean(identity.brand || '');
   const model = clean(identity.model || '');
   const variant = clean(identity.variant || '');
+  const cap = Math.max(1, Math.min(12, Number(maxAliases) || 12));
 
   const out = [];
   const seen = new Set();
+  const addReject = ({ alias = '', source = 'deterministic', reason = '', stage = 'deterministic_alias', detail = '' }) => {
+    if (!Array.isArray(rejectLog) || !reason) {
+      return;
+    }
+    rejectLog.push({
+      alias: sanitizeAlias(alias),
+      source: clean(source || 'deterministic'),
+      reason: clean(reason),
+      stage: clean(stage),
+      detail: clean(detail)
+    });
+  };
   const push = (alias, source = 'deterministic', weight = 1) => {
     const normalized = sanitizeAlias(alias);
-    if (!normalized || seen.has(normalized)) {
+    if (!normalized) {
+      addReject({ alias, source, reason: 'empty_alias' });
+      return;
+    }
+    if (seen.has(normalized)) {
+      addReject({ alias: normalized, source, reason: 'duplicate_alias' });
+      return;
+    }
+    if (out.length >= cap) {
+      addReject({
+        alias: normalized,
+        source,
+        reason: 'alias_cap_reached',
+        detail: `cap:${cap}`
+      });
       return;
     }
     seen.add(normalized);
@@ -192,7 +293,7 @@ export function buildDeterministicAliases(identity = {}, maxAliases = 12) {
     }
   }
 
-  return out.slice(0, Math.max(1, Math.min(12, Number(maxAliases) || 12)));
+  return out;
 }
 
 function extractTooltipTerms(value) {
@@ -296,14 +397,34 @@ function buildQueryRows({
   lexicon = {},
   learnedQueries = {},
   identityAliases = [],
-  maxRows = 72
+  maxRows = 72,
+  rejectLog = []
 }) {
   const brand = clean(job?.identityLock?.brand || '');
   const model = clean(job?.identityLock?.model || '');
   const variant = clean(job?.identityLock?.variant || '');
   const product = clean([brand, model, variant].filter(Boolean).join(' '));
+  const rowCap = Math.max(1, Number(maxRows || 72));
   const rows = [];
   const seen = new Map();
+  const addReject = ({
+    query = '',
+    source = 'deterministic',
+    reason = '',
+    stage = 'query_row_builder',
+    detail = ''
+  }) => {
+    if (!Array.isArray(rejectLog) || !reason) {
+      return;
+    }
+    rejectLog.push({
+      query: clean(query),
+      source: clean(source || 'deterministic'),
+      reason: clean(reason),
+      stage: clean(stage),
+      detail: clean(detail)
+    });
+  };
   const addRow = ({
     query,
     hintSource = 'deterministic',
@@ -313,7 +434,13 @@ function buildQueryRows({
     domainHint = ''
   }) => {
     const normalizedQuery = clean(query);
+    const source = clean(hintSource || 'deterministic');
     if (!normalizedQuery || !brand) {
+      addReject({
+        query: normalizedQuery || String(query || ''),
+        source,
+        reason: !normalizedQuery ? 'empty_query' : 'missing_brand_identity'
+      });
       return;
     }
     const token = normalizedQuery.toLowerCase();
@@ -326,6 +453,20 @@ function buildQueryRows({
       ])];
       existing.hint_source = existing.hint_source || hintSource;
       if (!existing.doc_hint && docHint) existing.doc_hint = docHint;
+      addReject({
+        query: normalizedQuery,
+        source,
+        reason: 'duplicate_query_merged'
+      });
+      return;
+    }
+    if (rows.length >= rowCap) {
+      addReject({
+        query: normalizedQuery,
+        source,
+        reason: 'query_row_cap_reached',
+        detail: `cap:${rowCap}`
+      });
       return;
     }
     rows.push({
@@ -444,7 +585,7 @@ function buildQueryRows({
     });
   }
 
-  return rows.slice(0, Math.max(1, maxRows));
+  return rows;
 }
 
 function fillTemplate(template, values) {
@@ -471,7 +612,10 @@ export function buildSearchProfile({
   const variant = clean(job?.identityLock?.variant || '');
   const category = clean(job?.category || categoryConfig?.category || 'mouse');
   const identity = { brand, model, variant, category };
-  const identityAliases = buildDeterministicAliases(identity, 12);
+  const aliasRejectLog = [];
+  const queryRejectLog = [];
+  const identityAliases = buildDeterministicAliases(identity, 12, aliasRejectLog);
+  const variantGuardTerms = buildVariantGuardTerms(identity);
 
   const baseTemplates = toArray(categoryConfig?.searchTemplates)
     .map((template) => fillTemplate(template, { brand, model, variant, category }))
@@ -487,31 +631,62 @@ export function buildSearchProfile({
     lexicon,
     learnedQueries,
     identityAliases,
-    maxRows: Math.max(24, Number(maxQueries || 24) * 3)
+    maxRows: Math.max(24, Number(maxQueries || 24) * 3),
+    rejectLog: queryRejectLog
   });
 
   const querySet = new Set();
   const selectedQueries = [];
-  const addQuery = (query) => {
+  const addQuery = (query, source = 'query_selection') => {
     const normalized = clean(query).toLowerCase();
-    if (!normalized || querySet.has(normalized)) {
+    const cleanedQuery = clean(query);
+    if (!normalized) {
+      queryRejectLog.push({
+        query: cleanedQuery,
+        source: clean(source),
+        reason: 'empty_query',
+        stage: 'query_selection',
+        detail: ''
+      });
+      return;
+    }
+    if (querySet.has(normalized)) {
+      queryRejectLog.push({
+        query: cleanedQuery,
+        source: clean(source),
+        reason: 'duplicate_query',
+        stage: 'query_selection',
+        detail: ''
+      });
       return;
     }
     querySet.add(normalized);
-    selectedQueries.push(clean(query));
+    selectedQueries.push(cleanedQuery);
   };
   for (const query of baseTemplates) {
-    addQuery(query);
+    addQuery(query, 'base_template');
   }
   for (const row of queryRows) {
-    addQuery(row.query);
+    addQuery(row.query, row.hint_source || 'query_row');
   }
   if (!selectedQueries.length && brand && model) {
-    addQuery(`${brand} ${model} ${variant} specifications`);
-    addQuery(`${brand} ${model} datasheet pdf`);
+    addQuery(`${brand} ${model} ${variant} specifications`, 'fallback');
+    addQuery(`${brand} ${model} datasheet pdf`, 'fallback');
   }
 
-  const boundedQueries = selectedQueries.slice(0, Math.max(1, maxQueries));
+  const maxQueryCap = Math.max(1, Number(maxQueries || 24));
+  const boundedQueries = selectedQueries.slice(0, maxQueryCap);
+  if (selectedQueries.length > boundedQueries.length) {
+    for (const query of selectedQueries.slice(maxQueryCap)) {
+      queryRejectLog.push({
+        query: clean(query),
+        source: 'query_selection',
+        reason: 'max_query_cap',
+        stage: 'query_selection',
+        detail: `cap:${maxQueryCap}`
+      });
+    }
+  }
   const boundedRows = queryRows.filter((row) => boundedQueries.includes(row.query));
   const hintSourceCounts = {};
   for (const row of boundedRows) {
@@ -522,7 +697,10 @@ export function buildSearchProfile({
   return {
     category,
     identity,
+    variant_guard_terms: variantGuardTerms,
     identity_aliases: identityAliases,
+    alias_reject_log: aliasRejectLog.slice(0, 120),
+    query_reject_log: queryRejectLog.slice(0, 240),
     negative_terms: [],
     focus_fields: focusFields,
     base_templates: baseTemplates,

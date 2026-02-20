@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { pct } from '../../utils/formatting';
+import { hasKnownValue } from '../../utils/fieldNormalize';
 import { Spinner } from './Spinner';
 import {
   DrawerShell,
@@ -36,6 +37,25 @@ function normalizeComparable(value: unknown): string {
   if (typeof value === 'string') return value.trim().toLowerCase();
   if (typeof value === 'number' || typeof value === 'boolean') return String(value).trim().toLowerCase();
   return stableSerialize(value).trim().toLowerCase();
+}
+
+function compactId(value: string, max = 28): string {
+  const token = String(value || '').trim();
+  if (!token) return '';
+  if (token.length <= max) return token;
+  const head = token.slice(0, Math.max(8, Math.floor((max - 3) / 2)));
+  const tail = token.slice(-Math.max(6, Math.floor((max - 3) / 2)));
+  return `${head}...${tail}`;
+}
+
+function isMeaningfulValue(value: unknown): boolean {
+  return hasKnownValue(value);
+}
+
+function isActionableCandidate(candidate: ReviewCandidate | null | undefined): boolean {
+  if (!candidate || candidate.is_synthetic_selected) return false;
+  const candidateId = String(candidate.candidate_id || '').trim();
+  return Boolean(candidateId) && isMeaningfulValue(candidate.value);
 }
 
 function SourceBadge({ candidate }: { candidate: ReviewCandidate }) {
@@ -249,6 +269,7 @@ export function CellDrawer({
       .filter(Boolean),
   );
   const isGridContext = candidateUiContext === 'grid';
+  const currentValueIsMeaningful = isMeaningfulValue(currentValue.value);
 
   // Merge legacy single-lane into two-lane flags, favoring candidate-id sets when provided.
   const hasPrimary = pendingPrimaryIdSet.size > 0 ? true : Boolean(pendingAIPrimary);
@@ -259,16 +280,7 @@ export function CellDrawer({
         : Boolean(pendingAIShared ?? pendingAIConfirmation));
   const hasAnyPending = hasPrimary || hasShared;
   const hasCandidateRows = candidates.length > 0;
-  const showPrimaryFallbackAction = !currentValue.overridden
-    && !candidatesLoading
-    && !hasCandidateRows
-    && hasPrimary
-    && Boolean(onConfirmPrimary);
-  const showSharedFallbackAction = !currentValue.overridden
-    && !candidatesLoading
-    && !hasCandidateRows
-    && hasShared
-    && Boolean(onConfirmShared);
+  const hasMeaningfulCandidates = candidates.some((candidate) => isMeaningfulValue(candidate?.value));
   const confirmSharedButtonClass = 'bg-purple-600 hover:bg-purple-700';
   const confirmPrimaryBannerClass = candidateUiContext === 'grid'
     ? 'text-orange-700 dark:text-orange-300 border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-900/20'
@@ -290,7 +302,7 @@ export function CellDrawer({
   const confirmPrimaryTitle = 'AI Confirm item-level review without changing the selected value.';
   const confirmSharedTitle = 'AI Confirm shared review (component/list/enum) without changing the selected value.';
   // Normalize current value for matching
-  const selectedValueToken = normalizeComparable(currentValue.value);
+  const selectedValueToken = currentValueIsMeaningful ? normalizeComparable(currentValue.value) : '';
 
   // The "active accepted" candidate: only ONE candidate has the "Accepted" badge.
   // Only set when NOT overridden (manual override deselects all).
@@ -303,9 +315,28 @@ export function CellDrawer({
   const hasAcceptedIdInCandidates = Boolean(acceptedCandidateIdToken)
     && candidates.some((c) => String(c?.candidate_id || '').trim() === acceptedCandidateIdToken);
   const hasPrimaryTargetInCandidates = pendingPrimaryIdSet.size > 0
-    && candidates.some((c) => pendingPrimaryIdSet.has(String(c?.candidate_id || '').trim()));
+    && candidates.some((c) => isActionableCandidate(c) && pendingPrimaryIdSet.has(String(c?.candidate_id || '').trim()));
   const hasSharedTargetInCandidates = pendingSharedIdSet.size > 0
-    && candidates.some((c) => pendingSharedIdSet.has(String(c?.candidate_id || '').trim()));
+    && candidates.some((c) => isActionableCandidate(c) && pendingSharedIdSet.has(String(c?.candidate_id || '').trim()));
+  const showPrimaryFallbackAction = !currentValue.overridden
+    && !candidatesLoading
+    && hasPrimary
+    && currentValueIsMeaningful
+    && Boolean(onConfirmPrimary)
+    && (!hasCandidateRows || pendingPrimaryIdSet.size === 0 || !hasPrimaryTargetInCandidates);
+  const showSharedFallbackAction = !currentValue.overridden
+    && !candidatesLoading
+    && hasShared
+    && currentValueIsMeaningful
+    && Boolean(onConfirmShared)
+    && (!hasCandidateRows || pendingSharedIdSet.size === 0 || !hasSharedTargetInCandidates);
+  const acceptedCandidateValueToken = acceptedCandidateIdToken
+    ? (() => {
+      const acceptedValue = candidates.find((candidate) => String(candidate?.candidate_id || '').trim() === acceptedCandidateIdToken)?.value;
+      return isMeaningfulValue(acceptedValue) ? normalizeComparable(acceptedValue) : '';
+    })()
+    : '';
+  const acceptedValueToken = acceptedCandidateValueToken || selectedValueToken;
   const matchingValueIndices = selectedValueToken
     ? candidates
       .map((c, idx) => ({ idx, token: normalizeComparable(c?.value) }))
@@ -315,6 +346,18 @@ export function CellDrawer({
   const fallbackAcceptedIndex = (!acceptedCandidateIdToken && matchingValueIndices.length === 1)
     ? matchingValueIndices[0]
     : -1;
+  const currentSourceCandidateIndex = (() => {
+    if (currentValue.overridden || !currentValueIsMeaningful) return -1;
+    if (acceptedCandidateIdToken) {
+      const acceptedIndex = candidates.findIndex((candidate) => String(candidate?.candidate_id || '').trim() === acceptedCandidateIdToken);
+      if (acceptedIndex >= 0) return acceptedIndex;
+    }
+    if (!selectedValueToken) return -1;
+    return candidates.findIndex((candidate) => {
+      if (!isMeaningfulValue(candidate?.value)) return false;
+      return normalizeComparable(candidate.value) === selectedValueToken;
+    });
+  })();
 
   return (
     <DrawerShell title={title} subtitle={subtitle} onClose={onClose}>
@@ -339,12 +382,12 @@ export function CellDrawer({
           </div>
         )}
         {/* Two-lane AI status banners */}
-        {!currentValue.overridden && hasPrimary && (
+        {!currentValue.overridden && hasPrimary && (currentValueIsMeaningful || hasMeaningfulCandidates) && (
           <div className={`mt-1 px-2 py-1 text-[11px] font-medium border rounded ${confirmPrimaryBannerClass}`}>
             Item AI Review: Pending (candidate-scoped)
           </div>
         )}
-        {!currentValue.overridden && hasShared && (
+        {!currentValue.overridden && hasShared && (currentValueIsMeaningful || hasMeaningfulCandidates) && (
           <div className={`mt-1 px-2 py-1 text-[11px] font-medium border rounded ${confirmSharedBannerClass}`}>
             Shared AI Review: Pending (candidate-scoped)
           </div>
@@ -369,7 +412,7 @@ export function CellDrawer({
             Confirm Shared
           </button>
         )}
-        {!isCurrentAccepted && !currentValue.overridden && onAcceptCurrent && (
+        {!isCurrentAccepted && !currentValue.overridden && onAcceptCurrent && currentValueIsMeaningful && (
           <button
             onClick={onAcceptCurrent}
             disabled={isPending}
@@ -414,8 +457,10 @@ export function CellDrawer({
               )}
               {candidates.map((candidate, index) => {
                 const candidateId = String(candidate.candidate_id || '').trim();
-                const candidateValueToken = normalizeComparable(candidate.value);
-                const isValueMatch = Boolean(selectedValueToken) && Boolean(candidateValueToken) && candidateValueToken === selectedValueToken;
+                const candidateValueIsMeaningful = isMeaningfulValue(candidate.value);
+                const candidateIsActionable = isActionableCandidate(candidate);
+                const candidateValueToken = candidateValueIsMeaningful ? normalizeComparable(candidate.value) : '';
+                const isCurrentSourceCandidate = index === currentSourceCandidateIndex;
                 const isActiveAccepted = (
                   Boolean(acceptedCandidateIdToken)
                   && candidateId === acceptedCandidateIdToken
@@ -423,23 +468,24 @@ export function CellDrawer({
                 const isSharedAccepted = Boolean(sharedAcceptedCandidateIdToken)
                   && candidateId === sharedAcceptedCandidateIdToken;
                 const isPrimaryTarget = hasPrimary
+                  && candidateIsActionable
                   && (pendingPrimaryIdSet.size > 0 ? pendingPrimaryIdSet.has(candidateId) : false);
                 const isSharedTarget = hasShared
+                  && candidateIsActionable
                   && (pendingSharedIdSet.size > 0 ? pendingSharedIdSet.has(candidateId) : false);
                 const showSharedBadge = isSharedTarget && !(candidateUiContext === 'grid' && isPrimaryTarget);
-                const showPrimaryAction = hasPrimary && (
-                  pendingPrimaryIdSet.size === 0
-                  || isPrimaryTarget
-                  || !hasPrimaryTargetInCandidates
-                );
-                const showSharedAction = !isGridContext && hasShared && (
-                  pendingSharedIdSet.size === 0
-                  || isSharedTarget
-                  || !hasSharedTargetInCandidates
-                );
+                const showPrimaryAction = hasPrimary
+                  && candidateValueIsMeaningful
+                  && pendingPrimaryIdSet.size > 0
+                  && isPrimaryTarget;
+                const showSharedAction = !isGridContext
+                  && hasShared
+                  && candidateValueIsMeaningful
+                  && pendingSharedIdSet.size > 0
+                  && isSharedTarget;
                 const showPrimaryAcceptAction = isGridContext
-                  ? Boolean(onAcceptPrimaryCandidate || onAcceptPrimary || onAcceptCandidate)
-                  : Boolean(onAcceptCandidate);
+                  ? candidateIsActionable && Boolean(onAcceptPrimaryCandidate || onAcceptPrimary || onAcceptCandidate)
+                  : candidateIsActionable && Boolean(onAcceptCandidate);
                 const showSharedAcceptAction = false;
                 const acceptThisCandidateDisabled = isPending;
                 const acceptThisCandidateTitle = acceptCandidateTitle;
@@ -497,15 +543,19 @@ export function CellDrawer({
                 };
 
                 // Candidate background rule:
-                // 1) Green when candidate matches accepted/selected value (and for active accepted fallback).
-                // 2) Otherwise pending-lane hue (item/shared) when this candidate is lane-targeted.
-                // 3) Otherwise neutral (no tint).
-                const isAcceptedValueCandidate = isValueMatch || (isActiveAccepted && !selectedValueToken);
+                // 1) Green only for accepted value (all equal-value candidates share green).
+                // 2) Pending hue only when that specific candidate is lane-targeted.
+                // 3) Otherwise neutral.
+                const isAcceptedValueCandidate = (
+                  Boolean(acceptedValueToken)
+                  && Boolean(candidateValueToken)
+                  && candidateValueToken === acceptedValueToken
+                ) || (isActiveAccepted && !acceptedValueToken);
                 const pendingTintClass = (() => {
-                  if (isGridContext && hasPrimary) {
+                  if (isPrimaryTarget) {
                     return 'border-orange-300 dark:border-orange-700 bg-orange-50/50 dark:bg-orange-900/10';
                   }
-                  if (hasShared) {
+                  if (isSharedTarget) {
                     return 'border-purple-300 dark:border-purple-700 bg-purple-50/50 dark:bg-purple-900/10';
                   }
                   return undefined;
@@ -518,20 +568,29 @@ export function CellDrawer({
 
                 const valueClass = isAcceptedValueCandidate
                   ? (isActiveAccepted ? 'text-green-700 dark:text-green-300 font-bold' : 'text-green-600 dark:text-green-400')
-                  : (isGridContext && hasPrimary)
+                  : isPrimaryTarget
                     ? 'text-orange-700 dark:text-orange-300'
-                    : (hasShared)
+                    : isSharedTarget
                       ? 'text-purple-700 dark:text-purple-300'
                       : '';
 
                 return (
                   <DrawerCard key={candidateId ? `${candidateId}::${index}` : `candidate::${index}`} className={cardClass}>
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] bg-gray-200 dark:bg-gray-700 rounded px-1.5 py-0.5 font-mono">
-                        {index + 1}
+                      <span
+                        className={`text-[10px] rounded px-1.5 py-0.5 font-mono ${isCurrentSourceCandidate ? 'bg-amber-200 dark:bg-amber-800 text-amber-900 dark:text-amber-100' : 'bg-gray-200 dark:bg-gray-700'}`}
+                        title={isCurrentSourceCandidate ? 'Source for the current value shown at top.' : undefined}
+                      >
+                        {index + 1}{isCurrentSourceCandidate ? '*' : ''}
                       </span>
                       <span className={`font-mono text-sm flex-1 truncate ${valueClass}`} title={String(candidate.value)}>
                         {String(candidate.value)}
+                      </span>
+                      <span
+                        className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 max-w-[220px] truncate"
+                        title={`candidate_id: ${candidateId}`}
+                      >
+                        id:{compactId(candidateId)}
                       </span>
                       <span className="text-xs text-gray-400">{pct(candidate.score)}</span>
                       {isActiveAccepted && (

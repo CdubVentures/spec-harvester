@@ -5,6 +5,8 @@ import {
 } from '../billing/costRates.js';
 import { selectLlmProvider } from './providers/index.js';
 import { LlmProviderHealth } from './providerHealth.js';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
 const _providerHealth = new LlmProviderHealth({
   failureThreshold: 5,
@@ -60,6 +62,125 @@ function sanitizeText(message, secrets = []) {
     output = output.split(secret).join('[redacted]');
   }
   return output;
+}
+
+function inferImageMimeType(uri = '', fallback = 'image/jpeg') {
+  const token = String(uri || '').toLowerCase();
+  if (token.endsWith('.png')) return 'image/png';
+  if (token.endsWith('.webp')) return 'image/webp';
+  if (token.endsWith('.gif')) return 'image/gif';
+  if (token.endsWith('.bmp')) return 'image/bmp';
+  return fallback;
+}
+
+function normalizeUserInput(user) {
+  if (user && typeof user === 'object' && !Array.isArray(user)) {
+    const text = String(user.text ?? user.prompt ?? user.payload ?? '').trim();
+    const rawImages = Array.isArray(user.images) ? user.images : [];
+    return {
+      text,
+      images: rawImages
+        .map((row) => ({
+          id: String(row?.id || '').trim(),
+          file_uri: String(row?.file_uri || row?.uri || row?.url || '').trim(),
+          mime_type: String(row?.mime_type || '').trim(),
+          caption: String(row?.caption || '').trim()
+        }))
+        .filter((row) => row.file_uri)
+    };
+  }
+  return {
+    text: String(user || ''),
+    images: []
+  };
+}
+
+async function resolveImageUrlForPrompt({
+  uri = '',
+  mimeType = '',
+  maxInlineBytes = 700_000
+} = {}) {
+  const token = String(uri || '').trim();
+  if (!token) return null;
+  if (/^https?:\/\//i.test(token) || token.startsWith('data:')) {
+    return token;
+  }
+  if (/^(s3|gs):\/\//i.test(token)) {
+    return null;
+  }
+  const localCandidates = [token];
+  if (!path.isAbsolute(token) && token.includes('/')) {
+    const outputRoot = String(process.env.LOCAL_OUTPUT_ROOT || 'out').trim() || 'out';
+    localCandidates.push(path.resolve(outputRoot, ...token.split('/')));
+    const inputRoot = String(process.env.LOCAL_INPUT_ROOT || 'fixtures/s3').trim() || 'fixtures/s3';
+    localCandidates.push(path.resolve(inputRoot, ...token.split('/')));
+  }
+  for (const candidatePath of localCandidates) {
+    try {
+      const buffer = await fs.readFile(candidatePath);
+      if (!Buffer.isBuffer(buffer) || buffer.length === 0) continue;
+      if (buffer.length > Math.max(64_000, Number(maxInlineBytes || 700_000))) {
+        continue;
+      }
+      const effectiveMime = mimeType || inferImageMimeType(candidatePath);
+      return `data:${effectiveMime};base64,${buffer.toString('base64')}`;
+    } catch {
+      // try next local candidate
+    }
+  }
+  return null;
+}
+
+async function buildUserMessageContent({
+  user,
+  usageContext = {}
+} = {}) {
+  const normalized = normalizeUserInput(user);
+  const text = normalized.text || '';
+  const maxImages = Math.max(0, Number.parseInt(String(usageContext?.multimodal_max_images || 6), 10) || 6);
+  const maxInlineBytes = Math.max(64_000, Number.parseInt(String(usageContext?.multimodal_max_inline_bytes || 700_000), 10) || 700_000);
+  const images = [];
+  const imageSources = [];
+  for (const image of normalized.images.slice(0, maxImages)) {
+    const resolved = await resolveImageUrlForPrompt({
+      uri: image.file_uri,
+      mimeType: image.mime_type || inferImageMimeType(image.file_uri, 'image/jpeg'),
+      maxInlineBytes
+    });
+    if (!resolved) {
+      continue;
+    }
+    images.push({
+      type: 'image_url',
+      image_url: {
+        url: resolved
+      }
+    });
+    imageSources.push({
+      id: image.id || '',
+      file_uri: image.file_uri,
+      mime_type: image.mime_type || inferImageMimeType(image.file_uri, 'image/jpeg'),
+      caption: image.caption || ''
+    });
+  }
+  if (images.length === 0) {
+    return {
+      content: text,
+      text,
+      imageCount: 0,
+      imageSources
+    };
+  }
+  const content = [
+    { type: 'text', text },
+    ...images
+  ];
+  return {
+    content,
+    text,
+    imageCount: images.length,
+    imageSources
+  };
 }
 
 function extractMessageContent(message) {
@@ -139,6 +260,55 @@ function extractJsonCandidate(text) {
   return raw;
 }
 
+function stripThinkTags(text) {
+  const raw = String(text || '');
+  if (!raw) return '';
+  return raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+}
+
+function extractBalancedJsonSegments(text) {
+  const raw = String(text || '');
+  if (!raw) return [];
+  const segments = [];
+  for (let start = 0; start < raw.length; start += 1) {
+    const open = raw[start];
+    if (open !== '{' && open !== '[') continue;
+    const close = open === '{' ? '}' : ']';
+    let depth = 0;
+    let inString = false;
+    let escaping = false;
+    for (let i = start; i < raw.length; i += 1) {
+      const ch = raw[i];
+      if (inString) {
+        if (escaping) {
+          escaping = false;
+        } else if (ch === '\\') {
+          escaping = true;
+        } else if (ch === '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (ch === '"') {
+        inString = true;
+        continue;
+      }
+      if (ch === open) {
+        depth += 1;
+        continue;
+      }
+      if (ch === close) {
+        depth -= 1;
+        if (depth === 0) {
+          segments.push(raw.slice(start, i + 1).trim());
+          break;
+        }
+      }
+    }
+  }
+  return segments;
+}
+
 function parseJsonContent(content) {
   const direct = String(content || '').trim();
   if (!direct) {
@@ -150,15 +320,103 @@ function parseJsonContent(content) {
     // continue with relaxed extraction
   }
 
-  const extracted = extractJsonCandidate(direct);
-  if (!extracted) {
-    return null;
+  const candidates = [];
+  const pushCandidate = (value) => {
+    const token = String(value || '').trim();
+    if (token && !candidates.includes(token)) {
+      candidates.push(token);
+    }
+  };
+  pushCandidate(stripThinkTags(direct));
+  pushCandidate(extractJsonCandidate(direct));
+  for (const segment of extractBalancedJsonSegments(direct)) {
+    pushCandidate(segment);
   }
-  try {
-    return JSON.parse(extracted);
-  } catch {
-    return null;
+  // Prefer later candidates because models often append the final strict JSON at the end.
+  for (let i = candidates.length - 1; i >= 0; i -= 1) {
+    try {
+      return JSON.parse(candidates[i]);
+    } catch {
+      // continue
+    }
   }
+  return null;
+}
+
+function resolveModelTokenProfile(profileMap = {}, model = '') {
+  const token = normalizeModel(model);
+  if (!token || !profileMap || typeof profileMap !== 'object') {
+    return { defaultOutputTokens: 0, maxOutputTokens: 0 };
+  }
+  let selected = null;
+  let selectedKey = '';
+  for (const [rawModel, rawProfile] of Object.entries(profileMap || {})) {
+    const key = normalizeModel(rawModel);
+    if (!key || !rawProfile || typeof rawProfile !== 'object') continue;
+    const matches = token === key || token.startsWith(key) || key.startsWith(token);
+    if (!matches) continue;
+    if (!selected || key.length > selectedKey.length) {
+      selected = rawProfile;
+      selectedKey = key;
+    }
+  }
+  if (!selected) {
+    return { defaultOutputTokens: 0, maxOutputTokens: 0 };
+  }
+  const defaultOutputTokens = Number.parseInt(String(
+    selected.defaultOutputTokens
+    ?? selected.default_output_tokens
+    ?? selected.default
+    ?? 0
+  ), 10);
+  const maxOutputTokens = Number.parseInt(String(
+    selected.maxOutputTokens
+    ?? selected.max_output_tokens
+    ?? selected.max
+    ?? selected.maximum
+    ?? 0
+  ), 10);
+  return {
+    defaultOutputTokens: Number.isFinite(defaultOutputTokens) ? Math.max(0, defaultOutputTokens) : 0,
+    maxOutputTokens: Number.isFinite(maxOutputTokens) ? Math.max(0, maxOutputTokens) : 0
+  };
+}
+
+function resolveEffectiveMaxTokens({
+  model = '',
+  deepSeekMode = false,
+  reasoningMode = false,
+  reasoningBudget = 0,
+  maxTokens = 0,
+  usageContext = {}
+} = {}) {
+  const profile = resolveModelTokenProfile(usageContext?.model_token_profile_map || {}, model);
+  const defaultCap = Number.parseInt(String(usageContext?.default_output_token_cap || 0), 10);
+  let requested = 0;
+  if (reasoningMode && Number(reasoningBudget || 0) > 0) {
+    requested = Number(reasoningBudget || 0);
+  } else if (Number(maxTokens || 0) > 0) {
+    requested = Number(maxTokens || 0);
+  } else if (Number(profile.defaultOutputTokens || 0) > 0) {
+    requested = Number(profile.defaultOutputTokens || 0);
+  } else if (Number(defaultCap || 0) > 0) {
+    requested = Number(defaultCap || 0);
+  }
+  let capped = Number.isFinite(requested) ? Math.max(0, Math.floor(requested)) : 0;
+  const modelMax = Number(profile.maxOutputTokens || 0);
+  if (modelMax > 0) {
+    capped = Math.min(capped || modelMax, modelMax);
+  }
+  if (deepSeekMode) {
+    const deepSeekCap = Number.parseInt(String(usageContext?.deepseek_default_max_output_tokens || 8192), 10);
+    if (Number.isFinite(deepSeekCap) && deepSeekCap > 0) {
+      capped = Math.min(capped || deepSeekCap, deepSeekCap);
+    }
+  }
+  if (capped > 0 && capped < 128) {
+    capped = 128;
+  }
+  return capped;
 }
 
 function validateParsedShape(parsed, schema) {
@@ -243,6 +501,7 @@ export async function callOpenAI({
   const providerLabel = providerClient.name;
   const deepSeekMode = isDeepSeekRequest({ baseUrl, model });
   const reason = String(usageContext?.reason || 'extract');
+  const routeRole = String(usageContext?.route_role || '').trim();
   const traceWriter = usageContext?.traceWriter || null;
   const traceContext = usageContext?.trace_context || {};
   const traceTargetFields = Array.isArray(traceContext?.target_fields)
@@ -262,6 +521,37 @@ export async function callOpenAI({
   ]
     .filter(Boolean)
     .join('\n');
+  const effectiveMaxTokens = resolveEffectiveMaxTokens({
+    model,
+    deepSeekMode,
+    reasoningMode: Boolean(reasoningMode),
+    reasoningBudget: Number(reasoningBudget || 0),
+    maxTokens: Number(maxTokens || 0),
+    usageContext
+  });
+  const userMessage = await buildUserMessageContent({
+    user,
+    usageContext
+  });
+  let promptPreview = '';
+  try {
+    const promptPayload = developerMode
+      ? {
+        system: String(effectiveSystem || '').slice(0, 2000),
+        user: String(userMessage.text || '').slice(0, 10_000),
+        multimodal_image_count: userMessage.imageCount,
+        images: userMessage.imageSources
+      }
+      : {
+        redacted: true,
+        system_chars: String(effectiveSystem || '').length,
+        user_chars: String(userMessage.text || '').length,
+        multimodal_image_count: userMessage.imageCount
+      };
+    promptPreview = JSON.stringify(promptPayload).slice(0, 8000);
+  } catch {
+    promptPreview = '';
+  }
 
   const buildBody = ({ useJsonSchema }) => {
     const body = {
@@ -269,14 +559,12 @@ export async function callOpenAI({
       temperature: 0,
       messages: [
         { role: 'system', content: effectiveSystem },
-        { role: 'user', content: String(user || '') }
+        { role: 'user', content: userMessage.content }
       ]
     };
 
-    if (reasoningMode && Number(reasoningBudget || 0) > 0) {
-      body.max_tokens = Math.max(256, Number(reasoningBudget || 0));
-    } else if (Number(maxTokens || 0) > 0) {
-      body.max_tokens = Math.max(256, Number(maxTokens || 0));
+    if (effectiveMaxTokens > 0) {
+      body.max_tokens = effectiveMaxTokens;
     }
 
     if (useJsonSchema && jsonSchema) {
@@ -329,13 +617,15 @@ export async function callOpenAI({
   const emitFailure = (safeMessage) => {
     logger?.warn?.('llm_call_failed', {
       reason,
+      route_role: routeRole,
       provider: providerLabel,
       model,
       base_url: baseUrlNormalized,
       endpoint: `${baseUrlNormalized}/v1/chat/completions`,
       message: safeMessage,
       deepseek_mode_detected: Boolean(deepSeekMode),
-      json_schema_requested: Boolean(jsonSchemaRequested)
+      json_schema_requested: Boolean(jsonSchemaRequested),
+      multimodal_image_count: Number(userMessage.imageCount || 0)
     });
   };
 
@@ -345,7 +635,8 @@ export async function callOpenAI({
     responseModel = '',
     usage = {},
     responseText = '',
-    error = ''
+    error = '',
+    requestBody = null
   } = {}) => {
     if (!traceWriter || typeof traceWriter.writeJson !== 'function') {
       return;
@@ -369,12 +660,21 @@ export async function callOpenAI({
           prompt: developerMode
             ? {
               system: String(effectiveSystem || '').slice(0, 2000),
-              user: String(user || '').slice(0, 10_000)
+              user: String(userMessage.text || '').slice(0, 10_000),
+              multimodal_image_count: userMessage.imageCount,
+              images: userMessage.imageSources
             }
             : {
               redacted: true,
               system_chars: String(effectiveSystem || '').length,
-              user_chars: String(user || '').length
+              user_chars: String(userMessage.text || '').length,
+              multimodal_image_count: userMessage.imageCount
+            },
+          request_body: developerMode
+            ? requestBody
+            : {
+              redacted: true,
+              has_request_body: Boolean(requestBody)
             },
           response: developerMode
             ? { text: String(responseText || '').slice(0, 10_000) }
@@ -383,6 +683,7 @@ export async function callOpenAI({
               chars: String(responseText || '').length
             },
           usage: usage || {},
+          max_tokens_applied: effectiveMaxTokens,
           error: String(error || '').slice(0, 1500)
         },
         ringSize: traceRingSize
@@ -410,7 +711,7 @@ export async function callOpenAI({
     }
 
     const fallbackUsage = {
-      promptTokens: estimateTokensFromText(`${effectiveSystem}\n${String(user || '')}`),
+      promptTokens: estimateTokensFromText(`${effectiveSystem}\n${String(userMessage.text || '')}`),
       completionTokens: estimateTokensFromText(content),
       cachedPromptTokens: 0,
       estimated: !usage || Object.keys(usage || {}).length === 0
@@ -439,6 +740,7 @@ export async function callOpenAI({
     logger?.info?.('llm_call_usage', {
       purpose: reason,
       reason,
+      route_role: routeRole,
       provider: providerLabel,
       model: responseModel || model,
       base_url: baseUrlNormalized,
@@ -451,6 +753,7 @@ export async function callOpenAI({
       estimated_usage: Boolean(normalizedUsage.estimated),
       deepseek_mode_detected: Boolean(deepSeekMode),
       json_schema_requested: Boolean(jsonSchemaRequested),
+      multimodal_image_count: Number(userMessage.imageCount || 0),
       retry_without_schema: Boolean(retryWithoutSchema)
     });
   };
@@ -473,21 +776,28 @@ export async function callOpenAI({
   logger?.info?.('llm_call_started', {
     purpose: reason,
     reason,
+    route_role: routeRole,
     provider: providerLabel,
     model,
     base_url: baseUrlNormalized,
     endpoint: `${baseUrlNormalized}/v1/chat/completions`,
     deepseek_mode_detected: Boolean(deepSeekMode),
-    json_schema_requested: Boolean(jsonSchemaRequested)
+    json_schema_requested: Boolean(jsonSchemaRequested),
+    max_tokens_requested: Math.max(Number(reasoningMode ? reasoningBudget : maxTokens) || 0, 0),
+    max_tokens_applied: effectiveMaxTokens,
+    multimodal_image_count: Number(userMessage.imageCount || 0),
+    multimodal_image_sources: userMessage.imageSources,
+    prompt_preview: promptPreview
   });
 
   try {
     const useJsonSchema = Boolean(jsonSchemaRequested);
+    const firstBody = buildBody({ useJsonSchema });
     const first = await requestChatCompletion({
       providerClient,
       baseUrl: baseUrlNormalized,
       apiKey,
-      body: buildBody({ useJsonSchema }),
+      body: firstBody,
       controller
     });
     await emitUsage({
@@ -500,20 +810,24 @@ export async function callOpenAI({
     logger?.info?.('llm_call_completed', {
       purpose: reason,
       reason,
+      route_role: routeRole,
       provider: providerLabel,
       model: first.responseModel || model,
       base_url: baseUrlNormalized,
       endpoint: `${baseUrlNormalized}/v1/chat/completions`,
       deepseek_mode_detected: Boolean(deepSeekMode),
       json_schema_requested: Boolean(jsonSchemaRequested),
-      retry_without_schema: false
+      retry_without_schema: false,
+      multimodal_image_count: Number(userMessage.imageCount || 0),
+      response_preview: String(first.content || '').slice(0, 12_000)
     });
     await emitTrace({
       status: 'ok',
       retryWithoutSchema: false,
       responseModel: first.responseModel || model,
       usage: first.usage,
-      responseText: first.content
+      responseText: first.content,
+      requestBody: firstBody
     });
     return parsed;
   } catch (firstError) {
@@ -527,17 +841,19 @@ export async function callOpenAI({
         responseModel: model,
         usage: {},
         responseText: '',
-        error: safeMessage
+        error: safeMessage,
+        requestBody: buildBody({ useJsonSchema: Boolean(jsonSchemaRequested) })
       });
       throw new Error(safeMessage);
     }
 
     try {
+      const retryBody = buildBody({ useJsonSchema: false });
       const retry = await requestChatCompletion({
         providerClient,
         baseUrl: baseUrlNormalized,
         apiKey,
-        body: buildBody({ useJsonSchema: false }),
+        body: retryBody,
         controller
       });
       await emitUsage({
@@ -551,20 +867,24 @@ export async function callOpenAI({
       logger?.info?.('llm_call_completed', {
         purpose: reason,
         reason,
+        route_role: routeRole,
         provider: providerLabel,
         model: retry.responseModel || model,
         base_url: baseUrlNormalized,
         endpoint: `${baseUrlNormalized}/v1/chat/completions`,
         deepseek_mode_detected: Boolean(deepSeekMode),
         json_schema_requested: Boolean(jsonSchemaRequested),
-        retry_without_schema: true
+        retry_without_schema: true,
+        multimodal_image_count: Number(userMessage.imageCount || 0),
+        response_preview: String(retry.content || '').slice(0, 12_000)
       });
       await emitTrace({
         status: 'ok',
         retryWithoutSchema: true,
         responseModel: retry.responseModel || model,
         usage: retry.usage,
-        responseText: retry.content
+        responseText: retry.content,
+        requestBody: retryBody
       });
       return parsed;
     } catch (retryError) {
@@ -577,7 +897,8 @@ export async function callOpenAI({
         responseModel: model,
         usage: {},
         responseText: '',
-        error: safeMessage
+        error: safeMessage,
+        requestBody: buildBody({ useJsonSchema: false })
       });
       throw new Error(safeMessage);
     }

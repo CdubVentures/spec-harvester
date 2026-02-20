@@ -8,6 +8,8 @@ const diagrams = [
   'enum-master-flow',
   'lane-decoupling-flow',
   'entity-hierarchy',
+  'id-first-mutation-resolution-flow',
+  'unified-slot-authority-flow',
 ];
 
 function run(command) {

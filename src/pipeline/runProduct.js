@@ -1,8 +1,10 @@
 import crypto from 'node:crypto';
 import { buildRunId, normalizeWhitespace, wait } from '../utils/common.js';
 import { loadCategoryConfig } from '../categories/loader.js';
+import { loadProductCatalog } from '../catalog/productCatalog.js';
 import { SourcePlanner, buildSourceSummary } from '../planner/sourcePlanner.js';
-import { PlaywrightFetcher, DryRunFetcher, HttpFetcher } from '../fetcher/playwrightFetcher.js';
+import { PlaywrightFetcher, DryRunFetcher, HttpFetcher, CrawleeFetcher } from '../fetcher/playwrightFetcher.js';
+import { selectFetcherMode } from '../fetcher/fetcherMode.js';
 import { extractCandidatesFromPage } from '../extractors/fieldExtractor.js';
 import { evaluateAnchorConflicts, mergeAnchorConflictLists } from '../validator/anchors.js';
 import {
@@ -97,6 +99,9 @@ import { AggressiveOrchestrator } from '../extract/aggressiveOrchestrator.js';
 import { createFrontier } from '../research/frontierDb.js';
 import { RuntimeTraceWriter } from '../runtime/runtimeTraceWriter.js';
 import { computeNeedSet } from '../indexlab/needsetEngine.js';
+import { buildIndexingSchemaPackets } from '../indexlab/indexingSchemaPackets.js';
+import { validateIndexingSchemaPackets } from '../indexlab/indexingSchemaPacketsValidator.js';
+import { buildPhase07PrimeSources } from '../retrieve/primeSourcesBuilder.js';
 import {
   normalizeHttpUrlList,
   shouldQueueLlmRetry,
@@ -120,6 +125,211 @@ function normalizeIdentityToken(value) {
     .toLowerCase()
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function ambiguityLevelFromFamilyCount(count = 0) {
+  const n = Math.max(0, Number.parseInt(String(count || 0), 10) || 0);
+  if (n >= 9) return 'extra_hard';
+  if (n >= 6) return 'very_hard';
+  if (n >= 4) return 'hard';
+  if (n >= 2) return 'medium';
+  if (n === 1) return 'easy';
+  return 'unknown';
+}
+
+function normalizeAmbiguityLevel(value = '') {
+  const token = String(value || '').trim().toLowerCase();
+  if (token === 'easy' || token === 'low') return 'easy';
+  if (token === 'medium' || token === 'mid') return 'medium';
+  if (token === 'hard' || token === 'high') return 'hard';
+  if (token === 'very_hard' || token === 'very-hard' || token === 'very hard') return 'very_hard';
+  if (token === 'extra_hard' || token === 'extra-hard' || token === 'extra hard') return 'extra_hard';
+  return 'unknown';
+}
+
+async function resolveIdentityAmbiguitySnapshot({ config, category = '', identityLock = {} } = {}) {
+  const brandToken = normalizeIdentityToken(identityLock?.brand);
+  const modelToken = normalizeIdentityToken(identityLock?.model);
+  if (!brandToken || !modelToken) {
+    return {
+      family_model_count: 0,
+      ambiguity_level: 'unknown',
+      source: 'missing_identity'
+    };
+  }
+
+  try {
+    const catalog = await loadProductCatalog(config || {}, String(category || '').trim().toLowerCase());
+    const rows = Object.values(catalog?.products || {});
+    const familyCount = rows.filter((row) =>
+      normalizeIdentityToken(row?.brand) === brandToken
+      && normalizeIdentityToken(row?.model) === modelToken
+    ).length;
+    const safeCount = Math.max(1, familyCount);
+    return {
+      family_model_count: safeCount,
+      ambiguity_level: ambiguityLevelFromFamilyCount(safeCount),
+      source: 'catalog'
+    };
+  } catch {
+    return {
+      family_model_count: 1,
+      ambiguity_level: 'easy',
+      source: 'fallback'
+    };
+  }
+}
+
+function resolveIdentityLockStatus(identityLock = {}) {
+  const brand = normalizeIdentityToken(identityLock?.brand);
+  const model = normalizeIdentityToken(identityLock?.model);
+  const variant = normalizeIdentityToken(identityLock?.variant);
+  const sku = normalizeIdentityToken(identityLock?.sku);
+  const lockCount = [brand, model, variant, sku].filter(Boolean).length;
+  if (brand && model && (variant || sku)) {
+    return 'locked_full';
+  }
+  if (brand && model) {
+    return 'locked_brand_model';
+  }
+  if (lockCount > 0) {
+    return 'locked_partial';
+  }
+  return 'unlocked';
+}
+
+function buildRunIdentityFingerprint({ category = '', productId = '', identityLock = {} } = {}) {
+  const lockBrand = normalizeIdentityToken(identityLock?.brand);
+  const lockModel = normalizeIdentityToken(identityLock?.model);
+  const lockVariant = normalizeIdentityToken(identityLock?.variant);
+  const lockSku = normalizeIdentityToken(identityLock?.sku);
+  const seed = [
+    normalizeIdentityToken(category),
+    normalizeIdentityToken(productId),
+    lockBrand,
+    lockModel,
+    lockVariant,
+    lockSku
+  ].join('|');
+  return `sha256:${sha256(seed)}`;
+}
+
+function parseMinEvidenceRefs(value, fallback = 1) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed)) {
+    return Math.max(1, Number.parseInt(String(fallback || 1), 10) || 1);
+  }
+  return Math.max(1, parsed);
+}
+
+function sendModeIncludesPrime(value = '') {
+  const token = String(value || '').trim().toLowerCase();
+  return token.includes('prime');
+}
+
+function selectPreferredRouteRow(rows = [], scope = 'field') {
+  const scoped = (Array.isArray(rows) ? rows : [])
+    .filter((row) => String(row?.scope || '').trim().toLowerCase() === String(scope || '').trim().toLowerCase());
+  if (scoped.length === 0) {
+    return null;
+  }
+  return scoped
+    .slice()
+    .sort((a, b) => {
+      const effortA = Number.parseInt(String(a?.effort ?? 0), 10) || 0;
+      const effortB = Number.parseInt(String(b?.effort ?? 0), 10) || 0;
+      if (effortA !== effortB) return effortB - effortA;
+      const minA = parseMinEvidenceRefs(a?.llm_output_min_evidence_refs_required, 1);
+      const minB = parseMinEvidenceRefs(b?.llm_output_min_evidence_refs_required, 1);
+      return minB - minA;
+    })[0] || null;
+}
+
+function deriveRouteMatrixPolicy({
+  routeRows = [],
+  categoryConfig = null
+} = {}) {
+  const preferredField = selectPreferredRouteRow(routeRows, 'field');
+  const preferredComponent = selectPreferredRouteRow(routeRows, 'component');
+  const preferredList = selectPreferredRouteRow(routeRows, 'list');
+  const ruleMinRefs = [];
+  const fieldRules = categoryConfig?.fieldRules?.fields || {};
+  for (const rule of Object.values(fieldRules || {})) {
+    if (!rule || typeof rule !== 'object') continue;
+    ruleMinRefs.push(parseMinEvidenceRefs(rule?.evidence?.min_evidence_refs ?? rule?.min_evidence_refs ?? 1, 1));
+  }
+  const routeMinRefs = (Array.isArray(routeRows) ? routeRows : [])
+    .map((row) => parseMinEvidenceRefs(row?.llm_output_min_evidence_refs_required, 1));
+  const minEvidenceRefsEffective = Math.max(
+    1,
+    ...ruleMinRefs,
+    ...routeMinRefs
+  );
+  const scalarSend = String(
+    preferredField?.scalar_linked_send || 'scalar value + prime sources'
+  ).trim();
+  const componentSend = String(
+    preferredComponent?.component_values_send || 'component values + prime sources'
+  ).trim();
+  const listSend = String(
+    preferredList?.list_values_send || 'list values prime sources'
+  ).trim();
+  const primeVisualSend =
+    sendModeIncludesPrime(scalarSend) ||
+    sendModeIncludesPrime(componentSend) ||
+    sendModeIncludesPrime(listSend);
+
+  return {
+    scalar_linked_send: scalarSend,
+    component_values_send: componentSend,
+    list_values_send: listSend,
+    llm_output_min_evidence_refs_required: minEvidenceRefsEffective,
+    min_evidence_refs_effective: minEvidenceRefsEffective,
+    prime_sources_visual_send: primeVisualSend,
+    table_linked_send: primeVisualSend
+  };
+}
+
+async function loadRouteMatrixPolicyForRun({
+  config = {},
+  category = '',
+  categoryConfig = null,
+  logger = null
+} = {}) {
+  const categoryToken = String(category || '').trim().toLowerCase();
+  let routeRows = [];
+  if (categoryToken) {
+    let specDb = null;
+    try {
+      const { SpecDb } = await import('../db/specDb.js');
+      const dbPath = `${String(config.specDbDir || '.specfactory_tmp').replace(/[\\\/]+$/, '')}/${categoryToken}/spec.sqlite`;
+      specDb = new SpecDb({
+        dbPath,
+        category: categoryToken
+      });
+      routeRows = specDb.getLlmRouteMatrix();
+    } catch (error) {
+      logger?.warn?.('route_matrix_policy_load_failed', {
+        category: categoryToken,
+        message: error?.message || 'unknown_error'
+      });
+    } finally {
+      try {
+        specDb?.close?.();
+      } catch {
+        // best effort
+      }
+    }
+  }
+  const derived = deriveRouteMatrixPolicy({
+    routeRows,
+    categoryConfig
+  });
+  return {
+    ...derived,
+    source: routeRows.length > 0 ? 'spec_db' : 'category_rules_default',
+    row_count: routeRows.length
+  };
 }
 
 function bestIdentityFromSources(sourceResults, identityLock = {}) {
@@ -195,6 +405,7 @@ function hasKnownFieldValue(value) {
 }
 
 const PASS_TARGET_EXEMPT_FIELDS = new Set(['id', 'brand', 'model', 'base_model', 'category', 'sku']);
+const RUN_DEDUPE_MODE = 'serp_url+content_hash';
 
 function toInt(value, fallback = 0) {
   const parsed = Number.parseInt(String(value ?? ''), 10);
@@ -212,6 +423,212 @@ function toBool(value, fallback = false) {
   }
   const token = String(value).trim().toLowerCase();
   return token === '1' || token === 'true' || token === 'yes' || token === 'on';
+}
+
+function normalizeHostToken(value = '') {
+  return String(value || '').trim().toLowerCase().replace(/^www\./, '');
+}
+
+function hostFromHttpUrl(value = '') {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    return normalizeHostToken(new URL(raw).hostname);
+  } catch {
+    return '';
+  }
+}
+
+function compactQueryText(value = '') {
+  return normalizeWhitespace(String(value || '').replace(/\s+/g, ' ').trim());
+}
+
+function buildRepairSearchQuery({
+  domain = '',
+  brand = '',
+  model = '',
+  variant = ''
+} = {}) {
+  const host = normalizeHostToken(domain);
+  if (!host) return '';
+  const identity = compactQueryText([brand, model, variant].map((row) => String(row || '').trim()).filter(Boolean).join(' '));
+  const identitySegment = identity ? `"${identity}"` : '';
+  return compactQueryText(`site:${host} ${identitySegment} (spec OR manual OR pdf OR "user guide")`);
+}
+
+function classifyFetchOutcome({
+  status = 0,
+  message = '',
+  contentType = '',
+  html = ''
+} = {}) {
+  const code = toInt(status, 0);
+  const msg = String(message || '').toLowerCase();
+  const contentTypeToken = String(contentType || '').toLowerCase();
+  const htmlSize = String(html || '').trim().length;
+
+  const looksBotChallenge = /(captcha|cloudflare|cf-ray|bot.?challenge|are you human|human verification|robot check)/.test(msg);
+  const looksRateLimited = /(429|rate.?limit|too many requests|throttl)/.test(msg);
+  const looksLoginWall = /(401|sign[ -]?in|login|authenticate|account required|subscription required)/.test(msg);
+  const looksBlocked = /(403|forbidden|blocked|access denied|denied)/.test(msg);
+  const looksTimeout = /(timeout|timed out|etimedout|econnreset|econnrefused|socket hang up|network error|dns)/.test(msg);
+  const looksBadContent = /(parse|json|xml|cheerio|dom|extract|malformed|invalid content|unsupported content)/.test(msg);
+
+  if (code >= 200 && code < 400) {
+    if (contentTypeToken.includes('application/octet-stream') && htmlSize === 0) {
+      return 'bad_content';
+    }
+    return 'ok';
+  }
+  if (code === 404 || code === 410) return 'not_found';
+  if (code === 429) return 'rate_limited';
+  if (code === 401 || code === 407) return 'login_wall';
+  if (code === 403) {
+    if (looksBotChallenge) return 'bot_challenge';
+    if (looksLoginWall) return 'login_wall';
+    return 'blocked';
+  }
+  if (code >= 500) return 'server_error';
+  if (code >= 400) return 'blocked';
+  if (looksBotChallenge) return 'bot_challenge';
+  if (looksRateLimited) return 'rate_limited';
+  if (looksLoginWall) return 'login_wall';
+  if (looksBlocked) return 'blocked';
+  if (looksBadContent) return 'bad_content';
+  if (looksTimeout) return 'network_timeout';
+  return 'fetch_error';
+}
+
+const FETCH_OUTCOME_KEYS = [
+  'ok',
+  'not_found',
+  'blocked',
+  'rate_limited',
+  'login_wall',
+  'bot_challenge',
+  'bad_content',
+  'server_error',
+  'network_timeout',
+  'fetch_error'
+];
+
+function createFetchOutcomeCounters() {
+  return FETCH_OUTCOME_KEYS.reduce((acc, key) => {
+    acc[key] = 0;
+    return acc;
+  }, {});
+}
+
+function createHostBudgetRow() {
+  return {
+    started_count: 0,
+    completed_count: 0,
+    dedupe_hits: 0,
+    evidence_used: 0,
+    parse_fail_count: 0,
+    next_retry_ts: '',
+    outcome_counts: createFetchOutcomeCounters()
+  };
+}
+
+function ensureHostBudgetRow(mapRef, host = '') {
+  const token = String(host || '').trim().toLowerCase() || '__unknown__';
+  if (!mapRef.has(token)) {
+    mapRef.set(token, createHostBudgetRow());
+  }
+  return mapRef.get(token);
+}
+
+function noteHostRetryTs(hostRow, retryTs = '') {
+  if (!hostRow) return;
+  const token = String(retryTs || '').trim();
+  if (!token) return;
+  const retryMs = Date.parse(token);
+  if (!Number.isFinite(retryMs)) return;
+  const currentMs = Date.parse(String(hostRow.next_retry_ts || ''));
+  if (!Number.isFinite(currentMs) || retryMs > currentMs) {
+    hostRow.next_retry_ts = new Date(retryMs).toISOString();
+  }
+}
+
+function bumpHostOutcome(hostRow, outcome = '') {
+  if (!hostRow) return;
+  const token = String(outcome || '').trim().toLowerCase();
+  if (!token) return;
+  if (!Object.prototype.hasOwnProperty.call(hostRow.outcome_counts, token)) {
+    hostRow.outcome_counts[token] = 0;
+  }
+  hostRow.outcome_counts[token] += 1;
+}
+
+function applyHostBudgetBackoff(hostRow, { status = 0, outcome = '', config = {}, nowMs = Date.now() } = {}) {
+  if (!hostRow) return;
+  const code = toInt(status, 0);
+  const token = String(outcome || '').trim().toLowerCase();
+  let seconds = 0;
+  if (code === 429 || token === 'rate_limited') {
+    seconds = Math.max(60, toInt(config.frontierCooldown429BaseSeconds, 15 * 60));
+  } else if (code === 403 || token === 'blocked' || token === 'login_wall' || token === 'bot_challenge') {
+    seconds = Math.max(60, toInt(config.frontierCooldown403BaseSeconds, 30 * 60));
+  } else if (token === 'network_timeout' || token === 'fetch_error' || token === 'server_error') {
+    seconds = Math.max(60, toInt(config.frontierCooldownTimeoutSeconds, 6 * 60 * 60));
+  }
+  if (seconds > 0) {
+    noteHostRetryTs(hostRow, new Date(nowMs + (seconds * 1000)).toISOString());
+  }
+}
+
+function resolveHostBudgetState(hostRow, nowMs = Date.now()) {
+  const row = hostRow || createHostBudgetRow();
+  const outcomes = row.outcome_counts || createFetchOutcomeCounters();
+  const started = toInt(row.started_count, 0);
+  const completed = toInt(row.completed_count, 0);
+  const inFlight = Math.max(0, started - completed);
+
+  let score = 100;
+  score -= toInt(outcomes.not_found, 0) * 6;
+  score -= toInt(outcomes.blocked, 0) * 8;
+  score -= toInt(outcomes.rate_limited, 0) * 12;
+  score -= toInt(outcomes.login_wall, 0) * 10;
+  score -= toInt(outcomes.bot_challenge, 0) * 14;
+  score -= toInt(outcomes.bad_content, 0) * 8;
+  score -= toInt(outcomes.server_error, 0) * 6;
+  score -= toInt(outcomes.network_timeout, 0) * 5;
+  score -= toInt(outcomes.fetch_error, 0) * 4;
+  score -= toInt(row.dedupe_hits, 0);
+  score += Math.min(12, toInt(outcomes.ok, 0) * 2);
+  score += Math.min(10, toInt(row.evidence_used, 0) * 2);
+  score = Math.max(0, Math.min(100, score));
+
+  const nextRetryMs = Date.parse(String(row.next_retry_ts || ''));
+  const cooldownSeconds = Number.isFinite(nextRetryMs)
+    ? Math.max(0, Math.ceil((nextRetryMs - nowMs) / 1000))
+    : 0;
+
+  const blockedSignals = (
+    toInt(outcomes.blocked, 0)
+    + toInt(outcomes.rate_limited, 0)
+    + toInt(outcomes.login_wall, 0)
+    + toInt(outcomes.bot_challenge, 0)
+  );
+
+  let state = 'open';
+  if (cooldownSeconds > 0 && (score <= 30 || blockedSignals >= 2)) {
+    state = 'blocked';
+  } else if (cooldownSeconds > 0) {
+    state = 'backoff';
+  } else if (score < 55 || toInt(outcomes.bad_content, 0) > 0 || toInt(row.parse_fail_count, 0) > 0) {
+    state = 'degraded';
+  } else if (inFlight > 0) {
+    state = 'active';
+  }
+
+  return {
+    score: Number(score.toFixed(3)),
+    state,
+    cooldown_seconds: cooldownSeconds,
+    next_retry_ts: cooldownSeconds > 0 ? String(row.next_retry_ts || '').trim() || null : null
+  };
 }
 
 function sha256(value = '') {
@@ -479,6 +896,56 @@ function selectAggressiveDomHtml(artifactsByHost = {}) {
   return best;
 }
 
+function buildDomSnippetArtifact(html = '', maxChars = 3_600) {
+  const pageHtml = String(html || '');
+  if (!pageHtml) return null;
+  const cap = Math.max(600, Math.min(20_000, Number(maxChars || 3_600)));
+  const candidates = [
+    { kind: 'table', pattern: /<table[\s\S]*?<\/table>/i },
+    { kind: 'definition_list', pattern: /<dl[\s\S]*?<\/dl>/i },
+    { kind: 'spec_section', pattern: /<(section|div)[^>]*(?:spec|technical|feature|performance)[^>]*>[\s\S]*?<\/\1>/i }
+  ];
+  for (const candidate of candidates) {
+    const match = pageHtml.match(candidate.pattern);
+    if (match?.[0]) {
+      const snippetHtml = String(match[0]).slice(0, cap);
+      return {
+        kind: candidate.kind,
+        html: snippetHtml,
+        char_count: snippetHtml.length
+      };
+    }
+  }
+  const lower = pageHtml.toLowerCase();
+  const pivot = Math.max(0, lower.search(/spec|technical|feature|performance|dimension|polling|sensor|weight/));
+  const start = Math.max(0, pivot > 0 ? pivot - Math.floor(cap * 0.25) : 0);
+  const end = Math.min(pageHtml.length, start + cap);
+  const snippetHtml = pageHtml.slice(start, end);
+  if (!snippetHtml.trim()) return null;
+  return {
+    kind: 'html_window',
+    html: snippetHtml,
+    char_count: snippetHtml.length
+  };
+}
+
+function screenshotMimeType(format = '') {
+  const token = String(format || '').trim().toLowerCase();
+  return token === 'png' ? 'image/png' : 'image/jpeg';
+}
+
+function screenshotExtension(format = '') {
+  const token = String(format || '').trim().toLowerCase();
+  return token === 'png' ? 'png' : 'jpg';
+}
+
+function sha256Buffer(value) {
+  if (!Buffer.isBuffer(value) || value.length === 0) {
+    return '';
+  }
+  return `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
+}
+
 function normalizedSnippetRows(evidencePack) {
   if (!evidencePack) {
     return [];
@@ -589,6 +1056,57 @@ function ensureProvenanceField(provenance, field, fallbackValue = 'unk') {
     };
   }
   return provenance[field];
+}
+
+function mergePhase08Rows(existing = [], incoming = [], maxRows = 400) {
+  const out = [...(existing || [])];
+  const seen = new Set(
+    out.map((row) => `${row?.field_key || ''}|${row?.snippet_id || ''}|${row?.url || ''}`)
+  );
+  for (const row of incoming || []) {
+    const key = `${row?.field_key || ''}|${row?.snippet_id || ''}|${row?.url || ''}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    out.push(row);
+    if (out.length >= Math.max(1, Number.parseInt(String(maxRows || 400), 10) || 400)) {
+      break;
+    }
+  }
+  return out;
+}
+
+function buildPhase08SummaryFromBatches(batchRows = []) {
+  const rows = Array.isArray(batchRows) ? batchRows : [];
+  const batchCount = rows.length;
+  const batchErrors = rows.filter((row) => String(row?.status || '').trim().toLowerCase() === 'failed').length;
+  const rawCandidateCount = rows.reduce((sum, row) => sum + Number(row?.raw_candidate_count || 0), 0);
+  const acceptedCandidateCount = rows.reduce((sum, row) => sum + Number(row?.accepted_candidate_count || 0), 0);
+  const danglingRefCount = rows.reduce((sum, row) => sum + Number(row?.dropped_invalid_refs || 0), 0);
+  const policyViolationCount = rows.reduce(
+    (sum, row) => sum
+      + Number(row?.dropped_missing_refs || 0)
+      + Number(row?.dropped_invalid_refs || 0)
+      + Number(row?.dropped_evidence_verifier || 0),
+    0
+  );
+  const minRefsSatisfiedCount = rows.reduce((sum, row) => sum + Number(row?.min_refs_satisfied_count || 0), 0);
+  const minRefsTotal = rows.reduce((sum, row) => sum + Number(row?.min_refs_total || 0), 0);
+  return {
+    batch_count: batchCount,
+    batch_error_count: batchErrors,
+    schema_fail_rate: batchCount > 0 ? Number((batchErrors / batchCount).toFixed(6)) : 0,
+    raw_candidate_count: rawCandidateCount,
+    accepted_candidate_count: acceptedCandidateCount,
+    dangling_snippet_ref_count: danglingRefCount,
+    dangling_snippet_ref_rate: rawCandidateCount > 0 ? Number((danglingRefCount / rawCandidateCount).toFixed(6)) : 0,
+    evidence_policy_violation_count: policyViolationCount,
+    evidence_policy_violation_rate: rawCandidateCount > 0 ? Number((policyViolationCount / rawCandidateCount).toFixed(6)) : 0,
+    min_refs_satisfied_count: minRefsSatisfiedCount,
+    min_refs_total: minRefsTotal,
+    min_refs_satisfied_rate: minRefsTotal > 0 ? Number((minRefsSatisfiedCount / minRefsTotal).toFixed(6)) : 0
+  };
 }
 
 function tsvRowFromFields(fieldOrder, fields) {
@@ -926,6 +1444,70 @@ function helperSupportsProvisionalFill(helperContext, identityLock = {}) {
   );
 }
 
+function deriveNeedSetIdentityState({
+  identityGate = {},
+  identityConfidence = 0
+} = {}) {
+  if (identityGate?.validated && Number(identityConfidence || 0) >= 0.99) {
+    return 'locked';
+  }
+  const reasonCodes = Array.isArray(identityGate?.reasonCodes) ? identityGate.reasonCodes : [];
+  const hasConflictCode = reasonCodes.some((row) => {
+    const token = String(row || '').toLowerCase();
+    return token.includes('conflict') || token.includes('mismatch') || token.includes('major_anchor');
+  });
+  if (hasConflictCode || identityGate?.status === 'IDENTITY_CONFLICT') {
+    return 'conflict';
+  }
+  if (Number(identityConfidence || 0) >= 0.9) {
+    return 'provisional';
+  }
+  return 'unlocked';
+}
+
+function resolveExtractionGateOpen({
+  identityLock = {},
+  identityGate = {}
+} = {}) {
+  if (identityGate?.validated) {
+    return true;
+  }
+  const reasonCodes = Array.isArray(identityGate?.reasonCodes) ? identityGate.reasonCodes : [];
+  const hasHardConflict = reasonCodes.some((row) => {
+    const token = String(row || '').toLowerCase();
+    return token.includes('conflict') || token.includes('mismatch') || token.includes('major_anchor');
+  }) || String(identityGate?.status || '').toUpperCase() === 'IDENTITY_CONFLICT';
+  if (hasHardConflict) {
+    return false;
+  }
+  const hasVariant = Boolean(normalizeIdentityToken(identityLock?.variant));
+  if (hasVariant) {
+    return false;
+  }
+  const familyCount = Math.max(0, Number.parseInt(String(identityLock?.family_model_count || 0), 10) || 0);
+  const ambiguityLevel = normalizeAmbiguityLevel(
+    identityLock?.ambiguity_level || ambiguityLevelFromFamilyCount(familyCount)
+  );
+  if (ambiguityLevel === 'hard' || ambiguityLevel === 'very_hard' || ambiguityLevel === 'extra_hard') {
+    return false;
+  }
+  return Boolean(normalizeIdentityToken(identityLock?.brand) && normalizeIdentityToken(identityLock?.model));
+}
+
+function buildNeedSetIdentityAuditRows(identityReport = {}, limit = 24) {
+  const pages = Array.isArray(identityReport?.pages) ? identityReport.pages : [];
+  return pages
+    .map((row) => ({
+      source_id: String(row?.source_id || '').trim(),
+      url: String(row?.url || '').trim(),
+      decision: String(row?.decision || '').trim().toUpperCase(),
+      confidence: toFloat(row?.confidence, 0),
+      reason_codes: Array.isArray(row?.reason_codes) ? row.reason_codes.slice(0, 12) : []
+    }))
+    .filter((row) => row.source_id || row.url)
+    .slice(0, Math.max(1, Number(limit || 24)));
+}
+
 function isIndexingHelperFlowEnabled(config = {}) {
   return Boolean(config?.helperFilesEnabled && config?.indexingHelperFilesEnabled);
 }
@@ -1029,11 +1611,43 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
   const job = jobOverride || (await storage.readJson(s3Key));
   const productId = job.productId;
   const category = job.category || 'mouse';
+  const runArtifactsBase = storage.resolveOutputKey(category, productId, 'runs', runId);
+  const baseIdentityLock = job.identityLock || {};
+  const identityAmbiguity = await resolveIdentityAmbiguitySnapshot({
+    config,
+    category,
+    identityLock: baseIdentityLock
+  });
+  const identityLock = {
+    ...baseIdentityLock,
+    family_model_count: identityAmbiguity.family_model_count,
+    ambiguity_level: normalizeAmbiguityLevel(identityAmbiguity.ambiguity_level)
+  };
+  job.identityLock = identityLock;
+  const identityFingerprint = buildRunIdentityFingerprint({
+    category,
+    productId,
+    identityLock
+  });
+  const identityLockStatus = resolveIdentityLockStatus(identityLock);
   const runtimeMode = String(roundContext?.mode || config.accuracyMode || 'balanced').trim().toLowerCase();
   const uberAggressiveMode = runtimeMode === 'uber_aggressive';
   logger.setContext({
     category,
     productId
+  });
+  logger.info('run_context', {
+    productId,
+    runId,
+    category,
+    run_profile: config.runProfile || 'standard',
+    runtime_mode: runtimeMode,
+    identity_fingerprint: identityFingerprint,
+    identity_lock_status: identityLockStatus,
+    family_model_count: identityLock.family_model_count || 0,
+    ambiguity_level: identityLock.ambiguity_level || 'unknown',
+    dedupe_mode: RUN_DEDUPE_MODE,
+    phase_cursor: 'phase_00_bootstrap'
   });
   const traceWriter = toBool(config.runtimeTraceEnabled, true)
     ? new RuntimeTraceWriter({
@@ -1080,6 +1694,22 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     });
   }
   const categoryConfig = await loadCategoryConfig(category, { storage, config });
+  const routeMatrixPolicy = await loadRouteMatrixPolicyForRun({
+    config,
+    category,
+    categoryConfig,
+    logger
+  });
+  logger.info('route_matrix_policy_resolved', {
+    category,
+    source: routeMatrixPolicy.source,
+    row_count: Number(routeMatrixPolicy.row_count || 0),
+    scalar_linked_send: routeMatrixPolicy.scalar_linked_send,
+    component_values_send: routeMatrixPolicy.component_values_send,
+    list_values_send: routeMatrixPolicy.list_values_send,
+    min_evidence_refs_effective: Number(routeMatrixPolicy.min_evidence_refs_effective || 1),
+    prime_sources_visual_send: Boolean(routeMatrixPolicy.prime_sources_visual_send)
+  });
   const previousFinalSpec = await storage.readJsonOrNull(
     storage.resolveOutputKey(category, productId, 'final', 'spec.json')
   );
@@ -1301,13 +1931,15 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     planner.seed(helperContext.seed_urls || [], { forceBrandBypass: false });
   }
 
-  const preferHttpFetcher = Boolean(!config.dryRun && config.preferHttpFetcher);
-  let fetcher = config.dryRun
+  const initialFetcherMode = selectFetcherMode(config);
+  let fetcher = initialFetcherMode === 'dryrun'
     ? new DryRunFetcher(config, logger)
-    : (preferHttpFetcher
+    : initialFetcherMode === 'http'
       ? new HttpFetcher(config, logger)
-      : new PlaywrightFetcher(config, logger));
-  let fetcherMode = config.dryRun ? 'dryrun' : (preferHttpFetcher ? 'http' : 'playwright');
+      : initialFetcherMode === 'crawlee'
+        ? new CrawleeFetcher(config, logger)
+        : new PlaywrightFetcher(config, logger);
+  let fetcherMode = initialFetcherMode;
   let fetcherStartFallbackReason = '';
 
   const sourceResults = [];
@@ -1316,6 +1948,12 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
   const resumeFetchFailedUrls = new Set();
   const llmRetryReasonByUrl = new Map();
   const successfulSourceMetaByUrl = new Map();
+  const repairQueryByDomain = new Set();
+  const blockedDomainHitCount = new Map();
+  const blockedDomainsApplied = new Set();
+  const hostBudgetByHost = new Map();
+  const blockedDomainThreshold = Math.max(1, toInt(config.frontierBlockedDomainThreshold, 2));
+  const repairSearchEnabled = config.frontierRepairSearchEnabled !== false;
   const llmSatisfiedFields = new Set();
   const helperSupportiveSyntheticSources = (indexingHelperFlowEnabled && config.helperSupportiveEnabled)
     ? buildSupportiveSyntheticSources({
@@ -1375,6 +2013,9 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
   let llmEstimatedUsageCount = 0;
   let llmRetryWithoutSchemaCount = 0;
   let llmBudgetBlockedReason = '';
+  const phase08BatchRows = [];
+  let phase08FieldContexts = {};
+  let phase08PrimeRows = [];
   const llmVerifySampleRate = Math.max(1, Number.parseInt(String(config.llmVerifySampleRate || 10), 10) || 10);
   const llmVerifySampled = (stableHash(`${productId}:${runId}`) % llmVerifySampleRate) === 0;
   const llmVerifyForced = Boolean(roundContext?.force_verify_llm);
@@ -1402,6 +2043,8 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     budgetGuard: llmBudgetGuard,
     costRates: llmCostRates,
     traceWriter,
+    route_matrix_policy: routeMatrixPolicy,
+    routeMatrixPolicy: routeMatrixPolicy,
     forcedHighFields: [],
     recordUsage: async (usageRow) => {
       llmCallCount += 1;
@@ -1526,6 +2169,70 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
 
   let runtimePauseAnnounced = false;
   const processPlannerQueue = async () => {
+    const maybeEmitRepairQuery = ({
+      source,
+      sourceUrl = '',
+      statusCode = 0,
+      reason = '',
+      cooldownUntil = ''
+    } = {}) => {
+      if (!repairSearchEnabled) return;
+      const domain = normalizeHostToken(source?.host || hostFromHttpUrl(sourceUrl || source?.url || ''));
+      if (!domain) return;
+      if (repairQueryByDomain.has(domain)) return;
+      const query = buildRepairSearchQuery({
+        domain,
+        brand: job.identityLock?.brand || '',
+        model: job.identityLock?.model || '',
+        variant: job.identityLock?.variant || ''
+      });
+      if (!query) return;
+      repairQueryByDomain.add(domain);
+      logger.info('repair_query_enqueued', {
+        domain,
+        host: domain,
+        query,
+        status: Number(statusCode || 0),
+        reason: String(reason || '').trim() || null,
+        source_url: String(sourceUrl || source?.url || '').trim() || null,
+        cooldown_until: String(cooldownUntil || '').trim() || null,
+        provider: String(config.searchProvider || '').trim() || 'none',
+        doc_hint: 'manual_or_spec',
+        field_targets: requiredFields.slice(0, 10)
+      });
+    };
+
+    const maybeApplyBlockedDomainCooldown = ({
+      source,
+      statusCode = 0,
+      message = ''
+    } = {}) => {
+      const domain = normalizeHostToken(source?.host || hostFromHttpUrl(source?.url || ''));
+      if (!domain) return;
+      const blockedByStatus = Number(statusCode) === 403 || Number(statusCode) === 429;
+      const blockedByMessage = /(403|429|forbidden|captcha|rate.?limit|blocked)/i.test(String(message || ''));
+      if (!blockedByStatus && !blockedByMessage) {
+        return;
+      }
+      const hitCount = (blockedDomainHitCount.get(domain) || 0) + 1;
+      blockedDomainHitCount.set(domain, hitCount);
+      if (hitCount < blockedDomainThreshold) {
+        return;
+      }
+      if (blockedDomainsApplied.has(domain)) {
+        return;
+      }
+      blockedDomainsApplied.add(domain);
+      const removedCount = planner.blockHost(domain, Number(statusCode) === 429 ? 'status_429_backoff' : 'status_403_backoff');
+      logger.warn('blocked_domain_cooldown_applied', {
+        host: domain,
+        status: Number(statusCode || 0) || null,
+        blocked_count: hitCount,
+        threshold: blockedDomainThreshold,
+        removed_count: removedCount
+      });
+    };
+
     while (planner.hasNext()) {
       await loadRuntimeOverrides();
       applyRuntimeOverridesToPlanner(planner, runtimeOverrides);
@@ -1557,6 +2264,8 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       if (!source) {
         continue;
       }
+      const sourceHost = normalizeHostToken(source.host || hostFromHttpUrl(source.url || ''));
+      const hostBudgetRow = ensureHostBudgetRow(hostBudgetByHost, sourceHost);
       attemptedSourceUrls.add(String(source.url || '').trim());
       if ((runtimeOverrides.blocked_domains || []).includes(String(source.host || '').toLowerCase().replace(/^www\./, ''))) {
         logger.info('runtime_domain_block_applied', {
@@ -1568,29 +2277,97 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       }
       const cooldownDecision = frontierDb?.shouldSkipUrl?.(source.url) || { skip: false };
       if (cooldownDecision.skip) {
+        hostBudgetRow.dedupe_hits += 1;
+        noteHostRetryTs(hostBudgetRow, cooldownDecision.next_retry_ts || '');
+        const hostBudget = resolveHostBudgetState(hostBudgetRow);
+        logger.info('source_fetch_skipped', {
+          url: source.url,
+          host: sourceHost || source.host || '',
+          skip_reason: 'cooldown',
+          reason: cooldownDecision.reason || 'frontier_cooldown',
+          next_retry_ts: cooldownDecision.next_retry_ts || null,
+          host_budget_score: hostBudget.score,
+          host_budget_state: hostBudget.state
+        });
         logger.info('url_cooldown_applied', {
           url: source.url,
           status: null,
           cooldown_seconds: null,
+          next_retry_ts: cooldownDecision.next_retry_ts || null,
           reason: cooldownDecision.reason || 'frontier_cooldown'
         });
         resumeCooldownSkippedUrls.add(String(source.url || '').trim());
         continue;
       }
 
+      const hostBudgetBeforeFetch = resolveHostBudgetState(hostBudgetRow);
+      if (hostBudgetBeforeFetch.state === 'blocked') {
+        logger.info('source_fetch_skipped', {
+          url: source.url,
+          host: sourceHost || source.host || '',
+          skip_reason: 'blocked_budget',
+          reason: 'host_budget_blocked',
+          next_retry_ts: hostBudgetBeforeFetch.next_retry_ts || null,
+          host_budget_score: hostBudgetBeforeFetch.score,
+          host_budget_state: hostBudgetBeforeFetch.state
+        });
+        resumeCooldownSkippedUrls.add(String(source.url || '').trim());
+        continue;
+      }
+      if (hostBudgetBeforeFetch.state === 'backoff') {
+        logger.info('source_fetch_skipped', {
+          url: source.url,
+          host: sourceHost || source.host || '',
+          skip_reason: 'retry_later',
+          reason: 'host_budget_backoff',
+          next_retry_ts: hostBudgetBeforeFetch.next_retry_ts || null,
+          host_budget_score: hostBudgetBeforeFetch.score,
+          host_budget_state: hostBudgetBeforeFetch.state
+        });
+        resumeCooldownSkippedUrls.add(String(source.url || '').trim());
+        continue;
+      }
+
+      hostBudgetRow.started_count += 1;
+      const hostBudgetAtStart = resolveHostBudgetState(hostBudgetRow);
       logger.info('source_fetch_started', {
         url: source.url,
+        host: source.host,
         tier: source.tier,
         role: source.role,
-        approved_domain: source.approvedDomain
+        approved_domain: source.approvedDomain,
+        fetcher_kind: fetcherMode,
+        host_budget_score: hostBudgetAtStart.score,
+        host_budget_state: hostBudgetAtStart.state
       });
 
       let pageData;
+      const fetchStartedAtMs = Date.now();
       try {
         pageData = await fetcher.fetch(source);
       } catch (error) {
+        const fetchDurationMs = Math.max(0, Date.now() - fetchStartedAtMs);
+        const fetchFailureOutcome = classifyFetchOutcome({
+          status: 0,
+          message: error.message
+        });
+        hostBudgetRow.completed_count += 1;
+        bumpHostOutcome(hostBudgetRow, fetchFailureOutcome);
+        applyHostBudgetBackoff(hostBudgetRow, {
+          status: 0,
+          outcome: fetchFailureOutcome,
+          config
+        });
+        const hostBudgetAfterFailure = resolveHostBudgetState(hostBudgetRow);
         logger.error('source_fetch_failed', {
           url: source.url,
+          host: source.host,
+          fetcher_kind: fetcherMode,
+          fetch_ms: fetchDurationMs,
+          status: 0,
+          outcome: fetchFailureOutcome,
+          host_budget_score: hostBudgetAfterFailure.score,
+          host_budget_state: hostBudgetAfterFailure.state,
           message: error.message
         });
         resumeFetchFailedUrls.add(String(source.url || '').trim());
@@ -1598,7 +2375,13 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
           productId,
           url: source.url,
           status: 0,
+          elapsedMs: fetchDurationMs,
           error: error.message
+        });
+        maybeApplyBlockedDomainCooldown({
+          source,
+          statusCode: 0,
+          message: error.message
         });
         if (traceWriter) {
           const fetchTrace = await traceWriter.writeJson({
@@ -1608,6 +2391,8 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
               url: source.url,
               host: source.host,
               status: 0,
+              fetch_ms: fetchDurationMs,
+              outcome: fetchFailureOutcome,
               error: error.message
             },
             ringSize: Math.max(10, toInt(config.runtimeTraceFetchRing, 30))
@@ -1622,6 +2407,8 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         continue;
       }
 
+      const fetchDurationMs = Math.max(0, Date.now() - fetchStartedAtMs);
+      const parseStartedAtMs = Date.now();
       const sourceStatusCode = Number.parseInt(String(pageData.status || 0), 10) || 0;
       let fetchContentType = 'text/html';
       const finalToken = String(pageData.finalUrl || source.url || '').toLowerCase();
@@ -1631,6 +2418,53 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         fetchContentType = 'application/json';
       } else if (!String(pageData.html || '').trim()) {
         fetchContentType = 'application/octet-stream';
+      }
+      const sourceFetchOutcome = classifyFetchOutcome({
+        status: sourceStatusCode,
+        contentType: fetchContentType,
+        html: pageData.html || ''
+      });
+      const domSnippetArtifact = buildDomSnippetArtifact(
+        pageData.html,
+        Math.max(600, toInt(config.domSnippetMaxChars, 3_600))
+      );
+      const artifactHostKey = `${source.host}__${String(artifactSequence).padStart(4, '0')}`;
+      artifactSequence += 1;
+
+      const domSnippetUri = domSnippetArtifact
+        ? storage.resolveOutputKey(runArtifactsBase, 'raw', 'dom', artifactHostKey, 'dom_snippet.html')
+        : '';
+      if (domSnippetArtifact && domSnippetUri) {
+        domSnippetArtifact.uri = domSnippetUri;
+        domSnippetArtifact.content_hash = `sha256:${sha256(domSnippetArtifact.html || '')}`;
+      }
+
+      const screenshotArtifact = pageData?.screenshot && typeof pageData.screenshot === 'object'
+        ? pageData.screenshot
+        : null;
+      const screenshotBytes = Buffer.isBuffer(screenshotArtifact?.bytes)
+        ? screenshotArtifact.bytes
+        : null;
+      const screenshotFormat = String(screenshotArtifact?.format || 'jpeg').trim().toLowerCase() === 'png'
+        ? 'png'
+        : 'jpeg';
+      const screenshotUri = screenshotArtifact
+        ? storage.resolveOutputKey(
+          runArtifactsBase,
+          'raw',
+          'screenshots',
+          artifactHostKey,
+          `screenshot.${screenshotExtension(screenshotFormat)}`
+        )
+        : '';
+      const screenshotFileUri = screenshotArtifact && screenshotUri && typeof storage.resolveLocalPath === 'function'
+        ? storage.resolveLocalPath(screenshotUri)
+        : screenshotUri;
+      if (screenshotArtifact && screenshotUri) {
+        screenshotArtifact.uri = screenshotUri;
+        screenshotArtifact.file_uri = screenshotFileUri;
+        screenshotArtifact.mime_type = screenshotMimeType(screenshotFormat);
+        screenshotArtifact.content_hash = screenshotArtifact.content_hash || sha256Buffer(screenshotBytes);
       }
       if (traceWriter) {
         const fetchTrace = await traceWriter.writeJson({
@@ -1642,16 +2476,21 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
             final_url: pageData.finalUrl || source.url,
             host: source.host,
             status: sourceStatusCode,
+            outcome: sourceFetchOutcome,
+            fetch_ms: fetchDurationMs,
             content_type: fetchContentType,
             title: pageData.title || '',
             html_chars: String(pageData.html || '').length,
-            network_count: Array.isArray(pageData.networkResponses) ? pageData.networkResponses.length : 0
+            network_count: Array.isArray(pageData.networkResponses) ? pageData.networkResponses.length : 0,
+            dom_snippet_uri: domSnippetUri || null,
+            screenshot_uri: screenshotUri || null
           },
           ringSize: Math.max(10, toInt(config.runtimeTraceFetchRing, 30))
         });
         logger.info('fetch_trace_written', {
           url: source.url,
           status: sourceStatusCode,
+          fetch_ms: fetchDurationMs,
           content_type: fetchContentType,
           trace_path: fetchTrace.trace_path
         });
@@ -1686,6 +2525,12 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
           });
         }
       }
+
+      maybeApplyBlockedDomainCooldown({
+        source,
+        statusCode: sourceStatusCode,
+        message: String(pageData?.error || '')
+      });
 
       planner.discoverFromHtml(source.url, pageData.html);
       if (source.role === 'manufacturer') {
@@ -1781,12 +2626,50 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
             productId,
             category
           },
-          pageData,
+          pageData: {
+            ...pageData,
+            domSnippet: domSnippetArtifact
+          },
           adapterExtra,
           config,
           targetFields: llmTargetFields,
           deterministicCandidates: baseDeterministicFieldCandidates
         });
+        if (evidencePack && screenshotUri) {
+          const visualAssetId = `img_${sha256(`${artifactHostKey}|${screenshotUri}`).slice(0, 12)}`;
+          const visualAsset = {
+            id: visualAssetId,
+            kind: 'screenshot_capture',
+            source_id: String(evidencePack?.meta?.source_id || source.host || '').trim(),
+            source_url: String(pageData.finalUrl || source.url || '').trim(),
+            file_uri: screenshotFileUri || screenshotUri,
+            mime_type: String(screenshotArtifact?.mime_type || '').trim() || null,
+            content_hash: String(screenshotArtifact?.content_hash || '').trim() || null,
+            width: Number(screenshotArtifact?.width || 0) || null,
+            height: Number(screenshotArtifact?.height || 0) || null,
+            size_bytes: Buffer.isBuffer(screenshotArtifact?.bytes)
+              ? screenshotArtifact.bytes.length
+              : (Number.isFinite(Number(screenshotArtifact?.bytes)) ? Number(screenshotArtifact.bytes) : null),
+            captured_at: String(screenshotArtifact?.captured_at || new Date().toISOString()).trim()
+          };
+          const existingVisualAssets = Array.isArray(evidencePack.visual_assets)
+            ? evidencePack.visual_assets
+            : [];
+          evidencePack.visual_assets = [
+            ...existingVisualAssets,
+            visualAsset
+          ];
+          evidencePack.meta = {
+            ...(evidencePack.meta || {}),
+            visual_artifacts: {
+              ...(evidencePack.meta?.visual_artifacts || {}),
+              screenshot_uri: screenshotFileUri || screenshotUri,
+              screenshot_content_hash: String(screenshotArtifact?.content_hash || '').trim() || '',
+              dom_snippet_uri: domSnippetUri || '',
+              dom_snippet_content_hash: String(domSnippetArtifact?.content_hash || '').trim() || ''
+            }
+          };
+        }
       }
 
       if (deterministicParser && evidencePack) {
@@ -1866,6 +2749,31 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
             reason: llmSkipReason
           });
         }
+      }
+      if (llmExtraction?.phase08 && typeof llmExtraction.phase08 === 'object') {
+        const sourceUrlForPhase08 = String(source.finalUrl || source.url || '').trim();
+        const sourceHostForPhase08 = normalizeHostToken(source.host || hostFromHttpUrl(sourceUrlForPhase08));
+        const phase08Rows = Array.isArray(llmExtraction.phase08.batches)
+          ? llmExtraction.phase08.batches
+          : [];
+        phase08BatchRows.push(
+          ...phase08Rows.map((row) => ({
+            ...row,
+            source_url: sourceUrlForPhase08 || null,
+            source_host: sourceHostForPhase08 || null
+          }))
+        );
+        phase08FieldContexts = {
+          ...phase08FieldContexts,
+          ...(llmExtraction.phase08.field_contexts || {})
+        };
+        phase08PrimeRows = mergePhase08Rows(
+          phase08PrimeRows,
+          Array.isArray(llmExtraction?.phase08?.prime_sources?.rows)
+            ? llmExtraction.phase08.prime_sources.rows
+            : [],
+          500
+        );
       }
 
       const llmFieldCandidates = (llmExtraction.fieldCandidates || []).filter((row) => {
@@ -1953,6 +2861,21 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         endpointSignals: endpointIntel.endpointSignals
       });
 
+      const artifactRefs = {
+        host_key: artifactHostKey,
+        screenshot_uri: screenshotUri || '',
+        screenshot_file_uri: screenshotFileUri || '',
+        screenshot_mime_type: String(screenshotArtifact?.mime_type || '').trim() || null,
+        screenshot_content_hash: String(screenshotArtifact?.content_hash || '').trim() || null,
+        screenshot_width: Number(screenshotArtifact?.width || 0) || null,
+        screenshot_height: Number(screenshotArtifact?.height || 0) || null,
+        screenshot_size_bytes: Buffer.isBuffer(screenshotArtifact?.bytes)
+          ? screenshotArtifact.bytes.length
+          : (Number.isFinite(Number(screenshotArtifact?.bytes)) ? Number(screenshotArtifact.bytes) : null),
+        dom_snippet_uri: domSnippetUri || '',
+        dom_snippet_content_hash: String(domSnippetArtifact?.content_hash || '').trim() || null
+      };
+
       sourceResults.push({
         ...source,
         ts: new Date().toISOString(),
@@ -1969,6 +2892,8 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         endpointSuggestions: endpointIntel.nextBestUrls,
         temporalSignals,
         llmEvidencePack: evidencePack,
+        artifact_host_key: artifactHostKey,
+        artifact_refs: artifactRefs,
         fingerprint,
         parserHealth
       });
@@ -2054,14 +2979,18 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         });
       }
 
-      frontierDb?.recordFetch?.({
+      const pageHtml = String(pageData.html || '');
+      const pageContentHash = sha256(pageHtml);
+      const pageBytes = pageHtml.length;
+      const frontierFetchRow = frontierDb?.recordFetch?.({
         productId,
         url: source.url,
         finalUrl: sourceUrl,
         status: sourceStatusCode,
         contentType: fetchContentType,
-        contentHash: sha256(String(pageData.html || '')),
-        bytes: String(pageData.html || '').length,
+        contentHash: pageContentHash,
+        bytes: pageBytes,
+        elapsedMs: fetchDurationMs,
         fieldsFound: [...new Set(knownCandidatesFromSource)],
         confidence: toFloat(identity.score, 0),
         conflictFlag: (anchorCheck.majorConflicts || []).length > 0
@@ -2075,14 +3004,26 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
           conflictFlag: false
         });
       }
+      if (sourceStatusCode === 404 || sourceStatusCode === 410) {
+        const cooldownUntil = String(
+          frontierFetchRow?.cooldown?.next_retry_ts || frontierFetchRow?.cooldown_next_retry_ts || ''
+        ).trim();
+        maybeEmitRepairQuery({
+          source,
+          sourceUrl,
+          statusCode: sourceStatusCode,
+          reason: sourceStatusCode === 410 ? 'status_410' : 'status_404',
+          cooldownUntil
+        });
+      }
 
-      const artifactHostKey = `${source.host}__${String(artifactSequence).padStart(4, '0')}`;
-      artifactSequence += 1;
       artifactsByHost[artifactHostKey] = {
         html: pageData.html,
         ldjsonBlocks: pageData.ldjsonBlocks,
         embeddedState: pageData.embeddedState,
         networkResponses: pageData.networkResponses,
+        screenshot: pageData.screenshot || null,
+        domSnippet: domSnippetArtifact,
         pdfDocs: adapterExtra.pdfDocs || [],
         extractedCandidates: mergedFieldCandidatesWithEvidence
       };
@@ -2106,15 +3047,66 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         llmCandidatesAccepted += llmFieldCandidates.length;
       }
 
+      hostBudgetRow.completed_count += 1;
+      bumpHostOutcome(hostBudgetRow, sourceFetchOutcome);
+      if (sourceFetchOutcome === 'bad_content') {
+        hostBudgetRow.parse_fail_count += 1;
+      }
+      if (knownCandidatesFromSource.length > 0) {
+        hostBudgetRow.evidence_used += 1;
+      }
+      const hostCooldownUntil = String(
+        frontierFetchRow?.cooldown?.next_retry_ts || frontierFetchRow?.cooldown_next_retry_ts || ''
+      ).trim();
+      if (hostCooldownUntil) {
+        noteHostRetryTs(hostBudgetRow, hostCooldownUntil);
+      } else {
+        applyHostBudgetBackoff(hostBudgetRow, {
+          status: sourceStatusCode,
+          outcome: sourceFetchOutcome,
+          config
+        });
+      }
+      const hostBudgetAfterSource = resolveHostBudgetState(hostBudgetRow);
+      const parseDurationMs = Math.max(0, Date.now() - parseStartedAtMs);
+      const articleExtractionMeta = (
+        evidencePack?.meta?.article_extraction
+        && typeof evidencePack.meta.article_extraction === 'object'
+      )
+        ? evidencePack.meta.article_extraction
+        : {};
       logger.info('source_processed', {
         url: source.url,
+        final_url: sourceUrl,
+        host: source.host,
+        fetcher_kind: fetcherMode,
+        fetch_ms: fetchDurationMs,
+        parse_ms: parseDurationMs,
         status: pageData.status,
+        outcome: sourceFetchOutcome,
+        content_type: fetchContentType,
+        content_hash: pageContentHash,
+        bytes: pageBytes,
         identity_match: identity.match,
         identity_score: identity.score,
         anchor_status: anchorStatus,
         candidate_count: mergedFieldCandidatesWithEvidence.length,
         candidate_source: source.candidateSource,
-        llm_candidate_count: llmFieldCandidates.length
+        llm_candidate_count: llmFieldCandidates.length,
+        article_title: String(articleExtractionMeta.title || ''),
+        article_excerpt: String(articleExtractionMeta.excerpt || ''),
+        article_preview: String(articleExtractionMeta.preview || ''),
+        article_extraction_method: String(articleExtractionMeta.method || ''),
+        article_quality_score: Number(articleExtractionMeta.quality_score || 0),
+        article_char_count: Number(articleExtractionMeta.char_count || 0),
+        article_heading_count: Number(articleExtractionMeta.heading_count || 0),
+        article_duplicate_sentence_ratio: Number(articleExtractionMeta.duplicate_sentence_ratio || 0),
+        article_low_quality: Boolean(articleExtractionMeta.low_quality),
+        article_fallback_reason: String(articleExtractionMeta.fallback_reason || ''),
+        screenshot_uri: screenshotUri || '',
+        dom_snippet_uri: domSnippetUri || '',
+        host_budget_score: hostBudgetAfterSource.score,
+        host_budget_state: hostBudgetAfterSource.state
       });
     }
   };
@@ -2907,6 +3899,32 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     provenance,
     fieldReasoning
   });
+  const needSetIdentityState = deriveNeedSetIdentityState({
+    identityGate,
+    identityConfidence
+  });
+  const extractionGateOpen = resolveExtractionGateOpen({
+    identityLock: job.identityLock || {},
+    identityGate
+  });
+  const needSetIdentityAuditRows = buildNeedSetIdentityAuditRows(identityReport, 24);
+  const needSetIdentityContext = {
+    status: needSetIdentityState,
+    confidence: identityConfidence,
+    identity_gate_validated: identityGate.validated,
+    extraction_gate_open: extractionGateOpen,
+    family_model_count: Number(identityLock.family_model_count || 0),
+    ambiguity_level: normalizeAmbiguityLevel(identityLock.ambiguity_level || ''),
+    publishable,
+    publish_blockers: publishBlockers,
+    reason_codes: identityReport.reason_codes || identityGate.reasonCodes || [],
+    page_count: identityReport.pages?.length || 0,
+    max_match_score: Math.max(
+      0,
+      ...sourceResults.map((source) => Number(source?.identity?.score || 0)).filter((value) => Number.isFinite(value))
+    ),
+    audit_rows: needSetIdentityAuditRows
+  };
   const needSet = computeNeedSet({
     runId,
     category,
@@ -2915,8 +3933,46 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     provenance,
     fieldRules: categoryConfig.fieldRules,
     fieldReasoning,
-    constraintAnalysis
+    constraintAnalysis,
+    identityContext: needSetIdentityContext
   });
+  const phase07PrimeSources = buildPhase07PrimeSources({
+    runId,
+    category,
+    productId,
+    needSet,
+    provenance,
+    sourceResults,
+    fieldRules: categoryConfig.fieldRules || {},
+    identity: {
+      brand: job.identityLock?.brand || identity.brand || '',
+      model: job.identityLock?.model || identity.model || '',
+      variant: job.identityLock?.variant || identity.variant || '',
+      sku: job.identityLock?.sku || identity.sku || ''
+    },
+    options: {
+      maxHitsPerField: 24,
+      maxPrimeSourcesPerField: 8
+    }
+  });
+  const phase08SummaryFromBatches = buildPhase08SummaryFromBatches(phase08BatchRows);
+  const phase08Extraction = {
+    run_id: runId,
+    category,
+    product_id: productId,
+    generated_at: new Date().toISOString(),
+    summary: phase08SummaryFromBatches,
+    batches: phase08BatchRows.slice(0, 500),
+    field_contexts: phase08FieldContexts,
+    prime_sources: {
+      rows: phase08PrimeRows.slice(0, 500)
+    },
+    validator: {
+      context_field_count: Number(llmValidatorDecisions?.phase08?.context_field_count || 0),
+      prime_source_rows: Number(llmValidatorDecisions?.phase08?.prime_source_rows || 0),
+      payload_chars: Number(llmValidatorDecisions?.phase08?.payload_chars || 0)
+    }
+  };
 
   const parserHealthRows = sourceResults
     .map((source) => source.parserHealth)
@@ -3011,6 +4067,11 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     runId,
     category,
     run_profile: config.runProfile || 'standard',
+    runtime_mode: runtimeMode,
+    identity_fingerprint: identityFingerprint,
+    identity_lock_status: identityLockStatus,
+    dedupe_mode: RUN_DEDUPE_MODE,
+    phase_cursor: 'completed',
     validated: gate.validated,
     reason: validatedReason,
     validated_reason: validatedReason,
@@ -3032,6 +4093,11 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     anchor_major_conflicts_count: anchorMajorConflictsCount,
     identity_confidence: identityConfidence,
     identity_gate_validated: identityGate.validated,
+    extraction_gate_open: extractionGateOpen,
+    identity_ambiguity: {
+      family_model_count: Number(identityLock.family_model_count || 0),
+      ambiguity_level: normalizeAmbiguityLevel(identityLock.ambiguity_level || '')
+    },
     identity_gate: identityGate,
     publishable,
     publish_blockers: publishBlockers,
@@ -3208,8 +4274,39 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       total_fields: needSet.total_fields,
       reason_counts: needSet.reason_counts,
       required_level_counts: needSet.required_level_counts,
+      identity_lock_state: needSet.identity_lock_state || null,
+      identity_audit_rows_count: Array.isArray(needSet.identity_audit_rows)
+        ? needSet.identity_audit_rows.length
+        : 0,
       top_fields: (needSet.needs || []).slice(0, 12).map((row) => row.field_key),
       generated_at: needSet.generated_at
+    },
+    phase07: {
+      fields_attempted: Number(phase07PrimeSources?.summary?.fields_attempted || 0),
+      fields_with_hits: Number(phase07PrimeSources?.summary?.fields_with_hits || 0),
+      fields_satisfied_min_refs: Number(phase07PrimeSources?.summary?.fields_satisfied_min_refs || 0),
+      fields_unsatisfied_min_refs: Number(phase07PrimeSources?.summary?.fields_unsatisfied_min_refs || 0),
+      refs_selected_total: Number(phase07PrimeSources?.summary?.refs_selected_total || 0),
+      distinct_sources_selected: Number(phase07PrimeSources?.summary?.distinct_sources_selected || 0),
+      avg_hits_per_field: Number(phase07PrimeSources?.summary?.avg_hits_per_field || 0),
+      generated_at: String(phase07PrimeSources?.generated_at || '').trim() || null
+    },
+    phase08: {
+      batch_count: Number(phase08Extraction?.summary?.batch_count || 0),
+      batch_error_count: Number(phase08Extraction?.summary?.batch_error_count || 0),
+      schema_fail_rate: Number(phase08Extraction?.summary?.schema_fail_rate || 0),
+      raw_candidate_count: Number(phase08Extraction?.summary?.raw_candidate_count || 0),
+      accepted_candidate_count: Number(phase08Extraction?.summary?.accepted_candidate_count || 0),
+      dangling_snippet_ref_count: Number(phase08Extraction?.summary?.dangling_snippet_ref_count || 0),
+      dangling_snippet_ref_rate: Number(phase08Extraction?.summary?.dangling_snippet_ref_rate || 0),
+      evidence_policy_violation_count: Number(phase08Extraction?.summary?.evidence_policy_violation_count || 0),
+      evidence_policy_violation_rate: Number(phase08Extraction?.summary?.evidence_policy_violation_rate || 0),
+      min_refs_satisfied_count: Number(phase08Extraction?.summary?.min_refs_satisfied_count || 0),
+      min_refs_total: Number(phase08Extraction?.summary?.min_refs_total || 0),
+      min_refs_satisfied_rate: Number(phase08Extraction?.summary?.min_refs_satisfied_rate || 0),
+      validator_context_field_count: Number(phase08Extraction?.validator?.context_field_count || 0),
+      validator_prime_source_rows: Number(phase08Extraction?.validator?.prime_source_rows || 0),
+      generated_at: String(phase08Extraction?.generated_at || '').trim() || null
     },
     top_evidence_references: buildTopEvidenceReferences(provenance, 100),
     parser_health: {
@@ -3283,14 +4380,96 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     };
   }
 
-  const runBase = storage.resolveOutputKey(category, productId, 'runs', runId);
+  const runBase = runArtifactsBase;
   const latestBase = storage.resolveOutputKey(category, productId, 'latest');
   const needSetRunKey = `${runBase}/analysis/needset.json`;
   const needSetLatestKey = `${latestBase}/needset.json`;
+  const phase07RunKey = `${runBase}/analysis/phase07_retrieval.json`;
+  const phase07LatestKey = `${latestBase}/phase07_retrieval.json`;
+  const phase08RunKey = `${runBase}/analysis/phase08_extraction.json`;
+  const phase08LatestKey = `${latestBase}/phase08_extraction.json`;
+  const sourcePacketsRunKey = `${runBase}/analysis/source_indexing_extraction_packets.json`;
+  const sourcePacketsLatestKey = `${latestBase}/source_indexing_extraction_packets.json`;
+  const itemPacketRunKey = `${runBase}/analysis/item_indexing_extraction_packet.json`;
+  const itemPacketLatestKey = `${latestBase}/item_indexing_extraction_packet.json`;
+  const runMetaPacketRunKey = `${runBase}/analysis/run_meta_packet.json`;
+  const runMetaPacketLatestKey = `${latestBase}/run_meta_packet.json`;
   summary.needset = {
     ...(summary.needset || {}),
     key: needSetRunKey,
     latest_key: needSetLatestKey
+  };
+  summary.phase07 = {
+    ...(summary.phase07 || {}),
+    key: phase07RunKey,
+    latest_key: phase07LatestKey
+  };
+  summary.phase08 = {
+    ...(summary.phase08 || {}),
+    key: phase08RunKey,
+    latest_key: phase08LatestKey
+  };
+  const indexingSchemaPackets = buildIndexingSchemaPackets({
+    runId,
+    category,
+    productId,
+    startMs,
+    summary,
+    categoryConfig,
+    sourceResults,
+    normalized,
+    provenance,
+    needSet,
+    phase08Extraction
+  });
+  let indexingSchemaValidation = null;
+  if (config.indexingSchemaPacketsValidationEnabled !== false) {
+    indexingSchemaValidation = await validateIndexingSchemaPackets({
+      sourceCollection: indexingSchemaPackets.sourceCollection,
+      itemPacket: indexingSchemaPackets.itemPacket,
+      runMetaPacket: indexingSchemaPackets.runMetaPacket,
+      schemaRoot: config.indexingSchemaPacketsSchemaRoot || ''
+    });
+    if (!indexingSchemaValidation.valid) {
+      const sampleErrors = (indexingSchemaValidation.errors || []).slice(0, 12);
+      logger.error('indexing_schema_packets_validation_failed', {
+        productId,
+        runId,
+        category,
+        schema_root: indexingSchemaValidation.schema_root,
+        error_count: Number(indexingSchemaValidation.error_count || 0),
+        errors: sampleErrors
+      });
+      if (config.indexingSchemaPacketsValidationStrict !== false) {
+        throw new Error(
+          `indexing_schema_packets_schema_invalid (${Number(indexingSchemaValidation.error_count || 0)} errors)`
+        );
+      }
+    }
+  }
+  summary.indexing_schema_packets = {
+    source_packets_key: sourcePacketsRunKey,
+    source_packets_latest_key: sourcePacketsLatestKey,
+    item_packet_key: itemPacketRunKey,
+    item_packet_latest_key: itemPacketLatestKey,
+    run_meta_packet_key: runMetaPacketRunKey,
+    run_meta_packet_latest_key: runMetaPacketLatestKey,
+    source_packet_count: Number(indexingSchemaPackets?.sourceCollection?.source_packet_count || 0),
+    item_packet_id: String(indexingSchemaPackets?.itemPacket?.item_packet_id || '').trim() || null,
+    run_packet_id: String(indexingSchemaPackets?.runMetaPacket?.run_packet_id || '').trim() || null,
+    validation: indexingSchemaValidation
+      ? {
+        enabled: true,
+        valid: Boolean(indexingSchemaValidation.valid),
+        schema_root: indexingSchemaValidation.schema_root,
+        error_count: Number(indexingSchemaValidation.error_count || 0)
+      }
+      : {
+        enabled: false,
+        valid: null,
+        schema_root: null,
+        error_count: 0
+      }
   };
   await storage.writeObject(
     needSetRunKey,
@@ -3302,23 +4481,130 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     Buffer.from(`${JSON.stringify(needSet, null, 2)}\n`, 'utf8'),
     { contentType: 'application/json' }
   );
+  await storage.writeObject(
+    phase07RunKey,
+    Buffer.from(`${JSON.stringify(phase07PrimeSources, null, 2)}\n`, 'utf8'),
+    { contentType: 'application/json' }
+  );
+  await storage.writeObject(
+    phase07LatestKey,
+    Buffer.from(`${JSON.stringify(phase07PrimeSources, null, 2)}\n`, 'utf8'),
+    { contentType: 'application/json' }
+  );
+  await storage.writeObject(
+    phase08RunKey,
+    Buffer.from(`${JSON.stringify(phase08Extraction, null, 2)}\n`, 'utf8'),
+    { contentType: 'application/json' }
+  );
+  await storage.writeObject(
+    phase08LatestKey,
+    Buffer.from(`${JSON.stringify(phase08Extraction, null, 2)}\n`, 'utf8'),
+    { contentType: 'application/json' }
+  );
+  await storage.writeObject(
+    sourcePacketsRunKey,
+    Buffer.from(`${JSON.stringify(indexingSchemaPackets.sourceCollection, null, 2)}\n`, 'utf8'),
+    { contentType: 'application/json' }
+  );
+  await storage.writeObject(
+    sourcePacketsLatestKey,
+    Buffer.from(`${JSON.stringify(indexingSchemaPackets.sourceCollection, null, 2)}\n`, 'utf8'),
+    { contentType: 'application/json' }
+  );
+  await storage.writeObject(
+    itemPacketRunKey,
+    Buffer.from(`${JSON.stringify(indexingSchemaPackets.itemPacket, null, 2)}\n`, 'utf8'),
+    { contentType: 'application/json' }
+  );
+  await storage.writeObject(
+    itemPacketLatestKey,
+    Buffer.from(`${JSON.stringify(indexingSchemaPackets.itemPacket, null, 2)}\n`, 'utf8'),
+    { contentType: 'application/json' }
+  );
+  await storage.writeObject(
+    runMetaPacketRunKey,
+    Buffer.from(`${JSON.stringify(indexingSchemaPackets.runMetaPacket, null, 2)}\n`, 'utf8'),
+    { contentType: 'application/json' }
+  );
+  await storage.writeObject(
+    runMetaPacketLatestKey,
+    Buffer.from(`${JSON.stringify(indexingSchemaPackets.runMetaPacket, null, 2)}\n`, 'utf8'),
+    { contentType: 'application/json' }
+  );
   logger.info('needset_computed', {
     productId,
     runId,
     category,
     needset_size: needSet.needset_size,
     total_fields: needSet.total_fields,
+    identity_lock_state: needSet.identity_lock_state || null,
+    identity_audit_rows: Array.isArray(needSet.identity_audit_rows)
+      ? needSet.identity_audit_rows
+      : [],
     reason_counts: needSet.reason_counts,
     required_level_counts: needSet.required_level_counts,
     snapshots: needSet.snapshots || [],
     needs: needSet.needs || [],
     needset_key: needSetRunKey
   });
+  logger.info('phase07_prime_sources_built', {
+    productId,
+    runId,
+    category,
+    fields_attempted: Number(phase07PrimeSources?.summary?.fields_attempted || 0),
+    fields_with_hits: Number(phase07PrimeSources?.summary?.fields_with_hits || 0),
+    fields_satisfied_min_refs: Number(phase07PrimeSources?.summary?.fields_satisfied_min_refs || 0),
+    refs_selected_total: Number(phase07PrimeSources?.summary?.refs_selected_total || 0),
+    distinct_sources_selected: Number(phase07PrimeSources?.summary?.distinct_sources_selected || 0),
+    phase07_key: phase07RunKey,
+    fields: Array.isArray(phase07PrimeSources?.fields)
+      ? phase07PrimeSources.fields.slice(0, 32).map((row) => ({
+        field_key: row.field_key,
+        min_refs_required: row.min_refs_required,
+        refs_selected: row.refs_selected,
+        min_refs_satisfied: row.min_refs_satisfied,
+        distinct_sources_required: row.distinct_sources_required,
+        distinct_sources_selected: row.distinct_sources_selected,
+        top_hit_score: Number((row.hits || [])[0]?.score || 0)
+      }))
+      : []
+  });
+  logger.info('phase08_extraction_context_built', {
+    productId,
+    runId,
+    category,
+    batch_count: Number(phase08Extraction?.summary?.batch_count || 0),
+    batch_error_count: Number(phase08Extraction?.summary?.batch_error_count || 0),
+    schema_fail_rate: Number(phase08Extraction?.summary?.schema_fail_rate || 0),
+    raw_candidate_count: Number(phase08Extraction?.summary?.raw_candidate_count || 0),
+    accepted_candidate_count: Number(phase08Extraction?.summary?.accepted_candidate_count || 0),
+    dangling_snippet_ref_count: Number(phase08Extraction?.summary?.dangling_snippet_ref_count || 0),
+    evidence_policy_violation_count: Number(phase08Extraction?.summary?.evidence_policy_violation_count || 0),
+    min_refs_satisfied_count: Number(phase08Extraction?.summary?.min_refs_satisfied_count || 0),
+    min_refs_total: Number(phase08Extraction?.summary?.min_refs_total || 0),
+    field_context_count: Object.keys(phase08Extraction?.field_contexts || {}).length,
+    prime_source_rows: Number(phase08Extraction?.prime_sources?.rows?.length || 0),
+    phase08_key: phase08RunKey
+  });
+  logger.info('indexing_schema_packets_written', {
+    productId,
+    runId,
+    category,
+    source_packet_count: Number(indexingSchemaPackets?.sourceCollection?.source_packet_count || 0),
+    source_packets_key: sourcePacketsRunKey,
+    item_packet_key: itemPacketRunKey,
+    run_meta_packet_key: runMetaPacketRunKey
+  });
 
   logger.info('run_completed', {
     productId,
     runId,
     run_profile: config.runProfile || 'standard',
+    runtime_mode: runtimeMode,
+    identity_fingerprint: identityFingerprint,
+    identity_lock_status: identityLockStatus,
+    dedupe_mode: RUN_DEDUPE_MODE,
+    phase_cursor: 'completed',
     validated: summary.validated,
     validated_reason: summary.validated_reason,
     confidence,
@@ -3339,6 +4625,10 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     critic_reject_count: (criticDecisions.reject || []).length,
     llm_validator_accept_count: (llmValidatorDecisions.accept || []).length,
     llm_validator_reject_count: (llmValidatorDecisions.reject || []).length,
+    phase08_batch_count: Number(phase08Extraction?.summary?.batch_count || 0),
+    phase08_schema_fail_rate: Number(phase08Extraction?.summary?.schema_fail_rate || 0),
+    phase08_dangling_ref_rate: Number(phase08Extraction?.summary?.dangling_snippet_ref_rate || 0),
+    phase08_min_refs_satisfied_rate: Number(phase08Extraction?.summary?.min_refs_satisfied_rate || 0),
     traffic_green_count: trafficLight.counts.green,
     traffic_yellow_count: trafficLight.counts.yellow,
     traffic_red_count: trafficLight.counts.red,

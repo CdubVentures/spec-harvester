@@ -224,6 +224,85 @@ function routeFingerprint(route = {}) {
   ].join('::');
 }
 
+function toIntToken(value, fallback = 0) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(0, parsed);
+}
+
+function reasonTokenGroup(reason = '') {
+  const token = normalized(reason).toLowerCase();
+  if (!token) return 'default';
+  if (token.includes('serp') || token.includes('triage') || token.includes('rerank')) return 'triage';
+  if (
+    token.includes('planner_fast')
+    || token.includes('verify_extract_fast')
+    || token.endsWith('_fast')
+  ) return 'fast';
+  if (
+    token.includes('planner_reason')
+    || token.includes('reasoning')
+    || token.includes('verify_extract_reason')
+    || token.includes('validate')
+  ) return 'reasoning';
+  return 'default';
+}
+
+function roleTokenCap(config = {}, role = 'extract', reason = '', isFallback = false) {
+  const group = reasonTokenGroup(reason);
+  if (role === 'plan') {
+    if (group === 'triage') {
+      return toIntToken(
+        isFallback ? config.llmMaxOutputTokensPlanFallback : config.llmMaxOutputTokensTriage,
+        toIntToken(config.llmMaxOutputTokensPlan, toIntToken(config.llmMaxOutputTokens, 1200))
+      );
+    }
+    if (group === 'fast') {
+      return toIntToken(
+        isFallback ? config.llmMaxOutputTokensPlanFallback : config.llmMaxOutputTokensFast,
+        toIntToken(config.llmMaxOutputTokensPlan, toIntToken(config.llmMaxOutputTokens, 1200))
+      );
+    }
+    if (group === 'reasoning') {
+      return toIntToken(
+        isFallback ? config.llmMaxOutputTokensPlanFallback : config.llmMaxOutputTokensReasoning,
+        toIntToken(config.llmMaxOutputTokensPlan, toIntToken(config.llmMaxOutputTokens, 1200))
+      );
+    }
+    return toIntToken(
+      isFallback ? config.llmMaxOutputTokensPlanFallback : config.llmMaxOutputTokensPlan,
+      toIntToken(config.llmMaxOutputTokens, 1200)
+    );
+  }
+  if (role === 'extract') {
+    return toIntToken(
+      isFallback ? config.llmMaxOutputTokensExtractFallback : config.llmMaxOutputTokensExtract,
+      toIntToken(config.llmMaxOutputTokens, 1200)
+    );
+  }
+  if (role === 'validate') {
+    return toIntToken(
+      isFallback ? config.llmMaxOutputTokensValidateFallback : config.llmMaxOutputTokensValidate,
+      toIntToken(config.llmMaxOutputTokens, 1200)
+    );
+  }
+  if (role === 'write') {
+    return toIntToken(
+      isFallback ? config.llmMaxOutputTokensWriteFallback : config.llmMaxOutputTokensWrite,
+      toIntToken(config.llmMaxOutputTokens, 1200)
+    );
+  }
+  return toIntToken(config.llmMaxOutputTokens, 1200);
+}
+
+function roleReasoningCap(config = {}, role = 'extract', reason = '', isFallback = false) {
+  const fallbackCap = roleTokenCap(config, role, reason, isFallback);
+  const configured = toIntToken(config.llmReasoningBudget, 0);
+  if (configured <= 0) return fallbackCap;
+  if (fallbackCap <= 0) return configured;
+  return Math.min(configured, fallbackCap);
+}
+
 export function resolveLlmRoute(config = {}, { reason = '', role = '', modelOverride = '' } = {}) {
   const resolvedRole = role || routeRoleFromReason(reason);
   const route = baseRouteForRole(config, resolvedRole);
@@ -342,8 +421,27 @@ export async function callLlmWithRouting({
     model: primary.model || null,
     base_url: primary.baseUrl || null,
     fallback_base_url: fallback?.baseUrl || null,
-    fallback_configured: Boolean(fallback)
+    fallback_configured: Boolean(fallback),
+    output_token_cap: roleTokenCap(config, resolvedRole, reason, false),
+    output_token_cap_fallback: roleTokenCap(config, resolvedRole, reason, true)
   });
+
+  const primaryTokenCap = roleTokenCap(config, resolvedRole, reason, false);
+  const fallbackTokenCap = roleTokenCap(config, resolvedRole, reason, true);
+  const primaryReasoningBudget = roleReasoningCap(config, resolvedRole, reason, false);
+  const fallbackReasoningBudget = roleReasoningCap(config, resolvedRole, reason, true);
+  const resolvedMaxTokens = Math.max(
+    0,
+    Number(maxTokens || 0) > 0
+      ? Math.min(Number(maxTokens || 0), primaryTokenCap || Number(maxTokens || 0))
+      : primaryTokenCap
+  );
+  const resolvedReasoningBudget = Math.max(
+    0,
+    Number(reasoningBudget || 0) > 0
+      ? Math.min(Number(reasoningBudget || 0), primaryReasoningBudget || Number(reasoningBudget || 0))
+      : primaryReasoningBudget
+  );
 
   const sharedParams = {
     system,
@@ -353,13 +451,22 @@ export async function callLlmWithRouting({
     usageContext: {
       ...usageContext,
       reason,
-      route_role: resolvedRole
+      route_role: resolvedRole,
+      developer_mode: usageContext?.developer_mode !== undefined
+        ? Boolean(usageContext.developer_mode)
+        : Boolean(config?.runtimeTraceLlmPayloads),
+      model_token_profile_map: config?.llmModelOutputTokenMap || {},
+      default_output_token_cap: primaryTokenCap,
+      deepseek_default_max_output_tokens: Math.max(
+        toIntToken(config?.deepseekChatMaxOutputMaximum, 4096),
+        toIntToken(config?.deepseekReasonerMaxOutputMaximum, 8192)
+      )
     },
     costRates,
     onUsage,
     reasoningMode: Boolean(reasoningMode),
-    reasoningBudget: Number(reasoningBudget || 0),
-    maxTokens: Number(maxTokens || 0),
+    reasoningBudget: Number(resolvedReasoningBudget || 0),
+    maxTokens: Number(resolvedMaxTokens || 0),
     timeoutMs,
     logger
   };
@@ -393,8 +500,19 @@ export async function callLlmWithRouting({
       apiKey: fallback.apiKey,
       baseUrl: fallback.baseUrl,
       provider: fallback.provider,
+      reasoningBudget: Number(
+        Number(reasoningBudget || 0) > 0
+          ? Math.min(Number(reasoningBudget || 0), fallbackReasoningBudget || Number(reasoningBudget || 0))
+          : fallbackReasoningBudget
+      ),
+      maxTokens: Number(
+        Number(maxTokens || 0) > 0
+          ? Math.min(Number(maxTokens || 0), fallbackTokenCap || Number(maxTokens || 0))
+          : fallbackTokenCap
+      ),
       usageContext: {
         ...sharedParams.usageContext,
+        default_output_token_cap: fallbackTokenCap,
         fallback_attempt: true,
         fallback_from_model: primary.model || null
       }

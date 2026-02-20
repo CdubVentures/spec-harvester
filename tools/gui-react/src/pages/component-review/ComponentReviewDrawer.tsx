@@ -2,9 +2,8 @@ import { useState } from 'react';
 import { useMutation, useQuery, type QueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { trafficColor, trafficTextColor, sourceBadgeClass, SOURCE_BADGE_FALLBACK } from '../../utils/colors';
-import { humanizeField } from '../../utils/fieldNormalize';
+import { hasKnownValue, humanizeField } from '../../utils/fieldNormalize';
 import { pct } from '../../utils/formatting';
-import { buildSyntheticComponentCandidateId } from '../../utils/candidateIdentifier';
 import {
   DrawerShell,
   DrawerSection,
@@ -44,6 +43,13 @@ const varianceBadge: Record<string, string> = {
   override_allowed: 'bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300',
 };
 
+function toPositiveId(value: unknown): number | undefined {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return undefined;
+  const id = Math.trunc(n);
+  return id > 0 ? id : undefined;
+}
+
 function buildPropertyBadges(state: ComponentPropertyState): Array<{ label: string; className: string }> {
   const badges: Array<{ label: string; className: string }> = [];
 
@@ -73,6 +79,19 @@ function buildPropertyBadges(state: ComponentPropertyState): Array<{ label: stri
   }
 
   return badges;
+}
+
+function hasActionablePending(state: ComponentPropertyState | null | undefined): boolean {
+  if (!state?.needs_review) return false;
+  const candidateRows = (state.candidates || []).filter((candidate) => {
+    const candidateId = String(candidate?.candidate_id || '').trim();
+    return Boolean(candidateId) && hasKnownValue(candidate?.value);
+  });
+  return candidateRows.some((candidate) => {
+    if (candidate?.is_synthetic_selected) return false;
+    const sharedStatus = String(candidate?.shared_review_status || '').trim().toLowerCase();
+    return sharedStatus ? sharedStatus === 'pending' : true;
+  });
 }
 
 function PropertyCard({
@@ -560,6 +579,19 @@ export function ComponentReviewDrawer({
   pendingReviewItems = [],
   isSynthetic = false,
 }: ComponentReviewDrawerProps) {
+  const drawerPendingReviewItems = (() => {
+    const propKey = String(focusedProperty || '').trim();
+    if (!propKey) return pendingReviewItems;
+    if (propKey.startsWith('__')) return pendingReviewItems;
+    return pendingReviewItems.filter((reviewItem) => {
+      const directFieldKey = String(reviewItem?.field_key || '').trim();
+      if (directFieldKey && directFieldKey === propKey) return true;
+      const attrs = reviewItem?.product_attributes;
+      if (!attrs || typeof attrs !== 'object' || Array.isArray(attrs)) return false;
+      return Object.prototype.hasOwnProperty.call(attrs, propKey);
+    });
+  })();
+
   // Mutation: approve individual review items (approve_new / dismiss)
   const reviewActionMut = useMutation({
     mutationFn: (body: { review_id: string; action: string; merge_target?: string }) =>
@@ -583,6 +615,11 @@ export function ComponentReviewDrawer({
     }) =>
       api.post(`/review-components/${category}/component-override`, body),
     onMutate: async (body) => {
+      const isIdentityProperty = String(body?.property || '').trim().startsWith('__');
+      const hasRequiredId = isIdentityProperty
+        ? Boolean(toPositiveId(body?.componentIdentityId))
+        : Boolean(toPositiveId(body?.componentValueId));
+      if (!hasRequiredId) return;
       const queryKey = ['componentReviewData', category, componentType];
       await queryClient.cancelQueries({ queryKey });
       queryClient.setQueryData<ComponentReviewPayload>(queryKey, (old) =>
@@ -613,6 +650,11 @@ export function ComponentReviewDrawer({
     }) =>
       api.post(`/review-components/${category}/component-override`, body),
     onMutate: async (body) => {
+      const isIdentityProperty = String(body?.property || '').trim().startsWith('__');
+      const hasRequiredId = isIdentityProperty
+        ? Boolean(toPositiveId(body?.componentIdentityId))
+        : Boolean(toPositiveId(body?.componentValueId));
+      if (!hasRequiredId) return;
       const queryKey = ['componentReviewData', category, componentType];
       await queryClient.cancelQueries({ queryKey });
       queryClient.setQueryData<ComponentReviewPayload>(queryKey, (old) =>
@@ -667,122 +709,53 @@ export function ComponentReviewDrawer({
   ) : null;
 
   function getMutationIds(property: string): { componentIdentityId?: number; componentValueId?: number } {
-    const componentIdentityId = item.component_identity_id ?? undefined;
+    const componentIdentityId = toPositiveId(item.component_identity_id);
     const componentValueId = property.startsWith('__')
       ? undefined
-      : (item.properties?.[property]?.slot_id ?? undefined);
+      : toPositiveId(item.properties?.[property]?.slot_id);
     return { componentIdentityId, componentValueId };
   }
 
-  function splitCandidateValueParts(rawValue: unknown): string[] {
-    if (Array.isArray(rawValue)) {
-      const nested = rawValue.flatMap((entry) => splitCandidateValueParts(entry));
-      return [...new Set(nested)];
-    }
-    const text = String(rawValue ?? '').trim();
-    if (!text) return [];
-    const parts = text.includes(',')
-      ? text.split(',').map((part) => part.trim()).filter(Boolean)
-      : [text];
-    return [...new Set(parts)];
+  function canMutateProperty(property: string): boolean {
+    const ids = getMutationIds(property);
+    return property.startsWith('__')
+      ? Boolean(ids.componentIdentityId)
+      : Boolean(ids.componentValueId);
   }
 
-  function matchesCandidateValue(rawValue: unknown, candidateNorm: string): boolean {
-    return splitCandidateValueParts(rawValue).some(
-      (part) => part.toLowerCase() === candidateNorm,
-    );
-  }
-
-  // Build pipeline candidates from pendingReviewItems' product_attributes for a given property key.
-  // Ensures flagged cells always have at least one candidate when pending review items exist.
-  function enrichCandidatesFromReviewItems(
-    existingCandidates: import('../../types/review').ReviewCandidate[],
-    property: string,
-  ): import('../../types/review').ReviewCandidate[] {
-    if (pendingReviewItems.length === 0) return existingCandidates;
-    // Collect existing candidate_ids to avoid duplicates
-    const existingIds = new Set(existingCandidates.map((c) => c.candidate_id));
-    const existingValues = new Set(existingCandidates.map((c) => String(c.value ?? '').trim().toLowerCase()));
-    // Build consolidated pipeline candidates from review items
-    const byValue = new Map<string, { value: string; products: string[]; latest: string }>();
-    for (const ri of pendingReviewItems) {
-      const attrs = ri.product_attributes || {};
-      // For __name, use raw_query or matched_component; for __maker, use {componentType}_brand.
-      // Properties may be arrays/comma-delimited strings, so split into candidate tokens.
-      let rawValue: unknown;
-      if (property === '__name') {
-        rawValue = ri.matched_component || ri.raw_query;
-      } else if (property === '__maker') {
-        rawValue = attrs[`${componentType}_brand`] || attrs['brand'];
-      } else {
-        rawValue = attrs[property];
-      }
-      const valueParts = splitCandidateValueParts(rawValue);
-      for (const valStr of valueParts) {
-        const valNorm = valStr.toLowerCase();
-        if (!valNorm || existingValues.has(valNorm)) continue;
-        if (!byValue.has(valNorm)) {
-          byValue.set(valNorm, { value: valStr, products: [], latest: '' });
-        }
-        const entry = byValue.get(valNorm)!;
-        entry.products.push(ri.product_id || 'unknown');
-        if (!entry.latest || (ri.created_at && ri.created_at > entry.latest)) entry.latest = ri.created_at;
-      }
-    }
-    const syntheticCandidates: import('../../types/review').ReviewCandidate[] = [];
-    for (const meta of byValue.values()) {
-      const val = meta.value;
-      const cid = buildSyntheticComponentCandidateId({
-        componentType,
-        componentName: item.name,
-        propertyKey: property,
-        value: val,
-      });
-      if (existingIds.has(cid)) continue;
-      const count = meta.products.length;
-      syntheticCandidates.push({
-        candidate_id: cid,
-        value: val,
-        score: 0.5,
-        source_id: 'pipeline',
-        source: `Pipeline (${count} product${count !== 1 ? 's' : ''})`,
-        tier: null,
-        method: 'product_extraction',
-        evidence: {
-          url: '',
-          retrieved_at: meta.latest || '',
-          snippet_id: '',
-          snippet_hash: '',
-          quote: `Extracted from ${meta.products.slice(0, 3).join(', ')}${count > 3 ? ` +${count - 3} more` : ''}`,
-          quote_span: null,
-          snippet_text: 'Pipeline extraction from product runs',
-          source_id: 'pipeline',
-        },
-      });
-    }
-    return [...existingCandidates, ...syntheticCandidates];
-  }
-
-  function resolveReviewItemsForCandidate(
-    candidate: import('../../types/review').ReviewCandidate,
-    property: string,
-  ): ComponentReviewFlaggedItem[] {
-    if (pendingReviewItems.length === 0) return [];
-    const candidateNorm = String(candidate?.value ?? '').trim().toLowerCase();
-    if (!candidateNorm) return [];
-    const scoped = pendingReviewItems.filter((ri) => {
-      const attrs = (ri.product_attributes || {}) as Record<string, unknown>;
-      let val: unknown;
-      if (property === '__name') {
-        val = ri.matched_component || ri.raw_query;
-      } else if (property === '__maker') {
-        val = attrs[`${componentType}_brand`] || attrs['brand'];
-      } else {
-        val = attrs[property];
-      }
-      return matchesCandidateValue(val, candidateNorm);
+  function buildPendingSharedCandidateIds({
+    hasSharedPending,
+    candidates,
+  }: {
+    hasSharedPending: boolean;
+    candidates: import('../../types/review').ReviewCandidate[];
+  }): string[] {
+    if (!hasSharedPending) return [];
+    const allCandidates = (candidates || []).filter((candidate) => {
+      const candidateId = String(candidate?.candidate_id || '').trim();
+      return Boolean(candidateId) && hasKnownValue(candidate?.value);
     });
-    return scoped;
+    const pendingCandidates = allCandidates.filter((candidate) => {
+      if (candidate?.is_synthetic_selected) return false;
+      const sharedStatus = String(candidate?.shared_review_status || '').trim().toLowerCase();
+      return !sharedStatus || sharedStatus === 'pending';
+    });
+    return [...new Set(
+      pendingCandidates
+      .map((candidate) => String(candidate?.candidate_id || '').trim())
+      .filter(Boolean),
+    )];
+  }
+
+  function countPendingSharedCandidates(
+    candidates: import('../../types/review').ReviewCandidate[],
+  ): number {
+    return (candidates || []).filter((candidate) => {
+      const candidateId = String(candidate?.candidate_id || '').trim();
+      if (!candidateId || !hasKnownValue(candidate?.value) || candidate?.is_synthetic_selected) return false;
+      const sharedStatus = String(candidate?.shared_review_status || '').trim().toLowerCase();
+      return !sharedStatus || sharedStatus === 'pending';
+    }).length;
   }
 
   // Handle __name/__maker in focused mode via CellDrawer
@@ -790,7 +763,7 @@ export function ComponentReviewDrawer({
     const state = focusedProperty === '__name' ? item.name_tracked : item.maker_tracked;
     const subtitle = `${item.name} | ${item.maker || componentType}`;
     const badges = buildPropertyBadges(state);
-    const hasValue = state.selected.value != null && String(state.selected.value).trim() !== '';
+    const hasValue = hasKnownValue(state.selected.value);
     const isAccepted = hasValue
       && !state.needs_review
       && !state.overridden
@@ -799,25 +772,15 @@ export function ComponentReviewDrawer({
         || state.source === 'workbook'
         || state.source === 'manual'
         || state.source === 'user'
-        || state.selected.color === 'green'
       );
-    const candidates = enrichCandidatesFromReviewItems(state.candidates, focusedProperty);
-    const hasSharedPending = Boolean(state.needs_review);
-    const pendingSharedCandidateIds = hasSharedPending
-      ? candidates
-        .filter((candidate) => resolveReviewItemsForCandidate(candidate, focusedProperty).length > 0)
-        .map((candidate) => candidate.candidate_id)
-      : [];
-    if (hasSharedPending && pendingSharedCandidateIds.length === 0) {
-      const fallbackAcceptedId = String(state.accepted_candidate_id || '').trim();
-      if (fallbackAcceptedId && candidates.some((candidate) => String(candidate?.candidate_id || '').trim() === fallbackAcceptedId)) {
-        pendingSharedCandidateIds.push(fallbackAcceptedId);
-      }
-      if (pendingSharedCandidateIds.length === 0) {
-        const firstCandidateId = String(candidates[0]?.candidate_id || '').trim();
-        if (firstCandidateId) pendingSharedCandidateIds.push(firstCandidateId);
-      }
-    }
+    const candidates = state.candidates ?? [];
+    const hasSharedPending = hasActionablePending(state);
+    const pendingSharedCandidateIds = buildPendingSharedCandidateIds({
+      hasSharedPending,
+      candidates,
+    });
+    const focusedMutationIds = getMutationIds(focusedProperty);
+    const canMutateFocused = canMutateProperty(focusedProperty);
 
     return (
       <CellDrawer
@@ -838,17 +801,20 @@ export function ComponentReviewDrawer({
         pendingAIConfirmation={hasSharedPending}
         pendingSharedCandidateIds={pendingSharedCandidateIds}
         candidateUiContext="shared"
-        onManualOverride={(value) => overrideMut.mutate({
-          componentType,
-          name: item.name,
-          maker: item.maker,
-          property: focusedProperty,
-          value,
-          ...getMutationIds(focusedProperty),
-        })}
+        onManualOverride={(value) => {
+          if (!canMutateFocused) return;
+          overrideMut.mutate({
+            componentType,
+            name: item.name,
+            maker: item.maker,
+            property: focusedProperty,
+            value,
+            ...focusedMutationIds,
+          });
+        }}
         isPending={overrideMut.isPending || candidateAcceptMut.isPending || confirmSharedLaneMut.isPending || reviewActionMut.isPending}
         candidates={candidates}
-        onAcceptCandidate={(candidateId, candidate) => {
+        onAcceptCandidate={canMutateFocused ? (candidateId, candidate) => {
           candidateAcceptMut.mutate({
             componentType,
             name: item.name,
@@ -857,10 +823,26 @@ export function ComponentReviewDrawer({
             value: String(candidate.value ?? ''),
             candidateId,
             candidateSource: candidate.source_id || candidate.source || '',
-            ...getMutationIds(focusedProperty),
+            ...focusedMutationIds,
           });
-        }}
-        onConfirmShared={hasSharedPending ? () => {
+        } : undefined}
+        onConfirmSharedCandidate={hasSharedPending && canMutateFocused ? (candidateId, candidate) => {
+          confirmSharedLaneMut.mutate({
+            componentType,
+            name: item.name,
+            maker: item.maker,
+            property: focusedProperty,
+            candidateId,
+            candidateValue: hasKnownValue(candidate?.value)
+              ? String(candidate.value)
+              : (hasValue ? String(state.selected.value) : undefined),
+            candidateConfidence: Number.isFinite(Number(candidate?.score))
+              ? Number(candidate.score)
+              : Number(state.selected.confidence ?? 0),
+            ...focusedMutationIds,
+          });
+        } : undefined}
+        onConfirmShared={hasSharedPending && canMutateFocused ? () => {
           confirmSharedLaneMut.mutate({
             componentType,
             name: item.name,
@@ -869,12 +851,19 @@ export function ComponentReviewDrawer({
             candidateId: state.accepted_candidate_id || undefined,
             candidateValue: hasValue ? String(state.selected.value) : undefined,
             candidateConfidence: Number(state.selected.confidence ?? 0),
-            ...getMutationIds(focusedProperty),
+            ...focusedMutationIds,
           });
         } : undefined}
         extraSections={
           <>
-            {pendingReviewItems.length > 0 && <PendingAIReviewSection items={pendingReviewItems} category={category} queryClient={queryClient} />}
+            {drawerPendingReviewItems.length > 0 && (
+              <PendingAIReviewSection
+                items={drawerPendingReviewItems}
+                pendingCandidateCount={countPendingSharedCandidates(candidates)}
+                category={category}
+                queryClient={queryClient}
+              />
+            )}
             {state.reason_codes?.length > 0 && <FlagsSection reasonCodes={state.reason_codes} />}
             {item.linked_products && item.linked_products.length > 0 && (
               <LinkedProductsList
@@ -895,7 +884,7 @@ export function ComponentReviewDrawer({
     const state = item.properties[focusedProperty];
     const subtitle = `${item.name} | ${item.maker || componentType}`;
     const badges = buildPropertyBadges(state);
-    const hasValue = state.selected.value != null && String(state.selected.value).trim() !== '';
+    const hasValue = hasKnownValue(state.selected.value);
     const isAccepted = hasValue
       && !state.needs_review
       && !state.overridden
@@ -904,25 +893,15 @@ export function ComponentReviewDrawer({
         || state.source === 'workbook'
         || state.source === 'manual'
         || state.source === 'user'
-        || state.selected.color === 'green'
       );
-    const candidates = enrichCandidatesFromReviewItems(state.candidates, focusedProperty);
-    const hasSharedPending = Boolean(state.needs_review);
-    const pendingSharedCandidateIds = hasSharedPending
-      ? candidates
-        .filter((candidate) => resolveReviewItemsForCandidate(candidate, focusedProperty).length > 0)
-        .map((candidate) => candidate.candidate_id)
-      : [];
-    if (hasSharedPending && pendingSharedCandidateIds.length === 0) {
-      const fallbackAcceptedId = String(state.accepted_candidate_id || '').trim();
-      if (fallbackAcceptedId && candidates.some((candidate) => String(candidate?.candidate_id || '').trim() === fallbackAcceptedId)) {
-        pendingSharedCandidateIds.push(fallbackAcceptedId);
-      }
-      if (pendingSharedCandidateIds.length === 0) {
-        const firstCandidateId = String(candidates[0]?.candidate_id || '').trim();
-        if (firstCandidateId) pendingSharedCandidateIds.push(firstCandidateId);
-      }
-    }
+    const candidates = state.candidates ?? [];
+    const hasSharedPending = hasActionablePending(state);
+    const pendingSharedCandidateIds = buildPendingSharedCandidateIds({
+      hasSharedPending,
+      candidates,
+    });
+    const focusedMutationIds = getMutationIds(focusedProperty);
+    const canMutateFocused = canMutateProperty(focusedProperty);
 
     return (
       <CellDrawer
@@ -943,17 +922,20 @@ export function ComponentReviewDrawer({
         pendingAIConfirmation={hasSharedPending}
         pendingSharedCandidateIds={pendingSharedCandidateIds}
         candidateUiContext="shared"
-        onManualOverride={(value) => overrideMut.mutate({
-          componentType,
-          name: item.name,
-          maker: item.maker,
-          property: focusedProperty,
-          value,
-          ...getMutationIds(focusedProperty),
-        })}
+        onManualOverride={(value) => {
+          if (!canMutateFocused) return;
+          overrideMut.mutate({
+            componentType,
+            name: item.name,
+            maker: item.maker,
+            property: focusedProperty,
+            value,
+            ...focusedMutationIds,
+          });
+        }}
         isPending={overrideMut.isPending || candidateAcceptMut.isPending || confirmSharedLaneMut.isPending || reviewActionMut.isPending}
         candidates={candidates}
-        onAcceptCandidate={(candidateId, candidate) => {
+        onAcceptCandidate={canMutateFocused ? (candidateId, candidate) => {
           candidateAcceptMut.mutate({
             componentType,
             name: item.name,
@@ -962,10 +944,26 @@ export function ComponentReviewDrawer({
             value: String(candidate.value ?? ''),
             candidateId,
             candidateSource: candidate.source_id || candidate.source || '',
-            ...getMutationIds(focusedProperty),
+            ...focusedMutationIds,
           });
-        }}
-        onConfirmShared={hasSharedPending ? () => {
+        } : undefined}
+        onConfirmSharedCandidate={hasSharedPending && canMutateFocused ? (candidateId, candidate) => {
+          confirmSharedLaneMut.mutate({
+            componentType,
+            name: item.name,
+            maker: item.maker,
+            property: focusedProperty,
+            candidateId,
+            candidateValue: hasKnownValue(candidate?.value)
+              ? String(candidate.value)
+              : (hasValue ? String(state.selected.value) : undefined),
+            candidateConfidence: Number.isFinite(Number(candidate?.score))
+              ? Number(candidate.score)
+              : Number(state.selected.confidence ?? 0),
+            ...focusedMutationIds,
+          });
+        } : undefined}
+        onConfirmShared={hasSharedPending && canMutateFocused ? () => {
           confirmSharedLaneMut.mutate({
             componentType,
             name: item.name,
@@ -974,12 +972,19 @@ export function ComponentReviewDrawer({
             candidateId: state.accepted_candidate_id || undefined,
             candidateValue: hasValue ? String(state.selected.value) : undefined,
             candidateConfidence: Number(state.selected.confidence ?? 0),
-            ...getMutationIds(focusedProperty),
+            ...focusedMutationIds,
           });
         } : undefined}
         extraSections={
           <>
-            {pendingReviewItems.length > 0 && <PendingAIReviewSection items={pendingReviewItems} category={category} queryClient={queryClient} />}
+            {drawerPendingReviewItems.length > 0 && (
+              <PendingAIReviewSection
+                items={drawerPendingReviewItems}
+                pendingCandidateCount={countPendingSharedCandidates(candidates)}
+                category={category}
+                queryClient={queryClient}
+              />
+            )}
             {state.reason_codes?.length > 0 && <FlagsSection reasonCodes={state.reason_codes} />}
             {item.linked_products && item.linked_products.length > 0 && (
               <LinkedProductsList
@@ -998,6 +1003,7 @@ export function ComponentReviewDrawer({
 
   const propertyKeys = Object.keys(item.properties).sort();
   const subtitle = [item.maker, componentType].filter(Boolean).join(' | ');
+  const componentIdentityId = toPositiveId(item.component_identity_id);
 
   const topBadges: Array<{ label: string; className: string }> = [
     { label: `${item.metrics.property_count} properties`, className: 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300' },
@@ -1011,7 +1017,7 @@ export function ComponentReviewDrawer({
     mutationFn: async () => {
       const promises: Promise<unknown>[] = [];
       // 1. Approve all review items
-      for (const ri of pendingReviewItems) {
+      for (const ri of drawerPendingReviewItems) {
         promises.push(
           api.post(`/review-components/${category}/component-review-action`, {
             review_id: ri.review_id,
@@ -1022,6 +1028,8 @@ export function ComponentReviewDrawer({
       }
       // 2. Apply best candidate values for each property as overrides
       for (const [propKey, state] of Object.entries(item.properties)) {
+        const componentValueId = toPositiveId(state.slot_id);
+        if (!componentValueId) continue;
         const bestCandidate = state.candidates?.[0];
         if (bestCandidate?.value != null && String(bestCandidate.value).trim()) {
           promises.push(
@@ -1031,14 +1039,14 @@ export function ComponentReviewDrawer({
               maker: item.maker,
               property: propKey,
               value: String(bestCandidate.value),
-              componentIdentityId: item.component_identity_id ?? undefined,
-              componentValueId: state.slot_id ?? undefined,
+              componentIdentityId,
+              componentValueId,
             }),
           );
         }
       }
       // 3. Apply name + maker if they have pipeline candidates
-      if (item.name_tracked?.candidates?.[0]?.source_id === 'pipeline') {
+      if (componentIdentityId && item.name_tracked?.candidates?.[0]?.source_id === 'pipeline') {
         promises.push(
           api.post(`/review-components/${category}/component-override`, {
             componentType,
@@ -1046,11 +1054,11 @@ export function ComponentReviewDrawer({
             maker: item.maker,
             property: '__name',
             value: item.name,
-            componentIdentityId: item.component_identity_id ?? undefined,
+            componentIdentityId,
           }),
         );
       }
-      if (item.maker_tracked?.candidates?.[0]?.source_id === 'pipeline' && item.maker) {
+      if (componentIdentityId && item.maker_tracked?.candidates?.[0]?.source_id === 'pipeline' && item.maker) {
         promises.push(
           api.post(`/review-components/${category}/component-override`, {
             componentType,
@@ -1058,7 +1066,7 @@ export function ComponentReviewDrawer({
             maker: item.maker,
             property: '__maker',
             value: item.maker,
-            componentIdentityId: item.component_identity_id ?? undefined,
+            componentIdentityId,
           }),
         );
       }
@@ -1093,11 +1101,11 @@ export function ComponentReviewDrawer({
           </div>
         </DrawerSection>
       )}
-      {!isSynthetic && pendingReviewItems.length > 0 && (
+      {!isSynthetic && drawerPendingReviewItems.length > 0 && (
         <DrawerSection title="AI Review">
           <div className="px-3 py-2 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded space-y-2">
             <div className="text-xs text-purple-700 dark:text-purple-300 font-medium">
-              {pendingReviewItems.length} pipeline match{pendingReviewItems.length !== 1 ? 'es' : ''} pending review
+              {drawerPendingReviewItems.length} pipeline match{drawerPendingReviewItems.length !== 1 ? 'es' : ''} pending review
             </div>
             <button
               onClick={() => acceptEntireRowMut.mutate()}
@@ -1112,8 +1120,8 @@ export function ComponentReviewDrawer({
           </div>
         </DrawerSection>
       )}
-      {pendingReviewItems.length > 0 && (
-        <PendingAIReviewSection items={pendingReviewItems} category={category} queryClient={queryClient} />
+      {drawerPendingReviewItems.length > 0 && (
+        <PendingAIReviewSection items={drawerPendingReviewItems} category={category} queryClient={queryClient} />
       )}
       <DrawerSection title="Identity">
         <DrawerValueRow
@@ -1128,14 +1136,17 @@ export function ComponentReviewDrawer({
             value={item.name}
             tracked={item.name_tracked}
             property="__name"
-            onOverride={(prop, val) => overrideMut.mutate({
-              componentType,
-              name: item.name,
-              maker: item.maker,
-              property: prop,
-              value: val,
-              ...getMutationIds(prop),
-            })}
+            onOverride={(prop, val) => {
+              if (!canMutateProperty(prop)) return;
+              overrideMut.mutate({
+                componentType,
+                name: item.name,
+                maker: item.maker,
+                property: prop,
+                value: val,
+                ...getMutationIds(prop),
+              });
+            }}
             isPending={overrideMut.isPending}
           />
           <IdentityOverrideRow
@@ -1143,14 +1154,17 @@ export function ComponentReviewDrawer({
             value={item.maker}
             tracked={item.maker_tracked}
             property="__maker"
-            onOverride={(prop, val) => overrideMut.mutate({
-              componentType,
-              name: item.name,
-              maker: item.maker,
-              property: prop,
-              value: val,
-              ...getMutationIds(prop),
-            })}
+            onOverride={(prop, val) => {
+              if (!canMutateProperty(prop)) return;
+              overrideMut.mutate({
+                componentType,
+                name: item.name,
+                maker: item.maker,
+                property: prop,
+                value: val,
+                ...getMutationIds(prop),
+              });
+            }}
             isPending={overrideMut.isPending}
           />
         </div>
@@ -1166,28 +1180,34 @@ export function ComponentReviewDrawer({
       <AliasEditor
         aliases={item.aliases}
         overridden={item.aliases_overridden}
-        onSave={(items) => overrideMut.mutate({
-          componentType,
-          name: item.name,
-          maker: item.maker,
-          property: '__aliases',
-          value: items,
-          ...getMutationIds('__aliases'),
-        })}
+        onSave={(items) => {
+          if (!canMutateProperty('__aliases')) return;
+          overrideMut.mutate({
+            componentType,
+            name: item.name,
+            maker: item.maker,
+            property: '__aliases',
+            value: items,
+            ...getMutationIds('__aliases'),
+          });
+        }}
         isPending={overrideMut.isPending}
       />
 
       <LinksEditor
         links={item.links}
         tracked={item.links_tracked}
-        onSave={(items) => overrideMut.mutate({
-          componentType,
-          name: item.name,
-          maker: item.maker,
-          property: '__links',
-          value: items,
-          ...getMutationIds('__links'),
-        })}
+        onSave={(items) => {
+          if (!canMutateProperty('__links')) return;
+          overrideMut.mutate({
+            componentType,
+            name: item.name,
+            maker: item.maker,
+            property: '__links',
+            value: items,
+            ...getMutationIds('__links'),
+          });
+        }}
         isPending={overrideMut.isPending}
       />
 
@@ -1221,14 +1241,17 @@ export function ComponentReviewDrawer({
             key={key}
             propKey={key}
             state={item.properties[key]}
-            onOverride={(value) => overrideMut.mutate({
-              componentType,
-              name: item.name,
-              maker: item.maker,
-              property: key,
-              value,
-              ...getMutationIds(key),
-            })}
+            onOverride={(value) => {
+              if (!canMutateProperty(key)) return;
+              overrideMut.mutate({
+                componentType,
+                name: item.name,
+                maker: item.maker,
+                property: key,
+                value,
+                ...getMutationIds(key),
+              });
+            }}
             isPending={overrideMut.isPending}
           />
         ))}

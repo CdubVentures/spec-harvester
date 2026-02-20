@@ -1,0 +1,308 @@
+{
+  "schema_version": "2026-02-20.source-indexing-extraction-packet.simple.v1",
+  "record_kind": "source_indexing_extraction_packet_simple",
+  "source": {
+    "source_packet_id": "sha256:<canonical_url>",
+    "source_id": "src_<id>",
+    "canonical_url": "https://example.com/product-page",
+    "source_version_id": "sha256:<canonical_url|content_hash>",
+    "content_hash": "sha256:<content>"
+  },
+  "run": {
+    "run_id": "20260220-xxxxxx",
+    "category": "mice",
+    "item_identifier": "mice-logitech-g-pro-x",
+    "started_at": "2026-02-20T11:32:55.212Z",
+    "finished_at": "2026-02-20T11:33:07.515Z",
+    "http_status": 200,
+    "content_type": "text/html",
+    "fetch_ms": 1864
+  },
+  "parser": {
+    "phase_lineage": {
+      "phase_01_static_html": true,
+      "phase_02_dynamic_js": true,
+      "phase_03_main_article": true,
+      "phase_04_html_spec_table": true,
+      "phase_05_embedded_json": true,
+      "phase_06_text_pdf": false,
+      "phase_07_scanned_pdf_ocr": false,
+      "phase_08_image_ocr": false,
+      "phase_09_chart_graph": false,
+      "phase_10_office_mixed_doc": false
+    }
+  },
+  "identity_target": {
+    "brand": "Logitech",
+    "model": "G Pro X",
+    "variant": "Wireless",
+    "sku": "910-XXXX"
+  },
+  "evidence_index": {
+    "e1": {
+      "evidence_id": "e1",
+      "source_surface": "network_json",
+      "target_match": {
+        "page_product_cluster_id": "cluster_main_product",
+        "target_match_score": 0.97,
+        "target_match_passed": true
+      },
+      "snippet_id": "s1",
+      "snippet_hash": "sha256:<snippet>",
+      "quote": "\"pollingRateHz\": 8000",
+      "snippet_text": "\"pollingRateHz\": 8000",
+      "source_url": "https://example.com/product-page",
+      "retrieved_at": "2026-02-20T11:33:01.050Z"
+    }
+  },
+  "field_key_map": {
+    "polling_rate_hz": {
+      "field_key_id": "sha256:<source_version_id|polling_rate_hz>",
+      "field_meta": {
+        "field_key": "polling_rate_hz",
+        "shape": "scalar",
+        "required_level": "critical",
+        "unit_expected": "Hz"
+      },
+      "contexts": [
+        {
+          "field_instance_id": "sha256:<source_version_id|grid_key|polling_rate_hz|scalar>",
+          "context_kind": "scalar",
+          "ambiguity": {
+            "level": "low",
+            "score": 0.08,
+            "reasons": [
+              "single_source_only"
+            ]
+          },
+          "assertions": [
+            {
+              "assertion_id": "cand_item_polling_rate_hz_1",
+              "candidate_id": "cand_item_polling_rate_hz_1",
+              "value_raw": "8000",
+              "value_normalized": 8000,
+              "unit": "Hz",
+              "confidence": 0.97,
+              "target_match": {
+                "page_product_cluster_id": "cluster_main_product",
+                "target_match_score": 0.97,
+                "target_match_passed": true
+              },
+              "ambiguity": {
+                "level": "low",
+                "score": 0.08
+              },
+              "parse_score_by_key": {
+                "score": 0.98,
+                "suggested_start_rank": 1
+              },
+              "evidence_ref_ids": [
+                "e1"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "quality": {
+    "wrong_model": false,
+    "junk": false,
+    "blocked_reason": ""
+  },
+  "coverage_summary": {
+    "field_count": 1,
+    "fields": [
+      "polling_rate_hz"
+    ],
+    "required_coverage": "1/1",
+    "critical_coverage": "1/1",
+    "is_jackpot_candidate": true
+  },
+  "indexing_projection": {
+    "retrieval_ready": true,
+    "chunk_strategy": "hybrid",
+    "chunk_count": 12,
+    "embedding_ready_evidence_ids": [
+      "e1"
+    ],
+    "retrieval_priority_field_keys": [
+      "polling_rate_hz"
+    ]
+  },
+  "sql_projection": {
+    "source_registry_row": {
+      "source_id": "src_<id>",
+      "category": "mice",
+      "item_identifier": "mice-logitech-g-pro-x",
+      "product_id": "mice-logitech-g-pro-x",
+      "run_id": "20260220-xxxxxx",
+      "source_url": "https://example.com/product-page",
+      "source_host": "example.com",
+      "source_root_domain": "example.com",
+      "source_tier": 1,
+      "source_method": "dynamic_fetch",
+      "crawl_status": "fetched",
+      "http_status": 200,
+      "fetched_at": "2026-02-20T11:33:07.000Z"
+    },
+    "source_assertion_rows": [
+      {
+        "assertion_id": "cand_item_polling_rate_hz_1",
+        "source_id": "src_<id>",
+        "field_key": "polling_rate_hz",
+        "context_kind": "scalar",
+        "context_ref": null,
+        "item_field_state_id": 2122,
+        "component_value_id": null,
+        "list_value_id": null,
+        "enum_list_id": null,
+        "value_raw": "8000",
+        "value_normalized": 8000,
+        "unit": "Hz",
+        "candidate_id": "cand_item_polling_rate_hz_1",
+        "extraction_method": "network_json"
+      }
+    ],
+    "source_artifact_rows": [
+      {
+        "source_id": "src_<id>",
+        "artifact_type": "html",
+        "local_path": "runs/20260220-xxxxxx/raw/page.html",
+        "content_hash": "sha256:<html>",
+        "mime_type": "text/html",
+        "size_bytes": 155886,
+        "captured_at": "2026-02-20T11:33:00.000Z"
+      }
+    ],
+    "source_evidence_rows": [
+      {
+        "assertion_id": "cand_item_polling_rate_hz_1",
+        "evidence_url": "https://example.com/product-page",
+        "snippet_id": "s1",
+        "quote": "\"pollingRateHz\": 8000",
+        "method": "network_capture",
+        "tier": 1,
+        "retrieved_at": "2026-02-20T11:33:01.050Z"
+      }
+    ]
+  },
+  "visual_evidence": {
+    "store_original_images": true,
+    "retention_days": 30,
+    "llm_derivative_policy": {
+      "send_original_to_llm": false,
+      "preferred_variant": "review_sm",
+      "max_bytes_per_image": 512000,
+      "review_lg": {
+        "enabled": true,
+        "max_side_px": 1600,
+        "format": "webp",
+        "quality": 75
+      },
+      "review_sm": {
+        "enabled": true,
+        "max_side_px": 768,
+        "format": "webp",
+        "quality": 65
+      },
+      "region_crop": {
+        "enabled": true,
+        "max_side_px": 1024,
+        "format": "webp",
+        "quality": 70
+      }
+    },
+    "image_assets": {
+      "img1": {
+        "image_asset_id": "img1",
+        "asset_kind": "page_screenshot",
+        "source_surface": "screenshot_capture",
+        "candidate_source_type": "dom_img",
+        "candidate_context": {
+          "dom_path": "body > main > section.product-gallery img.hero",
+          "selector_hint": ".product-gallery img.hero",
+          "alt_text": "Logitech G Pro X Wireless black",
+          "nearby_text": "G PRO X Wireless Gaming Mouse",
+          "carousel_state": "active"
+        },
+        "artifact_id": "a_screenshot_01",
+        "content_hash": "sha256:<img-bytes>",
+        "perceptual_hash": "phash:<64bit>",
+        "mime_type": "image/png",
+        "width": 1920,
+        "height": 1080,
+        "size_bytes": 812390,
+        "storage_uri": "runs/20260220-xxxxxx/raw/page_screenshot.png",
+        "captured_at": "2026-02-20T11:33:03.000Z",
+        "target_match": {
+          "page_product_cluster_id": "cluster_main_product",
+          "target_match_score": 0.96,
+          "target_match_passed": true
+        },
+        "quality_gate": {
+          "quality_score": 0.91,
+          "quality_gate_passed": true,
+          "reject_reasons": []
+        },
+        "llm_variants": {
+          "review_lg": {
+            "storage_uri": "runs/20260220-xxxxxx/derived/page_screenshot.review_lg.webp",
+            "content_hash": "sha256:<img-review-lg>",
+            "mime_type": "image/webp",
+            "width": 1600,
+            "height": 900,
+            "size_bytes": 231442
+          },
+          "review_sm": {
+            "storage_uri": "runs/20260220-xxxxxx/derived/page_screenshot.review_sm.webp",
+            "content_hash": "sha256:<img-review-sm>",
+            "mime_type": "image/webp",
+            "width": 768,
+            "height": 432,
+            "size_bytes": 94220
+          },
+          "region_crop": {
+            "storage_uri": "runs/20260220-xxxxxx/derived/page_screenshot.region_crop.webp",
+            "content_hash": "sha256:<img-region-crop>",
+            "mime_type": "image/webp",
+            "width": 1024,
+            "height": 576,
+            "size_bytes": 121007
+          }
+        },
+        "preferred_llm_variant": "review_sm",
+        "page_context": {
+          "scroll_y": 0,
+          "viewport_width": 1920,
+          "viewport_height": 1080
+        }
+      }
+    },
+    "regions": {
+      "r1": {
+        "region_id": "r1",
+        "image_asset_id": "img1",
+        "bbox": [
+          320,
+          240,
+          980,
+          360
+        ],
+        "label": "model_badge",
+        "ocr_text": "G PRO X",
+        "ocr_confidence": 0.94
+      }
+    },
+    "model_variant_cues": [
+      {
+        "cue_id": "cue1",
+        "image_asset_id": "img1",
+        "region_id": "r1",
+        "cue_type": "model_text",
+        "value": "G PRO X",
+        "confidence": 0.94
+      }
+    ]
+  }
+}

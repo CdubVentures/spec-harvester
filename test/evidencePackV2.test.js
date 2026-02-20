@@ -30,6 +30,7 @@ test('buildEvidencePackV2 captures definition lists, label-value pairs, and targ
   });
 
   const types = new Set((pack.references || []).map((row) => String(row.type || '')));
+  assert.equal(types.has('readability_text'), true);
   assert.equal(types.has('definition'), true);
   assert.equal(types.has('kv'), true);
   assert.equal(types.has('window'), true);
@@ -39,6 +40,8 @@ test('buildEvidencePackV2 captures definition lists, label-value pairs, and targ
   assert.equal((pack.sources && typeof pack.sources === 'object'), true);
   assert.equal(typeof pack.sources?.example_com?.page_content_hash, 'string');
   assert.equal(pack.sources?.example_com?.page_content_hash?.startsWith('sha256:'), true);
+  assert.equal(typeof pack.meta?.article_extraction?.method, 'string');
+  assert.equal(typeof pack.meta?.article_extraction?.quality_score, 'number');
 });
 
 test('buildEvidencePackV2 emits snippet hashes and JSON-LD Product snippets', () => {
@@ -116,4 +119,38 @@ test('buildEvidencePackV2 binds deterministic candidates to snippet ids', () => 
   assert.equal(boundSnippet.type, 'deterministic_candidate');
   assert.equal(boundSnippet.candidate_fingerprint, fingerprint);
   assert.equal(boundSnippet.extraction_method, 'api_fetch');
+});
+
+test('buildEvidencePackV2 emits compact screenshot metadata without binary payload leakage', () => {
+  const pack = buildEvidencePackV2({
+    source: {
+      url: 'https://example.com/mouse',
+      host: 'example.com',
+      sourceId: 'example_source'
+    },
+    pageData: {
+      html: '<html><body><h2>Specifications</h2><table><tr><td>Weight</td><td>60 g</td></tr></table></body></html>',
+      networkResponses: [],
+      ldjsonBlocks: [],
+      embeddedState: {},
+      screenshot: {
+        kind: 'page',
+        format: 'jpeg',
+        width: 1920,
+        height: 1080,
+        bytes: Buffer.from('fake-binary-image-data')
+      }
+    },
+    adapterExtra: {},
+    config: {
+      llmMaxEvidenceChars: 6000
+    },
+    targetFields: ['weight']
+  });
+
+  const screenshotSnippet = (pack.snippets || []).find((row) => row.type === 'screenshot_capture');
+  assert.equal(Boolean(screenshotSnippet), true);
+  assert.equal(String(screenshotSnippet.text || '').includes('fake-binary-image-data'), false);
+  assert.equal(String(screenshotSnippet.text || '').includes('bytes=22'), true);
+  assert.equal(Boolean(pack.meta?.visual_artifacts?.screenshot_available), true);
 });

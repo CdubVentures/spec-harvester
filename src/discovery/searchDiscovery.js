@@ -336,16 +336,65 @@ function buildPlanOnlyResults({ categoryConfig, queries, variables, maxQueries =
   return planned;
 }
 
-function dedupeQueries(queries, limit) {
-  return [...new Set((queries || []).map((query) => String(query || '').trim()).filter(Boolean))]
-    .slice(0, Math.max(1, limit));
+function dedupeQueryRows(rows = [], limit = 24) {
+  const cap = Math.max(1, Number(limit || 24));
+  const out = [];
+  const rejectLog = [];
+  const seen = new Map();
+  for (const row of rows || []) {
+    const query = String(row?.query || row || '').trim();
+    const source = String(row?.source || 'unknown').trim() || 'unknown';
+    if (!query) {
+      rejectLog.push({
+        query: '',
+        source,
+        reason: 'empty_query',
+        stage: 'pre_execution_merge',
+        detail: ''
+      });
+      continue;
+    }
+    const normalized = query.toLowerCase();
+    if (seen.has(normalized)) {
+      const existing = out[seen.get(normalized)];
+      existing.sources = uniqueTokens([...(existing.sources || []), source], 8);
+      rejectLog.push({
+        query,
+        source,
+        reason: 'duplicate_query',
+        stage: 'pre_execution_merge',
+        detail: ''
+      });
+      continue;
+    }
+    if (out.length >= cap) {
+      rejectLog.push({
+        query,
+        source,
+        reason: 'max_query_cap',
+        stage: 'pre_execution_merge',
+        detail: `cap:${cap}`
+      });
+      continue;
+    }
+    out.push({
+      query,
+      sources: uniqueTokens([source], 8)
+    });
+    seen.set(normalized, out.length - 1);
+  }
+  return {
+    rows: out,
+    rejectLog
+  };
 }
 
-function prioritizeQueries(queries, variables = {}) {
+function prioritizeQueryRows(rows = [], variables = {}) {
   const brand = String(variables.brand || '').trim().toLowerCase();
   const model = String(variables.model || '').trim().toLowerCase();
   const brandToken = brand.replace(/\s+/g, '');
-  const ranked = [...(queries || [])].map((query) => {
+  const ranked = [...(rows || [])].map((row) => {
+    const query = String(row?.query || '').trim();
     const text = String(query || '').toLowerCase();
     let score = 0;
     if (text.includes('site:')) score += 6;
@@ -355,13 +404,159 @@ function prioritizeQueries(queries, variables = {}) {
     if (model && text.includes(model)) score += 2;
     if (/rtings|techpowerup/.test(text)) score += 1;
     return {
+      ...row,
       query,
       score
     };
   });
   return ranked
-    .sort((a, b) => b.score - a.score || a.query.localeCompare(b.query))
-    .map((row) => row.query);
+    .sort((a, b) => b.score - a.score || a.query.localeCompare(b.query));
+}
+
+function compactToken(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+function containsGuardToken(haystackLower = '', compactHaystack = '', token = '') {
+  const normalized = String(token || '').toLowerCase().trim();
+  if (!normalized) return false;
+  if (haystackLower.includes(normalized)) return true;
+  const compact = compactToken(normalized);
+  return compact ? compactHaystack.includes(compact) : false;
+}
+
+function extractDigitGroups(value = '') {
+  return [...new Set(String(value || '').toLowerCase().match(/\d{2,}/g) || [])];
+}
+
+function extractQueryModelLikeTokens(value = '') {
+  return [...new Set(
+    String(value || '')
+      .toLowerCase()
+      .split(/[^a-z0-9]+/g)
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 3 && /[a-z]/.test(token) && /\d/.test(token))
+  )];
+}
+
+function isLikelyUnitToken(token = '') {
+  const value = String(token || '').toLowerCase().trim();
+  if (!value) return false;
+  return /^(?:\d+k|\d+hz|\d+khz|\d+ghz|\d+mhz|\d+dpi|\d+cpi|\d+mm|\d+cm|\d+g|\d+kg|\d+ms|\d+s|\d+mah|\d+v|\d+mb|\d+gb)$/.test(value);
+}
+
+function buildIdentityQueryGuardContext(variables = {}, variantGuardTerms = []) {
+  const brandTokens = [...new Set(tokenize(variables.brand).map((token) => compactToken(token)).filter(Boolean))];
+  const modelTokens = [...new Set([
+    ...tokenize(variables.model),
+    ...tokenize(variables.variant)
+  ].map((token) => compactToken(token)).filter(Boolean))]
+    .filter((token) => !brandTokens.includes(token) && !GENERIC_MODEL_TOKENS.has(token));
+  const requiredDigitGroups = extractDigitGroups(
+    [variables.model, variables.variant].filter(Boolean).join(' ')
+  );
+  const allowedModelTokens = new Set();
+  for (const token of [...modelTokens, ...toArray(variantGuardTerms).map((value) => compactToken(value))]) {
+    const normalized = compactToken(token);
+    if (!normalized || !/[a-z]/.test(normalized) || !/\d/.test(normalized)) {
+      continue;
+    }
+    allowedModelTokens.add(normalized);
+    const trimLeftAlpha = normalized.replace(/^[a-z]+/, '');
+    const trimRightAlpha = normalized.replace(/[a-z]+$/, '');
+    if (trimLeftAlpha && trimLeftAlpha.length >= 2) {
+      allowedModelTokens.add(trimLeftAlpha);
+    }
+    if (trimRightAlpha && trimRightAlpha.length >= 2 && /[a-z]/.test(trimRightAlpha) && /\d/.test(trimRightAlpha)) {
+      allowedModelTokens.add(trimRightAlpha);
+    }
+  }
+  return {
+    brandTokens,
+    modelTokens,
+    requiredDigitGroups,
+    allowedModelTokens: [...allowedModelTokens]
+  };
+}
+
+function validateQueryAgainstIdentity(query = '', context = {}) {
+  const reasons = [];
+  const queryText = String(query || '').toLowerCase();
+  const compactQuery = compactToken(queryText);
+  const brandTokens = toArray(context.brandTokens);
+  const modelTokens = toArray(context.modelTokens);
+  const requiredDigitGroups = toArray(context.requiredDigitGroups);
+  const allowedModelTokens = new Set(toArray(context.allowedModelTokens).map((value) => compactToken(value)));
+
+  if (
+    brandTokens.length > 0
+    && !brandTokens.some((token) => containsGuardToken(queryText, compactQuery, token))
+  ) {
+    reasons.push('missing_brand_token');
+  }
+
+  for (const digits of requiredDigitGroups) {
+    if (!containsGuardToken(queryText, compactQuery, digits)) {
+      reasons.push(`missing_required_digit_group:${digits}`);
+    }
+  }
+
+  if (requiredDigitGroups.length === 0 && modelTokens.length > 0) {
+    const requiredModelTokens = modelTokens.filter((token) => token.length >= 4);
+    if (
+      requiredModelTokens.length > 0
+      && !requiredModelTokens.some((token) => containsGuardToken(queryText, compactQuery, token))
+    ) {
+      reasons.push('missing_model_token');
+    }
+  }
+
+  for (const token of extractQueryModelLikeTokens(queryText)) {
+    const normalized = compactToken(token);
+    if (!normalized || allowedModelTokens.has(normalized) || isLikelyUnitToken(token)) {
+      continue;
+    }
+    reasons.push(`foreign_model_token:${token}`);
+    if (reasons.length >= 6) {
+      break;
+    }
+  }
+
+  return {
+    accepted: reasons.length === 0,
+    reasons
+  };
+}
+
+function enforceIdentityQueryGuard({ rows = [], variables = {}, variantGuardTerms = [] } = {}) {
+  const context = buildIdentityQueryGuardContext(variables, variantGuardTerms);
+  const accepted = [];
+  const rejectLog = [];
+  for (const row of rows || []) {
+    const query = String(row?.query || '').trim();
+    if (!query) {
+      continue;
+    }
+    const result = validateQueryAgainstIdentity(query, context);
+    if (result.accepted) {
+      accepted.push(row);
+      continue;
+    }
+    rejectLog.push({
+      query,
+      source: toArray(row?.sources),
+      reason: result.reasons[0] || 'identity_guard_reject',
+      stage: 'pre_execution_guard',
+      detail: result.reasons.join('|')
+    });
+  }
+  return {
+    rows: accepted,
+    rejectLog,
+    guardContext: context
+  };
 }
 
 function toArray(value) {
@@ -685,10 +880,40 @@ export async function discoverCandidateSources({
       8
     )
   );
-  const queries = prioritizeQueries(dedupeQueries(
-    [...baseQueries, ...targetedQueries, ...llmQueries, ...toArray(uberSearchPlan?.queries), ...extraQueries],
-    Math.max(queryLimit, 6)
-  ), variables);
+  const queryCandidates = [
+    ...baseQueries.map((query) => ({ query, source: 'base_template' })),
+    ...targetedQueries.map((query) => ({ query, source: 'targeted' })),
+    ...llmQueries.map((query) => ({ query, source: 'llm' })),
+    ...toArray(uberSearchPlan?.queries).map((query) => ({ query, source: 'uber' })),
+    ...extraQueries.map((query) => ({ query, source: 'runtime_extra' }))
+  ];
+  const mergedQueryCap = Math.max(queryLimit, 6);
+  const mergedQueries = dedupeQueryRows(queryCandidates, mergedQueryCap);
+  const rankedQueries = prioritizeQueryRows(mergedQueries.rows, variables);
+  const guardedQueries = enforceIdentityQueryGuard({
+    rows: rankedQueries,
+    variables,
+    variantGuardTerms: toArray(searchProfileBase?.variant_guard_terms)
+  });
+  let queries = guardedQueries.rows.map((row) => String(row?.query || '').trim()).filter(Boolean);
+  if (!queries.length && rankedQueries.length > 0) {
+    const fallback = String(rankedQueries[0]?.query || '').trim();
+    if (fallback) {
+      queries = [fallback];
+      guardedQueries.rejectLog.push({
+        query: fallback,
+        source: toArray(rankedQueries[0]?.sources),
+        reason: 'guard_fallback_retained',
+        stage: 'pre_execution_guard',
+        detail: 'all_queries_rejected'
+      });
+    }
+  }
+  const queryRejectLogCombined = [
+    ...toArray(searchProfileBase?.query_reject_log),
+    ...toArray(mergedQueries.rejectLog),
+    ...toArray(guardedQueries.rejectLog)
+  ].slice(0, 300);
   const searchProfileKeys = buildSearchProfileKeys({
     storage,
     config,
@@ -705,6 +930,14 @@ export async function discoverCandidateSources({
     status: 'planned',
     provider: config.searchProvider,
     llm_queries: llmQueries,
+    query_reject_log: queryRejectLogCombined,
+    query_guard: {
+      brand_tokens: toArray(guardedQueries.guardContext?.brandTokens),
+      model_tokens: toArray(guardedQueries.guardContext?.modelTokens),
+      required_digit_groups: toArray(guardedQueries.guardContext?.requiredDigitGroups),
+      accepted_query_count: queries.length,
+      rejected_query_count: toArray(guardedQueries.rejectLog).length
+    },
     selected_queries: queries.slice(0, queryLimit),
     selected_query_count: Math.min(queryLimit, queries.length),
     key: searchProfileKeys.inputKey,
@@ -1425,10 +1658,13 @@ export async function discoverCandidateSources({
     llm_serp_triage: llmTriageEnabled,
     llm_serp_triage_model: String(config.llmModelTriage || config.cortexModelRerankFast || config.cortexModelSearchFast || config.llmModelFast || '').trim(),
     query_count: queries.length,
+    query_reject_count: toArray(searchProfileFinal?.query_reject_log).length,
     discovered_count: discovered.length,
     approved_count: approvedOnly.length,
     candidate_count: candidateOnly.length,
     queries,
+    query_guard: searchProfileFinal.query_guard || null,
+    query_reject_log: toArray(searchProfileFinal.query_reject_log).slice(0, 200),
     llm_queries: llmQueries,
     search_profile_key: searchProfileKeys.inputKey,
     search_profile_run_key: searchProfileKeys.runKey,

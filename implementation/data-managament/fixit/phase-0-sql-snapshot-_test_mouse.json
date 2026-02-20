@@ -1,0 +1,2025 @@
+{
+  "generatedAt": "2026-02-19T08:29:09.418Z",
+  "dbPath": "C:\\Users\\Chris\\Desktop\\Spec Factory\\.specfactory_tmp\\_test_mouse\\spec.sqlite",
+  "schema": {
+    "tables": [
+      {
+        "name": "artifacts",
+        "sql": "CREATE TABLE artifacts (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  category TEXT NOT NULL, product_id TEXT, run_id TEXT,\n  artifact_type TEXT NOT NULL, url TEXT,\n  local_path TEXT, content_hash TEXT, mime_type TEXT, size_bytes INTEGER,\n  fetched_at TEXT, created_at TEXT DEFAULT (datetime('now'))\n)"
+      },
+      {
+        "name": "audit_log",
+        "sql": "CREATE TABLE audit_log (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  event_at TEXT DEFAULT (datetime('now')),\n  category TEXT, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL,\n  field_changed TEXT, old_value TEXT, new_value TEXT,\n  change_type TEXT DEFAULT 'update',\n  actor_type TEXT DEFAULT 'system', actor_id TEXT, run_id TEXT, note TEXT,\n  product_id TEXT, component_type TEXT, component_name TEXT, field_key TEXT\n)"
+      },
+      {
+        "name": "billing_entries",
+        "sql": "CREATE TABLE billing_entries (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  ts TEXT NOT NULL,\n  month TEXT NOT NULL,\n  day TEXT NOT NULL,\n  provider TEXT NOT NULL DEFAULT 'unknown',\n  model TEXT NOT NULL DEFAULT 'unknown',\n  category TEXT DEFAULT '',\n  product_id TEXT DEFAULT '',\n  run_id TEXT DEFAULT '',\n  round INTEGER DEFAULT 0,\n  prompt_tokens INTEGER DEFAULT 0,\n  completion_tokens INTEGER DEFAULT 0,\n  cached_prompt_tokens INTEGER DEFAULT 0,\n  total_tokens INTEGER DEFAULT 0,\n  cost_usd REAL DEFAULT 0,\n  reason TEXT DEFAULT 'extract',\n  host TEXT DEFAULT '',\n  url_count INTEGER DEFAULT 0,\n  evidence_chars INTEGER DEFAULT 0,\n  estimated_usage INTEGER DEFAULT 0,\n  meta TEXT DEFAULT '{}'\n)"
+      },
+      {
+        "name": "brands",
+        "sql": "CREATE TABLE brands (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  brand_key TEXT NOT NULL, canonical_name TEXT NOT NULL,\n  aliases TEXT, categories TEXT, website TEXT, identifier TEXT,\n  created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')),\n  UNIQUE(brand_key)\n)"
+      },
+      {
+        "name": "candidate_reviews",
+        "sql": "CREATE TABLE candidate_reviews (\n  review_id INTEGER PRIMARY KEY AUTOINCREMENT,\n  candidate_id TEXT NOT NULL REFERENCES candidates(candidate_id),\n  context_type TEXT NOT NULL CHECK(context_type IN ('item', 'component', 'list')),\n  context_id TEXT NOT NULL,\n  human_accepted INTEGER DEFAULT 0,\n  human_accepted_at TEXT,\n  ai_review_status TEXT DEFAULT 'not_run'\n    CHECK(ai_review_status IN ('not_run', 'pending', 'accepted', 'rejected', 'unknown')),\n  ai_confidence REAL,\n  ai_reason TEXT,\n  ai_reviewed_at TEXT,\n  ai_review_model TEXT,\n  human_override_ai INTEGER DEFAULT 0,\n  human_override_ai_at TEXT,\n  created_at TEXT DEFAULT (datetime('now')),\n  updated_at TEXT DEFAULT (datetime('now')),\n  UNIQUE(candidate_id, context_type, context_id)\n)"
+      },
+      {
+        "name": "candidates",
+        "sql": "CREATE TABLE candidates (\n  candidate_id TEXT PRIMARY KEY,\n  category TEXT NOT NULL,\n  product_id TEXT NOT NULL,\n  field_key TEXT NOT NULL,\n  value TEXT,\n  normalized_value TEXT,\n  score REAL DEFAULT 0,\n  rank INTEGER,\n  source_url TEXT,\n  source_host TEXT,\n  source_root_domain TEXT,\n  source_tier INTEGER,\n  source_method TEXT,\n  approved_domain INTEGER DEFAULT 0,\n  snippet_id TEXT,\n  snippet_hash TEXT,\n  snippet_text TEXT,\n  quote TEXT,\n  quote_span_start INTEGER,\n  quote_span_end INTEGER,\n  evidence_url TEXT,\n  evidence_retrieved_at TEXT,\n  is_component_field INTEGER DEFAULT 0,\n  component_type TEXT,\n  is_list_field INTEGER DEFAULT 0,\n  llm_extract_model TEXT,\n  extracted_at TEXT NOT NULL DEFAULT (datetime('now')),\n  run_id TEXT\n)"
+      },
+      {
+        "name": "category_brain",
+        "sql": "CREATE TABLE category_brain (\n  category TEXT NOT NULL,\n  artifact_name TEXT NOT NULL,\n  payload TEXT NOT NULL,\n  updated_at TEXT NOT NULL,\n  PRIMARY KEY (category, artifact_name)\n)"
+      },
+      {
+        "name": "component_aliases",
+        "sql": "CREATE TABLE component_aliases (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  component_id INTEGER NOT NULL REFERENCES component_identity(id),\n  alias TEXT NOT NULL,\n  source TEXT DEFAULT 'component_db',\n  created_at TEXT DEFAULT (datetime('now')),\n  UNIQUE(component_id, alias)\n)"
+      },
+      {
+        "name": "component_identity",
+        "sql": "CREATE TABLE component_identity (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  category TEXT NOT NULL,\n  component_type TEXT NOT NULL,\n  canonical_name TEXT NOT NULL,\n  maker TEXT DEFAULT '',\n  links TEXT,\n  source TEXT DEFAULT 'component_db',\n  created_at TEXT DEFAULT (datetime('now')),\n  updated_at TEXT DEFAULT (datetime('now')), review_status TEXT DEFAULT 'pending', aliases_overridden INTEGER DEFAULT 0,\n  UNIQUE(category, component_type, canonical_name, maker)\n)"
+      },
+      {
+        "name": "component_review_queue",
+        "sql": "CREATE TABLE component_review_queue (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  review_id TEXT NOT NULL,\n  category TEXT NOT NULL, component_type TEXT NOT NULL,\n  field_key TEXT, raw_query TEXT, matched_component TEXT,\n  match_type TEXT, name_score REAL, property_score REAL, combined_score REAL,\n  alternatives TEXT, product_id TEXT, run_id TEXT,\n  status TEXT DEFAULT 'pending_ai',\n  ai_decision TEXT, ai_suggested_name TEXT, ai_suggested_maker TEXT, ai_reviewed_at TEXT,\n  product_attributes TEXT, reasoning_note TEXT,\n  human_reviewed_at TEXT,\n  created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')),\n  UNIQUE(review_id)\n)"
+      },
+      {
+        "name": "component_values",
+        "sql": "CREATE TABLE component_values (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  category TEXT NOT NULL,\n  component_type TEXT NOT NULL,\n  component_name TEXT NOT NULL,\n  component_maker TEXT DEFAULT '',\n  property_key TEXT NOT NULL,\n  value TEXT,\n  confidence REAL DEFAULT 1.0,\n  variance_policy TEXT,\n  source TEXT DEFAULT 'component_db',\n  accepted_candidate_id TEXT,\n  needs_review INTEGER DEFAULT 0,\n  overridden INTEGER DEFAULT 0,\n  updated_at TEXT DEFAULT (datetime('now')), constraints TEXT,\n  UNIQUE(category, component_type, component_name, component_maker, property_key)\n)"
+      },
+      {
+        "name": "curation_suggestions",
+        "sql": "CREATE TABLE curation_suggestions (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  suggestion_id TEXT NOT NULL,\n  category TEXT NOT NULL, suggestion_type TEXT NOT NULL,\n  field_key TEXT, component_type TEXT,\n  value TEXT NOT NULL, normalized_value TEXT,\n  status TEXT DEFAULT 'pending',\n  source TEXT, product_id TEXT, run_id TEXT,\n  first_seen_at TEXT DEFAULT (datetime('now')), last_seen_at TEXT,\n  reviewed_by TEXT, reviewed_at TEXT, review_note TEXT,\n  created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')),\n  UNIQUE(category, suggestion_type, field_key, value)\n)"
+      },
+      {
+        "name": "enum_lists",
+        "sql": "CREATE TABLE enum_lists (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  category TEXT NOT NULL,\n  field_key TEXT NOT NULL,\n  source TEXT DEFAULT 'field_rules',\n  created_at TEXT DEFAULT (datetime('now')),\n  updated_at TEXT DEFAULT (datetime('now')),\n  UNIQUE(category, field_key)\n)"
+      },
+      {
+        "name": "item_component_links",
+        "sql": "CREATE TABLE item_component_links (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  category TEXT NOT NULL,\n  product_id TEXT NOT NULL,\n  field_key TEXT NOT NULL,\n  component_type TEXT NOT NULL,\n  component_name TEXT NOT NULL,\n  component_maker TEXT DEFAULT '',\n  match_type TEXT,\n  match_score REAL,\n  created_at TEXT DEFAULT (datetime('now')),\n  updated_at TEXT DEFAULT (datetime('now')),\n  UNIQUE(category, product_id, field_key)\n)"
+      },
+      {
+        "name": "item_field_state",
+        "sql": "CREATE TABLE item_field_state (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  category TEXT NOT NULL,\n  product_id TEXT NOT NULL,\n  field_key TEXT NOT NULL,\n  value TEXT,\n  confidence REAL DEFAULT 0,\n  source TEXT DEFAULT 'pipeline',\n  accepted_candidate_id TEXT,\n  overridden INTEGER DEFAULT 0,\n  needs_ai_review INTEGER DEFAULT 0,\n  ai_review_complete INTEGER DEFAULT 0,\n  updated_at TEXT DEFAULT (datetime('now')),\n  UNIQUE(category, product_id, field_key)\n)"
+      },
+      {
+        "name": "item_list_links",
+        "sql": "CREATE TABLE item_list_links (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  category TEXT NOT NULL,\n  product_id TEXT NOT NULL,\n  field_key TEXT NOT NULL,\n  list_value_id INTEGER REFERENCES list_values(id),\n  created_at TEXT DEFAULT (datetime('now')),\n  UNIQUE(category, product_id, field_key, list_value_id)\n)"
+      },
+      {
+        "name": "key_review_audit",
+        "sql": "CREATE TABLE key_review_audit (\n  event_id INTEGER PRIMARY KEY AUTOINCREMENT,\n  key_review_state_id INTEGER NOT NULL REFERENCES key_review_state(id),\n  event_type TEXT NOT NULL,\n  actor_type TEXT NOT NULL,\n  actor_id TEXT,\n  old_value TEXT,\n  new_value TEXT,\n  reason TEXT,\n  created_at TEXT DEFAULT (datetime('now'))\n)"
+      },
+      {
+        "name": "key_review_run_sources",
+        "sql": "CREATE TABLE key_review_run_sources (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  key_review_run_id INTEGER NOT NULL REFERENCES key_review_runs(run_id),\n  assertion_id TEXT NOT NULL REFERENCES source_assertions(assertion_id),\n  packet_role TEXT,\n  position INTEGER,\n  created_at TEXT DEFAULT (datetime('now'))\n)"
+      },
+      {
+        "name": "key_review_runs",
+        "sql": "CREATE TABLE key_review_runs (\n  run_id INTEGER PRIMARY KEY AUTOINCREMENT,\n  key_review_state_id INTEGER NOT NULL REFERENCES key_review_state(id),\n  stage TEXT NOT NULL,\n  status TEXT NOT NULL,\n  provider TEXT,\n  model_used TEXT,\n  prompt_hash TEXT,\n  response_schema_version TEXT,\n  input_tokens INTEGER,\n  output_tokens INTEGER,\n  latency_ms INTEGER,\n  cost_usd REAL,\n  error TEXT,\n  started_at TEXT,\n  finished_at TEXT,\n  created_at TEXT DEFAULT (datetime('now'))\n)"
+      },
+      {
+        "name": "key_review_state",
+        "sql": "CREATE TABLE key_review_state (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  category TEXT NOT NULL,\n  target_kind TEXT NOT NULL CHECK(target_kind IN ('grid_key','enum_key','component_key')),\n  item_identifier TEXT,\n  field_key TEXT NOT NULL,\n  enum_value_norm TEXT,\n  component_identifier TEXT,\n  property_key TEXT,\n\n  required_level TEXT,\n  availability TEXT,\n  difficulty TEXT,\n  effort INTEGER,\n  ai_mode TEXT,\n  parse_template TEXT,\n  evidence_policy TEXT,\n  min_evidence_refs_effective INTEGER DEFAULT 1,\n  min_distinct_sources_required INTEGER DEFAULT 1,\n\n  send_mode TEXT CHECK(send_mode IN ('single_source_data','all_source_data')),\n  component_send_mode TEXT CHECK(component_send_mode IN ('component_values','component_values_prime_sources')),\n  list_send_mode TEXT CHECK(list_send_mode IN ('list_values','list_values_prime_sources')),\n\n  selected_value TEXT,\n  selected_candidate_id TEXT,\n  confidence_score REAL DEFAULT 0,\n  confidence_level TEXT,\n  flagged_at TEXT,\n  resolved_at TEXT,\n\n  ai_confirm_primary_status TEXT,\n  ai_confirm_primary_confidence REAL,\n  ai_confirm_primary_at TEXT,\n  ai_confirm_primary_interrupted INTEGER DEFAULT 0,\n  ai_confirm_primary_error TEXT,\n  ai_confirm_shared_status TEXT,\n  ai_confirm_shared_confidence REAL,\n  ai_confirm_shared_at TEXT,\n  ai_confirm_shared_interrupted INTEGER DEFAULT 0,\n  ai_confirm_shared_error TEXT,\n\n  user_accept_primary_status TEXT,\n  user_accept_primary_at TEXT,\n  user_accept_primary_by TEXT,\n  user_accept_shared_status TEXT,\n  user_accept_shared_at TEXT,\n  user_accept_shared_by TEXT,\n\n  user_override_ai_primary INTEGER DEFAULT 0,\n  user_override_ai_primary_at TEXT,\n  user_override_ai_primary_reason TEXT,\n  user_override_ai_shared INTEGER DEFAULT 0,\n  user_override_ai_shared_at TEXT,\n  user_override_ai_shared_reason TEXT,\n\n  created_at TEXT DEFAULT (datetime('now')),\n  updated_at TEXT DEFAULT (datetime('now'))\n)"
+      },
+      {
+        "name": "learning_profiles",
+        "sql": "CREATE TABLE learning_profiles (\n  profile_id TEXT PRIMARY KEY,\n  category TEXT NOT NULL,\n  brand TEXT DEFAULT '',\n  model TEXT DEFAULT '',\n  variant TEXT DEFAULT '',\n  runs_total INTEGER DEFAULT 0,\n  validated_runs INTEGER DEFAULT 0,\n  validated INTEGER DEFAULT 0,\n  unknown_field_rate REAL DEFAULT 0,\n  unknown_field_rate_avg REAL DEFAULT 0,\n  parser_health_avg REAL DEFAULT 0,\n  preferred_urls TEXT DEFAULT '[]',\n  feedback_urls TEXT DEFAULT '[]',\n  uncertain_fields TEXT DEFAULT '[]',\n  host_stats TEXT DEFAULT '[]',\n  critical_fields_below TEXT DEFAULT '[]',\n  last_run TEXT DEFAULT '{}',\n  parser_health TEXT DEFAULT '{}',\n  updated_at TEXT NOT NULL\n)"
+      },
+      {
+        "name": "list_values",
+        "sql": "CREATE TABLE list_values (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  category TEXT NOT NULL,\n  field_key TEXT NOT NULL,\n  value TEXT NOT NULL,\n  normalized_value TEXT,\n  source TEXT DEFAULT 'known_values',\n  accepted_candidate_id TEXT,\n  enum_policy TEXT,\n  needs_review INTEGER DEFAULT 0,\n  overridden INTEGER DEFAULT 0,\n  created_at TEXT DEFAULT (datetime('now')),\n  updated_at TEXT DEFAULT (datetime('now')), source_timestamp TEXT, list_id INTEGER REFERENCES enum_lists(id),\n  UNIQUE(category, field_key, value)\n)"
+      },
+      {
+        "name": "llm_cache",
+        "sql": "CREATE TABLE llm_cache (\n  cache_key TEXT PRIMARY KEY,\n  response TEXT NOT NULL,\n  timestamp INTEGER NOT NULL,\n  ttl INTEGER NOT NULL\n)"
+      },
+      {
+        "name": "llm_route_matrix",
+        "sql": "CREATE TABLE llm_route_matrix (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  category TEXT NOT NULL,\n  scope TEXT NOT NULL CHECK(scope IN ('field', 'component', 'list')),\n  route_key TEXT NOT NULL,\n  required_level TEXT NOT NULL,\n  difficulty TEXT NOT NULL,\n  availability TEXT NOT NULL,\n  effort INTEGER NOT NULL DEFAULT 3,\n  effort_band TEXT NOT NULL DEFAULT '1-3',\n  single_source_data INTEGER NOT NULL DEFAULT 1,\n  all_source_data INTEGER NOT NULL DEFAULT 0,\n  model_ladder_today TEXT NOT NULL,\n  all_sources_confidence_repatch INTEGER NOT NULL DEFAULT 1,\n  max_tokens INTEGER NOT NULL DEFAULT 4096,\n  studio_key_navigation_sent_in_extract_review INTEGER NOT NULL DEFAULT 1,\n  studio_contract_rules_sent_in_extract_review INTEGER NOT NULL DEFAULT 1,\n  studio_extraction_guidance_sent_in_extract_review INTEGER NOT NULL DEFAULT 1,\n  studio_tooltip_or_description_sent_when_present INTEGER NOT NULL DEFAULT 1,\n  studio_enum_options_sent_when_present INTEGER NOT NULL DEFAULT 1,\n  studio_component_variance_constraints_sent_in_component_review INTEGER NOT NULL DEFAULT 1,\n  studio_parse_template_sent_direct_in_extract_review INTEGER NOT NULL DEFAULT 1,\n  studio_ai_mode_difficulty_effort_sent_direct_in_extract_review INTEGER NOT NULL DEFAULT 1,\n  studio_required_level_sent_in_extract_review INTEGER NOT NULL DEFAULT 1,\n  studio_component_entity_set_sent_when_component_field INTEGER NOT NULL DEFAULT 1,\n  studio_evidence_policy_sent_direct_in_extract_review INTEGER NOT NULL DEFAULT 1,\n  studio_variance_policy_sent_in_component_review INTEGER NOT NULL DEFAULT 1,\n  studio_constraints_sent_in_component_review INTEGER NOT NULL DEFAULT 1,\n  studio_send_booleans_prompted_to_model INTEGER NOT NULL DEFAULT 0,\n  scalar_linked_send TEXT NOT NULL DEFAULT 'scalar value + prime sources',\n  component_values_send TEXT NOT NULL DEFAULT 'component values + prime sources',\n  list_values_send TEXT NOT NULL DEFAULT 'list values prime sources',\n  llm_output_min_evidence_refs_required INTEGER NOT NULL DEFAULT 1,\n  insufficient_evidence_action TEXT NOT NULL DEFAULT 'threshold_unmet',\n  created_at TEXT DEFAULT (datetime('now')),\n  updated_at TEXT DEFAULT (datetime('now')), enable_websearch INTEGER DEFAULT 1,\n  UNIQUE(category, route_key)\n)"
+      },
+      {
+        "name": "product_queue",
+        "sql": "CREATE TABLE product_queue (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  category TEXT NOT NULL, product_id TEXT NOT NULL,\n  s3key TEXT DEFAULT '', status TEXT DEFAULT 'pending',\n  priority INTEGER DEFAULT 3, attempts_total INTEGER DEFAULT 0,\n  retry_count INTEGER DEFAULT 0, max_attempts INTEGER DEFAULT 3,\n  next_retry_at TEXT, last_run_id TEXT,\n  cost_usd_total REAL DEFAULT 0, rounds_completed INTEGER DEFAULT 0,\n  next_action_hint TEXT, last_urls_attempted TEXT,\n  last_error TEXT, last_started_at TEXT, last_completed_at TEXT,\n  dirty_flags TEXT, last_summary TEXT,\n  created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')),\n  UNIQUE(category, product_id)\n)"
+      },
+      {
+        "name": "product_runs",
+        "sql": "CREATE TABLE product_runs (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  category TEXT NOT NULL, product_id TEXT NOT NULL, run_id TEXT NOT NULL,\n  is_latest INTEGER DEFAULT 1,\n  summary_json TEXT, validated INTEGER DEFAULT 0, confidence REAL DEFAULT 0,\n  cost_usd_run REAL DEFAULT 0, sources_attempted INTEGER DEFAULT 0,\n  run_at TEXT DEFAULT (datetime('now')),\n  UNIQUE(category, product_id, run_id)\n)"
+      },
+      {
+        "name": "products",
+        "sql": "CREATE TABLE products (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  category TEXT NOT NULL, product_id TEXT NOT NULL,\n  brand TEXT DEFAULT '', model TEXT DEFAULT '', variant TEXT DEFAULT '',\n  status TEXT DEFAULT 'active', seed_urls TEXT, identifier TEXT,\n  created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')),\n  UNIQUE(category, product_id)\n)"
+      },
+      {
+        "name": "runtime_events",
+        "sql": "CREATE TABLE runtime_events (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  ts TEXT NOT NULL,\n  level TEXT DEFAULT 'info',\n  event TEXT NOT NULL,\n  category TEXT DEFAULT '',\n  product_id TEXT DEFAULT '',\n  run_id TEXT DEFAULT '',\n  data TEXT DEFAULT '{}'\n)"
+      },
+      {
+        "name": "source_artifacts",
+        "sql": "CREATE TABLE source_artifacts (\n  artifact_id INTEGER PRIMARY KEY AUTOINCREMENT,\n  source_id TEXT NOT NULL REFERENCES source_registry(source_id),\n  artifact_type TEXT NOT NULL,\n  local_path TEXT NOT NULL,\n  content_hash TEXT,\n  mime_type TEXT,\n  size_bytes INTEGER,\n  captured_at TEXT DEFAULT (datetime('now'))\n)"
+      },
+      {
+        "name": "source_assertions",
+        "sql": "CREATE TABLE source_assertions (\n  assertion_id TEXT PRIMARY KEY,\n  source_id TEXT NOT NULL REFERENCES source_registry(source_id),\n  field_key TEXT NOT NULL,\n  context_kind TEXT NOT NULL CHECK(context_kind IN ('scalar','component','list')),\n  context_ref TEXT,\n  value_raw TEXT,\n  value_normalized TEXT,\n  unit TEXT,\n  candidate_id TEXT,\n  extraction_method TEXT,\n  created_at TEXT DEFAULT (datetime('now')),\n  updated_at TEXT DEFAULT (datetime('now'))\n, item_field_state_id INTEGER REFERENCES item_field_state(id), component_value_id INTEGER REFERENCES component_values(id), list_value_id INTEGER REFERENCES list_values(id), enum_list_id INTEGER REFERENCES enum_lists(id))"
+      },
+      {
+        "name": "source_corpus",
+        "sql": "CREATE TABLE source_corpus (\n  url TEXT PRIMARY KEY,\n  category TEXT NOT NULL,\n  host TEXT DEFAULT '',\n  root_domain TEXT DEFAULT '',\n  path TEXT DEFAULT '',\n  title TEXT DEFAULT '',\n  snippet TEXT DEFAULT '',\n  tier INTEGER DEFAULT 99,\n  role TEXT DEFAULT '',\n  fields TEXT DEFAULT '[]',\n  methods TEXT DEFAULT '[]',\n  identity_match INTEGER DEFAULT 0,\n  approved_domain INTEGER DEFAULT 0,\n  brand TEXT DEFAULT '',\n  model_name TEXT DEFAULT '',\n  variant TEXT DEFAULT '',\n  first_seen_at TEXT,\n  last_seen_at TEXT\n)"
+      },
+      {
+        "name": "source_evidence_refs",
+        "sql": "CREATE TABLE source_evidence_refs (\n  evidence_ref_id INTEGER PRIMARY KEY AUTOINCREMENT,\n  assertion_id TEXT NOT NULL REFERENCES source_assertions(assertion_id),\n  evidence_url TEXT,\n  snippet_id TEXT,\n  quote TEXT,\n  method TEXT,\n  tier INTEGER,\n  retrieved_at TEXT,\n  created_at TEXT DEFAULT (datetime('now'))\n)"
+      },
+      {
+        "name": "source_intel_brands",
+        "sql": "CREATE TABLE source_intel_brands (\n  root_domain TEXT NOT NULL,\n  brand_key TEXT NOT NULL,\n  brand TEXT DEFAULT '',\n  attempts INTEGER DEFAULT 0,\n  http_ok_count INTEGER DEFAULT 0,\n  identity_match_count INTEGER DEFAULT 0,\n  major_anchor_conflict_count INTEGER DEFAULT 0,\n  fields_contributed_count INTEGER DEFAULT 0,\n  fields_accepted_count INTEGER DEFAULT 0,\n  accepted_critical_fields_count INTEGER DEFAULT 0,\n  products_seen INTEGER DEFAULT 0,\n  recent_products TEXT DEFAULT '[]',\n  per_field_helpfulness TEXT DEFAULT '{}',\n  extra_stats TEXT DEFAULT '{}',\n  last_seen_at TEXT,\n  PRIMARY KEY (root_domain, brand_key)\n)"
+      },
+      {
+        "name": "source_intel_domains",
+        "sql": "CREATE TABLE source_intel_domains (\n  root_domain TEXT PRIMARY KEY,\n  category TEXT NOT NULL,\n  attempts INTEGER DEFAULT 0,\n  http_ok_count INTEGER DEFAULT 0,\n  identity_match_count INTEGER DEFAULT 0,\n  major_anchor_conflict_count INTEGER DEFAULT 0,\n  fields_contributed_count INTEGER DEFAULT 0,\n  fields_accepted_count INTEGER DEFAULT 0,\n  accepted_critical_fields_count INTEGER DEFAULT 0,\n  products_seen INTEGER DEFAULT 0,\n  approved_attempts INTEGER DEFAULT 0,\n  candidate_attempts INTEGER DEFAULT 0,\n  parser_runs INTEGER DEFAULT 0,\n  parser_success_count INTEGER DEFAULT 0,\n  parser_health_score_total REAL DEFAULT 0,\n  endpoint_signal_count INTEGER DEFAULT 0,\n  endpoint_signal_score_total REAL DEFAULT 0,\n  planner_score REAL DEFAULT 0,\n  field_reward_strength REAL DEFAULT 0,\n  recent_products TEXT DEFAULT '[]',\n  per_field_helpfulness TEXT DEFAULT '{}',\n  fingerprint_counts TEXT DEFAULT '{}',\n  extra_stats TEXT DEFAULT '{}',\n  last_seen_at TEXT,\n  updated_at TEXT\n)"
+      },
+      {
+        "name": "source_intel_field_rewards",
+        "sql": "CREATE TABLE source_intel_field_rewards (\n  root_domain TEXT NOT NULL,\n  scope TEXT NOT NULL DEFAULT 'domain',\n  scope_key TEXT NOT NULL DEFAULT '',\n  field TEXT NOT NULL,\n  method TEXT NOT NULL DEFAULT 'unknown',\n  seen_count REAL DEFAULT 0,\n  success_count REAL DEFAULT 0,\n  fail_count REAL DEFAULT 0,\n  contradiction_count REAL DEFAULT 0,\n  success_rate REAL DEFAULT 0,\n  contradiction_rate REAL DEFAULT 0,\n  reward_score REAL DEFAULT 0,\n  last_seen_at TEXT,\n  last_decay_at TEXT,\n  PRIMARY KEY (root_domain, scope, scope_key, field, method)\n)"
+      },
+      {
+        "name": "source_intel_paths",
+        "sql": "CREATE TABLE source_intel_paths (\n  root_domain TEXT NOT NULL,\n  path TEXT NOT NULL,\n  attempts INTEGER DEFAULT 0,\n  http_ok_count INTEGER DEFAULT 0,\n  identity_match_count INTEGER DEFAULT 0,\n  major_anchor_conflict_count INTEGER DEFAULT 0,\n  fields_contributed_count INTEGER DEFAULT 0,\n  fields_accepted_count INTEGER DEFAULT 0,\n  accepted_critical_fields_count INTEGER DEFAULT 0,\n  products_seen INTEGER DEFAULT 0,\n  recent_products TEXT DEFAULT '[]',\n  per_field_helpfulness TEXT DEFAULT '{}',\n  extra_stats TEXT DEFAULT '{}',\n  last_seen_at TEXT,\n  PRIMARY KEY (root_domain, path)\n)"
+      },
+      {
+        "name": "source_registry",
+        "sql": "CREATE TABLE source_registry (\n  source_id TEXT PRIMARY KEY,\n  category TEXT NOT NULL,\n  item_identifier TEXT NOT NULL,\n  product_id TEXT,\n  run_id TEXT,\n  source_url TEXT NOT NULL,\n  source_host TEXT,\n  source_root_domain TEXT,\n  source_tier INTEGER,\n  source_method TEXT,\n  crawl_status TEXT DEFAULT 'fetched',\n  http_status INTEGER,\n  fetched_at TEXT,\n  created_at TEXT DEFAULT (datetime('now')),\n  updated_at TEXT DEFAULT (datetime('now'))\n)"
+      }
+    ],
+    "indexes": [
+      {
+        "name": "idx_art_product",
+        "tbl_name": "artifacts",
+        "sql": "CREATE INDEX idx_art_product ON artifacts(category, product_id)"
+      },
+      {
+        "name": "idx_audit_entity",
+        "tbl_name": "audit_log",
+        "sql": "CREATE INDEX idx_audit_entity ON audit_log(entity_type, entity_id)"
+      },
+      {
+        "name": "idx_be_day",
+        "tbl_name": "billing_entries",
+        "sql": "CREATE INDEX idx_be_day ON billing_entries(day)"
+      },
+      {
+        "name": "idx_be_month",
+        "tbl_name": "billing_entries",
+        "sql": "CREATE INDEX idx_be_month ON billing_entries(month)"
+      },
+      {
+        "name": "idx_be_product",
+        "tbl_name": "billing_entries",
+        "sql": "CREATE INDEX idx_be_product ON billing_entries(product_id)"
+      },
+      {
+        "name": "idx_rev_candidate",
+        "tbl_name": "candidate_reviews",
+        "sql": "CREATE INDEX idx_rev_candidate ON candidate_reviews(candidate_id)"
+      },
+      {
+        "name": "idx_rev_context",
+        "tbl_name": "candidate_reviews",
+        "sql": "CREATE INDEX idx_rev_context ON candidate_reviews(context_type, context_id)"
+      },
+      {
+        "name": "idx_cand_component",
+        "tbl_name": "candidates",
+        "sql": "CREATE INDEX idx_cand_component ON candidates(component_type) WHERE component_type IS NOT NULL"
+      },
+      {
+        "name": "idx_cand_field_value",
+        "tbl_name": "candidates",
+        "sql": "CREATE INDEX idx_cand_field_value ON candidates(field_key, normalized_value)"
+      },
+      {
+        "name": "idx_cand_product_field",
+        "tbl_name": "candidates",
+        "sql": "CREATE INDEX idx_cand_product_field ON candidates(product_id, field_key)"
+      },
+      {
+        "name": "idx_ca_alias",
+        "tbl_name": "component_aliases",
+        "sql": "CREATE INDEX idx_ca_alias ON component_aliases(alias)"
+      },
+      {
+        "name": "idx_crq_category",
+        "tbl_name": "component_review_queue",
+        "sql": "CREATE INDEX idx_crq_category ON component_review_queue(category, component_type, status)"
+      },
+      {
+        "name": "idx_cv_type_name",
+        "tbl_name": "component_values",
+        "sql": "CREATE INDEX idx_cv_type_name ON component_values(component_type, component_name)"
+      },
+      {
+        "name": "idx_cs_category",
+        "tbl_name": "curation_suggestions",
+        "sql": "CREATE INDEX idx_cs_category ON curation_suggestions(category, suggestion_type, status)"
+      },
+      {
+        "name": "idx_el_field",
+        "tbl_name": "enum_lists",
+        "sql": "CREATE INDEX idx_el_field ON enum_lists(category, field_key)"
+      },
+      {
+        "name": "idx_icl_component",
+        "tbl_name": "item_component_links",
+        "sql": "CREATE INDEX idx_icl_component ON item_component_links(category, component_type, component_name, component_maker)"
+      },
+      {
+        "name": "idx_icl_product",
+        "tbl_name": "item_component_links",
+        "sql": "CREATE INDEX idx_icl_product ON item_component_links(product_id)"
+      },
+      {
+        "name": "idx_ifs_product",
+        "tbl_name": "item_field_state",
+        "sql": "CREATE INDEX idx_ifs_product ON item_field_state(product_id)"
+      },
+      {
+        "name": "idx_ill_list_value",
+        "tbl_name": "item_list_links",
+        "sql": "CREATE INDEX idx_ill_list_value ON item_list_links(list_value_id)"
+      },
+      {
+        "name": "idx_ill_product",
+        "tbl_name": "item_list_links",
+        "sql": "CREATE INDEX idx_ill_product ON item_list_links(product_id)"
+      },
+      {
+        "name": "idx_krr_state",
+        "tbl_name": "key_review_runs",
+        "sql": "CREATE INDEX idx_krr_state ON key_review_runs(key_review_state_id, stage, status)"
+      },
+      {
+        "name": "idx_krs_kind",
+        "tbl_name": "key_review_state",
+        "sql": "CREATE INDEX idx_krs_kind ON key_review_state(category, target_kind, field_key)"
+      },
+      {
+        "name": "idx_krs_selected_candidate",
+        "tbl_name": "key_review_state",
+        "sql": "CREATE INDEX idx_krs_selected_candidate ON key_review_state(category, selected_candidate_id)"
+      },
+      {
+        "name": "ux_krs_component",
+        "tbl_name": "key_review_state",
+        "sql": "CREATE UNIQUE INDEX ux_krs_component\n  ON key_review_state(category, component_identifier, property_key)\n  WHERE target_kind = 'component_key'"
+      },
+      {
+        "name": "ux_krs_enum",
+        "tbl_name": "key_review_state",
+        "sql": "CREATE UNIQUE INDEX ux_krs_enum\n  ON key_review_state(category, field_key, enum_value_norm)\n  WHERE target_kind = 'enum_key'"
+      },
+      {
+        "name": "ux_krs_grid",
+        "tbl_name": "key_review_state",
+        "sql": "CREATE UNIQUE INDEX ux_krs_grid\n  ON key_review_state(category, item_identifier, field_key)\n  WHERE target_kind = 'grid_key'"
+      },
+      {
+        "name": "idx_lp_category",
+        "tbl_name": "learning_profiles",
+        "sql": "CREATE INDEX idx_lp_category ON learning_profiles(category)"
+      },
+      {
+        "name": "idx_lv_field",
+        "tbl_name": "list_values",
+        "sql": "CREATE INDEX idx_lv_field ON list_values(field_key)"
+      },
+      {
+        "name": "idx_lv_list_id",
+        "tbl_name": "list_values",
+        "sql": "CREATE INDEX idx_lv_list_id ON list_values(list_id)"
+      },
+      {
+        "name": "idx_llmc_expiry",
+        "tbl_name": "llm_cache",
+        "sql": "CREATE INDEX idx_llmc_expiry ON llm_cache(timestamp)"
+      },
+      {
+        "name": "idx_lrm_cat_scope",
+        "tbl_name": "llm_route_matrix",
+        "sql": "CREATE INDEX idx_lrm_cat_scope ON llm_route_matrix(category, scope)"
+      },
+      {
+        "name": "idx_pq_category",
+        "tbl_name": "product_queue",
+        "sql": "CREATE INDEX idx_pq_category ON product_queue(category, status)"
+      },
+      {
+        "name": "idx_pq_product",
+        "tbl_name": "product_queue",
+        "sql": "CREATE INDEX idx_pq_product ON product_queue(category, product_id)"
+      },
+      {
+        "name": "idx_pr_latest",
+        "tbl_name": "product_runs",
+        "sql": "CREATE INDEX idx_pr_latest ON product_runs(category, product_id, is_latest) WHERE is_latest = 1"
+      },
+      {
+        "name": "idx_pr_product",
+        "tbl_name": "product_runs",
+        "sql": "CREATE INDEX idx_pr_product ON product_runs(category, product_id)"
+      },
+      {
+        "name": "idx_products_cat",
+        "tbl_name": "products",
+        "sql": "CREATE INDEX idx_products_cat ON products(category)"
+      },
+      {
+        "name": "idx_re_product",
+        "tbl_name": "runtime_events",
+        "sql": "CREATE INDEX idx_re_product ON runtime_events(product_id)"
+      },
+      {
+        "name": "idx_re_ts",
+        "tbl_name": "runtime_events",
+        "sql": "CREATE INDEX idx_re_ts ON runtime_events(ts)"
+      },
+      {
+        "name": "idx_sa_component_slot",
+        "tbl_name": "source_assertions",
+        "sql": "CREATE INDEX idx_sa_component_slot ON source_assertions(component_value_id)"
+      },
+      {
+        "name": "idx_sa_field",
+        "tbl_name": "source_assertions",
+        "sql": "CREATE INDEX idx_sa_field ON source_assertions(field_key, context_kind)"
+      },
+      {
+        "name": "idx_sa_item_slot",
+        "tbl_name": "source_assertions",
+        "sql": "CREATE INDEX idx_sa_item_slot ON source_assertions(item_field_state_id)"
+      },
+      {
+        "name": "idx_sa_list_slot",
+        "tbl_name": "source_assertions",
+        "sql": "CREATE INDEX idx_sa_list_slot ON source_assertions(list_value_id, enum_list_id)"
+      },
+      {
+        "name": "idx_sc_category",
+        "tbl_name": "source_corpus",
+        "sql": "CREATE INDEX idx_sc_category ON source_corpus(category)"
+      },
+      {
+        "name": "idx_sc_domain",
+        "tbl_name": "source_corpus",
+        "sql": "CREATE INDEX idx_sc_domain ON source_corpus(root_domain)"
+      },
+      {
+        "name": "idx_sid_category",
+        "tbl_name": "source_intel_domains",
+        "sql": "CREATE INDEX idx_sid_category ON source_intel_domains(category)"
+      },
+      {
+        "name": "idx_sifr_domain",
+        "tbl_name": "source_intel_field_rewards",
+        "sql": "CREATE INDEX idx_sifr_domain ON source_intel_field_rewards(root_domain)"
+      },
+      {
+        "name": "idx_sr_item",
+        "tbl_name": "source_registry",
+        "sql": "CREATE INDEX idx_sr_item ON source_registry(category, item_identifier)"
+      }
+    ]
+  },
+  "metrics": {
+    "rowCounts": {
+      "artifacts": 0,
+      "audit_log": 32,
+      "billing_entries": 0,
+      "brands": 0,
+      "candidate_reviews": 0,
+      "candidates": 9738,
+      "category_brain": 0,
+      "component_aliases": 38,
+      "component_identity": 31,
+      "component_review_queue": 28,
+      "component_values": 98,
+      "curation_suggestions": 23,
+      "enum_lists": 18,
+      "item_component_links": 0,
+      "item_field_state": 1760,
+      "item_list_links": 438,
+      "key_review_audit": 3,
+      "key_review_run_sources": 0,
+      "key_review_runs": 0,
+      "key_review_state": 1950,
+      "learning_profiles": 0,
+      "list_values": 124,
+      "llm_cache": 0,
+      "llm_route_matrix": 15,
+      "product_queue": 0,
+      "product_runs": 488,
+      "products": 22,
+      "runtime_events": 0,
+      "source_artifacts": 0,
+      "source_assertions": 7470,
+      "source_corpus": 0,
+      "source_evidence_refs": 7470,
+      "source_intel_brands": 0,
+      "source_intel_domains": 0,
+      "source_intel_field_rewards": 0,
+      "source_intel_paths": 0,
+      "source_registry": 22
+    },
+    "checks": {
+      "fk_orphan_item_list_links": 0,
+      "fk_orphan_list_values_enum_list": 0,
+      "fk_orphan_source_assertions_source": 0,
+      "fk_orphan_source_assertions_item_slot": 0,
+      "fk_orphan_source_assertions_component_slot": 0,
+      "fk_orphan_source_assertions_list_slot": 0,
+      "missing_source_assertions_for_candidates": 2268,
+      "item_slot_value_without_accepted_candidate": 1444,
+      "component_slot_value_without_accepted_candidate": 63,
+      "enum_value_slot_without_accepted_candidate": 116,
+      "key_review_selected_value_without_candidate": 1625,
+      "source_registry_unknown_source_host": 22,
+      "source_registry_rows": 22,
+      "item_component_links_rows": 0,
+      "component_values_rows": 98
+    }
+  },
+  "samples": {
+    "candidates_missing_source_assertions": [
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_zynarch-evo-3100_p54xqu",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "new_component",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-release-date_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_2024-06-15_1gf9h02",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-discontinued_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_yes_16htrzo",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-sku_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_unk_gy5zff",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-price-range_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_test-value-price-range_1y9ax4h",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-colors_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_testitem1-testitem2-testitem3_90bwh1",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-design_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_testitem1-testitem2-testitem3_13uh1tz",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-lighting_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_testitem1-testitem2-testitem3_a9mkxp",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-rgb_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_yes_19w5e6e",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-connection_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_wired_1p83vbx",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-connectivity_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_wired-wireless-bluetooth_19lojce",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-computer-side-connector_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_test-value-computer-side-connector_sh791t",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-mouse-side-connector_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_test-value-mouse-side-connector_1vl3zab",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-bluetooth_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_yes_1do95sl",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-cable-type_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_test-value-cable-type_1lvu41l",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-paracord_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_yes_1a65n67",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-wireless-charging_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_yes_1shx1et",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-battery-hours_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_65-8_1026ssa",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-adjustable-weight_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_yes_1tq9nlb",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-feet-material_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_glass_68kgo8",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-coating_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_testitem1-testitem2-testitem3_gmuvew",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-honeycomb-frame_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_yes_u52e87",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-silent-clicks_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_yes_1h322t6",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-weight_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_235_1vv35yo",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-material_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_test-seed-material-alpha_1oxjunt",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-lngth_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_117-5_1p23eb3",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-width_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_63-92_xw0sxc",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-height_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_37-6_1pd1zof",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-form-factor_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_ambidextrous_1vojzsb",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-shape_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_asymmetrical_vh2kh2",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-hump_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_back-front_1kznpcn",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-front-flare_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_flat_1ox615b",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-thumb-rest_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_test-value-thumb-rest_drlizz",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-grip_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_testitem1-testitem2-testitem3_o2jek1",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-hand-size_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_testitem1-testitem2-testitem3_1bshz8q",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-mcu_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_holtek-ht32f52352_1mwplp2",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-mcu-link_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_https-example-com-test_1nuklmj",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-sensor_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_test-seed-sensor-alpha_6934kd",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-sensor-brand_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_test-value-sensor-brand_asr3rd",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-sensor-date_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_2024-06-15_by9a1x",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-sensor-link_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_https-example-com-test_4003u",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-sensor-type_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_laser_1nwce6m",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-flawless-sensor_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_yes_1auc0g1",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-sensor-latency_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_unk_1ws2lpj",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-sensor-latency-list_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_unk_1go2chg",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-shift-latency_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_unk_1p5k6cr",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-polling-rate_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_4705_1gt8ocq",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-dpi_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_47024_1my9cvs",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-ips_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_611_rt0w7e",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      },
+      {
+        "candidate_id": "pl-cr_test-mouse-testco-scenario-02_encoder-acceleration_cr-encoder-zynarch-evo-3100-test-mouse-testco-sc_47_19drz87",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "field_key": "encoder",
+        "source_host": "pipeline",
+        "source_method": "product_extraction",
+        "run_id": "20260219074434-7aacf7"
+      }
+    ],
+    "source_registry_unknown": [
+      {
+        "source_id": "_test_mouse::_test_mouse-testco-scenario-01::unknown::20260219074433-9ec3e3",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "product_id": "_test_mouse-testco-scenario-01",
+        "source_host": "unknown",
+        "source_method": null,
+        "source_url": "https://test-mfr-1-test-mouse-testco-scenario-01.example.com/products/scenario-1"
+      },
+      {
+        "source_id": "_test_mouse::_test_mouse-testco-scenario-02::unknown::20260219074434-7aacf7",
+        "item_identifier": "_test_mouse-testco-scenario-02",
+        "product_id": "_test_mouse-testco-scenario-02",
+        "source_host": "unknown",
+        "source_method": null,
+        "source_url": "https://test-mfr-1-test-mouse-testco-scenario-02.example.com/products/scenario-2"
+      },
+      {
+        "source_id": "_test_mouse::_test_mouse-testco-scenario-03::unknown::20260219074434-5fbe9e",
+        "item_identifier": "_test_mouse-testco-scenario-03",
+        "product_id": "_test_mouse-testco-scenario-03",
+        "source_host": "unknown",
+        "source_method": null,
+        "source_url": "https://test-mfr-1-test-mouse-testco-scenario-03.example.com/products/scenario-3"
+      },
+      {
+        "source_id": "_test_mouse::_test_mouse-testco-scenario-04::unknown::20260219074435-1660a6",
+        "item_identifier": "_test_mouse-testco-scenario-04",
+        "product_id": "_test_mouse-testco-scenario-04",
+        "source_host": "unknown",
+        "source_method": null,
+        "source_url": "https://test-mfr-1-test-mouse-testco-scenario-04.example.com/products/scenario-4"
+      },
+      {
+        "source_id": "_test_mouse::_test_mouse-testco-scenario-05::unknown::20260219074436-90b441",
+        "item_identifier": "_test_mouse-testco-scenario-05",
+        "product_id": "_test_mouse-testco-scenario-05",
+        "source_host": "unknown",
+        "source_method": null,
+        "source_url": "https://test-mfr-1-test-mouse-testco-scenario-05.example.com/products/scenario-5"
+      },
+      {
+        "source_id": "_test_mouse::_test_mouse-testco-scenario-06::unknown::20260219074436-094478",
+        "item_identifier": "_test_mouse-testco-scenario-06",
+        "product_id": "_test_mouse-testco-scenario-06",
+        "source_host": "unknown",
+        "source_method": null,
+        "source_url": "https://test-mfr-1-test-mouse-testco-scenario-06.example.com/products/scenario-6"
+      },
+      {
+        "source_id": "_test_mouse::_test_mouse-testco-scenario-07::unknown::20260219074437-d53e4e",
+        "item_identifier": "_test_mouse-testco-scenario-07",
+        "product_id": "_test_mouse-testco-scenario-07",
+        "source_host": "unknown",
+        "source_method": null,
+        "source_url": "https://test-mfr-1-test-mouse-testco-scenario-07.example.com/products/scenario-7"
+      },
+      {
+        "source_id": "_test_mouse::_test_mouse-testco-scenario-08::unknown::20260219074437-1d309b",
+        "item_identifier": "_test_mouse-testco-scenario-08",
+        "product_id": "_test_mouse-testco-scenario-08",
+        "source_host": "unknown",
+        "source_method": null,
+        "source_url": "https://test-mfr-1-test-mouse-testco-scenario-08.example.com/products/scenario-8"
+      },
+      {
+        "source_id": "_test_mouse::_test_mouse-testco-scenario-09::unknown::20260219074438-e5a140",
+        "item_identifier": "_test_mouse-testco-scenario-09",
+        "product_id": "_test_mouse-testco-scenario-09",
+        "source_host": "unknown",
+        "source_method": null,
+        "source_url": "https://test-mfr-1-test-mouse-testco-scenario-09.example.com/products/scenario-9"
+      },
+      {
+        "source_id": "_test_mouse::_test_mouse-testco-scenario-10::unknown::20260219074438-c0a10a",
+        "item_identifier": "_test_mouse-testco-scenario-10",
+        "product_id": "_test_mouse-testco-scenario-10",
+        "source_host": "unknown",
+        "source_method": null,
+        "source_url": "https://test-mfr-1-test-mouse-testco-scenario-10.example.com/products/scenario-10"
+      },
+      {
+        "source_id": "_test_mouse::_test_mouse-testco-scenario-11::unknown::20260219074439-6148ba",
+        "item_identifier": "_test_mouse-testco-scenario-11",
+        "product_id": "_test_mouse-testco-scenario-11",
+        "source_host": "unknown",
+        "source_method": null,
+        "source_url": "https://test-mfr-1-test-mouse-testco-scenario-11.example.com/products/scenario-11"
+      },
+      {
+        "source_id": "_test_mouse::_test_mouse-testco-scenario-12::unknown::20260219074439-ec794f",
+        "item_identifier": "_test_mouse-testco-scenario-12",
+        "product_id": "_test_mouse-testco-scenario-12",
+        "source_host": "unknown",
+        "source_method": null,
+        "source_url": "https://test-mfr-1-test-mouse-testco-scenario-12.example.com/products/scenario-12"
+      },
+      {
+        "source_id": "_test_mouse::_test_mouse-testco-scenario-13::unknown::20260219074439-dd8aee",
+        "item_identifier": "_test_mouse-testco-scenario-13",
+        "product_id": "_test_mouse-testco-scenario-13",
+        "source_host": "unknown",
+        "source_method": null,
+        "source_url": "https://test-mfr-1-test-mouse-testco-scenario-13.example.com/products/scenario-13"
+      },
+      {
+        "source_id": "_test_mouse::_test_mouse-testco-scenario-14::unknown::20260219074440-64c543",
+        "item_identifier": "_test_mouse-testco-scenario-14",
+        "product_id": "_test_mouse-testco-scenario-14",
+        "source_host": "unknown",
+        "source_method": null,
+        "source_url": "https://test-mfr-1-test-mouse-testco-scenario-14.example.com/products/scenario-14"
+      },
+      {
+        "source_id": "_test_mouse::_test_mouse-testco-scenario-15::unknown::20260219074440-ec4d23",
+        "item_identifier": "_test_mouse-testco-scenario-15",
+        "product_id": "_test_mouse-testco-scenario-15",
+        "source_host": "unknown",
+        "source_method": null,
+        "source_url": "https://test-mfr-1-test-mouse-testco-scenario-15.example.com/products/scenario-15"
+      },
+      {
+        "source_id": "_test_mouse::_test_mouse-testco-scenario-16::unknown::20260219074440-bd95f7",
+        "item_identifier": "_test_mouse-testco-scenario-16",
+        "product_id": "_test_mouse-testco-scenario-16",
+        "source_host": "unknown",
+        "source_method": null,
+        "source_url": "https://test-mfr-1-test-mouse-testco-scenario-16.example.com/products/scenario-16"
+      },
+      {
+        "source_id": "_test_mouse::_test_mouse-testco-scenario-17::unknown::20260219074441-1e3581",
+        "item_identifier": "_test_mouse-testco-scenario-17",
+        "product_id": "_test_mouse-testco-scenario-17",
+        "source_host": "unknown",
+        "source_method": null,
+        "source_url": "https://test-mfr-1-test-mouse-testco-scenario-17.example.com/products/scenario-17"
+      },
+      {
+        "source_id": "_test_mouse::_test_mouse-testco-scenario-18::unknown::20260219074441-b316e8",
+        "item_identifier": "_test_mouse-testco-scenario-18",
+        "product_id": "_test_mouse-testco-scenario-18",
+        "source_host": "unknown",
+        "source_method": null,
+        "source_url": "https://test-mfr-1-test-mouse-testco-scenario-18.example.com/products/scenario-18"
+      },
+      {
+        "source_id": "_test_mouse::_test_mouse-testco-scenario-19::unknown::20260219074441-5a7dad",
+        "item_identifier": "_test_mouse-testco-scenario-19",
+        "product_id": "_test_mouse-testco-scenario-19",
+        "source_host": "unknown",
+        "source_method": null,
+        "source_url": "https://test-mfr-1-test-mouse-testco-scenario-19.example.com/products/scenario-19"
+      },
+      {
+        "source_id": "_test_mouse::_test_mouse-testco-scenario-20::unknown::20260219074441-c1ebd3",
+        "item_identifier": "_test_mouse-testco-scenario-20",
+        "product_id": "_test_mouse-testco-scenario-20",
+        "source_host": "unknown",
+        "source_method": null,
+        "source_url": "https://test-mfr-1-test-mouse-testco-scenario-20.example.com/products/scenario-20"
+      },
+      {
+        "source_id": "_test_mouse::_test_mouse-testco-scenario-21::unknown::20260219074442-892b1c",
+        "item_identifier": "_test_mouse-testco-scenario-21",
+        "product_id": "_test_mouse-testco-scenario-21",
+        "source_host": "unknown",
+        "source_method": null,
+        "source_url": "https://test-mfr-1-test-mouse-testco-scenario-21.example.com/products/scenario-21"
+      },
+      {
+        "source_id": "_test_mouse::_test_mouse-testco-scenario-22::unknown::20260219074442-cbf37f",
+        "item_identifier": "_test_mouse-testco-scenario-22",
+        "product_id": "_test_mouse-testco-scenario-22",
+        "source_host": "unknown",
+        "source_method": null,
+        "source_url": "https://test-mfr-1-test-mouse-testco-scenario-22.example.com/products/scenario-22"
+      }
+    ],
+    "key_review_selected_no_candidate": [
+      {
+        "id": 17539,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "acceleration",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "54",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17540,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "adjustable_scroll_wheel",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "yes",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17541,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "adjustable_weight",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "yes",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17542,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "base_model",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "Scenario 1",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": "pending",
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17543,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "battery_hours",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "75.6",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17544,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "bluetooth",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "yes",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17545,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "brand",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "TestCo",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": "pending",
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17546,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "cable_type",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "test_value_cable_type",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17547,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "category",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "_test_mouse",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": "pending",
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17551,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "coating",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "TestItem1,TestItem2,TestItem3",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17552,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "colors",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "TestItem1,TestItem2,TestItem3",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17553,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "computer_side_connector",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "test_value_computer_side_connector",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17554,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "connection",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "wired",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17555,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "connectivity",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "wired, wireless, bluetooth",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17556,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "debounce",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "108",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17557,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "design",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "TestItem1,TestItem2,TestItem3",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17558,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "discontinued",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "yes",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17559,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "dpi",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "54027",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17560,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "encoder",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "TestSeed_Encoder Alpha",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17561,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "encoder_brand",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "test_value_encoder_brand",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17562,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "encoder_link",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "https://example.com/test",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17563,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "feet_material",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "Glass",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17564,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "flawless_sensor",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "yes",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17565,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "form_factor",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "ambidextrous",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17567,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "grip",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "TestItem1,TestItem2,TestItem3",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17568,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "hand_size",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "TestItem1,TestItem2,TestItem3",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17569,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "hardware_acceleration",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "yes",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17570,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "height",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "43.2",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17571,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "honeycomb_frame",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "yes",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17572,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "hot_swappable",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "yes",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17573,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "hump",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "back - front",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17574,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "id",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "_test_mouse-testco-scenario-01",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": "pending",
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17575,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "ips",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "702",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17576,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "lift",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "108",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17577,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "lift_settings",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "TestItem1,TestItem2,TestItem3",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17578,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "lighting",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "TestItem1,TestItem2,TestItem3",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17579,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "lngth",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "135",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17580,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "material",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "TestSeed_Material Alpha",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17581,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "mcu",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "Holtek HT32F52352",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17582,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "mcu_link",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "https://example.com/test",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17583,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "middle_buttons",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "108",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17584,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "model",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "Scenario 1",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": "pending",
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17585,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "motion_sync",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "yes",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17586,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "mouse_side_connector",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "test_value_mouse_side_connector",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17587,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "nvidia_reflex",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "yes",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17588,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "onboard_memory",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "yes",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17589,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "onboard_memory_value",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "108",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17590,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "paracord",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "yes",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17591,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "polling_rate",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "5405",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      },
+      {
+        "id": 17592,
+        "target_kind": "grid_key",
+        "item_identifier": "_test_mouse-testco-scenario-01",
+        "field_key": "price_range",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "selected_value": "test_value_price_range",
+        "selected_candidate_id": null,
+        "ai_confirm_primary_status": null,
+        "ai_confirm_shared_status": null
+      }
+    ],
+    "list_pipeline_without_links": [
+      {
+        "id": 581,
+        "list_id": 3,
+        "field_key": "coating",
+        "value": "val1",
+        "needs_review": 1,
+        "accepted_candidate_id": null
+      },
+      {
+        "id": 582,
+        "list_id": 3,
+        "field_key": "coating",
+        "value": "val2",
+        "needs_review": 1,
+        "accepted_candidate_id": null
+      },
+      {
+        "id": 583,
+        "list_id": 3,
+        "field_key": "coating",
+        "value": "val3",
+        "needs_review": 0,
+        "accepted_candidate_id": null
+      },
+      {
+        "id": 107,
+        "list_id": 5,
+        "field_key": "connectivity",
+        "value": "wired, wireless, bluetooth",
+        "needs_review": 0,
+        "accepted_candidate_id": "_test_mouse-testco-scenario-06::connectivity::cand-item_test-mouse-testco-scenario-06_connectivity_wired-wireless-bluetooth_1_2ess42"
+      },
+      {
+        "id": 221,
+        "list_id": 11,
+        "field_key": "lighting",
+        "value": "TestItem1, TestItem2, TestItem3",
+        "needs_review": 0,
+        "accepted_candidate_id": null
+      },
+      {
+        "id": 588,
+        "list_id": 11,
+        "field_key": "lighting",
+        "value": "val1",
+        "needs_review": 1,
+        "accepted_candidate_id": null
+      },
+      {
+        "id": 589,
+        "list_id": 11,
+        "field_key": "lighting",
+        "value": "val2",
+        "needs_review": 1,
+        "accepted_candidate_id": null
+      },
+      {
+        "id": 590,
+        "list_id": 11,
+        "field_key": "lighting",
+        "value": "val3",
+        "needs_review": 1,
+        "accepted_candidate_id": null
+      }
+    ],
+    "component_pending_without_links": [
+      {
+        "id": 296,
+        "component_type": "encoder",
+        "component_name": "Pixium Drift NX-42",
+        "component_maker": "",
+        "property_key": "encoder_life_span",
+        "needs_review": 1
+      },
+      {
+        "id": 297,
+        "component_type": "encoder",
+        "component_name": "Pixium Drift NX-42",
+        "component_maker": "",
+        "property_key": "encoder_steps",
+        "needs_review": 1
+      },
+      {
+        "id": 298,
+        "component_type": "encoder",
+        "component_name": "Pixium Drift NX-42",
+        "component_maker": "",
+        "property_key": "encoder_type",
+        "needs_review": 1
+      },
+      {
+        "id": 299,
+        "component_type": "encoder",
+        "component_name": "Rayvon QX-7700 Pro",
+        "component_maker": "",
+        "property_key": "encoder_life_span",
+        "needs_review": 1
+      },
+      {
+        "id": 300,
+        "component_type": "encoder",
+        "component_name": "Rayvon QX-7700 Pro",
+        "component_maker": "",
+        "property_key": "encoder_steps",
+        "needs_review": 1
+      },
+      {
+        "id": 301,
+        "component_type": "encoder",
+        "component_name": "Rayvon QX-7700 Pro",
+        "component_maker": "",
+        "property_key": "encoder_type",
+        "needs_review": 1
+      },
+      {
+        "id": 302,
+        "component_type": "encoder",
+        "component_name": "TestSeed_Encoder Epsilon",
+        "component_maker": "TestMaker",
+        "property_key": "encoder_life_span",
+        "needs_review": 1
+      },
+      {
+        "id": 303,
+        "component_type": "encoder",
+        "component_name": "Zynarch EVO-3100",
+        "component_maker": "",
+        "property_key": "encoder_life_span",
+        "needs_review": 1
+      },
+      {
+        "id": 304,
+        "component_type": "encoder",
+        "component_name": "Zynarch EVO-3100",
+        "component_maker": "",
+        "property_key": "encoder_steps",
+        "needs_review": 1
+      },
+      {
+        "id": 305,
+        "component_type": "encoder",
+        "component_name": "Zynarch EVO-3100",
+        "component_maker": "",
+        "property_key": "encoder_type",
+        "needs_review": 1
+      },
+      {
+        "id": 306,
+        "component_type": "sensor",
+        "component_name": "Pixium Drift NX-42",
+        "component_maker": "",
+        "property_key": "acceleration",
+        "needs_review": 1
+      },
+      {
+        "id": 307,
+        "component_type": "sensor",
+        "component_name": "Pixium Drift NX-42",
+        "component_maker": "",
+        "property_key": "dpi",
+        "needs_review": 1
+      },
+      {
+        "id": 308,
+        "component_type": "sensor",
+        "component_name": "Pixium Drift NX-42",
+        "component_maker": "",
+        "property_key": "sensor_date",
+        "needs_review": 1
+      },
+      {
+        "id": 309,
+        "component_type": "sensor",
+        "component_name": "Pixium Drift NX-42",
+        "component_maker": "",
+        "property_key": "sensor_type",
+        "needs_review": 1
+      },
+      {
+        "id": 310,
+        "component_type": "sensor",
+        "component_name": "Rayvon QX-7700 Pro",
+        "component_maker": "",
+        "property_key": "acceleration",
+        "needs_review": 1
+      },
+      {
+        "id": 311,
+        "component_type": "sensor",
+        "component_name": "Rayvon QX-7700 Pro",
+        "component_maker": "",
+        "property_key": "dpi",
+        "needs_review": 1
+      },
+      {
+        "id": 312,
+        "component_type": "sensor",
+        "component_name": "Rayvon QX-7700 Pro",
+        "component_maker": "",
+        "property_key": "flawless_sensor",
+        "needs_review": 1
+      },
+      {
+        "id": 313,
+        "component_type": "sensor",
+        "component_name": "Rayvon QX-7700 Pro",
+        "component_maker": "",
+        "property_key": "ips",
+        "needs_review": 1
+      },
+      {
+        "id": 314,
+        "component_type": "sensor",
+        "component_name": "Rayvon QX-7700 Pro",
+        "component_maker": "",
+        "property_key": "sensor_date",
+        "needs_review": 1
+      },
+      {
+        "id": 315,
+        "component_type": "sensor",
+        "component_name": "Rayvon QX-7700 Pro",
+        "component_maker": "",
+        "property_key": "sensor_type",
+        "needs_review": 1
+      },
+      {
+        "id": 316,
+        "component_type": "sensor",
+        "component_name": "TestSeed_Sensor Epsilon",
+        "component_maker": "TestMaker",
+        "property_key": "acceleration",
+        "needs_review": 1
+      },
+      {
+        "id": 317,
+        "component_type": "sensor",
+        "component_name": "TestSeed_Sensor Epsilon",
+        "component_maker": "TestMaker",
+        "property_key": "dpi",
+        "needs_review": 1
+      },
+      {
+        "id": 318,
+        "component_type": "sensor",
+        "component_name": "TestSeed_Sensor Epsilon",
+        "component_maker": "TestMaker",
+        "property_key": "ips",
+        "needs_review": 1
+      },
+      {
+        "id": 319,
+        "component_type": "sensor",
+        "component_name": "TestSeed_Sensor Epsilon",
+        "component_maker": "TestMaker",
+        "property_key": "sensor_date",
+        "needs_review": 1
+      },
+      {
+        "id": 320,
+        "component_type": "switch",
+        "component_name": "Pixium Drift NX-42",
+        "component_maker": "",
+        "property_key": "click_force",
+        "needs_review": 1
+      },
+      {
+        "id": 321,
+        "component_type": "switch",
+        "component_name": "Pixium Drift NX-42",
+        "component_maker": "",
+        "property_key": "releasing_force",
+        "needs_review": 1
+      },
+      {
+        "id": 322,
+        "component_type": "switch",
+        "component_name": "Pixium Drift NX-42",
+        "component_maker": "",
+        "property_key": "switch_life_span",
+        "needs_review": 1
+      },
+      {
+        "id": 323,
+        "component_type": "switch",
+        "component_name": "Pixium Drift NX-42",
+        "component_maker": "",
+        "property_key": "switch_type",
+        "needs_review": 1
+      },
+      {
+        "id": 324,
+        "component_type": "switch",
+        "component_name": "Rayvon QX-7700 Pro",
+        "component_maker": "",
+        "property_key": "click_force",
+        "needs_review": 1
+      },
+      {
+        "id": 325,
+        "component_type": "switch",
+        "component_name": "Rayvon QX-7700 Pro",
+        "component_maker": "",
+        "property_key": "releasing_force",
+        "needs_review": 1
+      },
+      {
+        "id": 326,
+        "component_type": "switch",
+        "component_name": "Rayvon QX-7700 Pro",
+        "component_maker": "",
+        "property_key": "switch_life_span",
+        "needs_review": 1
+      },
+      {
+        "id": 327,
+        "component_type": "switch",
+        "component_name": "Rayvon QX-7700 Pro",
+        "component_maker": "",
+        "property_key": "switch_type",
+        "needs_review": 1
+      },
+      {
+        "id": 328,
+        "component_type": "switch",
+        "component_name": "TestSeed_Switch Epsilon",
+        "component_maker": "TestMaker",
+        "property_key": "click_force",
+        "needs_review": 1
+      },
+      {
+        "id": 329,
+        "component_type": "switch",
+        "component_name": "TestSeed_Switch Epsilon",
+        "component_maker": "TestMaker",
+        "property_key": "releasing_force",
+        "needs_review": 1
+      }
+    ]
+  }
+}

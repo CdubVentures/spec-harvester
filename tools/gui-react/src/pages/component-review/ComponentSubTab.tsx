@@ -8,8 +8,7 @@ import { ReviewValueCell } from '../../components/common/ReviewValueCell';
 import { LinkedProductsList } from '../../components/common/LinkedProductsList';
 import { useComponentReviewStore } from '../../stores/componentReviewStore';
 import { api } from '../../api/client';
-import { humanizeField } from '../../utils/fieldNormalize';
-import { buildSyntheticComponentCandidateId } from '../../utils/candidateIdentifier';
+import { hasKnownValue, humanizeField } from '../../utils/fieldNormalize';
 import { FlagIcon } from '../../components/common/FlagIcon';
 import { ComponentReviewDrawer } from './ComponentReviewDrawer';
 import { ComponentReviewPanel } from './ComponentReviewPanel';
@@ -34,6 +33,26 @@ function isCellSelected(
   property: string,
 ): boolean {
   return selectedCell?.rowIndex === rowIndex && selectedCell?.property === property;
+}
+
+function toPositiveId(value: unknown): number | undefined {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return undefined;
+  const id = Math.trunc(n);
+  return id > 0 ? id : undefined;
+}
+
+function hasActionablePending(state?: ComponentReviewItem['name_tracked'] | ComponentPropertyState): boolean {
+  if (!state?.needs_review) return false;
+  const candidateRows = (state?.candidates || []).filter((candidate) => {
+    const candidateId = String(candidate?.candidate_id || '').trim();
+    return Boolean(candidateId) && hasKnownValue(candidate?.value);
+  });
+  return candidateRows.some((candidate) => {
+    if (candidate?.is_synthetic_selected) return false;
+    const sharedStatus = String(candidate?.shared_review_status || '').trim().toLowerCase();
+    return sharedStatus ? sharedStatus === 'pending' : true;
+  });
 }
 
 /**
@@ -116,9 +135,8 @@ export function ComponentSubTab({ data, category, queryClient }: ComponentSubTab
     },
     [data.items],
   );
-  const { pendingAIByComponent, newComponentItems } = useMemo(() => {
+  const pendingAIByComponent = useMemo(() => {
     const byComponent = new Map<string, ComponentReviewFlaggedItem[]>();
-    const newItems: ComponentReviewFlaggedItem[] = [];
     const pushPending = (rawName: string, reviewItem: ComponentReviewFlaggedItem) => {
       const key = String(rawName || '').trim().toLowerCase();
       if (!key) return;
@@ -138,164 +156,15 @@ export function ComponentSubTab({ data, category, queryClient }: ComponentSubTab
           if (dbName) {
             // Attach to existing row using the actual DB name as key
             pushPending(dbName, item);
-          } else {
-            newItems.push(item);
           }
         }
       }
     }
-    return { pendingAIByComponent: byComponent, newComponentItems: newItems };
+    return byComponent;
   }, [reviewDoc?.items, existingNameMap]);
-
-  // Build synthetic rows for new_component items
-  const syntheticRows = useMemo<ExtendedComponentReviewItem[]>(() => {
-    // Filter to items matching this sub-tab's component type
-    const relevant = newComponentItems.filter((item) => item.component_type === data.componentType);
-    if (relevant.length === 0) return [];
-
-    // Group by raw_query (case-insensitive) to deduplicate
-    const grouped = new Map<string, ComponentReviewFlaggedItem[]>();
-    for (const item of relevant) {
-      const key = item.raw_query.toLowerCase();
-      const existing = grouped.get(key) || [];
-      existing.push(item);
-      grouped.set(key, existing);
-    }
-
-    // Skip if name already exists as a real row
-    const existingNames = new Set(data.items.map((i) => i.name.toLowerCase()));
-
-    const rows: ExtendedComponentReviewItem[] = [];
-    for (const [, items] of grouped) {
-      const representative = items[0];
-      const name = representative.raw_query;
-      if (existingNames.has(name.toLowerCase())) continue;
-
-      // Helper: build consolidated candidates from review items for a given attribute key
-      type CandidateItem = { candidate_id: string; value: string; score: number; source_id: string; source: string; tier: null; method: string; evidence: { url: string; retrieved_at: string; snippet_id: string; snippet_hash: string; quote: string; quote_span: null; snippet_text: string; source_id: string } };
-      function buildPipelineCandidates(attrKey: string, items: ComponentReviewFlaggedItem[]): CandidateItem[] {
-        const byValue = new Map<string, { products: string[]; latest: string }>();
-        for (const ri of items) {
-          const attrs = ri.product_attributes || {};
-          const val = attrs[attrKey];
-          if (val == null || val === '') continue;
-          const valStr = String(val).trim();
-          if (!valStr) continue;
-          if (!byValue.has(valStr)) byValue.set(valStr, { products: [], latest: '' });
-          const entry = byValue.get(valStr)!;
-          entry.products.push(ri.product_id || 'unknown');
-          if (!entry.latest || (ri.created_at && ri.created_at > entry.latest)) entry.latest = ri.created_at;
-        }
-        const candidates: CandidateItem[] = [];
-        for (const [val, meta] of byValue) {
-          const count = meta.products.length;
-          candidates.push({
-            candidate_id: buildSyntheticComponentCandidateId({
-              componentType: data.componentType,
-              componentName: name,
-              propertyKey: attrKey,
-              value: val,
-            }),
-            value: val,
-            score: 0.5,
-            source_id: 'pipeline',
-            source: `Pipeline (${count} product${count !== 1 ? 's' : ''})`,
-            tier: null,
-            method: 'product_extraction',
-            evidence: {
-              url: '',
-              retrieved_at: meta.latest || '',
-              snippet_id: '',
-              snippet_hash: '',
-              quote: `Extracted from ${meta.products.slice(0, 3).join(', ')}${count > 3 ? ` +${count - 3} more` : ''}`,
-              quote_span: null,
-              snippet_text: `Pipeline extraction from product runs`,
-              source_id: 'pipeline',
-            },
-          });
-        }
-        return candidates;
-      }
-
-      // Build name candidates from review items
-      const nameCandidates = items.map((ri) => ({
-        candidate_id: buildSyntheticComponentCandidateId({
-          componentType: data.componentType,
-          componentName: name,
-          propertyKey: '__name',
-          value: ri.raw_query || name,
-        }),
-        value: ri.raw_query,
-        score: ri.combined_score || 0.5,
-        source_id: 'pipeline',
-        source: `Pipeline (${ri.product_id || 'unknown'})`,
-        tier: null as null,
-        method: ri.match_type || 'new_component',
-        evidence: {
-          url: '',
-          retrieved_at: ri.created_at || '',
-          snippet_id: '',
-          snippet_hash: '',
-          quote: `Extracted from product ${ri.product_id}`,
-          quote_span: null as null,
-          snippet_text: `Component ${ri.match_type || 'new_component'}`,
-          source_id: 'pipeline',
-        },
-      }));
-
-      // Build maker candidates
-      const makerCandidates = buildPipelineCandidates(`${data.componentType}_brand`, items);
-      const bestMaker = makerCandidates.length > 0 ? makerCandidates[0].value : (representative.ai_suggested_maker || '');
-
-      const makeTracked = (value: string | null, candidates: CandidateItem[]): ComponentPropertyState => ({
-        selected: {
-          value: value ?? (null as unknown as string),
-          confidence: value ? 0.3 : 0,
-          status: 'pending_ai',
-          color: value ? 'purple' : 'gray',
-        },
-        needs_review: true,
-        reason_codes: ['pending_ai'] as string[],
-        source: 'pending_ai',
-        source_timestamp: representative.created_at,
-        variance_policy: null as ComponentReviewItem['name_tracked']['variance_policy'],
-        constraints: [] as string[],
-        overridden: false,
-        candidate_count: candidates.length,
-        candidates,
-      });
-
-      // Build property tracked states with real candidates
-      const syntheticProperties: Record<string, ComponentPropertyState> = {};
-      for (const propKey of data.property_columns) {
-        const propCandidates = buildPipelineCandidates(propKey, items);
-        const bestValue = propCandidates.length > 0 ? propCandidates[0].value : null;
-        syntheticProperties[propKey] = makeTracked(bestValue, propCandidates);
-      }
-
-      rows.push({
-        name,
-        maker: bestMaker,
-        aliases: [],
-        aliases_overridden: false,
-        links: [],
-        name_tracked: makeTracked(name, nameCandidates),
-        maker_tracked: makeTracked(bestMaker || null, makerCandidates),
-        links_tracked: [],
-        properties: syntheticProperties,
-        review_status: 'pending',
-        metrics: { confidence: 0, flags: 1, property_count: data.property_columns.length },
-        _isSynthetic: true,
-        _reviewItems: items,
-      });
-    }
-    return rows;
-  }, [newComponentItems, data.componentType, data.items, data.property_columns]);
-
-  // Merge real + synthetic rows
   const mergedItems = useMemo<ExtendedComponentReviewItem[]>(
-    () => [...data.items, ...syntheticRows],
-    [data.items, syntheticRows],
+    () => data.items,
+    [data.items],
   );
 
   // Individual selectors: only re-render when these specific slices change.
@@ -323,6 +192,11 @@ export function ComponentSubTab({ data, category, queryClient }: ComponentSubTab
     }) =>
       api.post(`/review-components/${category}/component-override`, body),
     onMutate: async (body) => {
+      const isIdentityProperty = String(body?.property || '').trim().startsWith('__');
+      const hasRequiredId = isIdentityProperty
+        ? Boolean(toPositiveId(body?.componentIdentityId))
+        : Boolean(toPositiveId(body?.componentValueId));
+      if (!hasRequiredId) return;
       const queryKey = ['componentReviewData', category, data.componentType];
       await queryClient.cancelQueries({ queryKey });
       // Use rowIndex from current selectedCell for precise targeting
@@ -413,10 +287,19 @@ export function ComponentSubTab({ data, category, queryClient }: ComponentSubTab
       )
         ? payload.items[cell.rowIndex]
         : payload?.items?.find((entry) => entry.name === cell.name && entry.maker === cell.maker);
-      const componentIdentityId = row?.component_identity_id ?? undefined;
+      const componentIdentityId = toPositiveId(row?.component_identity_id);
       const componentValueId = cell.property.startsWith('__')
         ? undefined
-        : (row?.properties?.[cell.property]?.slot_id ?? undefined);
+        : toPositiveId(row?.properties?.[cell.property]?.slot_id);
+      if (cell.property.startsWith('__')) {
+        if (!componentIdentityId) {
+          commitComponentEdit();
+          return;
+        }
+      } else if (!componentValueId) {
+        commitComponentEdit();
+        return;
+      }
       overrideMutRef.current.mutate({
         componentType: data.componentType,
         name: cell.name,
@@ -440,10 +323,7 @@ export function ComponentSubTab({ data, category, queryClient }: ComponentSubTab
           const isSelected = isCellSelected(selectedCell, row.index, '__name');
           const isEditing = isSelected && cellEditMode;
           const isSynthetic = Boolean(row.original._isSynthetic);
-          const cellSource = row.original.name_tracked?.source;
-          const cellIsPendingAI = isSynthetic
-            || Boolean(row.original.name_tracked?.needs_review)
-            || cellSource === 'pending_ai';
+          const cellIsPendingAI = isSynthetic || hasActionablePending(row.original.name_tracked);
 
           if (isEditing && !isSynthetic) {
             return (
@@ -477,10 +357,7 @@ export function ComponentSubTab({ data, category, queryClient }: ComponentSubTab
           const isSelected = isCellSelected(selectedCell, row.index, '__maker');
           const isEditing = isSelected && cellEditMode;
           const isSynthetic = Boolean(row.original._isSynthetic);
-          const cellSource = row.original.maker_tracked?.source;
-          const cellIsPendingAI = isSynthetic
-            || Boolean(row.original.maker_tracked?.needs_review)
-            || cellSource === 'pending_ai';
+          const cellIsPendingAI = isSynthetic || hasActionablePending(row.original.maker_tracked);
 
           if (isEditing) {
             return (
@@ -551,13 +428,13 @@ export function ComponentSubTab({ data, category, queryClient }: ComponentSubTab
     ];
 
     for (const propKey of data.property_columns) {
-      const propFlagCount = mergedItems.filter(item => {
-        const src = item.properties[propKey]?.source;
-        return item.properties[propKey]?.needs_review && src !== 'pending_ai' && !item._isSynthetic;
-      }).length;
-      const propAICount = mergedItems.filter(item => {
-        const src = item.properties[propKey]?.source;
-        return item._isSynthetic || src === 'pending_ai';
+      const propAICount = mergedItems.filter((item) => (
+        item._isSynthetic || hasActionablePending(item.properties[propKey])
+      )).length;
+      const propFlagCount = mergedItems.filter((item) => {
+        if (item._isSynthetic) return false;
+        const state = item.properties[propKey];
+        return Boolean(state?.needs_review) && !hasActionablePending(state);
       }).length;
       cols.push({
         id: `prop_${propKey}`,
@@ -599,10 +476,7 @@ export function ComponentSubTab({ data, category, queryClient }: ComponentSubTab
           }
 
           const flagCount = state?.needs_review ? (state.reason_codes?.length || 1) : 0;
-          const cellSource = state?.source;
-          const cellIsPendingAI = isSynthetic
-            || Boolean(state?.needs_review)
-            || cellSource === 'pending_ai';
+          const cellIsPendingAI = isSynthetic || hasActionablePending(state);
           return (
             <ReviewValueCell
               state={state}

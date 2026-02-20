@@ -1,0 +1,16 @@
+{
+  "productId": "monitor-dell-aw2725df-e2e",
+  "category": "monitor",
+  "identityLock": {
+    "brand": "Dell",
+    "model": "AW2725DF",
+    "variant": "",
+    "sku": "",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [
+    "https://www.tomshardware.com/reviews/dell-alienware-aw2725df"
+  ],
+  "anchors": {}
+}

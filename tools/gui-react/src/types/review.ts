@@ -46,10 +46,14 @@ export interface ReviewCandidate {
   tier: number | null;
   method: string | null;
   evidence: CandidateEvidence;
+  is_synthetic_selected?: boolean;
   llm_extract_model?: string | null;
   llm_extract_provider?: string | null;
   llm_validate_model?: string | null;
   llm_validate_provider?: string | null;
+  primary_review_status?: 'pending' | 'accepted' | 'rejected';
+  shared_review_status?: 'pending' | 'accepted' | 'rejected';
+  human_accepted?: boolean;
 }
 
 export interface KeyReviewLaneState {

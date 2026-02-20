@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { normalizeWhitespace } from '../utils/common.js';
 import { filterReadableHtml } from '../extract/readabilityFilter.js';
+import { extractMainArticle } from '../extract/articleExtractor.js';
 
 function toText(value, maxChars = 5000) {
   const text = typeof value === 'string' ? value : JSON.stringify(value || {});
@@ -8,6 +9,9 @@ function toText(value, maxChars = 5000) {
 }
 
 function sha256(value) {
+  if (Buffer.isBuffer(value)) {
+    return `sha256:${createHash('sha256').update(value).digest('hex')}`;
+  }
   return `sha256:${createHash('sha256').update(String(value || ''), 'utf8').digest('hex')}`;
 }
 
@@ -28,6 +32,15 @@ function safeSourceId(source = {}, host = '') {
 
 function extractionMethodForType(type) {
   const token = String(type || '').toLowerCase();
+  if (token === 'readability_text') {
+    return 'readability';
+  }
+  if (token === 'dom_snippet') {
+    return 'dom_snippet';
+  }
+  if (token === 'screenshot_meta' || token === 'screenshot_capture') {
+    return 'visual_artifact';
+  }
   if (token === 'table' || token === 'kv' || token === 'definition') {
     return 'spec_table_match';
   }
@@ -235,6 +248,11 @@ function normalizeCandidateToken(value) {
     .trim();
 }
 
+function screenshotMimeType(format = '') {
+  const token = String(format || '').trim().toLowerCase();
+  return token === 'png' ? 'image/png' : 'image/jpeg';
+}
+
 export function fingerprintEvidenceCandidate(candidate = {}) {
   const field = normalizeCandidateToken(candidate.field);
   const value = normalizeCandidateToken(candidate.value);
@@ -299,6 +317,15 @@ function pushReference(state, item, targetFields = []) {
   const normalized = normalizeText(safeText);
   const snippetHash = sha256(normalized);
   const extractedMethod = String(item.extractionMethod || extractionMethodForType(item.type) || '').trim();
+  const fileUri = String(item.fileUri || item.file_uri || item.storage_uri || '').trim();
+  const mimeType = String(item.mimeType || item.mime_type || '').trim();
+  const width = Number.isFinite(Number(item.width)) ? Number(item.width) : null;
+  const height = Number.isFinite(Number(item.height)) ? Number(item.height) : null;
+  const sizeBytes = Number.isFinite(Number(item.sizeBytes ?? item.size_bytes))
+    ? Number(item.sizeBytes ?? item.size_bytes)
+    : null;
+  const contentHash = String(item.contentHash || item.content_hash || '').trim();
+  const surface = String(item.surface || '').trim();
 
   const referenceRow = {
     id,
@@ -309,7 +336,14 @@ function pushReference(state, item, targetFields = []) {
     snippet_hash: snippetHash,
     extracted_at: state.fetchedAt,
     key_path: String(item.keyPath || '').trim(),
-    candidate_fingerprint: String(item.candidateFingerprint || '').trim()
+    candidate_fingerprint: String(item.candidateFingerprint || '').trim(),
+    file_uri: fileUri || null,
+    mime_type: mimeType || null,
+    width,
+    height,
+    size_bytes: sizeBytes,
+    content_hash: contentHash || null,
+    surface: surface || null
   };
   state.references.push(referenceRow);
 
@@ -327,6 +361,13 @@ function pushReference(state, item, targetFields = []) {
     extraction_method: extractedMethod,
     key_path: String(item.keyPath || '').trim(),
     candidate_fingerprint: String(item.candidateFingerprint || '').trim(),
+    file_uri: fileUri || null,
+    mime_type: mimeType || null,
+    width,
+    height,
+    size_bytes: sizeBytes,
+    content_hash: contentHash || null,
+    surface: surface || null,
     reference: {
       id,
       url: item.url,
@@ -386,7 +427,55 @@ export function buildEvidencePackV2({
     },
     candidateBindings: {}
   };
+  const domSnippetHtml = String(pageData?.domSnippet?.html || '');
+  const domSnippetText = normalizeText(stripHtml(domSnippetHtml));
+  const domSnippetKind = String(pageData?.domSnippet?.kind || '').trim().toLowerCase();
+  const screenshotMeta = pageData?.screenshot && typeof pageData.screenshot === 'object'
+    ? pageData.screenshot
+    : null;
+  const screenshotByteCount = Buffer.isBuffer(screenshotMeta?.bytes)
+    ? screenshotMeta.bytes.length
+    : Number.isFinite(Number(screenshotMeta?.bytes))
+      ? Number(screenshotMeta.bytes)
+      : 0;
+  const screenshotFormat = screenshotMeta
+    ? (String(screenshotMeta.format || 'jpeg').trim().toLowerCase() === 'png' ? 'png' : 'jpeg')
+    : 'jpeg';
+  const screenshotMime = screenshotMeta
+    ? String(screenshotMeta.mime_type || screenshotMimeType(screenshotFormat)).trim()
+    : '';
+  const screenshotUri = screenshotMeta
+    ? String(screenshotMeta.file_uri || screenshotMeta.uri || screenshotMeta.storage_uri || '').trim()
+    : '';
+  const screenshotHash = screenshotMeta
+    ? String(screenshotMeta.content_hash || '').trim()
+      || (Buffer.isBuffer(screenshotMeta?.bytes) ? sha256(screenshotMeta.bytes) : '')
+    : '';
+  const domSnippetUri = String(pageData?.domSnippet?.uri || '').trim();
+  const domSnippetHash = String(pageData?.domSnippet?.content_hash || '').trim()
+    || (domSnippetText ? sha256(domSnippetText) : '');
   const tokens = fieldTokens(targetFields);
+  const visualAssets = [];
+  const articleExtraction = extractMainArticle(html, {
+    url: normalizedUrl || source?.url || '',
+    title: pageData?.title || '',
+    enabled: config?.articleExtractorV2Enabled !== false,
+    minChars: Number(config?.articleExtractorMinChars || 700),
+    minScore: Number(config?.articleExtractorMinScore || 45),
+    maxChars: Math.min(maxChars, Number(config?.articleExtractorMaxChars || 24_000))
+  });
+
+  if (articleExtraction?.text) {
+    pushReference(state, {
+      id: toStableId('a', 0),
+      url: normalizedUrl || source.url,
+      type: 'readability_text',
+      content: String(articleExtraction.text || '').slice(0, 12_000),
+      extractionMethod: String(articleExtraction.method || '').toLowerCase() === 'readability'
+        ? 'readability'
+        : 'parse_template'
+    }, targetFields);
+  }
 
   const definitionSections = extractDefinitionPairs(pageData?.html || '');
   definitionSections.forEach((text, index) => {
@@ -437,6 +526,61 @@ export function buildEvidencePackV2({
       content: text
     }, targetFields);
   });
+  if (domSnippetText) {
+    pushReference(state, {
+      id: toStableId('h', 0),
+      url: normalizedUrl || source.url,
+      type: 'dom_snippet',
+      content: domSnippetText.slice(0, 3600),
+      extractionMethod: 'dom_snippet',
+      fileUri: domSnippetUri || null,
+      mimeType: 'text/html',
+      sizeBytes: Number(pageData?.domSnippet?.char_count || domSnippetText.length || 0),
+      contentHash: domSnippetHash || null,
+      surface: 'static_dom'
+    }, targetFields);
+  }
+  if (screenshotMeta) {
+    const screenshotDescriptor = [
+      `Screenshot artifact kind=${String(screenshotMeta.kind || 'page')}`,
+      `format=${String(screenshotFormat || 'jpeg')}`,
+      `selector=${String(screenshotMeta.selector || 'none')}`,
+      `size=${String(screenshotMeta.width || 'unk')}x${String(screenshotMeta.height || 'unk')}`,
+      `width=${String(screenshotMeta.width || 'unk')}`,
+      `height=${String(screenshotMeta.height || 'unk')}`,
+      `bytes=${screenshotByteCount > 0 ? screenshotByteCount : 'unk'}`,
+      screenshotUri ? `uri=${screenshotUri}` : ''
+    ].filter(Boolean).join(' | ');
+    const screenshotId = toStableId('i', 0);
+    pushReference(state, {
+      id: screenshotId,
+      url: normalizedUrl || source.url,
+      type: 'screenshot_capture',
+      content: screenshotDescriptor,
+      extractionMethod: 'visual_artifact',
+      fileUri: screenshotUri || null,
+      mimeType: screenshotMime || screenshotMimeType(screenshotFormat),
+      width: Number(screenshotMeta.width || 0) || null,
+      height: Number(screenshotMeta.height || 0) || null,
+      sizeBytes: screenshotByteCount > 0 ? screenshotByteCount : null,
+      contentHash: screenshotHash || null,
+      surface: 'screenshot_capture'
+    }, targetFields);
+    visualAssets.push({
+      id: `img_${sha256(`${state.sourceId}|${screenshotId}|${screenshotUri || 'inline'}`).slice(7, 19)}`,
+      source_id: state.sourceId,
+      source_url: normalizedUrl || source.url,
+      kind: 'screenshot_capture',
+      file_uri: screenshotUri || null,
+      mime_type: screenshotMime || screenshotMimeType(screenshotFormat),
+      width: Number(screenshotMeta.width || 0) || null,
+      height: Number(screenshotMeta.height || 0) || null,
+      size_bytes: screenshotByteCount > 0 ? screenshotByteCount : null,
+      content_hash: screenshotHash || null,
+      selector: String(screenshotMeta.selector || '').trim() || null,
+      captured_at: String(screenshotMeta.captured_at || fetchedAt).trim() || fetchedAt
+    });
+  }
 
   rankNetworkJsonRows(pageData?.networkResponses || [], tokens).forEach((row, index) => {
     pushReference(state, {
@@ -544,6 +688,7 @@ export function buildEvidencePackV2({
     snippets: state.snippets,
     snippets_by_id: state.snippetsById,
     candidate_bindings: state.candidateBindings,
+    visual_assets: visualAssets,
     meta: {
       source_id: sourceId,
       host,
@@ -556,7 +701,31 @@ export function buildEvidencePackV2({
       candidate_binding_count: Object.keys(state.candidateBindings || {}).length,
       fingerprint: source?.fingerprint?.id || '',
       page_content_hash: state.sources[sourceId].page_content_hash,
-      text_hash: state.sources[sourceId].text_hash
+      text_hash: state.sources[sourceId].text_hash,
+      visual_artifacts: {
+        screenshot_available: screenshotByteCount > 0,
+        screenshot_kind: screenshotMeta ? String(screenshotMeta.kind || 'page') : '',
+        screenshot_format: screenshotMeta ? String(screenshotFormat || 'jpeg') : '',
+        screenshot_uri: screenshotUri || '',
+        screenshot_content_hash: screenshotHash || '',
+        dom_snippet_available: Boolean(domSnippetText),
+        dom_snippet_kind: domSnippetKind || '',
+        dom_snippet_uri: domSnippetUri || '',
+        dom_snippet_content_hash: domSnippetHash || '',
+        visual_asset_count: visualAssets.length
+      },
+      article_extraction: {
+        method: String(articleExtraction?.method || ''),
+        title: normalizeText(String(articleExtraction?.title || '')).slice(0, 220),
+        excerpt: normalizeText(String(articleExtraction?.excerpt || '')).slice(0, 360),
+        preview: normalizeText(String(articleExtraction?.text || '')).slice(0, 1200),
+        quality_score: Number(articleExtraction?.quality?.score || 0),
+        char_count: Number(articleExtraction?.quality?.char_count || 0),
+        heading_count: Number(articleExtraction?.quality?.heading_count || 0),
+        duplicate_sentence_ratio: Number(articleExtraction?.quality?.duplicate_sentence_ratio || 0),
+        low_quality: Boolean(articleExtraction?.low_quality),
+        fallback_reason: String(articleExtraction?.fallback_reason || '')
+      }
     }
   };
 }

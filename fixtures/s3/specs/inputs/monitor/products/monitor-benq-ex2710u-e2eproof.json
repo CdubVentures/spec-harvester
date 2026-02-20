@@ -1,0 +1,17 @@
+{
+  "productId": "monitor-benq-ex2710u-e2eproof",
+  "category": "monitor",
+  "identityLock": {
+    "brand": "BenQ",
+    "model": "EX2710U",
+    "variant": "e2eproof",
+    "sku": "",
+    "mpn": "",
+    "gtin": ""
+  },
+  "seedUrls": [
+    "https://www.rtings.com/monitor/reviews/benq/mobiuz-ex2710u",
+    "https://www.benq.com/en-us/monitor/gaming/ex2710u.html"
+  ],
+  "anchors": {}
+}

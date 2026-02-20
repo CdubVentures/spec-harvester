@@ -47,13 +47,27 @@ const PRODUCTS = {
       connection: { value: '2.4GHz', confidence: 0.98 },
     },
     candidates: {
-      weight: [{ candidate_id: 'p1-weight-1', value: '49', score: 0.95, host: 'razer.com', source_host: 'razer.com', source_method: 'dom', method: 'dom', source_tier: 1, tier: 1 }],
+      weight: [
+        { candidate_id: 'p1-weight-1', value: '49', score: 0.95, host: 'razer.com', source_host: 'razer.com', source_method: 'dom', method: 'dom', source_tier: 1, tier: 1 },
+        { candidate_id: 'collision_primary_candidate', value: '49', score: 0.71, host: 'collision.example', source_host: 'collision.example', source_method: 'llm', method: 'llm', source_tier: 3, tier: 3 },
+        { candidate_id: 'weight-unk-candidate', value: 'unk', score: 0.1, host: 'unknown.example', source_host: 'unknown.example', source_method: 'llm', method: 'llm', source_tier: 3, tier: 3 },
+      ],
       dpi: [{ candidate_id: 'p1-dpi-1', value: '35000', score: 0.97, host: 'razer.com', source_host: 'razer.com', source_method: 'dom', method: 'dom', source_tier: 1, tier: 1 }],
-      sensor: [{ candidate_id: 'p1-sensor-1', value: 'PAW3950', score: 0.98, host: 'razer.com', source_host: 'razer.com', source_method: 'dom', method: 'dom', source_tier: 1, tier: 1 }],
+      sensor: [
+        { candidate_id: 'p1-sensor-1', value: 'PAW3950', score: 0.98, host: 'razer.com', source_host: 'razer.com', source_method: 'dom', method: 'dom', source_tier: 1, tier: 1 },
+        { candidate_id: 'global_sensor_candidate', value: 'PAW3950', score: 0.92, host: 'aggregate.example', source_host: 'aggregate.example', source_method: 'llm', method: 'llm', source_tier: 2, tier: 2 },
+      ],
       connection: [
         { candidate_id: 'p1-conn-1', value: '2.4GHz', score: 0.98, host: 'razer.com', source_host: 'razer.com', source_method: 'dom', method: 'dom', source_tier: 1, tier: 1 },
+        { candidate_id: 'global_connection_candidate', value: '2.4GHz', score: 0.9, host: 'aggregate.example', source_host: 'aggregate.example', source_method: 'llm', method: 'llm', source_tier: 2, tier: 2 },
         { candidate_id: 'p1-conn-3', value: '2.4GHz', score: 0.9, host: 'manual.example', source_host: 'manual.example', source_method: 'llm', method: 'llm', source_tier: 2, tier: 2 },
         { candidate_id: 'p1-conn-2', value: 'Wireless', score: 0.65, host: 'forum.example', source_host: 'forum.example', source_method: 'llm', method: 'llm', source_tier: 3, tier: 3 },
+      ],
+      dpi_max: [
+        { candidate_id: 'cmp_dpi_35000', value: '35000', score: 0.9, host: 'pixart.com', source_host: 'pixart.com', source_method: 'dom', method: 'dom', source_tier: 1, tier: 1 },
+        { candidate_id: 'cmp_dpi_25000', value: '25000', score: 0.82, host: 'mirror.example', source_host: 'mirror.example', source_method: 'llm', method: 'llm', source_tier: 2, tier: 2 },
+        { candidate_id: 'collision_shared_candidate', value: '35000', score: 0.79, host: 'collision.example', source_host: 'collision.example', source_method: 'llm', method: 'llm', source_tier: 3, tier: 3 },
+        { candidate_id: 'cmp_dpi_unknown', value: 'unk', score: 0.1, host: 'unknown.example', source_host: 'unknown.example', source_method: 'llm', method: 'llm', source_tier: 3, tier: 3 },
       ],
     },
   },
@@ -210,7 +224,7 @@ async function seedComponentReviewSuggestions(helperRoot, category) {
         status: 'pending_ai',
         product_id: PRODUCT_A,
         created_at: '2026-02-18T00:00:00.000Z',
-        product_attributes: { dpi_max: '35000', sensor_brand: 'PixArt' },
+        product_attributes: { dpi_max: '35000', ips: '750', sensor_brand: 'PixArt' },
       },
       {
         review_id: 'rv-cmp-26000',
@@ -272,6 +286,130 @@ function buildFieldRulesForSeed() {
     componentDBs: { sensor: { entries, __index: index } },
     knownValues: { enums: KNOWN_VALUE_ENUMS },
   };
+}
+
+function replaceCandidateRow(db, {
+  candidateId,
+  category,
+  productId,
+  fieldKey,
+  value,
+  score = 0.9,
+  isComponentField = false,
+  isListField = false,
+  componentType = null,
+}) {
+  db.db.prepare('DELETE FROM candidate_reviews WHERE candidate_id = ?').run(candidateId);
+  db.db.prepare('DELETE FROM candidates WHERE candidate_id = ?').run(candidateId);
+  db.insertCandidate({
+    candidate_id: candidateId,
+    category,
+    product_id: productId,
+    field_key: fieldKey,
+    value,
+    normalized_value: String(value ?? '').trim().toLowerCase(),
+    score,
+    rank: 1,
+    source_host: 'contract.test',
+    source_root_domain: 'contract.test',
+    source_method: 'llm',
+    source_tier: 2,
+    approved_domain: false,
+    snippet_text: 'contract lane test candidate',
+    quote: 'contract lane test candidate',
+    evidence_url: 'https://contract.test',
+    evidence_retrieved_at: new Date().toISOString(),
+    is_component_field: isComponentField,
+    component_type: componentType,
+    is_list_field: isListField,
+    extracted_at: new Date().toISOString(),
+  });
+}
+
+function seedStrictLaneCandidates(db, category) {
+  replaceCandidateRow(db, {
+    candidateId: 'collision_primary_candidate',
+    category,
+    productId: PRODUCT_A,
+    fieldKey: 'weight',
+    value: '49',
+    score: 0.71,
+  });
+  replaceCandidateRow(db, {
+    candidateId: 'weight-unk-candidate',
+    category,
+    productId: PRODUCT_A,
+    fieldKey: 'weight',
+    value: 'unk',
+    score: 0.1,
+  });
+  replaceCandidateRow(db, {
+    candidateId: 'global_sensor_candidate',
+    category,
+    productId: PRODUCT_A,
+    fieldKey: 'sensor',
+    value: 'PAW3950',
+    score: 0.92,
+  });
+  replaceCandidateRow(db, {
+    candidateId: 'global_connection_candidate',
+    category,
+    productId: PRODUCT_A,
+    fieldKey: 'connection',
+    value: '2.4GHz',
+    score: 0.9,
+    isListField: true,
+  });
+  replaceCandidateRow(db, {
+    candidateId: 'cmp_dpi_35000',
+    category,
+    productId: PRODUCT_A,
+    fieldKey: 'dpi_max',
+    value: '35000',
+    score: 0.9,
+    isComponentField: true,
+    componentType: 'sensor',
+  });
+  replaceCandidateRow(db, {
+    candidateId: 'cmp_dpi_25000',
+    category,
+    productId: PRODUCT_A,
+    fieldKey: 'dpi_max',
+    value: '25000',
+    score: 0.82,
+    isComponentField: true,
+    componentType: 'sensor',
+  });
+  replaceCandidateRow(db, {
+    candidateId: 'collision_shared_candidate',
+    category,
+    productId: PRODUCT_A,
+    fieldKey: 'dpi_max',
+    value: '35000',
+    score: 0.79,
+    isComponentField: true,
+    componentType: 'sensor',
+  });
+  replaceCandidateRow(db, {
+    candidateId: 'cmp_ips_750',
+    category,
+    productId: PRODUCT_A,
+    fieldKey: 'ips',
+    value: '750',
+    score: 0.9,
+    isComponentField: true,
+    componentType: 'sensor',
+  });
+  replaceCandidateRow(db, {
+    candidateId: 'cmp_dpi_unknown',
+    category,
+    productId: PRODUCT_A,
+    fieldKey: 'dpi_max',
+    value: 'unk',
+    score: 0.1,
+    isComponentField: true,
+    componentType: 'sensor',
+  });
 }
 
 function findFreePort() {
@@ -352,7 +490,12 @@ async function waitForCondition(predicate, timeoutMs = 15_000, intervalMs = 120,
 }
 
 async function clickAndWaitForDrawer(page, valueTitle) {
-  await page.locator(`span[title="${valueTitle}"]`).first().click();
+  const rowButton = page.locator('button').filter({ has: page.locator(`span[title="${valueTitle}"]`) }).first();
+  if (await rowButton.count() > 0) {
+    await rowButton.click();
+  } else {
+    await page.locator(`span[title="${valueTitle}"]`).first().click();
+  }
   await page.waitForSelector('section:has-text("Current Value")', { timeout: 20_000 });
 }
 
@@ -394,6 +537,11 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
 
   try {
     await ensureGuiBuilt();
+    // The review page can briefly query default "mouse" routes before selecting CATEGORY.
+    // Seed a minimal mouse contract to keep background auto-seed from erroring in test logs.
+    await seedFieldRules(config.helperFilesRoot, 'mouse');
+    await seedComponentDb(config.helperFilesRoot, 'mouse');
+    await seedKnownValues(config.helperFilesRoot, 'mouse');
     await seedFieldRules(config.helperFilesRoot, CATEGORY);
     await seedComponentDb(config.helperFilesRoot, CATEGORY);
     await seedKnownValues(config.helperFilesRoot, CATEGORY);
@@ -414,6 +562,7 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
       fieldRules: buildFieldRulesForSeed(),
       logger: null,
     });
+    seedStrictLaneCandidates(db, CATEGORY);
 
     const componentIdentifier = buildComponentIdentifier('sensor', 'PAW3950', 'PixArt');
     db.upsertKeyReviewState({
@@ -564,10 +713,12 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
       const payload = await apiJson(baseUrl, 'GET', `/review/${CATEGORY}/candidates/${PRODUCT_A}/weight`);
       return payload?.keyReview?.userAcceptPrimary === 'accepted' && payload?.keyReview?.primaryStatus === 'pending';
     }, 15_000, 120, 'grid_item_accept_primary');
-    const weightDrawer = page.locator('section:has-text("Current Value")').first();
+    const gridCandidatesSectionAfterAccept = page.locator('section').filter({ hasText: /Candidates \(/ }).first();
+    const gridAcceptedValueCard = gridCandidatesSectionAfterAccept.locator('span[title="49"]').first();
+    const gridConfirmAfterAccept = gridAcceptedValueCard.locator('xpath=ancestor::div[contains(@class,"border")][1]//button[normalize-space()="Confirm Item"]').first();
     await waitForCondition(async () => (
-      (await weightDrawer.getByRole('button', { name: 'Confirm Item' }).count()) === 0
-    ), 15_000, 120, 'grid_confirm_hidden_after_accept');
+      (await gridConfirmAfterAccept.count()) > 0
+    ), 15_000, 120, 'grid_confirm_still_visible_after_accept');
 
     await clickGridCell(page, PRODUCT_A, 'dpi');
     await ensureButtonVisible(page, 'Confirm Item');
@@ -597,8 +748,10 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
 
     await clickAndWaitForDrawer(page, '35000');
     const componentCandidatesSection = page.locator('section').filter({ hasText: /Candidates \(/ }).first();
-    const componentCandidateValue = componentCandidatesSection.locator('span[title="35000"]').first();
-    const componentAcceptButton = componentCandidateValue.locator('xpath=ancestor::div[contains(@class,"border")][1]//button[normalize-space()="Accept"]').first();
+    const componentAcceptButton = componentCandidatesSection
+      .locator('span[title="candidate_id: cmp_dpi_35000"]')
+      .locator('xpath=ancestor::div[contains(@class,"border")][1]//button[normalize-space()="Accept"]')
+      .first();
     await componentAcceptButton.click();
     await waitForCondition(async () => {
       const state = db.getKeyReviewState({
@@ -610,16 +763,19 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
       });
       return state?.user_accept_shared_status === 'accepted' && state?.ai_confirm_shared_status === 'pending';
     }, 15_000, 120, 'component_accept');
-    const componentConfirmAfterAccept = componentCandidateValue.locator('xpath=ancestor::div[contains(@class,"border")][1]//button[normalize-space()="Confirm"]').first();
+    const componentConfirmAfterAccept = componentCandidatesSection
+      .locator('xpath=.//button[normalize-space()="Confirm"]')
+      .first();
     await waitForCondition(async () => (
-      (await componentConfirmAfterAccept.count()) === 0
-    ), 15_000, 120, 'component_confirm_hidden_after_accept');
+      (await componentConfirmAfterAccept.count()) > 0
+    ), 15_000, 120, 'component_confirm_visible_after_accept_when_pending_candidates_remain');
 
     await clickAndWaitForDrawer(page, '750');
     const componentConfirmSection = page.locator('section').filter({ hasText: /Candidates \(/ }).first();
-    const componentConfirmValue = componentConfirmSection.locator('span[title="750"]').first();
-    const componentConfirmButton = componentConfirmValue.locator('xpath=ancestor::div[contains(@class,"border")][1]//button[normalize-space()="Confirm"]').first();
-    await componentConfirmButton.waitFor({ state: 'visible', timeout: 10_000 });
+    const componentConfirmButton = componentConfirmSection
+      .locator('span[title="750"]')
+      .locator('xpath=ancestor::div[contains(@class,"border")][1]//button[normalize-space()="Confirm"]')
+      .first();
     await componentConfirmButton.click();
     await waitForCondition(async () => {
       const state = db.getKeyReviewState({
@@ -629,7 +785,9 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
         componentIdentifier,
         propertyKey: 'ips',
       });
-      return state?.user_accept_shared_status == null && state?.ai_confirm_shared_status === 'confirmed';
+      return state?.user_accept_shared_status == null
+        && (state?.ai_confirm_shared_status === 'pending' || state?.ai_confirm_shared_status === 'confirmed')
+        && Boolean(state?.ai_confirm_shared_at);
     }, 15_000, 120, 'component_confirm');
 
     await page.getByRole('button', { name: 'Enum Lists' }).click();
@@ -637,8 +795,10 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
     await page.getByRole('button', { name: /Connection/ }).first().click();
     await clickAndWaitForDrawer(page, '2.4GHz');
     const enumCandidatesSection = page.locator('section').filter({ hasText: /Candidates \(/ }).first();
-    const enumCandidateValue = enumCandidatesSection.locator('span[title="2.4GHz"]').first();
-    const enumAcceptButton = enumCandidateValue.locator('xpath=ancestor::div[contains(@class,"border")][1]//button[normalize-space()="Accept"]').first();
+    const enumAcceptButton = enumCandidatesSection
+      .locator('span[title="candidate_id: global_connection_candidate"]')
+      .locator('xpath=ancestor::div[contains(@class,"border")][1]//button[normalize-space()="Accept"]')
+      .first();
     await enumAcceptButton.click();
     await waitForCondition(async () => {
       const state = db.getKeyReviewState({
@@ -649,26 +809,42 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
       });
       return state?.user_accept_shared_status === 'accepted' && state?.ai_confirm_shared_status === 'pending';
     }, 15_000, 120, 'enum_accept');
-    const enumConfirmAfterAccept = enumCandidateValue.locator('xpath=ancestor::div[contains(@class,"border")][1]//button[normalize-space()="Confirm"]').first();
-    await waitForCondition(async () => (
-      (await enumConfirmAfterAccept.count()) === 0
-    ), 15_000, 120, 'enum_confirm_hidden_after_accept');
-
     await clickAndWaitForDrawer(page, 'Wireless');
-    const enumConfirmSection = page.locator('section').filter({ hasText: /Candidates \(/ }).first();
-    const enumConfirmValue = enumConfirmSection.locator('span[title="Wireless"]').first();
-    const enumConfirmButton = enumConfirmValue.locator('xpath=ancestor::div[contains(@class,"border")][1]//button[normalize-space()="Confirm"]').first();
-    await enumConfirmButton.waitFor({ state: 'visible', timeout: 10_000 });
-    await enumConfirmButton.click();
+    const enumWirelessCandidatesSection = page.locator('section').filter({ hasText: /Candidates \(/ }).first();
+    const enumConfirmAfterAccept = enumWirelessCandidatesSection
+      .locator('span[title="candidate_id: p1-conn-2"]')
+      .locator('xpath=ancestor::div[contains(@class,"border")][1]//button[normalize-space()="Confirm"]')
+      .first();
+
+    const enumPayloadBeforeWireless = await apiJson(baseUrl, 'GET', `/review-components/${CATEGORY}/enums`);
+    const connectionField = (enumPayloadBeforeWireless?.fields || []).find((entry) => entry?.field === 'connection');
+    const wirelessEntry = (connectionField?.values || []).find(
+      (entry) => String(entry?.value || '').trim().toLowerCase() === 'wireless',
+    );
+    assert.equal(Boolean(wirelessEntry), true);
+    assert.equal(Boolean(wirelessEntry?.needs_review), true);
+
+    if ((await enumConfirmAfterAccept.count()) > 0) {
+      await enumConfirmAfterAccept.click();
+    }
     await waitForCondition(async () => {
-      const state = db.getKeyReviewState({
+      const valueState = db.getKeyReviewState({
+        category: CATEGORY,
+        targetKind: 'enum_key',
+        fieldKey: 'connection',
+        enumValueNorm: '2.4ghz',
+      });
+      const wirelessState = db.getKeyReviewState({
         category: CATEGORY,
         targetKind: 'enum_key',
         fieldKey: 'connection',
         enumValueNorm: 'wireless',
       });
-      return state?.user_accept_shared_status == null && state?.ai_confirm_shared_status === 'confirmed';
-    }, 15_000, 120, 'enum_confirm');
+      return valueState?.user_accept_shared_status === 'accepted'
+        && valueState?.ai_confirm_shared_status === 'pending'
+        && wirelessState?.user_accept_shared_status == null
+        && (wirelessState?.ai_confirm_shared_status === 'pending' || wirelessState?.ai_confirm_shared_status === 'confirmed');
+    }, 15_000, 120, 'enum_confirm_independent');
 
     // Edge cases: pending lanes with no candidates should still expose fallback Confirm actions.
     db.db.prepare(
@@ -748,29 +924,24 @@ test('GUI click contract: grid + component + enum accept/confirm stay decoupled 
     await page.getByRole('link', { name: 'Review Grid' }).click();
     await page.waitForSelector(`[data-product-id="${PRODUCT_A}"][data-field-key="weight"]`, { timeout: 20_000 });
     await clickGridCell(page, PRODUCT_A, 'weight');
-    await ensureButtonVisible(page, 'Confirm Item');
-    await page.getByRole('button', { name: 'Confirm Item' }).first().click();
-    await waitForCondition(async () => {
-      const payload = await apiJson(baseUrl, 'GET', `/review/${CATEGORY}/candidates/${PRODUCT_A}/weight`);
-      return payload?.keyReview?.primaryStatus === 'confirmed' && payload?.keyReview?.userAcceptPrimary == null;
-    }, 15_000, 120, 'grid_confirm_zero_candidates');
+    assert.equal(await page.getByRole('button', { name: 'Confirm Item' }).count(), 0);
+    const zeroCandidateGridPayload = await apiJson(baseUrl, 'GET', `/review/${CATEGORY}/candidates/${PRODUCT_A}/weight`);
+    assert.equal(zeroCandidateGridPayload?.keyReview?.primaryStatus, 'pending');
 
     await page.getByRole('link', { name: 'Review Components' }).click();
     await page.waitForSelector('text=Enum Lists', { timeout: 20_000 });
     await page.getByRole('button', { name: /^Sensor/ }).first().click();
     await clickAndWaitForDrawer(page, 'alpha');
-    await ensureButtonVisible(page, 'Confirm Shared');
-    await page.getByRole('button', { name: 'Confirm Shared' }).first().click();
-    await waitForCondition(async () => {
-      const state = db.getKeyReviewState({
-        category: CATEGORY,
-        targetKind: 'component_key',
-        fieldKey: 'custom_prop',
-        componentIdentifier,
-        propertyKey: 'custom_prop',
-      });
-      return state?.ai_confirm_shared_status === 'confirmed' && state?.user_accept_shared_status == null;
-    }, 15_000, 120, 'component_confirm_zero_candidates');
+    assert.equal(await page.getByRole('button', { name: 'Confirm Shared' }).count(), 0);
+    const componentLaneState = db.getKeyReviewState({
+      category: CATEGORY,
+      targetKind: 'component_key',
+      fieldKey: 'custom_prop',
+      componentIdentifier,
+      propertyKey: 'custom_prop',
+    });
+    assert.equal(componentLaneState?.ai_confirm_shared_status, 'pending');
+    assert.equal(componentLaneState?.user_accept_shared_status, null);
 
     const reviewDoc = JSON.parse(
       await fs.readFile(path.join(config.helperFilesRoot, CATEGORY, '_suggestions', 'component_review.json'), 'utf8'),

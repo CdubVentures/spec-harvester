@@ -109,10 +109,22 @@ Reject/strip any alias/query that:
 ### 2.6 Runtime knob (implemented)
 - Add explicit run-control knob: `phase 02 llm searchprofile` (boolean).
 - Add explicit model dropdown for Phase 02 planner model (default selection prefers Gemini if available in model catalog).
+- Add explicit token-cap dropdown paired with the model selector.
 - Wire through GUI -> `POST /process/start` -> env overrides:
   - `LLM_PLAN_DISCOVERY_QUERIES=true|false`
   - `LLM_MODEL_PLAN=<selected_model>`
+  - `LLM_MAX_OUTPUT_TOKENS_PLAN=<selected_tokens>`
+  - `LLM_MAX_OUTPUT_TOKENS_PLAN_FALLBACK=<selected_tokens>`
 - GUI proof must show planner status/model on Search Profile panel.
+
+### 2.7 LLM output contract hardening (implemented)
+- Planner outputs are validated against strict JSON schema.
+- Parsing hardening retries when provider response wraps JSON with extra reasoning text.
+- Runtime traces include:
+  - `retry_without_schema`
+  - `json_schema_requested`
+  - `max_tokens_applied`
+  so model/cap behavior is auditable from GUI trace view.
 
 ## GUI proof
 - Show aliases and query templates *before* search executes.

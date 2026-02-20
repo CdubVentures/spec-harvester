@@ -60,7 +60,7 @@ test('extractCandidatesLLM keeps only candidates with valid evidenceRefs', async
           { id: 'ref-1', url: 'https://example.com', host: 'example.com', evidenceKey: 'network:1' }
         ],
         snippets: [
-          { type: 'network', text: '{"connection":"wireless"}' }
+          { id: 'ref-1', type: 'network', normalized_text: 'Connection: wireless mode' }
         ]
       },
       config: {

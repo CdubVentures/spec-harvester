@@ -1,5 +1,6 @@
 import { callLlmWithRouting, hasLlmRouteApiKey } from './routing.js';
 import { normalizeFieldList } from '../utils/fieldKeys.js';
+import { buildExtractionContextMatrix, buildPrimeSourcesFromProvenance } from './extractionContext.js';
 
 function hasKnownValue(value) {
   const token = String(value || '').trim().toLowerCase();
@@ -117,6 +118,34 @@ function sanitizeDecisions(result = {}, uncertainSet = new Set()) {
   };
 }
 
+function buildValidatorMultimodalInput({
+  payload = {},
+  extractionContext = {},
+  maxImages = 6
+} = {}) {
+  const text = JSON.stringify(payload);
+  const rows = Array.isArray(extractionContext?.prime_sources?.rows)
+    ? extractionContext.prime_sources.rows
+    : [];
+  const images = rows
+    .filter((row) => String(row?.file_uri || '').trim())
+    .slice(0, Math.max(1, Number(maxImages || 6)))
+    .map((row, index) => ({
+      id: String(row?.snippet_id || `img_${index + 1}`).trim(),
+      file_uri: String(row?.file_uri || '').trim(),
+      mime_type: String(row?.mime_type || '').trim() || '',
+      content_hash: String(row?.content_hash || '').trim() || '',
+      caption: [
+        row?.field_key ? `field=${row.field_key}` : '',
+        row?.surface ? `surface=${row.surface}` : ''
+      ].filter(Boolean).join(' | ')
+    }));
+  return {
+    text,
+    images
+  };
+}
+
 export async function validateCandidatesLLM({
   job,
   normalized,
@@ -134,7 +163,12 @@ export async function validateCandidatesLLM({
       enabled: false,
       accept: [],
       reject: [],
-      unknown: []
+      unknown: [],
+      phase08: {
+        context_field_count: 0,
+        prime_source_rows: 0,
+        payload_chars: 0
+      }
     };
   }
 
@@ -145,7 +179,12 @@ export async function validateCandidatesLLM({
       enabled: false,
       accept: [],
       reject: [],
-      unknown: []
+      unknown: [],
+      phase08: {
+        context_field_count: 0,
+        prime_source_rows: 0,
+        payload_chars: 0
+      }
     };
   }
 
@@ -164,11 +203,37 @@ export async function validateCandidatesLLM({
       enabled: false,
       accept: [],
       reject: [],
-      unknown: []
+      unknown: [],
+      phase08: {
+        context_field_count: normalizedUncertain.length,
+        prime_source_rows: 0,
+        payload_chars: 0
+      }
     };
   }
 
   const uncertainSet = new Set(normalizedUncertain);
+  const validatorPrimeSources = buildPrimeSourcesFromProvenance({
+    uncertainFields: normalizedUncertain,
+    provenance,
+    maxPerField: 4,
+    maxRows: 48,
+    quoteChars: 320
+  });
+  const extractionContext = buildExtractionContextMatrix({
+    category: job.category || categoryConfig.category || '',
+    categoryConfig,
+    fields: normalizedUncertain,
+    evidencePack: null,
+    primeSources: validatorPrimeSources,
+    options: {
+      maxPrimePerField: 4,
+      maxPrimeRows: 48,
+      maxParseExamples: 2,
+      maxComponentEntities: 120,
+      maxEnumOptions: 80
+    }
+  });
   const payload = {
     product: {
       productId: job.productId,
@@ -197,10 +262,20 @@ export async function validateCandidatesLLM({
         }];
       })
     ),
+    extraction_context: {
+      summary: extractionContext.summary || {},
+      fields: extractionContext.fields || {},
+      prime_sources: extractionContext?.prime_sources || { by_field: {}, rows: [] }
+    },
     constraints: constraints?.fields || {}
   };
 
   try {
+    const multimodalUserInput = buildValidatorMultimodalInput({
+      payload,
+      extractionContext,
+      maxImages: Math.max(1, Number.parseInt(String(config.llmValidateMaxImages || 6), 10) || 6)
+    });
     const result = await callLlmWithRouting({
       config,
       reason: 'validate',
@@ -210,7 +285,7 @@ export async function validateCandidatesLLM({
         'Return JSON only.',
         'Do not guess values without strong evidence.'
       ].join('\n'),
-      user: JSON.stringify(payload),
+      user: multimodalUserInput,
       jsonSchema: validatorSchema(),
       usageContext: {
         category: job.category || categoryConfig.category || '',
@@ -221,6 +296,7 @@ export async function validateCandidatesLLM({
         host: '',
         url_count: 0,
         evidence_chars: JSON.stringify(payload).length,
+        multimodal_image_count: multimodalUserInput.images.length,
         traceWriter: llmContext.traceWriter || null,
         trace_context: {
           purpose: 'validate_candidates',
@@ -253,6 +329,11 @@ export async function validateCandidatesLLM({
       enabled: true,
       llm_validate_model: config.llmModelValidate || config.llmModelExtract || '',
       llm_validate_provider: config.llmProvider || '',
+      phase08: {
+        context_field_count: normalizedUncertain.length,
+        prime_source_rows: Number(extractionContext?.prime_sources?.rows?.length || 0),
+        payload_chars: JSON.stringify(payload).length
+      },
       ...decisions
     };
   } catch (error) {
@@ -264,7 +345,12 @@ export async function validateCandidatesLLM({
       enabled: false,
       accept: [],
       reject: [],
-      unknown: []
+      unknown: [],
+      phase08: {
+        context_field_count: normalizedUncertain.length,
+        prime_source_rows: Number(extractionContext?.prime_sources?.rows?.length || 0),
+        payload_chars: JSON.stringify(payload).length
+      }
     };
   }
 }

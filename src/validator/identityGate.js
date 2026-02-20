@@ -68,14 +68,56 @@ function likelyProductSpecificSource(source) {
 function dynamicMatchThreshold(identityLock = {}) {
   const hasVariant = str(identityLock.variant) !== '';
   const hasStrongId = str(identityLock.sku) !== '' || str(identityLock.mpn) !== '' || str(identityLock.gtin) !== '';
+  const familyModelCount = Math.max(0, Number.parseInt(String(identityLock.family_model_count || 0), 10) || 0);
+  const ambiguityToken = String(identityLock.ambiguity_level || '').trim().toLowerCase();
+  const ambiguityLevel = ambiguityToken === 'easy' || ambiguityToken === 'low'
+    ? 'easy'
+    : ambiguityToken === 'medium' || ambiguityToken === 'mid'
+      ? 'medium'
+      : ambiguityToken === 'hard' || ambiguityToken === 'high'
+        ? 'hard'
+        : ambiguityToken === 'very_hard' || ambiguityToken === 'very-hard' || ambiguityToken === 'very hard'
+          ? 'very_hard'
+          : ambiguityToken === 'extra_hard' || ambiguityToken === 'extra-hard' || ambiguityToken === 'extra hard'
+            ? 'extra_hard'
+            : familyModelCount >= 9
+              ? 'extra_hard'
+              : familyModelCount >= 6
+                ? 'very_hard'
+                : familyModelCount >= 4
+                  ? 'hard'
+                  : familyModelCount >= 2
+                    ? 'medium'
+                    : familyModelCount === 1
+                      ? 'easy'
+                      : 'unknown';
   let threshold = 0.8;
   if (!hasVariant) {
-    threshold -= 0.1;
+    if (ambiguityLevel === 'easy') {
+      threshold -= 0.15;
+    } else if (ambiguityLevel === 'medium') {
+      threshold -= 0.1;
+    } else if (ambiguityLevel === 'hard') {
+      threshold -= 0.02;
+    } else if (ambiguityLevel === 'very_hard') {
+      threshold += 0.01;
+    } else if (ambiguityLevel === 'extra_hard') {
+      threshold += 0.03;
+    } else {
+      threshold -= 0.1;
+    }
   }
   if (!hasStrongId) {
     threshold -= 0.05;
   }
-  return Math.max(0.65, Math.min(0.85, threshold));
+  if (ambiguityLevel === 'hard') {
+    threshold += 0.03;
+  } else if (ambiguityLevel === 'very_hard') {
+    threshold += 0.05;
+  } else if (ambiguityLevel === 'extra_hard') {
+    threshold += 0.08;
+  }
+  return Math.max(0.62, Math.min(0.92, threshold));
 }
 
 function detectConnectionClass(value) {

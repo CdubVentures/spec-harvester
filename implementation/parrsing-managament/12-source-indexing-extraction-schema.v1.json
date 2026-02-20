@@ -1,0 +1,2050 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "specfactory://schemas/source-indexing-extraction-packet.v1.json",
+  "title": "Spec Factory Source Indexing And Extraction Packet (Per Source URL)",
+  "description": "Canonical per-source packet for indexing and extraction. One packet = one canonical URL + one content hash version, with field-key assertions, evidence lineage, and retrieval projection.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_kind",
+    "source_packet_id",
+    "source_id",
+    "source_key",
+    "canonical_url",
+    "source_version_id",
+    "content_hash",
+    "run_meta",
+    "source_metadata",
+    "parser_execution",
+    "identity_target",
+    "artifact_index",
+    "evidence_index",
+    "field_key_map",
+    "quality",
+    "coverage_summary",
+    "indexing_projection",
+    "sql_projection"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "2026-02-20.source-indexing-extraction-packet.v1"
+    },
+    "record_kind": {
+      "type": "string",
+      "const": "source_indexing_extraction_packet"
+    },
+    "source_packet_id": {
+      "type": "string",
+      "description": "Stable per canonical URL. Example: sha256(canonical_url)."
+    },
+    "source_id": {
+      "type": "string",
+      "description": "Source registry identity for this source in this category/item scope."
+    },
+    "source_key": {
+      "type": "string",
+      "description": "Canonical URL string key."
+    },
+    "canonical_url": {
+      "type": "string",
+      "format": "uri"
+    },
+    "source_version_id": {
+      "type": "string",
+      "description": "Stable per canonical_url + content_hash."
+    },
+    "content_hash": {
+      "type": "string",
+      "description": "Hash of fetched canonical content payload for this version."
+    },
+    "run_meta": {
+      "$ref": "#/$defs/runMeta"
+    },
+    "source_metadata": {
+      "$ref": "#/$defs/sourceMetadata"
+    },
+    "parser_execution": {
+      "$ref": "#/$defs/parserExecution"
+    },
+    "identity_target": {
+      "$ref": "#/$defs/identityTarget"
+    },
+    "artifact_index": {
+      "type": "object",
+      "description": "Captured artifacts keyed by artifact_id.",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/artifact"
+      }
+    },
+    "evidence_index": {
+      "type": "object",
+      "description": "Evidence snippets keyed by evidence_id. Assertions reference these IDs.",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/evidence"
+      }
+    },
+    "field_key_map": {
+      "type": "object",
+      "description": "Every parser-found field key for this source, with per-field metadata and context-scoped assertions.",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/fieldBundle"
+      }
+    },
+    "quality": {
+      "$ref": "#/$defs/quality"
+    },
+    "coverage_summary": {
+      "$ref": "#/$defs/coverageSummary"
+    },
+    "indexing_projection": {
+      "$ref": "#/$defs/indexingProjection"
+    },
+    "sql_projection": {
+      "$ref": "#/$defs/sourceSqlProjection"
+    },
+    "visual_evidence": {
+      "$ref": "#/$defs/visualEvidence"
+    },
+    "packet_invariants": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "one_packet_per_canonical_url": {
+          "type": "boolean",
+          "const": true
+        },
+        "source_host_non_authority": {
+          "type": "boolean",
+          "const": true
+        },
+        "extraction_first_packet": {
+          "type": "boolean",
+          "const": true
+        },
+        "downstream_binding_optional": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    }
+  },
+  "$defs": {
+    "phaseId": {
+      "type": "string",
+      "enum": [
+        "phase_01_static_html",
+        "phase_02_dynamic_js",
+        "phase_03_main_article",
+        "phase_04_html_spec_table",
+        "phase_05_embedded_json",
+        "phase_06_text_pdf",
+        "phase_07_scanned_pdf_ocr",
+        "phase_08_image_ocr",
+        "phase_09_chart_graph",
+        "phase_10_office_mixed_doc"
+      ]
+    },
+    "sourceSurface": {
+      "type": "string",
+      "enum": [
+        "static_dom",
+        "static_identity_block",
+        "static_metadata_block",
+        "static_table",
+        "static_dl",
+        "dynamic_dom",
+        "network_json",
+        "graphql_replay",
+        "main_article",
+        "html_spec_table",
+        "json_ld",
+        "embedded_state",
+        "microdata",
+        "opengraph",
+        "twitter_card",
+        "rdfa",
+        "microformat",
+        "pdf_text",
+        "pdf_table",
+        "pdf_kv",
+        "screenshot_capture",
+        "screenshot_ocr_text",
+        "screenshot_ocr_table",
+        "screenshot_ocr_kv",
+        "scanned_pdf_ocr_text",
+        "scanned_pdf_ocr_table",
+        "scanned_pdf_ocr_kv",
+        "image_ocr_text",
+        "image_ocr_table",
+        "image_ocr_kv",
+        "chart_network_series",
+        "chart_script_config",
+        "chart_svg",
+        "chart_vision",
+        "office_docx",
+        "office_xlsx",
+        "office_pptx",
+        "office_mixed",
+        "office_title_block",
+        "office_paragraph_block",
+        "office_table_block",
+        "office_list_block",
+        "office_kv_block"
+      ]
+    },
+    "imageCandidateSourceType": {
+      "type": "string",
+      "enum": [
+        "dom_img",
+        "carousel_img",
+        "json_ld_image",
+        "opengraph_image",
+        "twitter_image",
+        "network_image"
+      ]
+    },
+    "visualCandidateContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dom_path": {
+          "type": "string"
+        },
+        "selector_hint": {
+          "type": "string"
+        },
+        "alt_text": {
+          "type": "string"
+        },
+        "nearby_text": {
+          "type": "string"
+        },
+        "carousel_state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "inactive",
+            "clone",
+            "offscreen",
+            "unknown"
+          ]
+        }
+      }
+    },
+    "ambiguityLevel": {
+      "type": "string",
+      "enum": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ]
+    },
+    "targetMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "page_product_cluster_id",
+        "target_match_score",
+        "target_match_passed"
+      ],
+      "properties": {
+        "page_product_cluster_id": {
+          "type": "string",
+          "description": "Per-page cluster identity used for multi-product disambiguation."
+        },
+        "target_match_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "target_match_passed": {
+          "type": "boolean"
+        },
+        "identity_reject_reason": {
+          "type": "string"
+        }
+      }
+    },
+    "runMeta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "category",
+        "item_identifier",
+        "started_at",
+        "finished_at",
+        "fetch_status",
+        "http_status",
+        "content_type",
+        "fetch_ms"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string"
+        },
+        "job_id": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "item_identifier": {
+          "type": "string"
+        },
+        "product_id": {
+          "type": "string"
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "finished_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "fetch_status": {
+          "type": "string",
+          "enum": [
+            "fetched",
+            "partial",
+            "failed",
+            "blocked"
+          ]
+        },
+        "http_status": {
+          "type": "integer"
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "fetch_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "retry_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cache_hit": {
+          "type": "boolean"
+        }
+      }
+    },
+    "sourceMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_url",
+        "source_host",
+        "source_root_domain",
+        "source_tier",
+        "source_method",
+        "doc_kind",
+        "host_authority_disabled"
+      ],
+      "properties": {
+        "source_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "source_host": {
+          "type": "string"
+        },
+        "source_root_domain": {
+          "type": "string"
+        },
+        "source_tier": {
+          "type": "integer"
+        },
+        "source_method": {
+          "type": "string"
+        },
+        "doc_kind": {
+          "type": "string"
+        },
+        "host_authority_disabled": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    },
+    "parserExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "phase_lineage",
+        "phase_stats",
+        "supported_source_kinds"
+      ],
+      "properties": {
+        "supported_source_kinds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/phaseId"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "phase_lineage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "phase_01_static_html",
+            "phase_02_dynamic_js",
+            "phase_03_main_article",
+            "phase_04_html_spec_table",
+            "phase_05_embedded_json",
+            "phase_06_text_pdf",
+            "phase_07_scanned_pdf_ocr",
+            "phase_08_image_ocr",
+            "phase_09_chart_graph",
+            "phase_10_office_mixed_doc"
+          ],
+          "properties": {
+            "phase_01_static_html": {
+              "type": "boolean"
+            },
+            "phase_02_dynamic_js": {
+              "type": "boolean"
+            },
+            "phase_03_main_article": {
+              "type": "boolean"
+            },
+            "phase_04_html_spec_table": {
+              "type": "boolean"
+            },
+            "phase_05_embedded_json": {
+              "type": "boolean"
+            },
+            "phase_06_text_pdf": {
+              "type": "boolean"
+            },
+            "phase_07_scanned_pdf_ocr": {
+              "type": "boolean"
+            },
+            "phase_08_image_ocr": {
+              "type": "boolean"
+            },
+            "phase_09_chart_graph": {
+              "type": "boolean"
+            },
+            "phase_10_office_mixed_doc": {
+              "type": "boolean"
+            }
+          }
+        },
+        "phase_stats": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "executed",
+              "duration_ms",
+              "assertion_count",
+              "evidence_count"
+            ],
+            "properties": {
+              "executed": {
+                "type": "boolean"
+              },
+              "duration_ms": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "assertion_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "evidence_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "error_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "warning_count": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    "identityTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "type": "string"
+        },
+        "brand": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "variant": {
+          "type": "string"
+        },
+        "sku": {
+          "type": "string"
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id",
+        "phase_id",
+        "artifact_kind",
+        "content_hash",
+        "mime_type",
+        "captured_at"
+      ],
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "phase_id": {
+          "$ref": "#/$defs/phaseId"
+        },
+        "artifact_kind": {
+          "type": "string",
+          "enum": [
+            "html",
+            "dom_snapshot",
+            "json_payload",
+            "jsonld_payload",
+            "structured_metadata_payload",
+            "article_text",
+            "table_rows",
+            "pdf_text",
+            "pdf_tables",
+            "ocr_text",
+            "chart_series",
+            "office_blocks",
+            "screenshot",
+            "image",
+            "metadata"
+          ]
+        },
+        "content_hash": {
+          "type": "string"
+        },
+        "mime_type": {
+          "type": "string"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "local_path": {
+          "type": "string"
+        },
+        "captured_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "meta": {
+          "type": "object",
+          "description": "Artifact-specific metadata (page count, sheet names, chart library, etc).",
+          "additionalProperties": true
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_id",
+        "source_id",
+        "source_url",
+        "phase_id",
+        "source_surface",
+        "target_match",
+        "snippet_id",
+        "snippet_hash",
+        "quote",
+        "snippet_text",
+        "retrieved_at"
+      ],
+      "properties": {
+        "evidence_id": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "source_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "source_host": {
+          "type": "string"
+        },
+        "source_root_domain": {
+          "type": "string"
+        },
+        "phase_id": {
+          "$ref": "#/$defs/phaseId"
+        },
+        "source_surface": {
+          "$ref": "#/$defs/sourceSurface"
+        },
+        "target_match": {
+          "$ref": "#/$defs/targetMatch"
+        },
+        "artifact_id": {
+          "type": "string"
+        },
+        "image_asset_id": {
+          "type": "string"
+        },
+        "region_id": {
+          "type": "string"
+        },
+        "snippet_id": {
+          "type": "string"
+        },
+        "snippet_hash": {
+          "type": "string"
+        },
+        "quote": {
+          "type": "string"
+        },
+        "snippet_text": {
+          "type": "string"
+        },
+        "quote_span": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "page": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sheet": {
+          "type": "string"
+        },
+        "slide": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "bbox": {
+          "type": "array",
+          "description": "[x0, y0, x1, y1]",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "number"
+          }
+        },
+        "table_id": {
+          "type": "string"
+        },
+        "row_id": {
+          "type": "string"
+        },
+        "column_id": {
+          "type": "string"
+        },
+        "key_path": {
+          "type": "string"
+        },
+        "json_pointer": {
+          "type": "string"
+        },
+        "css_selector": {
+          "type": "string"
+        },
+        "xpath": {
+          "type": "string"
+        },
+        "ocr_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "chart_series": {
+          "type": "string"
+        },
+        "chart_axis": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "tier": {
+          "type": "integer"
+        },
+        "retrieved_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "surface_meta": {
+          "type": "object",
+          "description": "Surface-specific metadata for all parsing use-cases.",
+          "additionalProperties": true
+        }
+      }
+    },
+    "fieldBundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field_key",
+        "field_key_id",
+        "field_meta",
+        "contexts",
+        "field_metrics"
+      ],
+      "properties": {
+        "field_key": {
+          "type": "string"
+        },
+        "field_key_id": {
+          "type": "string",
+          "description": "Stable per source_version_id + field_key. Example: sha256(source_version_id|field_key)."
+        },
+        "field_meta": {
+          "$ref": "#/$defs/fieldMeta"
+        },
+        "contexts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/contextBundle"
+          }
+        },
+        "field_metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "assertion_count",
+            "distinct_evidence_count",
+            "distinct_surface_count",
+            "distinct_source_count",
+            "ambiguity_level",
+            "ambiguity_score"
+          ],
+          "properties": {
+            "assertion_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "distinct_evidence_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "distinct_surface_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "distinct_source_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "ambiguity_level": {
+              "$ref": "#/$defs/ambiguityLevel"
+            },
+            "ambiguity_score": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "0 = unambiguous, 1 = highly ambiguous."
+            },
+            "ambiguity_reasons": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "has_conflict": {
+              "type": "boolean"
+            }
+          }
+        },
+        "selection_hints": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "suggested_start_assertion_ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "uniqueItems": true
+            },
+            "send_mode_hint": {
+              "type": "string",
+              "enum": [
+                "single_source_data",
+                "all_source_data"
+              ]
+            },
+            "min_evidence_refs_effective": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "min_distinct_sources_required": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
+    },
+    "fieldMeta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field_key",
+        "contract_type",
+        "shape",
+        "required_level",
+        "is_identity",
+        "unit_expected",
+        "component_type",
+        "enum_source"
+      ],
+      "properties": {
+        "field_key": {
+          "type": "string"
+        },
+        "contract_type": {
+          "type": "string"
+        },
+        "shape": {
+          "type": "string",
+          "enum": [
+            "scalar",
+            "component",
+            "list"
+          ]
+        },
+        "required_level": {
+          "type": "string",
+          "enum": [
+            "identity",
+            "critical",
+            "required",
+            "recommended",
+            "optional"
+          ]
+        },
+        "is_identity": {
+          "type": "boolean"
+        },
+        "unit_expected": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enum_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "component_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enum_source": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parse_template": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence_policy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "contextBundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field_instance_id",
+        "context_id",
+        "context_kind",
+        "context_ref",
+        "ambiguity",
+        "assertions"
+      ],
+      "properties": {
+        "field_instance_id": {
+          "type": "string",
+          "description": "Stable ID for this reviewable field context instance (grid/component/enum). Example: sha256(source_version_id|target_kind|field_key|context_ref)."
+        },
+        "context_id": {
+          "type": "string"
+        },
+        "context_kind": {
+          "type": "string",
+          "enum": [
+            "scalar",
+            "component",
+            "list"
+          ]
+        },
+        "context_ref": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "For component/list contexts this is component_identifier or enum value reference; null for scalar item field."
+        },
+        "authority_binding": {
+          "description": "Optional downstream binding for review grid/component/enum and slot IDs.",
+          "$ref": "#/$defs/authorityBinding"
+        },
+        "ambiguity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "level",
+            "score"
+          ],
+          "properties": {
+            "level": {
+              "$ref": "#/$defs/ambiguityLevel"
+            },
+            "score": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "reasons": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "assertions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/assertion"
+          }
+        },
+        "selected_assertion_hint_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "conflicting_assertion_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "authorityBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_kind",
+        "field_key",
+        "slot_binding"
+      ],
+      "properties": {
+        "target_kind": {
+          "type": "string",
+          "enum": [
+            "grid_key",
+            "component_key",
+            "enum_key"
+          ]
+        },
+        "field_key": {
+          "type": "string"
+        },
+        "item_identifier": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "product_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "component_identifier": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "property_key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enum_value_norm": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "slot_binding": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "item_field_state_id": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "component_value_id": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "list_value_id": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "enum_list_id": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "key_review_state_id": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "assertion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assertion_id",
+        "candidate_id",
+        "source_id",
+        "field_key",
+        "context_kind",
+        "context_ref",
+        "value_raw",
+        "value_normalized",
+        "value_type",
+        "unit",
+        "extraction_method",
+        "parser_phase",
+        "parser_confidence",
+        "confidence",
+        "target_match",
+        "ambiguity",
+        "parse_score_by_key",
+        "evidence_ref_ids",
+        "created_at"
+      ],
+      "properties": {
+        "assertion_id": {
+          "type": "string",
+          "description": "Must be stable and should equal candidate_id for source_assertions compatibility."
+        },
+        "candidate_id": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "field_key": {
+          "type": "string"
+        },
+        "context_kind": {
+          "type": "string",
+          "enum": [
+            "scalar",
+            "component",
+            "list"
+          ]
+        },
+        "context_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value_raw": {},
+        "value_normalized": {},
+        "value_type": {
+          "type": "string",
+          "enum": [
+            "string",
+            "number",
+            "boolean",
+            "list",
+            "json"
+          ]
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "extraction_method": {
+          "type": "string"
+        },
+        "parser_phase": {
+          "$ref": "#/$defs/phaseId"
+        },
+        "parser_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parser_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "target_match": {
+          "$ref": "#/$defs/targetMatch"
+        },
+        "ambiguity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "level",
+            "score"
+          ],
+          "properties": {
+            "level": {
+              "$ref": "#/$defs/ambiguityLevel"
+            },
+            "score": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "reasons": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "parse_score_by_key": {
+          "$ref": "#/$defs/parseScoreByKey"
+        },
+        "evidence_ref_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "parseScoreByKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field_key",
+        "score",
+        "score_factors",
+        "suggested_start_rank"
+      ],
+      "properties": {
+        "field_key": {
+          "type": "string"
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "score_factors": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "parser_confidence",
+            "evidence_density",
+            "unit_match",
+            "identity_match",
+            "tier_weight"
+          ],
+          "properties": {
+            "parser_confidence": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "evidence_density": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "unit_match": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "identity_match": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "tier_weight": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "cross_source_agreement": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          }
+        },
+        "suggested_start_rank": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "wrong_model",
+        "junk",
+        "blocked_reason"
+      ],
+      "properties": {
+        "wrong_model": {
+          "type": "boolean"
+        },
+        "junk": {
+          "type": "boolean"
+        },
+        "blocked_reason": {
+          "type": "string"
+        },
+        "parser_warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "coverageSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field_count",
+        "fields",
+        "required_coverage",
+        "critical_coverage",
+        "is_jackpot_candidate"
+      ],
+      "properties": {
+        "field_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "required_coverage": {
+          "type": "string"
+        },
+        "critical_coverage": {
+          "type": "string"
+        },
+        "is_jackpot_candidate": {
+          "type": "boolean"
+        }
+      }
+    },
+    "sourceSqlProjection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_registry_row",
+        "source_artifact_rows",
+        "source_assertion_rows",
+        "source_evidence_rows"
+      ],
+      "properties": {
+        "source_registry_row": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source_id",
+            "category",
+            "item_identifier",
+            "source_url"
+          ],
+          "properties": {
+            "source_id": {
+              "type": "string"
+            },
+            "category": {
+              "type": "string"
+            },
+            "item_identifier": {
+              "type": "string"
+            },
+            "product_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "run_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source_url": {
+              "type": "string",
+              "format": "uri"
+            },
+            "source_host": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source_root_domain": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source_tier": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "source_method": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "crawl_status": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "http_status": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "fetched_at": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            }
+          }
+        },
+        "source_assertion_rows": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "assertion_id",
+              "source_id",
+              "field_key",
+              "context_kind"
+            ],
+            "properties": {
+              "assertion_id": {
+                "type": "string"
+              },
+              "source_id": {
+                "type": "string"
+              },
+              "field_key": {
+                "type": "string"
+              },
+              "context_kind": {
+                "type": "string",
+                "enum": [
+                  "scalar",
+                  "component",
+                  "list"
+                ]
+              },
+              "context_ref": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "item_field_state_id": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "component_value_id": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "list_value_id": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "enum_list_id": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "value_raw": {},
+              "value_normalized": {},
+              "unit": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "candidate_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "extraction_method": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "source_artifact_rows": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source_id",
+              "artifact_type",
+              "local_path"
+            ],
+            "properties": {
+              "source_id": {
+                "type": "string"
+              },
+              "artifact_type": {
+                "type": "string"
+              },
+              "local_path": {
+                "type": "string"
+              },
+              "content_hash": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "mime_type": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "size_bytes": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "captured_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "source_evidence_rows": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "assertion_id"
+            ],
+            "properties": {
+              "assertion_id": {
+                "type": "string"
+              },
+              "evidence_url": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uri"
+              },
+              "snippet_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "quote": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "method": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tier": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "retrieved_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "candidate_rows": {
+          "type": "array",
+          "description": "Optional direct rows for candidates table when extraction writes candidates in the same pass.",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "source_visual_asset_rows": {
+          "type": "array",
+          "description": "Optional rows for a future visual asset table.",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "visualEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "store_original_images",
+        "llm_derivative_policy",
+        "image_assets"
+      ],
+      "properties": {
+        "store_original_images": {
+          "type": "boolean",
+          "description": "When true, original screenshots/images are persisted and addressable by image_asset_id."
+        },
+        "retention_days": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "llm_derivative_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "send_original_to_llm",
+            "preferred_variant",
+            "max_bytes_per_image",
+            "review_lg",
+            "review_sm"
+          ],
+          "properties": {
+            "send_original_to_llm": {
+              "type": "boolean",
+              "const": false
+            },
+            "preferred_variant": {
+              "type": "string",
+              "enum": [
+                "review_sm",
+                "review_lg",
+                "region_crop"
+              ]
+            },
+            "max_bytes_per_image": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "review_lg": {
+              "$ref": "#/$defs/visualVariantPolicy"
+            },
+            "review_sm": {
+              "$ref": "#/$defs/visualVariantPolicy"
+            },
+            "region_crop": {
+              "$ref": "#/$defs/visualVariantPolicy"
+            }
+          }
+        },
+        "image_assets": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "$ref": "#/$defs/visualAsset"
+          }
+        },
+        "regions": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/visualRegion"
+          }
+        },
+        "model_variant_cues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/modelVariantCue"
+          }
+        }
+      }
+    },
+    "visualAsset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "image_asset_id",
+        "asset_kind",
+        "candidate_source_type",
+        "content_hash",
+        "mime_type",
+        "width",
+        "height",
+        "size_bytes",
+        "storage_uri",
+        "captured_at",
+        "target_match",
+        "quality_gate"
+      ],
+      "properties": {
+        "image_asset_id": {
+          "type": "string",
+          "description": "Stable ID; recommended sha256(source_version_id|content_hash|asset_kind|index)."
+        },
+        "asset_kind": {
+          "type": "string",
+          "enum": [
+            "page_screenshot",
+            "product_photo",
+            "spec_card_image",
+            "diagram_image",
+            "chart_capture",
+            "ocr_crop"
+          ]
+        },
+        "source_surface": {
+          "$ref": "#/$defs/sourceSurface"
+        },
+        "candidate_source_type": {
+          "$ref": "#/$defs/imageCandidateSourceType"
+        },
+        "candidate_context": {
+          "$ref": "#/$defs/visualCandidateContext"
+        },
+        "artifact_id": {
+          "type": "string"
+        },
+        "content_hash": {
+          "type": "string"
+        },
+        "perceptual_hash": {
+          "type": "string",
+          "description": "Perceptual hash for near-duplicate matching across sources."
+        },
+        "mime_type": {
+          "type": "string"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "storage_uri": {
+          "type": "string",
+          "description": "Local path or object storage URI."
+        },
+        "captured_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "target_match": {
+          "$ref": "#/$defs/targetMatch"
+        },
+        "quality_gate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "quality_score",
+            "quality_gate_passed"
+          ],
+          "properties": {
+            "quality_score": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "quality_gate_passed": {
+              "type": "boolean"
+            },
+            "reject_reasons": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "llm_variants": {
+          "type": "object",
+          "description": "Compressed derivatives used for LLM calls; original should remain audit-only.",
+          "properties": {
+            "review_lg": {
+              "$ref": "#/$defs/visualVariantAsset"
+            },
+            "review_sm": {
+              "$ref": "#/$defs/visualVariantAsset"
+            },
+            "region_crop": {
+              "$ref": "#/$defs/visualVariantAsset"
+            }
+          },
+          "additionalProperties": false
+        },
+        "preferred_llm_variant": {
+          "type": "string",
+          "enum": [
+            "review_sm",
+            "review_lg",
+            "region_crop"
+          ]
+        },
+        "page_context": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "scroll_y": {
+              "type": "integer"
+            },
+            "viewport_width": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "viewport_height": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "dom_anchor": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "visualVariantPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "max_side_px",
+        "format",
+        "quality"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "max_side_px": {
+          "type": "integer",
+          "minimum": 64
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "webp",
+            "jpeg",
+            "png"
+          ]
+        },
+        "quality": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      }
+    },
+    "visualVariantAsset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "storage_uri",
+        "content_hash",
+        "mime_type",
+        "width",
+        "height",
+        "size_bytes"
+      ],
+      "properties": {
+        "storage_uri": {
+          "type": "string"
+        },
+        "content_hash": {
+          "type": "string"
+        },
+        "mime_type": {
+          "type": "string"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "visualRegion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "region_id",
+        "image_asset_id",
+        "bbox"
+      ],
+      "properties": {
+        "region_id": {
+          "type": "string"
+        },
+        "image_asset_id": {
+          "type": "string"
+        },
+        "bbox": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "number"
+          }
+        },
+        "label": {
+          "type": "string"
+        },
+        "ocr_text": {
+          "type": "string"
+        },
+        "ocr_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "modelVariantCue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cue_id",
+        "image_asset_id",
+        "cue_type",
+        "value"
+      ],
+      "properties": {
+        "cue_id": {
+          "type": "string"
+        },
+        "image_asset_id": {
+          "type": "string"
+        },
+        "region_id": {
+          "type": "string"
+        },
+        "cue_type": {
+          "type": "string",
+          "enum": [
+            "model_text",
+            "sku_text",
+            "port_layout",
+            "logo_mark",
+            "packaging_variant",
+            "button_layout"
+          ]
+        },
+        "value": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "indexingProjection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "retrieval_ready",
+        "chunk_strategy",
+        "chunk_count",
+        "embedding_ready_evidence_ids",
+        "retrieval_priority_field_keys"
+      ],
+      "properties": {
+        "retrieval_ready": {
+          "type": "boolean"
+        },
+        "chunk_strategy": {
+          "type": "string",
+          "enum": [
+            "evidence_snippet",
+            "field_context",
+            "hybrid"
+          ]
+        },
+        "chunk_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "embedding_ready_evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "retrieval_priority_field_keys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "token_estimate_total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "surface_distribution": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    }
+  }
+}

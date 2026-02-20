@@ -5,11 +5,12 @@ import type { ComponentReviewFlaggedItem, ComponentReviewBatchResult } from '../
 
 interface PendingAIReviewSectionProps {
   items: ComponentReviewFlaggedItem[];
+  pendingCandidateCount?: number;
   category: string;
   queryClient: QueryClient;
 }
 
-export function PendingAIReviewSection({ items, category, queryClient }: PendingAIReviewSectionProps) {
+export function PendingAIReviewSection({ items, pendingCandidateCount, category, queryClient }: PendingAIReviewSectionProps) {
   const batchMut = useMutation({
     mutationFn: () =>
       api.post<ComponentReviewBatchResult>(`/review-components/${category}/run-component-review-batch`, {}),
@@ -28,6 +29,11 @@ export function PendingAIReviewSection({ items, category, queryClient }: Pending
         <div className="font-medium">
           {items.length} item{items.length !== 1 ? 's' : ''} awaiting AI confirmation
         </div>
+        {Number.isFinite(Number(pendingCandidateCount)) && Number(pendingCandidateCount) > 0 && (
+          <div className="text-[10px] text-purple-500 dark:text-purple-400">
+            {Number(pendingCandidateCount)} candidate{Number(pendingCandidateCount) !== 1 ? 's' : ''} currently require confirm actions
+          </div>
+        )}
         <div className="space-y-2">
           {items.slice(0, 8).map((item) => (
             <div key={item.review_id} className="space-y-0.5 border-b border-purple-200/50 dark:border-purple-800/50 pb-1 last:border-0">

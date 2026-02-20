@@ -13,6 +13,21 @@ function safeName(value, fallback = 'artifact') {
   return text || fallback;
 }
 
+function screenshotBuffer(artifact = {}) {
+  if (Buffer.isBuffer(artifact?.bytes)) {
+    return artifact.bytes;
+  }
+  const raw = artifact?.bytes;
+  if (typeof raw === 'string' && raw.trim()) {
+    try {
+      return Buffer.from(raw, 'base64');
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 function compactSummary(summary) {
   return {
     productId: summary.productId,
@@ -90,6 +105,57 @@ async function writePageArtifacts({ writes, storage, runBase, host, artifact }) 
       }
     )
   );
+
+  const domSnippetHtml = String(artifact?.domSnippet?.html || '').trim();
+  if (domSnippetHtml) {
+    writes.push(
+      storage.writeObject(
+        `${runBase}/raw/dom/${host}/dom_snippet.html`,
+        Buffer.from(domSnippetHtml, 'utf8'),
+        { contentType: 'text/html; charset=utf-8' }
+      )
+    );
+    writes.push(
+      storage.writeObject(
+        `${runBase}/raw/dom/${host}/dom_snippet.meta.json`,
+        jsonBuffer({
+          kind: String(artifact?.domSnippet?.kind || 'html_window'),
+          char_count: Number(artifact?.domSnippet?.char_count || domSnippetHtml.length),
+          generated_at: new Date().toISOString()
+        }),
+        { contentType: 'application/json' }
+      )
+    );
+  }
+
+  const screenshot = screenshotBuffer(artifact?.screenshot || {});
+  if (screenshot && screenshot.length > 0) {
+    const format = String(artifact?.screenshot?.format || 'jpeg').trim().toLowerCase();
+    const ext = format === 'png' ? 'png' : 'jpg';
+    const contentType = ext === 'png' ? 'image/png' : 'image/jpeg';
+    writes.push(
+      storage.writeObject(
+        `${runBase}/raw/screenshots/${host}/screenshot.${ext}`,
+        screenshot,
+        { contentType }
+      )
+    );
+    writes.push(
+      storage.writeObject(
+        `${runBase}/raw/screenshots/${host}/screenshot.meta.json`,
+        jsonBuffer({
+          kind: String(artifact?.screenshot?.kind || 'page'),
+          format: ext,
+          selector: String(artifact?.screenshot?.selector || '').trim() || null,
+          width: Number(artifact?.screenshot?.width || 0) || null,
+          height: Number(artifact?.screenshot?.height || 0) || null,
+          bytes: screenshot.length,
+          captured_at: String(artifact?.screenshot?.captured_at || '').trim() || null
+        }),
+        { contentType: 'application/json' }
+      )
+    );
+  }
 
   writes.push(
     storage.writeObject(

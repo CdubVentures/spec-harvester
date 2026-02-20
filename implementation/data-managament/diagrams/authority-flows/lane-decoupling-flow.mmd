@@ -1,0 +1,45 @@
+flowchart LR
+  subgraph Item_Context["Item key context grid_key"]
+    A["POST key-review-accept\nlane shared on grid_key"]
+    B["Peer grid fan-out\nsame field and selected_value"]
+    A --> B
+  end
+
+  subgraph Master_Component["Component master context"]
+    C["POST component-override"]
+    D["key_review_state component_key"]
+    E["cascadeComponentChange to linked items"]
+    C --> D --> E
+  end
+
+  subgraph Master_Enum["Enum master context"]
+    F["POST enum-override"]
+    G["key_review_state enum_key"]
+    H["cascadeEnumChange to linked items"]
+    F --> G --> H
+  end
+
+  subgraph Source_Provenance["Source provenance (metadata only)"]
+    S1["source_registry.source_id\nstable per item+source+run"]
+    S2["source_host / source_root_domain\nprovenance metadata only"]
+    S3["authoritative routing by slot/key IDs\nnot by host equality"]
+    S1 --> S2 --> S3
+  end
+
+  subgraph Test_Mode_Generation["Test Mode generation defaults"]
+    T1["Sources/Scenario = 0"]
+    T2["Shared % = 70"]
+    T3["Duplicate % = 15"]
+    T4["Host reuse toggle removed\nalways item-unique source hosts"]
+    T1 --> T2 --> T3 --> T4
+  end
+
+  A -. no grid to component master writes .-> D
+  A -. no grid to enum master writes .-> G
+
+  I["Item candidate sources can differ by item"] --> J["Canonical master value can still be shared"]
+  J --> D
+  J --> G
+
+  S3 -. no host-driven cascade targeting .-> D
+  S3 -. no host-driven cascade targeting .-> G

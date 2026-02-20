@@ -1,6 +1,13 @@
-# IMPROVEMENT PLAN — PHASE 05: PERFORMANCE + SCALE (15–20/DAY, LOW COST, 24/7 STABLE)
+# IMPROVEMENT PLAN - PHASE 05: PERFORMANCE + SCALE (15-20/DAY, LOW COST, 24/7 STABLE)
 
-**Order:** After Phase 13 + Improvement Phases 01–04.
+**Order:** After Phase 13 + Improvement Phases 01-04.
+
+## Status Update (2026-02-19)
+- Parsing management 01-03 has landed and should be treated as baseline for this phase:
+  - 01: static DOM-first parsing with Cheerio fallback path.
+  - 02: dynamic fetch policies + Crawlee controls (enable/headless/retry/backoff/timeout).
+  - 03: main article extraction (Readability + scored fallback) with live runtime telemetry.
+- Performance tuning in this phase should now optimize using those signals, not raw fetch counts alone.
 
 ---
 
@@ -18,7 +25,7 @@ The system must:
 
 ## MISSION
 
-1) Improve throughput: 15–20 publishable products/day.  
+1) Improve throughput: 15-20 publishable products/day.  
 2) Reduce wasted work: fewer redundant fetches, fewer repeated searches.  
 3) Keep ChatMock utilization efficient: low tier dominates, high tier is bounded.  
 4) Introduce caching and concurrency controls to make everything stable.
@@ -27,7 +34,7 @@ The system must:
 
 # DELIVERABLES
 
-## 5A — Worker Pools + Concurrency Limits
+## 5A - Worker Pools + Concurrency Limits
 
 Separate concurrency pools:
 - crawl/fetch pool (Playwright)
@@ -36,11 +43,11 @@ Separate concurrency pools:
 - Cortex pool (ChatMock)
 
 Respect ChatMock scarcity:
-- if ChatMock runs with request queue, cap concurrency at 1–2
+- if ChatMock runs with request queue, cap concurrency at 1-2
 
 ---
 
-## 5B — Caching: URL Content Hash + Evidence Reuse
+## 5B - Caching: URL Content Hash + Evidence Reuse
 
 Add per-URL caching:
 - if content hash unchanged, reuse evidence pack
@@ -49,7 +56,7 @@ Add per-URL caching:
 
 ---
 
-## 5C — Token Efficiency: Dossier Builder
+## 5C - Token Efficiency: Dossier Builder
 
 Before sending to any model:
 - rank evidence snippets by relevance to target fields
@@ -60,15 +67,15 @@ This reduces cost and improves quality.
 
 ---
 
-## 5D — Async Deep Jobs (High Tier)
+## 5D - Async Deep Jobs (High Tier)
 
 For deep tasks (vision, xhigh reasoning):
-- use async submission/poll pattern (so the harvester isn’t blocked by long inference)
+- use async submission/poll pattern (so the harvester is not blocked by long inference)
 - timebox per product and per field
 
 ---
 
-## 5E — Metrics + Budget Enforcement
+## 5E - Metrics + Budget Enforcement
 
 Enforce budgets:
 - max urls per product
@@ -86,9 +93,8 @@ Expose metrics:
 
 # ACCEPTANCE CRITERIA (PHASE 05)
 
-1) Stable throughput: 15–20/day with predictable runtimes.  
-2) High-tier usage bounded by config; low tier ≥85% by call count.  
+1) Stable throughput: 15-20/day with predictable runtimes.  
+2) High-tier usage bounded by config; low tier >=85% by call count.  
 3) Evidence reuse reduces fetch and token usage without reducing accuracy.  
 4) Deep tasks do not block the main queue (async pattern).  
 5) Metrics allow daily optimization decisions (not guessing).
-

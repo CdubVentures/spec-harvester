@@ -14,7 +14,7 @@ export function Tip({ text }: { text: string }) {
       </Tooltip.Trigger>
       <Tooltip.Portal>
         <Tooltip.Content
-          className="z-50 max-w-xs px-3 py-2 text-xs leading-snug text-white bg-gray-900 dark:bg-gray-950 rounded shadow-lg"
+          className="z-50 max-w-xs px-3 py-2 text-xs leading-snug whitespace-pre-line text-white bg-gray-900 dark:bg-gray-950 rounded shadow-lg"
           sideOffset={5}
         >
           {text}

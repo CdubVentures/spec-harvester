@@ -199,7 +199,7 @@ export async function validateComponentMatches({
         logger,
       });
 
-      const parsed = typeof result?.parsed === 'object' ? result.parsed : {};
+      const parsed = result && typeof result === 'object' ? result : {};
       const decisions = sanitizeDecisions(parsed, itemIndex);
       allDecisions.push(...decisions);
 

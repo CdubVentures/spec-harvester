@@ -1,0 +1,400 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "specfactory://schemas/run-meta-packet.v1.json",
+  "title": "Spec Factory Run Meta Packet",
+  "description": "Canonical run-level metadata packet that summarizes execution, coverage, and outputs for all items and sources in a run.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_kind",
+    "run_packet_id",
+    "run_id",
+    "category",
+    "started_at",
+    "finished_at",
+    "duration_ms",
+    "trigger",
+    "execution_summary",
+    "phase_summary",
+    "output_refs",
+    "quality_gates"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "2026-02-20.run-meta-packet.v1"
+    },
+    "record_kind": {
+      "type": "string",
+      "const": "run_meta_packet"
+    },
+    "run_packet_id": {
+      "type": "string",
+      "description": "Stable ID per run_id + category."
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "category": {
+      "type": "string"
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "finished_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "trigger": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "scheduled",
+        "retry",
+        "backfill",
+        "test_mode"
+      ]
+    },
+    "pipeline_config": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Execution knobs snapshot for reproducibility."
+    },
+    "execution_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "item_total",
+        "item_succeeded",
+        "item_partial",
+        "item_failed",
+        "source_total",
+        "source_fetched",
+        "source_failed",
+        "assertion_total",
+        "evidence_total",
+        "identity_rejected_evidence_total"
+      ],
+      "properties": {
+        "item_total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "item_succeeded": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "item_partial": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "item_failed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_fetched": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_failed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "assertion_total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "evidence_total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "identity_rejected_evidence_total": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "phase_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "phase_01_static_html",
+        "phase_02_dynamic_js",
+        "phase_03_main_article",
+        "phase_04_html_spec_table",
+        "phase_05_embedded_json",
+        "phase_06_text_pdf",
+        "phase_07_scanned_pdf_ocr",
+        "phase_08_image_ocr",
+        "phase_09_chart_graph",
+        "phase_10_office_mixed_doc"
+      ],
+      "properties": {
+        "phase_01_static_html": {
+          "$ref": "#/$defs/phaseStats"
+        },
+        "phase_02_dynamic_js": {
+          "$ref": "#/$defs/phaseStats"
+        },
+        "phase_03_main_article": {
+          "$ref": "#/$defs/phaseStats"
+        },
+        "phase_04_html_spec_table": {
+          "$ref": "#/$defs/phaseStats"
+        },
+        "phase_05_embedded_json": {
+          "$ref": "#/$defs/phaseStats"
+        },
+        "phase_06_text_pdf": {
+          "$ref": "#/$defs/phaseStats"
+        },
+        "phase_07_scanned_pdf_ocr": {
+          "$ref": "#/$defs/phaseStats"
+        },
+        "phase_08_image_ocr": {
+          "$ref": "#/$defs/phaseStats"
+        },
+        "phase_09_chart_graph": {
+          "$ref": "#/$defs/phaseStats"
+        },
+        "phase_10_office_mixed_doc": {
+          "$ref": "#/$defs/phaseStats"
+        }
+      }
+    },
+    "output_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_packet_refs",
+        "item_packet_refs"
+      ],
+      "properties": {
+        "source_packet_refs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source_packet_id",
+              "source_version_id",
+              "source_id"
+            ],
+            "properties": {
+              "source_packet_id": {
+                "type": "string"
+              },
+              "source_version_id": {
+                "type": "string"
+              },
+              "source_id": {
+                "type": "string"
+              }
+            }
+          },
+          "uniqueItems": true
+        },
+        "item_packet_refs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "item_packet_id",
+              "item_identifier"
+            ],
+            "properties": {
+              "item_packet_id": {
+                "type": "string"
+              },
+              "item_identifier": {
+                "type": "string"
+              }
+            }
+          },
+          "uniqueItems": true
+        },
+        "manifest_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "visual_manifest_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "visual_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "image_assets_captured": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unique_content_hash_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unique_perceptual_hash_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total_image_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "avg_images_per_source": {
+          "type": "number",
+          "minimum": 0
+        },
+        "llm_visual_validation_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "llm_visual_validation_cost_usd_est": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "quality_gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "coverage_gate_passed",
+        "evidence_gate_passed",
+        "error_rate_gate_passed",
+        "target_match_gate_passed"
+      ],
+      "properties": {
+        "coverage_gate_passed": {
+          "type": "boolean"
+        },
+        "evidence_gate_passed": {
+          "type": "boolean"
+        },
+        "error_rate_gate_passed": {
+          "type": "boolean"
+        },
+        "target_match_gate_passed": {
+          "type": "boolean"
+        },
+        "target_match_pass_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "coverage_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "error_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/logEvent"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/logEvent"
+      }
+    }
+  },
+  "$defs": {
+    "phaseStats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "executed_sources",
+        "assertion_count",
+        "evidence_count",
+        "error_count",
+        "duration_ms"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "executed_sources": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "assertion_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "evidence_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "logEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "id",
+        "code",
+        "message",
+        "retriable"
+      ],
+      "properties": {
+        "scope": {
+          "type": "string",
+          "enum": [
+            "run",
+            "item",
+            "source",
+            "phase"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "retriable": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

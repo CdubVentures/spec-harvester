@@ -78,6 +78,29 @@ test('FrontierDb enforces URL cooldown for repeated 404 responses', async () => 
   assert.equal(row.cooldown.reason, 'status_404_repeated');
 });
 
+test('FrontierDb applies cooldown for 403 with backoff reason', async () => {
+  const storage = createStorage();
+  const db = new FrontierDb({
+    storage,
+    key: 'specs/outputs/_intel/frontier/frontier.json',
+    config: {
+      frontierCooldown403BaseSeconds: 60
+    }
+  });
+  await db.load();
+
+  const url = 'https://example.com/forbidden';
+  db.recordFetch({
+    productId: 'p1',
+    url,
+    status: 403
+  });
+  const first = db.shouldSkipUrl(url);
+  assert.equal(first.skip, true);
+  const row = db.getUrlRow(url);
+  assert.equal(row.cooldown.reason, 'status_403_backoff');
+});
+
 test('FrontierDb records yields and produces product snapshot', async () => {
   const storage = createStorage();
   const key = 'specs/outputs/_intel/frontier/frontier.json';

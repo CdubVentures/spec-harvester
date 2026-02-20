@@ -73,9 +73,9 @@ function resolveModelPricingFromMap(rates = {}, model = '') {
 function resolveModelSpecificRates(rates = {}, model = '') {
   const token = normalizeModel(model);
   const output = {
-    inputPer1M: toNumber(rates.llmCostInputPer1M ?? rates.inputPer1M, 0.28),
-    outputPer1M: toNumber(rates.llmCostOutputPer1M ?? rates.outputPer1M, 0.42),
-    cachedInputPer1M: toNumber(rates.llmCostCachedInputPer1M ?? rates.cachedInputPer1M, 0)
+    inputPer1M: toNumber(rates.llmCostInputPer1M ?? rates.inputPer1M, 1.25),
+    outputPer1M: toNumber(rates.llmCostOutputPer1M ?? rates.outputPer1M, 10),
+    cachedInputPer1M: toNumber(rates.llmCostCachedInputPer1M ?? rates.cachedInputPer1M, 0.125)
   };
 
   const applyIfValid = (value, setter) => {
@@ -110,9 +110,9 @@ function resolveModelSpecificRates(rates = {}, model = '') {
 
 export function normalizeCostRates(config = {}) {
   return {
-    llmCostInputPer1M: toNumber(config.llmCostInputPer1M ?? config.inputPer1M, 0.28),
-    llmCostOutputPer1M: toNumber(config.llmCostOutputPer1M ?? config.outputPer1M, 0.42),
-    llmCostCachedInputPer1M: toNumber(config.llmCostCachedInputPer1M ?? config.cachedInputPer1M, 0),
+    llmCostInputPer1M: toNumber(config.llmCostInputPer1M ?? config.inputPer1M, 1.25),
+    llmCostOutputPer1M: toNumber(config.llmCostOutputPer1M ?? config.outputPer1M, 10),
+    llmCostCachedInputPer1M: toNumber(config.llmCostCachedInputPer1M ?? config.cachedInputPer1M, 0.125),
     llmCostInputPer1MDeepseekChat: toNumber(config.llmCostInputPer1MDeepseekChat ?? config.inputPer1MDeepseekChat, -1),
     llmCostOutputPer1MDeepseekChat: toNumber(config.llmCostOutputPer1MDeepseekChat ?? config.outputPer1MDeepseekChat, -1),
     llmCostCachedInputPer1MDeepseekChat: toNumber(config.llmCostCachedInputPer1MDeepseekChat ?? config.cachedInputPer1MDeepseekChat, -1),

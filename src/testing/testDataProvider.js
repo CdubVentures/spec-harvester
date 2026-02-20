@@ -20,6 +20,13 @@ function toArr(v) { return Array.isArray(v) ? v : []; }
 function norm(v) { return String(v ?? '').trim(); }
 function normLower(v) { return norm(v).toLowerCase(); }
 function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+function slugify(v) {
+  return String(v ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
 
 function singularize(word) {
   if (word.endsWith('ches') || word.endsWith('shes') || word.endsWith('sses') || word.endsWith('xes') || word.endsWith('zes')) return word.slice(0, -2);
@@ -1820,19 +1827,31 @@ function normalizeGenerationOptions(raw = {}) {
   const sharedRatioRaw = raw?.sharedFieldRatioPercent ?? raw?.sharedFieldRatio;
   const duplicateRatioRaw = raw?.sameValueDuplicatePercent ?? raw?.sameValueDuplicateRate;
   const sharedFieldRatio = clamp01(
-    toFiniteNumber(sharedRatioRaw, 100) > 1 ? toFiniteNumber(sharedRatioRaw, 100) / 100 : sharedRatioRaw,
-    1,
+    toFiniteNumber(sharedRatioRaw, 40) > 1 ? toFiniteNumber(sharedRatioRaw, 40) / 100 : sharedRatioRaw,
+    0.4,
   );
   const sameValueDuplicateRate = clamp01(
-    toFiniteNumber(duplicateRatioRaw, 35) > 1 ? toFiniteNumber(duplicateRatioRaw, 35) / 100 : duplicateRatioRaw,
-    0.35,
+    toFiniteNumber(duplicateRatioRaw, 30) > 1 ? toFiniteNumber(duplicateRatioRaw, 30) / 100 : duplicateRatioRaw,
+    0.3,
   );
   return {
     sourceCountOverride,
     sharedFieldRatio,
     sameValueDuplicateRate,
-    crossItemSourceReuse: raw?.crossItemSourceReuse !== false,
   };
+}
+
+function resolveScenarioGenerationPolicy(scenarioName = '') {
+  const name = String(scenarioName || '').trim().toLowerCase();
+  if (!name) {
+    return { allowSourceCountOverride: true, allowValueMutation: true };
+  }
+  if (name === 'happy_path') {
+    return { allowSourceCountOverride: true, allowValueMutation: true };
+  }
+  // Non-happy scenarios are deterministic edge-case contracts.
+  // Keep generation knobs from mutating their core behavior.
+  return { allowSourceCountOverride: false, allowValueMutation: false };
 }
 
 function stableUnitHash(input) {
@@ -1868,7 +1887,9 @@ function perturbValueForSource(value, sourceIndex) {
 function withSourceHost(source, host) {
   const nextHost = String(host || source?.host || '').trim();
   if (!nextHost) return source;
-  const next = { ...source, host: nextHost, rootDomain: nextHost.replace(/^[^.]+\./, '') };
+  // Keep synthetic sources domain-distinct in consensus by preserving full host identity.
+  // Collapsing to eTLD+1 (e.g. example.com) makes all sources look like one domain.
+  const next = { ...source, host: nextHost, rootDomain: nextHost };
   try {
     const url = new URL(String(source?.url || `https://${nextHost}`));
     url.hostname = nextHost;
@@ -1888,6 +1909,7 @@ function applyGenerationOptionsToSources({
   scenarioName = '',
 }) {
   const normalized = normalizeGenerationOptions(options);
+  const scenarioPolicy = resolveScenarioGenerationPolicy(scenarioName);
   if (!Array.isArray(sourceResults) || sourceResults.length === 0) return sourceResults;
 
   const cloneSource = (source) => ({
@@ -1896,7 +1918,7 @@ function applyGenerationOptionsToSources({
   });
   let sources = sourceResults.map(cloneSource);
 
-  if (normalized.sourceCountOverride > 0) {
+  if (normalized.sourceCountOverride > 0 && scenarioPolicy.allowSourceCountOverride) {
     const target = normalized.sourceCountOverride;
     if (sources.length > target) {
       sources = sources.slice(0, target);
@@ -1909,16 +1931,14 @@ function applyGenerationOptionsToSources({
     }
   }
 
-  if (!normalized.crossItemSourceReuse) {
-    const itemToken = slugify(productId) || 'item';
-    sources = sources.map((source, index) => {
-      const baseHost = String(source?.host || `test-source-${index + 1}.example.com`).trim().toLowerCase();
-      const hostPrefix = baseHost.split('.')[0] || `test-source-${index + 1}`;
-      return withSourceHost(source, `${hostPrefix}-${itemToken}.example.com`);
-    });
-  }
+  const itemToken = slugify(productId) || 'item';
+  sources = sources.map((source, index) => {
+    const baseHost = String(source?.host || `test-source-${index + 1}.example.com`).trim().toLowerCase();
+    const hostPrefix = baseHost.split('.')[0] || `test-source-${index + 1}`;
+    return withSourceHost(source, `${hostPrefix}-${itemToken}.example.com`);
+  });
 
-  if (sources.length <= 1) return sources;
+  if (sources.length <= 1 || !scenarioPolicy.allowValueMutation) return sources;
 
   const primaryMap = new Map();
   for (const candidate of (sources[0]?.fieldCandidates || [])) {
@@ -2408,7 +2428,7 @@ IMPORTANT:
       url: `https://${host}/products/${encodeURIComponent(model.toLowerCase().replace(/\s+/g, '-'))}`,
       finalUrl: `https://${host}/products/${encodeURIComponent(model.toLowerCase().replace(/\s+/g, '-'))}`,
       host,
-      rootDomain: host.replace(/^[^.]+\./, ''),
+      rootDomain: host,
       tier,
       tierName: src.role || tierNames[tier] || 'retailer',
       role: src.role || tierNames[tier] || 'retailer',

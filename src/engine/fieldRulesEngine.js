@@ -504,6 +504,9 @@ export class FieldRulesEngine {
     if (shape === 'scalar' && Array.isArray(normalized)) {
       return { ok: false, reason_code: 'shape_mismatch', expected_shape: 'scalar', actual_shape: 'list' };
     }
+    if (shape === 'scalar' && isObject(normalized)) {
+      return { ok: false, reason_code: 'shape_mismatch', expected_shape: 'scalar', actual_shape: 'object' };
+    }
     if ((type === 'number' || type === 'integer') && shape === 'list') {
       const values = Array.isArray(normalized) ? normalized : [];
       if (values.some((item) => asNumber(item) === null)) {
@@ -747,8 +750,17 @@ export class FieldRulesEngine {
       value = parseList(rawCandidate);
       attempts.push('shape:list');
     } else if (Array.isArray(value)) {
-      value = value[0];
-      attempts.push('shape:scalar_from_array');
+      const meaningfulValues = value.filter((entry) => !isUnknownToken(entry));
+      if (meaningfulValues.length !== 1 || Array.isArray(meaningfulValues[0]) || isObject(meaningfulValues[0])) {
+        return {
+          ok: false,
+          reason_code: 'shape_mismatch',
+          raw_input: rawCandidate,
+          attempted_normalizations: attempts
+        };
+      }
+      value = meaningfulValues[0];
+      attempts.push('shape:scalar_from_singleton_array');
     }
 
     if (normalizationFnName) {
@@ -1109,6 +1121,14 @@ export class FieldRulesEngine {
         value = value.map((item) => normalizeText(item)).filter(Boolean);
         attempts.push('type:string_list');
       } else {
+        if (isObject(value)) {
+          return {
+            ok: false,
+            reason_code: 'shape_mismatch',
+            raw_input: rawCandidate,
+            attempted_normalizations: attempts
+          };
+        }
         value = normalizeText(value);
       }
     }

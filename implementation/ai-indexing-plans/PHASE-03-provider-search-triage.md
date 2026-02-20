@@ -116,16 +116,69 @@ If running local:
 ### 3.8 Runtime knob (implemented)
 - Add explicit run-control knob: `phase 03 llm triage` (boolean) to force LLM SERP reranking.
 - Add explicit model dropdown for Phase 03 triage model (default selection prefers Gemini if available in model catalog).
+- Add explicit token-cap dropdown paired with Phase 03 triage model.
+- Expose full per-lane LLM controls in Runtime Settings:
+  - plan/triage/fast/reasoning/extract/validate/write model + token caps
+  - fallback model + token caps for plan/extract/validate/write
 - Wire through GUI -> `POST /process/start` -> env overrides:
   - `LLM_SERP_RERANK_ENABLED=true|false`
   - `LLM_MODEL_TRIAGE=<selected_model>`
+  - `LLM_MAX_OUTPUT_TOKENS_TRIAGE=<selected_tokens>`
+  - role token overrides:
+    - `LLM_MAX_OUTPUT_TOKENS_PLAN`
+    - `LLM_MAX_OUTPUT_TOKENS_FAST`
+    - `LLM_MAX_OUTPUT_TOKENS_REASONING`
+    - `LLM_MAX_OUTPUT_TOKENS_EXTRACT`
+    - `LLM_MAX_OUTPUT_TOKENS_VALIDATE`
+    - `LLM_MAX_OUTPUT_TOKENS_WRITE`
+  - fallback token overrides:
+    - `LLM_MAX_OUTPUT_TOKENS_PLAN_FALLBACK`
+    - `LLM_MAX_OUTPUT_TOKENS_EXTRACT_FALLBACK`
+    - `LLM_MAX_OUTPUT_TOKENS_VALIDATE_FALLBACK`
+    - `LLM_MAX_OUTPUT_TOKENS_WRITE_FALLBACK`
   - `CORTEX_MODEL_RERANK_FAST=<selected_model>` (compat path)
 - Add SERP Explorer proof fields:
   - `llm_triage_enabled`
   - `llm_triage_applied`
   - `llm_triage_model`
 
+### 3.8.1 DeepSeek fallback safety (implemented)
+- Fallback token limits are now capped independently for DeepSeek chat/reasoner profiles.
+- GUI disables token selections above model max for both primary and fallback models.
+- Traces expose `max_tokens_applied`, allowing direct verification that fallback calls do not exceed DeepSeek limits.
+
+### 3.9 Automation-ready logging + schema hooks (addendum)
+Phase 03 remains triage-only. Do not turn this phase into a scheduler.
+Its job is to emit structured data so automation in Phase 06B is trivial.
+
+Required persisted fields/artifacts:
+- `search_queries.dedupe_hash`
+- `serp_candidates.triage_decision`
+- `serp_candidates.reason_tags`
+- `serp_candidates.tier_guess`
+- `serp_candidates.doc_kind_guess`
+- `serp_candidates.field_targets`
+- `serp_candidates.hint_source` (`field_studio`, `learned`, `llm`, `deterministic`)
+
+Job emission from triage (intent only):
+- When `triage_decision == fetch`, insert search/fetch intent into `jobs`/`fetch_queue`.
+- Include `dedupe_key` (URL + query + hint/doc_kind token) to prevent repeated enqueue of equivalent fetches.
+- Do not add scheduling policy here (cooldowns, TTL windows, rediscovery cadence). Those belong to Phase 06B.
+
+GUI proof additions in this phase:
+- SERP Explorer shows `dedupe_hash`, `field_targets`, and `doc_hint`.
+- SERP Explorer shows queued fetch jobs count per query.
+- Candidate row badges include `hint_source` and `reason_tags`.
+- IndexLab overview shows live pending LLM bars by purpose/model so triage latency is visible during active runs.
+
+### 3.10 Cross-phase ownership note
+- Phase 04 owns 404/410/403/429 health outcomes and repair-trigger signals.
+- Phase 06 owns content hash dedupe and change detection signals.
+- Phase 09 owns NeedSet-driven rediscovery intent.
+- Phase 06B owns unified automation policy and scheduler loop execution.
+
 ## Exit criteria
 - Every search query and candidate is visible in the GUI.
 - Selected URLs are dominated by Tierâ€‘1 and Tierâ€‘2 when high-stakes fields require them.
+- Phase 03 artifacts contain all fields needed by Phase 06B without adding scheduler logic here.
 

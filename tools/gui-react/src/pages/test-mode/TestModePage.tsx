@@ -193,9 +193,9 @@ function MatrixTable({ matrix, validationResult, collapsed, onToggle }: {
                 <tr key={row.id} className="border-b border-gray-50 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50">
                   {validationResult && (
                     <td className="py-1 pr-2">
-                      {row.validationStatus === 'pass' && <span className="text-green-500 font-bold">P</span>}
-                      {row.validationStatus === 'fail' && <span className="text-red-500 font-bold">F</span>}
-                      {row.validationStatus === 'pending' && <span className="text-gray-300">-</span>}
+                      {row.validationStatus === 'pass' && <span className="inline-block h-2.5 w-2.5 rounded-full bg-green-500" title="All linked checks passed" />}
+                      {row.validationStatus === 'fail' && <span className="inline-block h-2.5 w-2.5 rounded-full bg-red-500" title="One or more linked checks failed" />}
+                      {row.validationStatus === 'pending' && <span className="inline-block h-2.5 w-2.5 rounded-full bg-gray-300 dark:bg-gray-600" title="No validation run yet" />}
                     </td>
                   )}
                   {matrix.columns.map(col => (
@@ -233,9 +233,9 @@ function ImportProgressPanel({ steps }: { steps: ImportProgress[] }) {
         {steps.filter(s => s.step !== 'complete').map((s, i) => (
           <div key={i} className="flex items-center gap-2 text-xs">
             {s.status === 'done' ? (
-              <span className="text-green-500 font-bold w-4 text-center">ok</span>
+              <span className="inline-block h-2.5 w-2.5 rounded-full bg-green-500" title="Completed" />
             ) : s.status === 'error' ? (
-              <span className="text-red-500 font-bold w-4 text-center">!</span>
+              <span className="inline-block h-2.5 w-2.5 rounded-full bg-red-500" title="Error" />
             ) : (
               <Spinner className="h-3 w-3" />
             )}
@@ -275,9 +275,8 @@ export function TestModePage() {
   });
   const [aiReview, setAiReview] = useState(false);
   const [sourcesPerScenario, setSourcesPerScenario] = useState<number>(saved.sourcesPerScenario ?? 0);
-  const [sharedFieldRatioPercent, setSharedFieldRatioPercent] = useState<number>(saved.sharedFieldRatioPercent ?? 100);
-  const [sameValueDuplicatePercent, setSameValueDuplicatePercent] = useState<number>(saved.sameValueDuplicatePercent ?? 35);
-  const [crossItemSourceReuse, setCrossItemSourceReuse] = useState<boolean>(saved.crossItemSourceReuse ?? true);
+  const [sharedFieldRatioPercent, setSharedFieldRatioPercent] = useState<number>(saved.sharedFieldRatioPercent ?? 40);
+  const [sameValueDuplicatePercent, setSameValueDuplicatePercent] = useState<number>(saved.sameValueDuplicatePercent ?? 30);
   const [statusLoaded, setStatusLoaded] = useState(false);
   const importStepsRef = useRef<ImportProgress[]>([]);
 
@@ -293,7 +292,6 @@ export function TestModePage() {
         sourcesPerScenario,
         sharedFieldRatioPercent,
         sameValueDuplicatePercent,
-        crossItemSourceReuse,
       }));
     } catch { /* localStorage full or disabled */ }
   }, [
@@ -305,23 +303,28 @@ export function TestModePage() {
     sourcesPerScenario,
     sharedFieldRatioPercent,
     sameValueDuplicatePercent,
-    crossItemSourceReuse,
   ]);
 
   const setGlobalCategory = useUiStore((s) => s.setCategory);
 
   // Fetch real categories for the source dropdown (separate key to avoid cache collision with AppShell)
-  const { data: categories = [] } = useQuery({
+  const { data: categories = [], isLoading: categoriesLoading, isError: categoriesError } = useQuery({
     queryKey: ['categories-real'],
     queryFn: () => api.get<string[]>('/categories'),
   });
 
   const queryClient = useQueryClient();
+  const normalizedCategories = Array.isArray(categories)
+    ? categories.map((c) => String(c || '').trim()).filter(Boolean)
+    : [];
+  const hasRemoteCategories = normalizedCategories.length > 0;
+  const sourceCategoryOptions = sourceCategory && !normalizedCategories.includes(sourceCategory)
+    ? [sourceCategory, ...normalizedCategories]
+    : normalizedCategories;
   const generationConfig = {
     sourcesPerScenario: Number.isFinite(sourcesPerScenario) ? Math.max(0, Math.min(5, sourcesPerScenario)) : 0,
-    sharedFieldRatioPercent: Number.isFinite(sharedFieldRatioPercent) ? Math.max(0, Math.min(100, sharedFieldRatioPercent)) : 100,
-    sameValueDuplicatePercent: Number.isFinite(sameValueDuplicatePercent) ? Math.max(0, Math.min(100, sameValueDuplicatePercent)) : 35,
-    crossItemSourceReuse,
+    sharedFieldRatioPercent: Number.isFinite(sharedFieldRatioPercent) ? Math.max(0, Math.min(100, sharedFieldRatioPercent)) : 40,
+    sameValueDuplicatePercent: Number.isFinite(sameValueDuplicatePercent) ? Math.max(0, Math.min(100, sameValueDuplicatePercent)) : 30,
   };
 
   // On mount, verify and restore state from backend (handles cold reload / stale localStorage)
@@ -393,6 +396,7 @@ export function TestModePage() {
       // Auto-switch global dropdown to the test category & refresh category list
       setGlobalCategory(data.category);
       queryClient.invalidateQueries({ queryKey: ['categories'] });
+      queryClient.invalidateQueries({ queryKey: ['categories-real'] });
     },
   });
 
@@ -456,6 +460,7 @@ export function TestModePage() {
       try { localStorage.removeItem(LS_KEY); } catch { /* ignore */ }
       queryClient.invalidateQueries({ queryKey: ['contract-summary'] });
       queryClient.invalidateQueries({ queryKey: ['categories'] });
+      queryClient.invalidateQueries({ queryKey: ['categories-real'] });
     },
   });
 
@@ -548,23 +553,40 @@ export function TestModePage() {
 
         {/* Buttons row */}
         <div className="flex flex-wrap items-end gap-3">
-          <div>
+          <div className="min-w-[240px]">
             <label className="text-xs font-medium text-gray-500 dark:text-gray-400 block mb-1">Source Category</label>
-            <select
-              value={sourceCategory}
-              onChange={(e) => setSourceCategory(e.target.value)}
-              className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700"
-            >
-              {categories.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
+            {hasRemoteCategories ? (
+              <select
+                value={sourceCategory}
+                onChange={(e) => setSourceCategory(e.target.value)}
+                className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700"
+                title={categoriesLoading ? 'Loading categories...' : 'Select the source category to clone into test mode.'}
+              >
+                <option value="" disabled>{categoriesLoading ? 'Loading categories...' : 'Select category'}</option>
+                {sourceCategoryOptions.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                value={sourceCategory}
+                onChange={(e) => setSourceCategory(String(e.target.value || '').trim())}
+                placeholder={categoriesLoading ? 'Loading categories...' : 'Type source category'}
+                className="w-full px-2 py-1.5 text-sm border border-amber-300 dark:border-amber-700 rounded bg-white dark:bg-gray-700"
+                title="Category list unavailable. Type a source category manually."
+              />
+            )}
+            {(categoriesError || (!categoriesLoading && !hasRemoteCategories)) && (
+              <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+                Category list unavailable. Manual category input enabled.
+              </p>
+            )}
           </div>
 
           <div className="relative group">
             <button
               onClick={() => createMut.mutate()}
-              disabled={isRunning}
+              disabled={isRunning || !sourceCategory}
               className={btnPrimary}
               title="Step 1 — Import: Copies the selected category's field rules contract (field_rules.json, known_values.json, cross_validation_rules.json, component DBs) into a test category. This creates an isolated sandbox so tests don't affect production data."
             >
@@ -600,19 +622,21 @@ export function TestModePage() {
             </button>
           </div>
 
-          <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer select-none" title="When enabled, runs LLM-based AI review on flagged component matches after the pipeline completes. Off by default (deterministic mode only).">
-            <input
-              type="checkbox"
-              checked={aiReview}
-              onChange={(e) => setAiReview(e.target.checked)}
-              className="rounded border-gray-300 dark:border-gray-600"
-            />
-            AI Review
-          </label>
+          <button
+            type="button"
+            onClick={() => setAiReview((prev) => !prev)}
+            className={aiReview ? btnPrimary : btnSecondary}
+            title="When enabled, runs LLM-based AI review on flagged component matches after the pipeline completes. Off by default (deterministic mode only)."
+          >
+            AI Review {aiReview ? 'On' : 'Off'}
+          </button>
 
           <div className="flex items-end gap-2">
             <label className="text-xs text-gray-500 dark:text-gray-400">
-              Sources/Scenario
+              <span className="inline-flex items-center gap-1">
+                Sources/Scenario
+                <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-gray-100 text-[10px] text-gray-500 dark:bg-gray-700 dark:text-gray-300" title="0 uses each scenario's default source count. 1-5 overrides all scenarios.">?</span>
+              </span>
               <input
                 type="number"
                 min={0}
@@ -621,11 +645,14 @@ export function TestModePage() {
                 value={sourcesPerScenario}
                 onChange={(e) => setSourcesPerScenario(Number.parseInt(e.target.value || '0', 10) || 0)}
                 className="block mt-1 w-20 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700"
-                title="0 = use scenario default source count. 1-5 overrides for all scenarios."
+                title="0 uses each scenario's default source count. 1-5 overrides all scenarios."
               />
             </label>
             <label className="text-xs text-gray-500 dark:text-gray-400">
-              Shared %
+              <span className="inline-flex items-center gap-1">
+                Shared %
+                <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-gray-100 text-[10px] text-gray-500 dark:bg-gray-700 dark:text-gray-300" title="Percent of non-primary-source fields copied from source 1. Higher = more agreement across sources.">?</span>
+              </span>
               <input
                 type="number"
                 min={0}
@@ -634,11 +661,14 @@ export function TestModePage() {
                 value={sharedFieldRatioPercent}
                 onChange={(e) => setSharedFieldRatioPercent(Number.parseInt(e.target.value || '0', 10) || 0)}
                 className="block mt-1 w-20 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700"
-                title="Percent of fields in non-primary sources that match source 1 values."
+                title="Percent of non-primary-source fields copied from source 1."
               />
             </label>
             <label className="text-xs text-gray-500 dark:text-gray-400">
-              Duplicate %
+              <span className="inline-flex items-center gap-1">
+                Duplicate %
+                <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-gray-100 text-[10px] text-gray-500 dark:bg-gray-700 dark:text-gray-300" title="Extra chance to force same-value duplicates even when Shared % would have varied the field.">?</span>
+              </span>
               <input
                 type="number"
                 min={0}
@@ -647,17 +677,8 @@ export function TestModePage() {
                 value={sameValueDuplicatePercent}
                 onChange={(e) => setSameValueDuplicatePercent(Number.parseInt(e.target.value || '0', 10) || 0)}
                 className="block mt-1 w-20 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700"
-                title="Additional probability of forcing same-value duplicates across sources."
+                title="Extra chance to force same-value duplicates even when Shared % does not."
               />
-            </label>
-            <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer select-none mb-1" title="Reuse the same host identities across products. Disable to generate per-item host IDs.">
-              <input
-                type="checkbox"
-                checked={crossItemSourceReuse}
-                onChange={(e) => setCrossItemSourceReuse(e.target.checked)}
-                className="rounded border-gray-300 dark:border-gray-600"
-              />
-              Reuse Hosts
             </label>
           </div>
 

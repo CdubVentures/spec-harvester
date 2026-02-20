@@ -22,6 +22,8 @@ import { componentReviewPath } from '../engine/curationSuggestions.js';
 import { runComponentReviewBatch } from '../pipeline/componentReviewBatch.js';
 import { invalidateFieldRulesCache } from '../field-rules/loader.js';
 import { introspectWorkbook, loadWorkbookMap, saveWorkbookMap, validateWorkbookMap, extractWorkbookContext } from '../ingest/categoryCompile.js';
+import { llmRoutingSnapshot } from '../llm/routing.js';
+import { buildTrafficLight } from '../validator/trafficLight.js';
 import { slugify as canonicalSlugify } from '../catalog/slugify.js';
 import { cleanVariant as canonicalCleanVariant } from '../catalog/identityDedup.js';
 import { buildComponentIdentifier } from '../utils/componentIdentifier.js';
@@ -62,6 +64,64 @@ function toFloat(v, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function toUnitRatio(v) {
+  const n = Number.parseFloat(String(v ?? ''));
+  if (!Number.isFinite(n)) return undefined;
+  if (n > 1) return Math.max(0, Math.min(1, n / 100));
+  return Math.max(0, Math.min(1, n));
+}
+
+function hasKnownValue(v) {
+  const token = String(v ?? '').trim().toLowerCase();
+  return token !== '' && token !== 'unk' && token !== 'unknown' && token !== 'n/a';
+}
+
+function deriveTrafficLightCounts({ summary = {}, provenance = {} } = {}) {
+  const fromSummary = summary?.traffic_light?.counts
+    || summary?.traffic_light
+    || summary?.trafficLight?.counts
+    || summary?.trafficLight;
+  if (fromSummary && typeof fromSummary === 'object') {
+    const green = toInt(fromSummary.green, 0);
+    const yellow = toInt(fromSummary.yellow, 0);
+    const red = toInt(fromSummary.red, 0);
+    if (green > 0 || yellow > 0 || red > 0) {
+      return { green, yellow, red };
+    }
+  }
+
+  try {
+    const computed = buildTrafficLight({
+      fieldOrder: Object.keys(provenance || {}),
+      provenance,
+      fieldReasoning: summary?.field_reasoning || {}
+    });
+    const green = toInt(computed?.counts?.green, 0);
+    const yellow = toInt(computed?.counts?.yellow, 0);
+    const red = toInt(computed?.counts?.red, 0);
+    if (green > 0 || yellow > 0 || red > 0) {
+      return { green, yellow, red };
+    }
+  } catch {
+    // non-fatal, fall back to simple bucket counts below
+  }
+
+  const skip = new Set(['id', 'brand', 'model', 'base_model', 'category']);
+  let green = 0;
+  let yellow = 0;
+  let red = 0;
+  for (const [field, row] of Object.entries(provenance || {})) {
+    if (skip.has(field)) continue;
+    const value = row?.value;
+    const known = hasKnownValue(value);
+    const meets = row?.meets_pass_target === true;
+    if (known && meets) green += 1;
+    else if (known) yellow += 1;
+    else red += 1;
+  }
+  return { green, yellow, red };
+}
+
 function normalizeModelToken(value) {
   return String(value || '').trim().toLowerCase();
 }
@@ -81,12 +141,134 @@ function llmProviderFromModel(model) {
   return 'openai';
 }
 
+function normalizePathToken(value, fallback = '') {
+  const token = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return token || fallback;
+}
+
+function classifyLlmTracePhase(purpose = '', routeRole = '') {
+  const reason = String(purpose || '').trim().toLowerCase();
+  const role = String(routeRole || '').trim().toLowerCase();
+  if (role === 'extract') return 'extract';
+  if (role === 'validate') return 'validate';
+  if (role === 'write') return 'write';
+  if (role === 'plan') return 'plan';
+  if (
+    reason.includes('discovery_planner') ||
+    reason.includes('search_profile') ||
+    reason.includes('searchprofile')
+  ) {
+    return 'phase_02';
+  }
+  if (
+    reason.includes('serp') ||
+    reason.includes('triage') ||
+    reason.includes('rerank') ||
+    reason.includes('discovery_query_plan')
+  ) {
+    return 'phase_03';
+  }
+  if (reason.includes('extract')) return 'extract';
+  if (reason.includes('validate') || reason.includes('verify')) return 'validate';
+  if (reason.includes('write') || reason.includes('summary')) return 'write';
+  if (reason.includes('planner') || reason.includes('plan')) return 'plan';
+  return 'other';
+}
+
+function normalizeJsonText(value, maxChars = 12000) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value, null, 2).slice(0, Math.max(0, Number(maxChars) || 0));
+    } catch {
+      return '';
+    }
+  }
+  const text = String(value || '');
+  return text.slice(0, Math.max(0, Number(maxChars) || 0));
+}
+
+function resolveLlmRoleDefaults(cfg = {}) {
+  return {
+    plan: String(cfg.llmModelPlan || '').trim(),
+    fast: String(cfg.llmModelFast || '').trim(),
+    triage: String(cfg.llmModelTriage || cfg.cortexModelRerankFast || cfg.cortexModelSearchFast || cfg.llmModelFast || '').trim(),
+    reasoning: String(cfg.llmModelReasoning || '').trim(),
+    extract: String(cfg.llmModelExtract || '').trim(),
+    validate: String(cfg.llmModelValidate || '').trim(),
+    write: String(cfg.llmModelWrite || '').trim()
+  };
+}
+
+function resolveLlmKnobDefaults(cfg = {}) {
+  const modelDefaults = resolveLlmRoleDefaults(cfg);
+  const tokenDefaults = {
+    plan: toInt(cfg.llmMaxOutputTokensPlan, toInt(cfg.llmMaxOutputTokens, 1200)),
+    fast: toInt(cfg.llmMaxOutputTokensFast, toInt(cfg.llmMaxOutputTokensPlan, 1200)),
+    triage: toInt(cfg.llmMaxOutputTokensTriage, toInt(cfg.llmMaxOutputTokensFast, 1200)),
+    reasoning: toInt(cfg.llmMaxOutputTokensReasoning, toInt(cfg.llmReasoningBudget, 4096)),
+    extract: toInt(cfg.llmMaxOutputTokensExtract, toInt(cfg.llmExtractMaxTokens, 1200)),
+    validate: toInt(cfg.llmMaxOutputTokensValidate, toInt(cfg.llmMaxOutputTokens, 1200)),
+    write: toInt(cfg.llmMaxOutputTokensWrite, toInt(cfg.llmMaxOutputTokens, 1200))
+  };
+  return {
+    phase_02_planner: {
+      model: String(cfg.llmModelPlan || '').trim(),
+      token_cap: tokenDefaults.plan
+    },
+    phase_03_triage: {
+      model: String(cfg.llmModelTriage || '').trim(),
+      token_cap: tokenDefaults.triage
+    },
+    fast_pass: {
+      model: modelDefaults.fast,
+      token_cap: tokenDefaults.fast
+    },
+    reasoning_pass: {
+      model: modelDefaults.reasoning,
+      token_cap: tokenDefaults.reasoning
+    },
+    extract_role: {
+      model: modelDefaults.extract,
+      token_cap: tokenDefaults.extract
+    },
+    validate_role: {
+      model: modelDefaults.validate,
+      token_cap: tokenDefaults.validate
+    },
+    write_role: {
+      model: modelDefaults.write,
+      token_cap: tokenDefaults.write
+    },
+    fallback_plan: {
+      model: String(cfg.llmPlanFallbackModel || '').trim(),
+      token_cap: toInt(cfg.llmMaxOutputTokensPlanFallback, tokenDefaults.plan)
+    },
+    fallback_extract: {
+      model: String(cfg.llmExtractFallbackModel || '').trim(),
+      token_cap: toInt(cfg.llmMaxOutputTokensExtractFallback, tokenDefaults.extract)
+    },
+    fallback_validate: {
+      model: String(cfg.llmValidateFallbackModel || '').trim(),
+      token_cap: toInt(cfg.llmMaxOutputTokensValidateFallback, tokenDefaults.validate)
+    },
+    fallback_write: {
+      model: String(cfg.llmWriteFallbackModel || '').trim(),
+      token_cap: toInt(cfg.llmMaxOutputTokensWriteFallback, tokenDefaults.write)
+    }
+  };
+}
+
 function resolvePricingForModel(cfg, model) {
   const modelToken = normalizeModelToken(model);
   const defaultRates = {
-    input_per_1m: toFloat(cfg?.llmCostInputPer1M, 0.28),
-    output_per_1m: toFloat(cfg?.llmCostOutputPer1M, 0.42),
-    cached_input_per_1m: toFloat(cfg?.llmCostCachedInputPer1M, 0)
+    input_per_1m: toFloat(cfg?.llmCostInputPer1M, 1.25),
+    output_per_1m: toFloat(cfg?.llmCostOutputPer1M, 10),
+    cached_input_per_1m: toFloat(cfg?.llmCostCachedInputPer1M, 0.125)
   };
   if (!modelToken) {
     return defaultRates;
@@ -131,6 +313,44 @@ function resolvePricingForModel(cfg, model) {
     };
   }
   return defaultRates;
+}
+
+function resolveTokenProfileForModel(cfg, model) {
+  const modelToken = normalizeModelToken(model);
+  const defaultFallback = {
+    default_output_tokens: toInt(cfg?.llmMaxOutputTokens, 1200),
+    max_output_tokens: toInt(cfg?.llmMaxTokens, 16384)
+  };
+  if (!modelToken) {
+    return defaultFallback;
+  }
+  const map = (cfg?.llmModelOutputTokenMap && typeof cfg.llmModelOutputTokenMap === 'object')
+    ? cfg.llmModelOutputTokenMap
+    : {};
+  let selected = null;
+  let selectedKey = '';
+  for (const [rawModel, rawProfile] of Object.entries(map)) {
+    const key = normalizeModelToken(rawModel);
+    if (!key || !rawProfile || typeof rawProfile !== 'object') continue;
+    const isMatch = modelToken === key || modelToken.startsWith(key) || key.startsWith(modelToken);
+    if (!isMatch) continue;
+    if (!selected || key.length > selectedKey.length) {
+      selected = rawProfile;
+      selectedKey = key;
+    }
+  }
+  const defaultOutput = toInt(
+    selected?.defaultOutputTokens ?? selected?.default_output_tokens,
+    defaultFallback.default_output_tokens
+  );
+  const maxOutput = toInt(
+    selected?.maxOutputTokens ?? selected?.max_output_tokens,
+    defaultFallback.max_output_tokens
+  );
+  return {
+    default_output_tokens: defaultOutput > 0 ? defaultOutput : defaultFallback.default_output_tokens,
+    max_output_tokens: maxOutput > 0 ? maxOutput : defaultFallback.max_output_tokens
+  };
 }
 
 function collectLlmModels(cfg = {}) {
@@ -283,6 +503,18 @@ const AGGREGATOR_DOMAIN_HINTS = [
   'reddit.com',
   'fandom.com'
 ];
+const FETCH_OUTCOME_KEYS = [
+  'ok',
+  'not_found',
+  'blocked',
+  'rate_limited',
+  'login_wall',
+  'bot_challenge',
+  'bad_content',
+  'server_error',
+  'network_timeout',
+  'fetch_error'
+];
 
 function normalizeDomainToken(value) {
   return String(value || '')
@@ -309,6 +541,57 @@ function urlPathToken(url) {
   } catch {
     return String(url || '').toLowerCase();
   }
+}
+
+function createFetchOutcomeCounters() {
+  return FETCH_OUTCOME_KEYS.reduce((acc, key) => {
+    acc[key] = 0;
+    return acc;
+  }, {});
+}
+
+function normalizeFetchOutcome(value) {
+  const token = String(value || '').trim().toLowerCase();
+  if (!token) return '';
+  return FETCH_OUTCOME_KEYS.includes(token) ? token : '';
+}
+
+function classifyFetchOutcomeFromEvent(evt = {}) {
+  const explicit = normalizeFetchOutcome(evt.outcome);
+  if (explicit) return explicit;
+
+  const code = toInt(evt.status, 0);
+  const message = String(evt.message || evt.detail || '').toLowerCase();
+  const contentType = String(evt.content_type || '').toLowerCase();
+
+  const looksBotChallenge = /(captcha|cloudflare|cf-ray|bot.?challenge|are you human|human verification|robot check)/.test(message);
+  const looksRateLimited = /(429|rate.?limit|too many requests|throttl)/.test(message);
+  const looksLoginWall = /(401|sign[ -]?in|login|authenticate|account required|subscription required)/.test(message);
+  const looksBlocked = /(403|forbidden|blocked|access denied|denied)/.test(message);
+  const looksTimeout = /(timeout|timed out|etimedout|econnreset|econnrefused|socket hang up|network error|dns)/.test(message);
+  const looksBadContent = /(parse|json|xml|cheerio|dom|extract|malformed|invalid content|unsupported content)/.test(message);
+
+  if (code >= 200 && code < 400) {
+    if (contentType.includes('application/octet-stream')) return 'bad_content';
+    return 'ok';
+  }
+  if (code === 404 || code === 410) return 'not_found';
+  if (code === 429) return 'rate_limited';
+  if (code === 401 || code === 407) return 'login_wall';
+  if (code === 403) {
+    if (looksBotChallenge) return 'bot_challenge';
+    if (looksLoginWall) return 'login_wall';
+    return 'blocked';
+  }
+  if (code >= 500) return 'server_error';
+  if (code >= 400) return 'blocked';
+  if (looksBotChallenge) return 'bot_challenge';
+  if (looksRateLimited) return 'rate_limited';
+  if (looksLoginWall) return 'login_wall';
+  if (looksBlocked) return 'blocked';
+  if (looksBadContent) return 'bad_content';
+  if (looksTimeout) return 'network_timeout';
+  return 'fetch_error';
 }
 
 function parseTsMs(value) {
@@ -396,6 +679,7 @@ function createDomainBucket(domain, siteKind = 'other') {
     blocked_count: 0,
     blocked_by_url: new Map(),
     parse_fail_count: 0,
+    outcome_counts: createFetchOutcomeCounters(),
     fetch_durations: [],
     fields_filled_count: 0,
     evidence_hits: 0,
@@ -420,6 +704,7 @@ function createUrlStat(url) {
     err_404_count: 0,
     blocked_count: 0,
     parse_fail_count: 0,
+    last_outcome: '',
     last_status: 0,
     last_event: '',
     last_ts: ''
@@ -454,6 +739,60 @@ function choosePreferredSiteKind(currentKind, nextKind) {
   const currentRank = SITE_KIND_RANK[currentKind] ?? 99;
   const nextRank = SITE_KIND_RANK[nextKind] ?? 99;
   return nextRank < currentRank ? nextKind : currentKind;
+}
+
+function cooldownSecondsRemaining(nextRetryAt, nowMs = Date.now()) {
+  const retryAtMs = parseTsMs(nextRetryAt);
+  if (!Number.isFinite(retryAtMs)) return 0;
+  return Math.max(0, Math.ceil((retryAtMs - nowMs) / 1000));
+}
+
+function clampScore(value, min = 0, max = 100) {
+  return Math.max(min, Math.min(max, Number(value) || 0));
+}
+
+function resolveHostBudget(bucket, cooldownSeconds = 0) {
+  const outcomes = bucket?.outcome_counts || createFetchOutcomeCounters();
+  const started = toInt(bucket?.started_count, 0);
+  const completed = toInt(bucket?.completed_count, 0);
+  const inFlight = Math.max(0, started - completed);
+
+  let score = 100;
+  score -= toInt(outcomes.not_found, 0) * 6;
+  score -= toInt(outcomes.blocked, 0) * 8;
+  score -= toInt(outcomes.rate_limited, 0) * 12;
+  score -= toInt(outcomes.login_wall, 0) * 10;
+  score -= toInt(outcomes.bot_challenge, 0) * 14;
+  score -= toInt(outcomes.bad_content, 0) * 8;
+  score -= toInt(outcomes.server_error, 0) * 6;
+  score -= toInt(outcomes.network_timeout, 0) * 5;
+  score -= toInt(outcomes.fetch_error, 0) * 4;
+  score -= toInt(bucket?.dedupe_hits, 0);
+  score += Math.min(12, toInt(outcomes.ok, 0) * 2);
+  score += Math.min(10, toInt(bucket?.evidence_used, 0) * 2);
+  score = clampScore(score, 0, 100);
+
+  let state = 'open';
+  const blockedSignals = (
+    toInt(outcomes.blocked, 0)
+    + toInt(outcomes.rate_limited, 0)
+    + toInt(outcomes.login_wall, 0)
+    + toInt(outcomes.bot_challenge, 0)
+  );
+  if (cooldownSeconds > 0 && (score <= 30 || blockedSignals >= 2)) {
+    state = 'blocked';
+  } else if (cooldownSeconds > 0) {
+    state = 'backoff';
+  } else if (score < 55 || toInt(outcomes.bad_content, 0) > 0 || toInt(bucket?.parse_fail_count, 0) > 0) {
+    state = 'degraded';
+  } else if (inFlight > 0) {
+    state = 'active';
+  }
+
+  return {
+    score,
+    state
+  };
 }
 
 function resolveDomainChecklistStatus(bucket) {
@@ -572,6 +911,55 @@ async function readIndexLabRunEvents(runId, limit = 2000) {
   return rows.slice(-Math.max(1, toInt(limit, 2000)));
 }
 
+function resolveRunProductId(meta = {}, events = []) {
+  const fromMeta = String(meta?.product_id || '').trim();
+  if (fromMeta) return fromMeta;
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const row = events[i] || {};
+    const payload = row?.payload && typeof row.payload === 'object'
+      ? row.payload
+      : {};
+    const candidate = String(
+      row?.product_id
+      || row?.productId
+      || payload?.product_id
+      || payload?.productId
+      || ''
+    ).trim();
+    if (candidate) return candidate;
+  }
+  return '';
+}
+
+async function resolveIndexLabRunContext(runId) {
+  const token = String(runId || '').trim();
+  if (!token) return null;
+  const runDir = safeJoin(INDEXLAB_ROOT, token);
+  if (!runDir) return null;
+  const meta = await safeReadJson(path.join(runDir, 'run.json'));
+  if (!meta || typeof meta !== 'object') {
+    return null;
+  }
+  const category = String(meta?.category || '').trim();
+  const resolvedRunId = String(meta?.run_id || token).trim();
+  if (!category || !resolvedRunId) {
+    return null;
+  }
+  const eventRows = await readIndexLabRunEvents(token, 3000);
+  const productId = resolveRunProductId(meta, eventRows);
+  if (!productId) {
+    return null;
+  }
+  return {
+    token,
+    runDir,
+    meta,
+    category,
+    resolvedRunId,
+    productId
+  };
+}
+
 async function readIndexLabRunNeedSet(runId) {
   const token = String(runId || '').trim();
   if (!token) return null;
@@ -586,11 +974,13 @@ async function readIndexLabRunNeedSet(runId) {
 
   const meta = await safeReadJson(path.join(runDir, 'run.json'));
   const category = String(meta?.category || '').trim();
-  const productId = String(meta?.product_id || '').trim();
   const resolvedRunId = String(meta?.run_id || token).trim();
-  if (!category || !productId || !resolvedRunId) {
+  if (!category || !resolvedRunId) {
     return null;
   }
+  const eventRows = await readIndexLabRunEvents(token, 3000);
+  const productId = resolveRunProductId(meta, eventRows);
+  if (!productId) return null;
 
   const runNeedSetKey = storage.resolveOutputKey(category, productId, 'runs', resolvedRunId, 'analysis', 'needset.json');
   const runNeedSetPath = path.join(OUTPUT_ROOT, ...String(runNeedSetKey || '').split('/'));
@@ -623,11 +1013,12 @@ async function readIndexLabRunSearchProfile(runId) {
 
   const meta = await safeReadJson(path.join(runDir, 'run.json'));
   const category = String(meta?.category || '').trim();
-  const productId = String(meta?.product_id || '').trim();
   const resolvedRunId = String(meta?.run_id || token).trim();
   if (!category || !resolvedRunId) {
     return null;
   }
+  const eventRows = await readIndexLabRunEvents(token, 3000);
+  const productId = resolveRunProductId(meta, eventRows);
 
   if (productId) {
     const runProfileKey = storage.resolveOutputKey(category, productId, 'runs', resolvedRunId, 'analysis', 'search_profile.json');
@@ -658,6 +1049,221 @@ async function readIndexLabRunSearchProfile(runId) {
   return null;
 }
 
+async function readIndexLabRunPhase07Retrieval(runId) {
+  const token = String(runId || '').trim();
+  if (!token) return null;
+  const runDir = safeJoin(INDEXLAB_ROOT, token);
+  if (!runDir) return null;
+
+  const directPath = path.join(runDir, 'phase07_retrieval.json');
+  const direct = await safeReadJson(directPath);
+  if (direct && typeof direct === 'object') {
+    return direct;
+  }
+
+  const meta = await safeReadJson(path.join(runDir, 'run.json'));
+  const category = String(meta?.category || '').trim();
+  const resolvedRunId = String(meta?.run_id || token).trim();
+  if (!category || !resolvedRunId) {
+    return null;
+  }
+  const eventRows = await readIndexLabRunEvents(token, 3000);
+  const productId = resolveRunProductId(meta, eventRows);
+  if (!productId) return null;
+
+  const runKey = storage.resolveOutputKey(category, productId, 'runs', resolvedRunId, 'analysis', 'phase07_retrieval.json');
+  const runPayload = await storage.readJsonOrNull(runKey);
+  if (runPayload && typeof runPayload === 'object') {
+    return runPayload;
+  }
+
+  const latestKey = storage.resolveOutputKey(category, productId, 'latest', 'phase07_retrieval.json');
+  const latestPayload = await storage.readJsonOrNull(latestKey);
+  if (latestPayload && typeof latestPayload === 'object') {
+    return latestPayload;
+  }
+
+  const runSummaryKey = storage.resolveOutputKey(category, productId, 'runs', resolvedRunId, 'logs', 'summary.json');
+  const runSummary = await storage.readJsonOrNull(runSummaryKey);
+  if (runSummary?.phase07 && typeof runSummary.phase07 === 'object') {
+    return {
+      run_id: resolvedRunId,
+      category,
+      product_id: productId,
+      generated_at: String(runSummary.generated_at || '').trim() || null,
+      summary: runSummary.phase07,
+      fields: [],
+      summary_only: true
+    };
+  }
+
+  return null;
+}
+
+async function readIndexLabRunPhase08Extraction(runId) {
+  const token = String(runId || '').trim();
+  if (!token) return null;
+  const runDir = safeJoin(INDEXLAB_ROOT, token);
+  if (!runDir) return null;
+
+  const directPath = path.join(runDir, 'phase08_extraction.json');
+  const direct = await safeReadJson(directPath);
+  if (direct && typeof direct === 'object') {
+    return direct;
+  }
+
+  const meta = await safeReadJson(path.join(runDir, 'run.json'));
+  const category = String(meta?.category || '').trim();
+  const resolvedRunId = String(meta?.run_id || token).trim();
+  if (!category || !resolvedRunId) {
+    return null;
+  }
+  const eventRows = await readIndexLabRunEvents(token, 3000);
+  const productId = resolveRunProductId(meta, eventRows);
+  if (!productId) return null;
+
+  const runKey = storage.resolveOutputKey(category, productId, 'runs', resolvedRunId, 'analysis', 'phase08_extraction.json');
+  const runPayload = await storage.readJsonOrNull(runKey);
+  if (runPayload && typeof runPayload === 'object') {
+    return runPayload;
+  }
+
+  const latestKey = storage.resolveOutputKey(category, productId, 'latest', 'phase08_extraction.json');
+  const latestPayload = await storage.readJsonOrNull(latestKey);
+  if (latestPayload && typeof latestPayload === 'object') {
+    return latestPayload;
+  }
+
+  const runSummaryKey = storage.resolveOutputKey(category, productId, 'runs', resolvedRunId, 'logs', 'summary.json');
+  const runSummary = await storage.readJsonOrNull(runSummaryKey);
+  if (runSummary?.phase08 && typeof runSummary.phase08 === 'object') {
+    return {
+      run_id: resolvedRunId,
+      category,
+      product_id: productId,
+      generated_at: String(runSummary.generated_at || '').trim() || null,
+      summary: runSummary.phase08,
+      batches: [],
+      field_contexts: {},
+      prime_sources: { rows: [] },
+      summary_only: true
+    };
+  }
+
+  return null;
+}
+
+async function readIndexLabRunSourceIndexingPackets(runId) {
+  const token = String(runId || '').trim();
+  if (!token) return null;
+  const runDir = safeJoin(INDEXLAB_ROOT, token);
+  if (!runDir) return null;
+
+  const directPath = path.join(runDir, 'source_indexing_extraction_packets.json');
+  const direct = await safeReadJson(directPath);
+  if (direct && typeof direct === 'object') {
+    return direct;
+  }
+
+  const meta = await safeReadJson(path.join(runDir, 'run.json'));
+  const category = String(meta?.category || '').trim();
+  const resolvedRunId = String(meta?.run_id || token).trim();
+  if (!category || !resolvedRunId) {
+    return null;
+  }
+  const eventRows = await readIndexLabRunEvents(token, 3000);
+  const productId = resolveRunProductId(meta, eventRows);
+  if (!productId) return null;
+
+  const runKey = storage.resolveOutputKey(category, productId, 'runs', resolvedRunId, 'analysis', 'source_indexing_extraction_packets.json');
+  const runPayload = await storage.readJsonOrNull(runKey);
+  if (runPayload && typeof runPayload === 'object') {
+    return runPayload;
+  }
+
+  const latestKey = storage.resolveOutputKey(category, productId, 'latest', 'source_indexing_extraction_packets.json');
+  const latestPayload = await storage.readJsonOrNull(latestKey);
+  if (latestPayload && typeof latestPayload === 'object') {
+    return latestPayload;
+  }
+
+  return null;
+}
+
+async function readIndexLabRunItemIndexingPacket(runId) {
+  const token = String(runId || '').trim();
+  if (!token) return null;
+  const runDir = safeJoin(INDEXLAB_ROOT, token);
+  if (!runDir) return null;
+
+  const directPath = path.join(runDir, 'item_indexing_extraction_packet.json');
+  const direct = await safeReadJson(directPath);
+  if (direct && typeof direct === 'object') {
+    return direct;
+  }
+
+  const meta = await safeReadJson(path.join(runDir, 'run.json'));
+  const category = String(meta?.category || '').trim();
+  const resolvedRunId = String(meta?.run_id || token).trim();
+  if (!category || !resolvedRunId) {
+    return null;
+  }
+  const eventRows = await readIndexLabRunEvents(token, 3000);
+  const productId = resolveRunProductId(meta, eventRows);
+  if (!productId) return null;
+
+  const runKey = storage.resolveOutputKey(category, productId, 'runs', resolvedRunId, 'analysis', 'item_indexing_extraction_packet.json');
+  const runPayload = await storage.readJsonOrNull(runKey);
+  if (runPayload && typeof runPayload === 'object') {
+    return runPayload;
+  }
+
+  const latestKey = storage.resolveOutputKey(category, productId, 'latest', 'item_indexing_extraction_packet.json');
+  const latestPayload = await storage.readJsonOrNull(latestKey);
+  if (latestPayload && typeof latestPayload === 'object') {
+    return latestPayload;
+  }
+
+  return null;
+}
+
+async function readIndexLabRunRunMetaPacket(runId) {
+  const token = String(runId || '').trim();
+  if (!token) return null;
+  const runDir = safeJoin(INDEXLAB_ROOT, token);
+  if (!runDir) return null;
+
+  const directPath = path.join(runDir, 'run_meta_packet.json');
+  const direct = await safeReadJson(directPath);
+  if (direct && typeof direct === 'object') {
+    return direct;
+  }
+
+  const meta = await safeReadJson(path.join(runDir, 'run.json'));
+  const category = String(meta?.category || '').trim();
+  const resolvedRunId = String(meta?.run_id || token).trim();
+  if (!category || !resolvedRunId) {
+    return null;
+  }
+  const eventRows = await readIndexLabRunEvents(token, 3000);
+  const productId = resolveRunProductId(meta, eventRows);
+  if (!productId) return null;
+
+  const runKey = storage.resolveOutputKey(category, productId, 'runs', resolvedRunId, 'analysis', 'run_meta_packet.json');
+  const runPayload = await storage.readJsonOrNull(runKey);
+  if (runPayload && typeof runPayload === 'object') {
+    return runPayload;
+  }
+
+  const latestKey = storage.resolveOutputKey(category, productId, 'latest', 'run_meta_packet.json');
+  const latestPayload = await storage.readJsonOrNull(latestKey);
+  if (latestPayload && typeof latestPayload === 'object') {
+    return latestPayload;
+  }
+
+  return null;
+}
+
 async function readIndexLabRunSerpExplorer(runId) {
   const token = String(runId || '').trim();
   if (!token) return null;
@@ -671,11 +1277,13 @@ async function readIndexLabRunSerpExplorer(runId) {
   if (!runDir) return null;
   const meta = await safeReadJson(path.join(runDir, 'run.json'));
   const category = String(meta?.category || '').trim();
-  const productId = String(meta?.product_id || '').trim();
   const resolvedRunId = String(meta?.run_id || token).trim();
-  if (!category || !productId || !resolvedRunId) {
+  if (!category || !resolvedRunId) {
     return null;
   }
+  const eventRows = await readIndexLabRunEvents(token, 3000);
+  const productId = resolveRunProductId(meta, eventRows);
+  if (!productId) return null;
 
   const runSummaryKey = storage.resolveOutputKey(category, productId, 'runs', resolvedRunId, 'logs', 'summary.json');
   const runSummary = await storage.readJsonOrNull(runSummaryKey);
@@ -683,7 +1291,35 @@ async function readIndexLabRunSerpExplorer(runId) {
     return null;
   }
   const attemptRows = Array.isArray(runSummary.searches_attempted) ? runSummary.searches_attempted : [];
-  const selectedUrls = Array.isArray(runSummary.urls_fetched) ? runSummary.urls_fetched : [];
+  const selectedUrlsRaw = Array.isArray(runSummary.urls_fetched) ? runSummary.urls_fetched : [];
+  const selectedUrls = selectedUrlsRaw
+    .map((row) => {
+      if (typeof row === 'string') {
+        return {
+          url: String(row).trim(),
+          query: '',
+          doc_kind: '',
+          tier_name: '',
+          score: 0,
+          reason_codes: ['summary_fallback']
+        };
+      }
+      if (!row || typeof row !== 'object') return null;
+      const url = String(row.url || row.href || '').trim();
+      if (!url) return null;
+      const reasonCodes = Array.isArray(row.reason_codes)
+        ? row.reason_codes.map((item) => String(item || '').trim()).filter(Boolean)
+        : [];
+      return {
+        url,
+        query: String(row.query || '').trim(),
+        doc_kind: String(row.doc_kind || '').trim(),
+        tier_name: String(row.tier_name || '').trim(),
+        score: Number(row.score || row.triage_score || 0),
+        reason_codes: reasonCodes.length > 0 ? reasonCodes : ['summary_fallback']
+      };
+    })
+    .filter(Boolean);
   return {
     generated_at: String(runSummary.generated_at || '').trim() || null,
     provider: String(runSummary.discovery?.provider || '').trim() || null,
@@ -695,6 +1331,8 @@ async function readIndexLabRunSerpExplorer(runId) {
     dedupe_input: 0,
     dedupe_output: 0,
     duplicates_removed: 0,
+    summary_only: true,
+    selected_urls: selectedUrls,
     queries: attemptRows.map((row) => ({
       query: String(row?.query || '').trim(),
       hint_source: '',
@@ -708,6 +1346,1155 @@ async function readIndexLabRunSerpExplorer(runId) {
       selected_count: 0,
       candidates: []
     }))
+  };
+}
+
+async function readIndexLabRunLlmTraces(runId, limit = 80) {
+  const context = await resolveIndexLabRunContext(runId);
+  if (!context) return null;
+  const traceRoot = path.join(
+    OUTPUT_ROOT,
+    '_runtime',
+    'traces',
+    'runs',
+    normalizePathToken(context.resolvedRunId, 'run'),
+    normalizePathToken(context.productId, 'product'),
+    'llm'
+  );
+  let entries = [];
+  try {
+    entries = await fs.readdir(traceRoot, { withFileTypes: true });
+  } catch {
+    return {
+      generated_at: new Date().toISOString(),
+      run_id: context.resolvedRunId,
+      category: context.category,
+      product_id: context.productId,
+      count: 0,
+      traces: []
+    };
+  }
+  const fileRows = entries
+    .filter((entry) => entry.isFile() && /^call_\d+\.json$/i.test(entry.name))
+    .map((entry) => entry.name)
+    .sort((a, b) => a.localeCompare(b));
+  const traces = [];
+  for (const name of fileRows) {
+    const filePath = path.join(traceRoot, name);
+    const row = await safeReadJson(filePath);
+    if (!row || typeof row !== 'object') continue;
+    const usage = row.usage && typeof row.usage === 'object'
+      ? row.usage
+      : {};
+    const prompt = row.prompt && typeof row.prompt === 'object'
+      ? row.prompt
+      : {};
+    const response = row.response && typeof row.response === 'object'
+      ? row.response
+      : {};
+    const routeRole = String(row.route_role || '').trim().toLowerCase();
+    const purpose = String(row.purpose || '').trim();
+    const ts = String(row.ts || '').trim();
+    const tsMs = Date.parse(ts);
+    traces.push({
+      id: `${context.resolvedRunId}:${name}`,
+      ts: ts || null,
+      ts_ms: Number.isFinite(tsMs) ? tsMs : 0,
+      phase: classifyLlmTracePhase(purpose, routeRole),
+      role: routeRole || null,
+      purpose: purpose || null,
+      status: String(row.status || '').trim() || null,
+      provider: String(row.provider || '').trim() || null,
+      model: String(row.model || '').trim() || null,
+      retry_without_schema: Boolean(row.retry_without_schema),
+      json_schema_requested: Boolean(row.json_schema_requested),
+      max_tokens_applied: toInt(row.max_tokens_applied, 0),
+      target_fields: Array.isArray(row.target_fields)
+        ? row.target_fields.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 80)
+        : [],
+      target_fields_count: toInt(row.target_fields_count, 0),
+      prompt_preview: normalizeJsonText(prompt, 8000),
+      response_preview: normalizeJsonText(response, 12000),
+      error: String(row.error || '').trim() || null,
+      usage: {
+        prompt_tokens: toInt(usage.prompt_tokens, toInt(usage.input_tokens, 0)),
+        completion_tokens: toInt(usage.completion_tokens, toInt(usage.output_tokens, 0)),
+        cached_prompt_tokens: toInt(usage.cached_prompt_tokens, toInt(usage.cached_input_tokens, 0)),
+        total_tokens: toInt(usage.total_tokens, 0)
+      },
+      trace_file: name
+    });
+  }
+  traces.sort((a, b) => {
+    if (b.ts_ms !== a.ts_ms) return b.ts_ms - a.ts_ms;
+    return String(b.trace_file || '').localeCompare(String(a.trace_file || ''));
+  });
+  const maxRows = Math.max(1, toInt(limit, 80));
+  return {
+    generated_at: new Date().toISOString(),
+    run_id: context.resolvedRunId,
+    category: context.category,
+    product_id: context.productId,
+    count: traces.length,
+    traces: traces.slice(0, maxRows).map(({ ts_ms, ...row }) => row)
+  };
+}
+
+async function readIndexLabRunEvidenceIndex(runId, { query = '', limit = 40 } = {}) {
+  const context = await resolveIndexLabRunContext(runId);
+  if (!context) return null;
+  const requestedQuery = String(query || '').trim();
+  const requestedLimit = Math.max(1, Math.min(120, toInt(limit, 40)));
+  const specDb = await getSpecDbReady(context.category);
+  if (!specDb?.db) {
+    return {
+      generated_at: new Date().toISOString(),
+      run_id: context.resolvedRunId,
+      category: context.category,
+      product_id: context.productId,
+      db_ready: false,
+      scope: {
+        mode: 'none',
+        run_match: false,
+        run_id: context.resolvedRunId
+      },
+      summary: {
+        documents: 0,
+        artifacts: 0,
+        artifacts_with_hash: 0,
+        unique_hashes: 0,
+        assertions: 0,
+        evidence_refs: 0,
+        fields_covered: 0
+      },
+      documents: [],
+      top_fields: [],
+      search: {
+        query: requestedQuery,
+        limit: requestedLimit,
+        count: 0,
+        rows: [],
+        note: 'spec_db_not_ready'
+      }
+    };
+  }
+
+  const db = specDb.db;
+  const scopeBaseSql = `
+    sr.category = @category
+    AND (
+      sr.product_id = @product_id
+      OR sr.item_identifier = @product_id
+    )
+  `;
+  const scopeParams = {
+    category: context.category,
+    product_id: context.productId,
+    run_id: context.resolvedRunId
+  };
+  const runCountRow = db.prepare(
+    `SELECT COUNT(*) AS c FROM source_registry sr WHERE ${scopeBaseSql} AND sr.run_id = @run_id`
+  ).get(scopeParams);
+  const runMatch = toInt(runCountRow?.c, 0) > 0;
+  const scopeMode = runMatch ? 'run' : 'product_fallback';
+  const scopeSql = runMatch
+    ? `${scopeBaseSql} AND sr.run_id = @run_id`
+    : scopeBaseSql;
+
+  const summaryRow = db.prepare(`
+    SELECT
+      COUNT(DISTINCT sr.source_id) AS documents,
+      COUNT(sa.artifact_id) AS artifacts,
+      SUM(CASE WHEN TRIM(COALESCE(sa.content_hash, '')) <> '' THEN 1 ELSE 0 END) AS artifacts_with_hash,
+      COUNT(DISTINCT CASE WHEN TRIM(COALESCE(sa.content_hash, '')) <> '' THEN sa.content_hash END) AS unique_hashes,
+      COUNT(DISTINCT asr.assertion_id) AS assertions,
+      COUNT(ser.evidence_ref_id) AS evidence_refs,
+      COUNT(DISTINCT asr.field_key) AS fields_covered
+    FROM source_registry sr
+    LEFT JOIN source_artifacts sa ON sa.source_id = sr.source_id
+    LEFT JOIN source_assertions asr ON asr.source_id = sr.source_id
+    LEFT JOIN source_evidence_refs ser ON ser.assertion_id = asr.assertion_id
+    WHERE ${scopeSql}
+  `).get(scopeParams) || {};
+
+  const documents = db.prepare(`
+    SELECT
+      sr.source_id,
+      sr.source_url,
+      sr.source_host,
+      sr.source_tier,
+      sr.crawl_status,
+      sr.http_status,
+      sr.fetched_at,
+      sr.run_id,
+      COUNT(DISTINCT sa.artifact_id) AS artifact_count,
+      SUM(CASE WHEN TRIM(COALESCE(sa.content_hash, '')) <> '' THEN 1 ELSE 0 END) AS hash_count,
+      COUNT(DISTINCT CASE WHEN TRIM(COALESCE(sa.content_hash, '')) <> '' THEN sa.content_hash END) AS unique_hashes,
+      COUNT(DISTINCT asr.assertion_id) AS assertion_count,
+      COUNT(ser.evidence_ref_id) AS evidence_ref_count
+    FROM source_registry sr
+    LEFT JOIN source_artifacts sa ON sa.source_id = sr.source_id
+    LEFT JOIN source_assertions asr ON asr.source_id = sr.source_id
+    LEFT JOIN source_evidence_refs ser ON ser.assertion_id = asr.assertion_id
+    WHERE ${scopeSql}
+    GROUP BY sr.source_id
+    ORDER BY COALESCE(sr.fetched_at, sr.updated_at, sr.created_at) DESC, sr.source_id
+    LIMIT 120
+  `).all(scopeParams);
+
+  const topFields = db.prepare(`
+    SELECT
+      asr.field_key,
+      COUNT(DISTINCT asr.assertion_id) AS assertions,
+      COUNT(ser.evidence_ref_id) AS evidence_refs,
+      COUNT(DISTINCT asr.source_id) AS distinct_sources
+    FROM source_assertions asr
+    JOIN source_registry sr ON sr.source_id = asr.source_id
+    LEFT JOIN source_evidence_refs ser ON ser.assertion_id = asr.assertion_id
+    WHERE ${scopeSql}
+    GROUP BY asr.field_key
+    ORDER BY assertions DESC, evidence_refs DESC, asr.field_key
+    LIMIT 80
+  `).all(scopeParams);
+
+  let searchRows = [];
+  if (requestedQuery) {
+    const queryToken = requestedQuery.toLowerCase();
+    const queryLike = `%${queryToken}%`;
+    const rankedRows = db.prepare(`
+      SELECT
+        sr.source_id,
+        sr.source_url,
+        sr.source_host,
+        sr.source_tier,
+        sr.run_id,
+        asr.assertion_id,
+        asr.field_key,
+        asr.context_kind,
+        asr.value_raw,
+        asr.value_normalized,
+        ser.snippet_id,
+        ser.evidence_url,
+        ser.quote,
+        c.snippet_text
+      FROM source_registry sr
+      JOIN source_assertions asr ON asr.source_id = sr.source_id
+      LEFT JOIN source_evidence_refs ser ON ser.assertion_id = asr.assertion_id
+      LEFT JOIN candidates c
+        ON c.candidate_id = asr.candidate_id
+       AND c.category = sr.category
+      WHERE ${scopeSql}
+        AND (
+          LOWER(COALESCE(asr.field_key, '')) LIKE @query_like
+          OR LOWER(COALESCE(asr.value_raw, '')) LIKE @query_like
+          OR LOWER(COALESCE(asr.value_normalized, '')) LIKE @query_like
+          OR LOWER(COALESCE(ser.quote, '')) LIKE @query_like
+          OR LOWER(COALESCE(c.snippet_text, '')) LIKE @query_like
+        )
+      ORDER BY
+        CASE
+          WHEN LOWER(COALESCE(asr.field_key, '')) = @query_exact THEN 0
+          WHEN LOWER(COALESCE(asr.field_key, '')) LIKE @query_like THEN 1
+          WHEN LOWER(COALESCE(asr.value_raw, '')) LIKE @query_like THEN 2
+          WHEN LOWER(COALESCE(ser.quote, '')) LIKE @query_like THEN 3
+          ELSE 4
+        END,
+        COALESCE(sr.source_tier, 99) ASC,
+        COALESCE(sr.fetched_at, sr.updated_at, sr.created_at) DESC,
+        sr.source_id
+      LIMIT @limit
+    `).all({
+      ...scopeParams,
+      query_like: queryLike,
+      query_exact: queryToken,
+      limit: requestedLimit
+    });
+
+    searchRows = rankedRows.map((row) => ({
+      source_id: String(row.source_id || '').trim(),
+      source_url: String(row.source_url || '').trim(),
+      source_host: String(row.source_host || '').trim(),
+      source_tier: row.source_tier === null || row.source_tier === undefined
+        ? null
+        : toInt(row.source_tier, 0),
+      run_id: String(row.run_id || '').trim() || null,
+      field_key: String(row.field_key || '').trim(),
+      context_kind: String(row.context_kind || '').trim(),
+      assertion_id: String(row.assertion_id || '').trim(),
+      snippet_id: String(row.snippet_id || '').trim() || null,
+      evidence_url: String(row.evidence_url || '').trim() || null,
+      quote_preview: String(row.quote || '').trim().slice(0, 280),
+      snippet_preview: String(row.snippet_text || '').trim().slice(0, 280),
+      value_preview: String(row.value_raw || row.value_normalized || '').trim().slice(0, 160)
+    }));
+  }
+
+  return {
+    generated_at: new Date().toISOString(),
+    run_id: context.resolvedRunId,
+    category: context.category,
+    product_id: context.productId,
+    db_ready: true,
+    scope: {
+      mode: scopeMode,
+      run_match: runMatch,
+      run_id: context.resolvedRunId
+    },
+    summary: {
+      documents: toInt(summaryRow.documents, 0),
+      artifacts: toInt(summaryRow.artifacts, 0),
+      artifacts_with_hash: toInt(summaryRow.artifacts_with_hash, 0),
+      unique_hashes: toInt(summaryRow.unique_hashes, 0),
+      assertions: toInt(summaryRow.assertions, 0),
+      evidence_refs: toInt(summaryRow.evidence_refs, 0),
+      fields_covered: toInt(summaryRow.fields_covered, 0)
+    },
+    documents: documents.map((row) => ({
+      source_id: String(row.source_id || '').trim(),
+      source_url: String(row.source_url || '').trim(),
+      source_host: String(row.source_host || '').trim(),
+      source_tier: row.source_tier === null || row.source_tier === undefined
+        ? null
+        : toInt(row.source_tier, 0),
+      crawl_status: String(row.crawl_status || '').trim(),
+      http_status: row.http_status === null || row.http_status === undefined
+        ? null
+        : toInt(row.http_status, 0),
+      fetched_at: String(row.fetched_at || '').trim() || null,
+      run_id: String(row.run_id || '').trim() || null,
+      artifact_count: toInt(row.artifact_count, 0),
+      hash_count: toInt(row.hash_count, 0),
+      unique_hashes: toInt(row.unique_hashes, 0),
+      assertion_count: toInt(row.assertion_count, 0),
+      evidence_ref_count: toInt(row.evidence_ref_count, 0)
+    })),
+    top_fields: topFields.map((row) => ({
+      field_key: String(row.field_key || '').trim(),
+      assertions: toInt(row.assertions, 0),
+      evidence_refs: toInt(row.evidence_refs, 0),
+      distinct_sources: toInt(row.distinct_sources, 0)
+    })),
+    search: {
+      query: requestedQuery,
+      limit: requestedLimit,
+      count: searchRows.length,
+      rows: searchRows
+    }
+  };
+}
+
+function clampAutomationPriority(value, fallback = 50) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(1, Math.min(100, parsed));
+}
+
+function automationPriorityForRequiredLevel(requiredLevel = '') {
+  const level = String(requiredLevel || '').trim().toLowerCase();
+  if (level === 'identity') return 10;
+  if (level === 'critical') return 20;
+  if (level === 'required') return 35;
+  if (level === 'expected') return 60;
+  if (level === 'optional') return 80;
+  return 50;
+}
+
+function automationPriorityForJobType(jobType = '') {
+  const token = String(jobType || '').trim().toLowerCase();
+  if (token === 'repair_search') return 20;
+  if (token === 'deficit_rediscovery') return 35;
+  if (token === 'staleness_refresh') return 55;
+  if (token === 'domain_backoff') return 65;
+  return 50;
+}
+
+function toStringList(value, limit = 20) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+    .slice(0, Math.max(1, toInt(limit, 20)));
+}
+
+function addUniqueStrings(base = [], extra = [], limit = 20) {
+  const cap = Math.max(1, toInt(limit, 20));
+  const seen = new Set(
+    (Array.isArray(base) ? base : [])
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+  );
+  for (const value of Array.isArray(extra) ? extra : []) {
+    const token = String(value || '').trim();
+    if (!token || seen.has(token)) continue;
+    seen.add(token);
+    if (seen.size >= cap) break;
+  }
+  return [...seen];
+}
+
+function buildAutomationJobId(prefix = '', dedupeKey = '') {
+  const lhs = String(prefix || 'job').trim().toLowerCase() || 'job';
+  const rhs = String(dedupeKey || '').trim().toLowerCase();
+  if (!rhs) return `${lhs}:na`;
+  let hash = 0;
+  for (let i = 0; i < rhs.length; i += 1) {
+    hash = ((hash << 5) - hash + rhs.charCodeAt(i)) | 0;
+  }
+  return `${lhs}:${Math.abs(hash).toString(36)}`;
+}
+
+function normalizeAutomationStatus(value = '') {
+  const token = String(value || '').trim().toLowerCase();
+  if (token === 'queued') return 'queued';
+  if (token === 'running') return 'running';
+  if (token === 'done') return 'done';
+  if (token === 'failed') return 'failed';
+  if (token === 'cooldown') return 'cooldown';
+  return 'queued';
+}
+
+function normalizeAutomationQuery(value = '') {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+function buildSearchProfileQueryMaps(searchProfile = {}) {
+  const queryToFields = new Map();
+  const fieldStats = new Map();
+  const queryRows = Array.isArray(searchProfile?.query_rows) ? searchProfile.query_rows : [];
+  const queryStatsRows = Array.isArray(searchProfile?.query_stats) ? searchProfile.query_stats : [];
+  const fieldTargetQueries = searchProfile?.field_target_queries && typeof searchProfile.field_target_queries === 'object'
+    ? searchProfile.field_target_queries
+    : {};
+
+  const ensureFieldStat = (fieldKey) => {
+    const field = String(fieldKey || '').trim();
+    if (!field) return null;
+    if (!fieldStats.has(field)) {
+      fieldStats.set(field, {
+        attempts: 0,
+        results: 0,
+        queries: new Set()
+      });
+    }
+    return fieldStats.get(field);
+  };
+
+  const queryStatsByQuery = new Map();
+  for (const row of queryStatsRows) {
+    const queryRaw = String(row?.query || '').trim();
+    const query = normalizeAutomationQuery(queryRaw);
+    if (!query) continue;
+    queryStatsByQuery.set(query, {
+      attempts: Math.max(0, toInt(row?.attempts, 0)),
+      result_count: Math.max(0, toInt(row?.result_count, 0))
+    });
+  }
+
+  for (const row of queryRows) {
+    const queryRaw = String(row?.query || '').trim();
+    const query = normalizeAutomationQuery(queryRaw);
+    if (!query) continue;
+    const targetFields = toStringList(row?.target_fields, 24);
+    if (targetFields.length > 0) {
+      if (!queryToFields.has(query)) queryToFields.set(query, new Set());
+      const querySet = queryToFields.get(query);
+      for (const field of targetFields) {
+        querySet.add(field);
+      }
+    }
+    const statsFallback = queryStatsByQuery.get(query) || {
+      attempts: Math.max(0, toInt(row?.attempts, 0)),
+      result_count: Math.max(0, toInt(row?.result_count, 0))
+    };
+    for (const field of targetFields) {
+      const stat = ensureFieldStat(field);
+      if (!stat) continue;
+      stat.attempts += Math.max(0, toInt(statsFallback.attempts, 0));
+      stat.results += Math.max(0, toInt(statsFallback.result_count, 0));
+      stat.queries.add(queryRaw);
+    }
+  }
+
+  for (const [fieldRaw, queriesRaw] of Object.entries(fieldTargetQueries)) {
+    const field = String(fieldRaw || '').trim();
+    if (!field) continue;
+    const stat = ensureFieldStat(field);
+    if (!stat) continue;
+    const queries = toStringList(queriesRaw, 20);
+    for (const query of queries) {
+      const queryToken = normalizeAutomationQuery(query);
+      if (!queryToken) continue;
+      if (!queryToFields.has(queryToken)) queryToFields.set(queryToken, new Set());
+      queryToFields.get(queryToken).add(field);
+      stat.queries.add(query);
+    }
+  }
+
+  const queryToFieldsFlat = new Map();
+  for (const [query, set] of queryToFields.entries()) {
+    queryToFieldsFlat.set(query, [...set].slice(0, 20));
+  }
+  const fieldStatsFlat = new Map();
+  for (const [field, row] of fieldStats.entries()) {
+    fieldStatsFlat.set(field, {
+      attempts: Math.max(0, toInt(row?.attempts, 0)),
+      results: Math.max(0, toInt(row?.results, 0)),
+      queries: [...(row?.queries || new Set())].slice(0, 20)
+    });
+  }
+  return {
+    queryToFields: queryToFieldsFlat,
+    fieldStats: fieldStatsFlat
+  };
+}
+
+async function readIndexLabRunAutomationQueue(runId) {
+  const context = await resolveIndexLabRunContext(runId);
+  if (!context) return null;
+
+  const eventRows = await readIndexLabRunEvents(context.token, 8000);
+  const needset = await readIndexLabRunNeedSet(context.token);
+  const searchProfile = await readIndexLabRunSearchProfile(context.token);
+  const { queryToFields, fieldStats } = buildSearchProfileQueryMaps(searchProfile || {});
+
+  const jobsById = new Map();
+  const actions = [];
+  const repairJobIdByQuery = new Map();
+  const deficitJobIdByField = new Map();
+  const contentHashSeen = new Map();
+
+  const sortedEvents = [...eventRows]
+    .filter((row) => row && typeof row === 'object')
+    .sort((a, b) => {
+      const aMs = parseTsMs(a.ts);
+      const bMs = parseTsMs(b.ts);
+      if (Number.isFinite(aMs) && Number.isFinite(bMs) && aMs !== bMs) {
+        return aMs - bMs;
+      }
+      return String(a.event || '').localeCompare(String(b.event || ''));
+    });
+
+  const ensureJob = ({
+    jobType = 'deficit_rediscovery',
+    dedupeKey = '',
+    sourceSignal = 'manual',
+    scheduledAt = '',
+    priority = null,
+    category = context.category,
+    productId = context.productId,
+    runId: resolvedRunId = context.resolvedRunId,
+    fieldTargets = [],
+    reasonTags = [],
+    domain = '',
+    url = '',
+    query = '',
+    provider = '',
+    docHint = '',
+    status = 'queued'
+  } = {}) => {
+    const normalizedJobType = String(jobType || '').trim().toLowerCase() || 'deficit_rediscovery';
+    const normalizedDedupe = String(dedupeKey || '').trim() || `${normalizedJobType}:${sourceSignal}`;
+    const jobId = buildAutomationJobId(normalizedJobType, normalizedDedupe);
+    const normalizedStatus = normalizeAutomationStatus(status);
+    if (!jobsById.has(jobId)) {
+      jobsById.set(jobId, {
+        job_id: jobId,
+        job_type: normalizedJobType,
+        priority: clampAutomationPriority(
+          priority === null || priority === undefined
+            ? automationPriorityForJobType(normalizedJobType)
+            : priority,
+          automationPriorityForJobType(normalizedJobType)
+        ),
+        status: normalizedStatus,
+        category: String(category || '').trim(),
+        product_id: String(productId || '').trim(),
+        run_id: String(resolvedRunId || '').trim(),
+        field_targets: toStringList(fieldTargets, 20),
+        url: String(url || '').trim() || null,
+        domain: String(domain || '').trim() || null,
+        query: String(query || '').trim() || null,
+        provider: String(provider || '').trim() || null,
+        doc_hint: String(docHint || '').trim() || null,
+        dedupe_key: normalizedDedupe,
+        source_signal: String(sourceSignal || '').trim() || 'manual',
+        scheduled_at: String(scheduledAt || '').trim() || null,
+        started_at: null,
+        finished_at: null,
+        next_run_at: null,
+        attempt_count: 0,
+        reason_tags: toStringList(reasonTags, 24),
+        last_error: null,
+        notes: []
+      });
+    }
+    const job = jobsById.get(jobId);
+    if (fieldTargets?.length) {
+      job.field_targets = addUniqueStrings(job.field_targets, fieldTargets, 20);
+    }
+    if (reasonTags?.length) {
+      job.reason_tags = addUniqueStrings(job.reason_tags, reasonTags, 24);
+    }
+    if (!job.url && url) job.url = String(url).trim();
+    if (!job.domain && domain) job.domain = String(domain).trim();
+    if (!job.query && query) job.query = String(query).trim();
+    if (!job.provider && provider) job.provider = String(provider).trim();
+    if (!job.doc_hint && docHint) job.doc_hint = String(docHint).trim();
+    if (!job.scheduled_at && scheduledAt) job.scheduled_at = String(scheduledAt).trim();
+    return job;
+  };
+
+  const pushAction = ({
+    ts = '',
+    event = '',
+    job = null,
+    status = '',
+    detail = '',
+    reasonTags = []
+  } = {}) => {
+    if (!job) return;
+    actions.push({
+      ts: String(ts || '').trim() || null,
+      event: String(event || '').trim() || null,
+      job_id: job.job_id,
+      job_type: job.job_type,
+      status: normalizeAutomationStatus(status || job.status),
+      source_signal: job.source_signal,
+      priority: clampAutomationPriority(job.priority, 50),
+      detail: String(detail || '').trim() || null,
+      domain: job.domain || null,
+      url: job.url || null,
+      query: job.query || null,
+      field_targets: toStringList(job.field_targets, 20),
+      reason_tags: addUniqueStrings(job.reason_tags || [], reasonTags, 24)
+    });
+  };
+
+  const transitionJob = ({
+    job = null,
+    status = 'queued',
+    ts = '',
+    detail = '',
+    nextRunAt = '',
+    reasonTags = [],
+    error = ''
+  } = {}) => {
+    if (!job) return;
+    const normalizedStatus = normalizeAutomationStatus(status);
+    job.status = normalizedStatus;
+    const safeTs = String(ts || '').trim();
+    if (normalizedStatus === 'queued') {
+      if (safeTs) job.scheduled_at = safeTs;
+      job.finished_at = null;
+      job.last_error = null;
+    }
+    if (normalizedStatus === 'running') {
+      if (safeTs) job.started_at = safeTs;
+      job.finished_at = null;
+      job.attempt_count = Math.max(0, toInt(job.attempt_count, 0)) + 1;
+      job.last_error = null;
+    }
+    if (normalizedStatus === 'done') {
+      if (safeTs && !job.started_at) {
+        job.started_at = safeTs;
+        job.attempt_count = Math.max(0, toInt(job.attempt_count, 0)) + 1;
+      }
+      if (safeTs) job.finished_at = safeTs;
+      job.last_error = null;
+    }
+    if (normalizedStatus === 'failed') {
+      if (safeTs && !job.started_at) {
+        job.started_at = safeTs;
+        job.attempt_count = Math.max(0, toInt(job.attempt_count, 0)) + 1;
+      }
+      if (safeTs) job.finished_at = safeTs;
+      job.last_error = String(error || detail || 'job_failed').trim() || 'job_failed';
+    }
+    if (normalizedStatus === 'cooldown') {
+      if (safeTs && !job.started_at) {
+        job.started_at = safeTs;
+      }
+      if (safeTs) job.finished_at = safeTs;
+    }
+    const nextRun = String(nextRunAt || '').trim();
+    if (nextRun) {
+      job.next_run_at = nextRun;
+    }
+    if (reasonTags?.length) {
+      job.reason_tags = addUniqueStrings(job.reason_tags, reasonTags, 24);
+    }
+    const detailToken = String(detail || '').trim();
+    if (detailToken) {
+      job.notes = addUniqueStrings(job.notes, [detailToken], 20);
+    }
+  };
+
+  const setRepairJobByQuery = (query = '', job = null) => {
+    const token = normalizeAutomationQuery(query);
+    if (!token || !job) return;
+    repairJobIdByQuery.set(token, job.job_id);
+  };
+
+  const getRepairJobByQuery = (query = '') => {
+    const token = normalizeAutomationQuery(query);
+    if (!token) return null;
+    const jobId = repairJobIdByQuery.get(token);
+    if (!jobId) return null;
+    return jobsById.get(jobId) || null;
+  };
+
+  const setDeficitJobByField = (fieldKey = '', job = null) => {
+    const token = String(fieldKey || '').trim();
+    if (!token || !job) return;
+    deficitJobIdByField.set(token, job.job_id);
+  };
+
+  const getDeficitJobsForQuery = (query = '') => {
+    const token = normalizeAutomationQuery(query);
+    if (!token) return [];
+    const fields = queryToFields.get(token) || [];
+    return fields
+      .map((field) => jobsById.get(deficitJobIdByField.get(field)))
+      .filter(Boolean);
+  };
+
+  for (const evt of sortedEvents) {
+    const eventName = String(evt?.event || '').trim().toLowerCase();
+    if (!eventName) continue;
+    const payload = evt?.payload && typeof evt.payload === 'object'
+      ? evt.payload
+      : {};
+    const ts = String(evt?.ts || payload.ts || '').trim();
+    const query = String(payload.query || evt.query || '').trim();
+    const url = String(payload.url || payload.source_url || evt.url || evt.source_url || '').trim();
+    const domain = normalizeDomainToken(
+      payload.domain || payload.host || evt.domain || evt.host || domainFromUrl(url)
+    );
+    const provider = String(payload.provider || evt.provider || '').trim();
+
+    if (eventName === 'repair_query_enqueued') {
+      const reason = String(payload.reason || evt.reason || '').trim();
+      const docHint = String(payload.doc_hint || evt.doc_hint || '').trim();
+      const fieldTargets = toStringList(payload.field_targets || evt.field_targets, 16);
+      const dedupeKey = [
+        'repair',
+        domain,
+        query.toLowerCase(),
+        fieldTargets.join('|').toLowerCase(),
+        reason.toLowerCase()
+      ].join('::');
+      const job = ensureJob({
+        jobType: 'repair_search',
+        dedupeKey,
+        sourceSignal: 'url_health',
+        scheduledAt: ts,
+        priority: 20,
+        fieldTargets,
+        reasonTags: [reason || 'repair_signal', 'phase_04_signal'],
+        domain,
+        url,
+        query,
+        provider,
+        docHint,
+        status: 'queued'
+      });
+      transitionJob({
+        job,
+        status: 'queued',
+        ts,
+        detail: reason || 'repair_query_enqueued',
+        reasonTags: [reason || 'repair_signal']
+      });
+      setRepairJobByQuery(query, job);
+      pushAction({
+        ts,
+        event: eventName,
+        job,
+        status: 'queued',
+        detail: reason || 'repair_query_enqueued',
+        reasonTags: [reason || 'repair_signal']
+      });
+      continue;
+    }
+
+    if (eventName === 'blocked_domain_cooldown_applied') {
+      const reason = toInt(payload.status, toInt(evt.status, 0)) === 429
+        ? 'status_429_backoff'
+        : 'status_403_backoff';
+      const dedupeKey = `domain_backoff::${domain}::${reason}`;
+      const job = ensureJob({
+        jobType: 'domain_backoff',
+        dedupeKey,
+        sourceSignal: 'url_health',
+        scheduledAt: ts,
+        priority: 65,
+        reasonTags: [reason, 'blocked_domain_threshold'],
+        domain,
+        status: 'cooldown'
+      });
+      transitionJob({
+        job,
+        status: 'cooldown',
+        ts,
+        detail: `blocked domain threshold reached (${toInt(payload.blocked_count, 0)})`,
+        reasonTags: [reason]
+      });
+      pushAction({
+        ts,
+        event: eventName,
+        job,
+        status: 'cooldown',
+        detail: `blocked domain threshold reached (${toInt(payload.blocked_count, 0)})`,
+        reasonTags: [reason]
+      });
+      continue;
+    }
+
+    if (eventName === 'url_cooldown_applied') {
+      const reason = String(payload.reason || evt.reason || '').trim().toLowerCase() || 'cooldown';
+      const nextRetryAt = String(payload.next_retry_ts || payload.next_retry_at || payload.cooldown_until || evt.next_retry_ts || '').trim();
+      const isPathDead = reason === 'path_dead_pattern';
+      const jobType = isPathDead ? 'repair_search' : 'domain_backoff';
+      const dedupeKey = `${jobType}::${domain}::${reason}::${urlPathToken(url || '/')}`;
+      const job = ensureJob({
+        jobType,
+        dedupeKey,
+        sourceSignal: 'url_health',
+        scheduledAt: ts,
+        priority: isPathDead ? 22 : 68,
+        reasonTags: [reason],
+        domain,
+        url,
+        status: 'cooldown'
+      });
+      transitionJob({
+        job,
+        status: 'cooldown',
+        ts,
+        detail: reason,
+        nextRunAt: nextRetryAt,
+        reasonTags: [reason]
+      });
+      pushAction({
+        ts,
+        event: eventName,
+        job,
+        status: 'cooldown',
+        detail: reason,
+        reasonTags: [reason]
+      });
+      continue;
+    }
+
+    if (eventName === 'source_fetch_skipped') {
+      const skipReason = String(payload.skip_reason || payload.reason || evt.skip_reason || evt.reason || '').trim().toLowerCase();
+      if (skipReason === 'retry_later' || skipReason === 'blocked_budget' || skipReason === 'cooldown') {
+        const nextRetryAt = String(payload.next_retry_ts || payload.next_retry_at || evt.next_retry_ts || '').trim();
+        const dedupeKey = `domain_backoff::${domain}::${skipReason}::${urlPathToken(url || '/')}`;
+        const job = ensureJob({
+          jobType: 'domain_backoff',
+          dedupeKey,
+          sourceSignal: 'url_health',
+          scheduledAt: ts,
+          priority: 70,
+          reasonTags: [skipReason],
+          domain,
+          url,
+          status: 'cooldown'
+        });
+        transitionJob({
+          job,
+          status: 'cooldown',
+          ts,
+          detail: skipReason,
+          nextRunAt: nextRetryAt,
+          reasonTags: [skipReason]
+        });
+        pushAction({
+          ts,
+          event: eventName,
+          job,
+          status: 'cooldown',
+          detail: skipReason,
+          reasonTags: [skipReason]
+        });
+      }
+      continue;
+    }
+
+    if (eventName === 'source_processed' || eventName === 'fetch_finished') {
+      const statusCode = toInt(payload.status, toInt(evt.status, 0));
+      const contentHash = String(payload.content_hash || payload.contentHash || evt.content_hash || '').trim();
+      if (statusCode >= 200 && statusCode < 300 && contentHash) {
+        const seen = contentHashSeen.get(contentHash);
+        if (!seen) {
+          contentHashSeen.set(contentHash, {
+            ts,
+            url,
+            host: domain
+          });
+        } else {
+          const dedupeKey = `staleness_refresh::${contentHash}`;
+          const job = ensureJob({
+            jobType: 'staleness_refresh',
+            dedupeKey,
+            sourceSignal: 'staleness',
+            scheduledAt: ts,
+            priority: 55,
+            reasonTags: ['content_hash_duplicate'],
+            domain,
+            url,
+            status: 'done'
+          });
+          transitionJob({
+            job,
+            status: 'done',
+            ts,
+            detail: `content hash repeated (first ${seen.ts || '-'})`,
+            reasonTags: ['content_hash_duplicate']
+          });
+          pushAction({
+            ts,
+            event: 'staleness_hash_duplicate',
+            job,
+            status: 'done',
+            detail: `content hash repeated (first ${seen.ts || '-'})`,
+            reasonTags: ['content_hash_duplicate']
+          });
+        }
+      }
+      continue;
+    }
+
+    if (eventName === 'discovery_query_started' || eventName === 'search_started') {
+      const repairJob = getRepairJobByQuery(query);
+      if (repairJob) {
+        transitionJob({
+          job: repairJob,
+          status: 'running',
+          ts,
+          detail: 'repair query execution started'
+        });
+        pushAction({
+          ts,
+          event: eventName,
+          job: repairJob,
+          status: 'running',
+          detail: 'repair query execution started'
+        });
+      }
+      for (const deficitJob of getDeficitJobsForQuery(query)) {
+        transitionJob({
+          job: deficitJob,
+          status: 'running',
+          ts,
+          detail: 'deficit rediscovery query started'
+        });
+        pushAction({
+          ts,
+          event: eventName,
+          job: deficitJob,
+          status: 'running',
+          detail: 'deficit rediscovery query started'
+        });
+      }
+      continue;
+    }
+
+    if (eventName === 'discovery_query_completed' || eventName === 'search_finished') {
+      const resultCount = Math.max(0, toInt(payload.result_count, toInt(evt.result_count, 0)));
+      const repairJob = getRepairJobByQuery(query);
+      if (repairJob) {
+        const done = resultCount > 0;
+        transitionJob({
+          job: repairJob,
+          status: done ? 'done' : 'failed',
+          ts,
+          detail: done ? `repair query completed with ${resultCount} results` : 'repair query returned no results',
+          error: done ? '' : 'repair_no_results'
+        });
+        pushAction({
+          ts,
+          event: eventName,
+          job: repairJob,
+          status: done ? 'done' : 'failed',
+          detail: done ? `repair query completed with ${resultCount} results` : 'repair query returned no results',
+          reasonTags: [done ? 'results_found' : 'no_results']
+        });
+      }
+      for (const deficitJob of getDeficitJobsForQuery(query)) {
+        const done = resultCount > 0;
+        transitionJob({
+          job: deficitJob,
+          status: done ? 'done' : 'failed',
+          ts,
+          detail: done ? `deficit query completed with ${resultCount} results` : 'deficit query returned no results',
+          error: done ? '' : 'deficit_no_results'
+        });
+        pushAction({
+          ts,
+          event: eventName,
+          job: deficitJob,
+          status: done ? 'done' : 'failed',
+          detail: done ? `deficit query completed with ${resultCount} results` : 'deficit query returned no results',
+          reasonTags: [done ? 'results_found' : 'no_results']
+        });
+      }
+      continue;
+    }
+  }
+
+  const needRows = Array.isArray(needset?.needs) ? needset.needs : [];
+  const deficitCandidates = needRows
+    .map((row) => ({
+      field_key: String(row?.field_key || '').trim(),
+      required_level: String(row?.required_level || '').trim().toLowerCase(),
+      need_score: Number.parseFloat(String(row?.need_score ?? 0)) || 0,
+      reasons: toStringList(row?.reasons, 12)
+    }))
+    .filter((row) => row.field_key)
+    .filter((row) => row.reasons.some((reason) => (
+      reason === 'missing'
+      || reason === 'tier_pref_unmet'
+      || reason === 'min_refs_fail'
+      || reason === 'low_conf'
+      || reason === 'conflict'
+      || reason === 'publish_gate_block'
+      || reason === 'blocked_by_identity'
+    )))
+    .sort((a, b) => b.need_score - a.need_score || a.field_key.localeCompare(b.field_key))
+    .slice(0, 16);
+
+  for (const row of deficitCandidates) {
+    const field = row.field_key;
+    const stats = fieldStats.get(field) || { attempts: 0, results: 0, queries: [] };
+    const querySample = Array.isArray(stats.queries) ? stats.queries[0] : '';
+    const dedupeKey = `deficit_rediscovery::${field}`;
+    const job = ensureJob({
+      jobType: 'deficit_rediscovery',
+      dedupeKey,
+      sourceSignal: 'needset_deficit',
+      scheduledAt: String(needset?.generated_at || '').trim() || context.meta?.started_at || '',
+      priority: automationPriorityForRequiredLevel(row.required_level),
+      fieldTargets: [field],
+      reasonTags: row.reasons,
+      query: String(querySample || '').trim(),
+      provider: String(searchProfile?.provider || '').trim(),
+      status: 'queued'
+    });
+    setDeficitJobByField(field, job);
+    if (toInt(stats.attempts, 0) > 0) {
+      const hasResults = toInt(stats.results, 0) > 0;
+      transitionJob({
+        job,
+        status: hasResults ? 'done' : 'failed',
+        ts: String(needset?.generated_at || context.meta?.ended_at || context.meta?.started_at || '').trim(),
+        detail: hasResults
+          ? `searchprofile queries returned ${toInt(stats.results, 0)} results`
+          : 'searchprofile queries executed with no results',
+        error: hasResults ? '' : 'searchprofile_no_results'
+      });
+      pushAction({
+        ts: String(needset?.generated_at || context.meta?.ended_at || context.meta?.started_at || '').trim(),
+        event: 'needset_deficit_resolved_from_searchprofile',
+        job,
+        status: hasResults ? 'done' : 'failed',
+        detail: hasResults
+          ? `searchprofile queries returned ${toInt(stats.results, 0)} results`
+          : 'searchprofile queries executed with no results',
+        reasonTags: [hasResults ? 'results_found' : 'no_results']
+      });
+    } else {
+      transitionJob({
+        job,
+        status: 'queued',
+        ts: String(needset?.generated_at || context.meta?.started_at || '').trim(),
+        detail: 'needset deficit queued for rediscovery',
+        reasonTags: row.reasons
+      });
+      pushAction({
+        ts: String(needset?.generated_at || context.meta?.started_at || '').trim(),
+        event: 'needset_deficit_enqueued',
+        job,
+        status: 'queued',
+        detail: 'needset deficit queued for rediscovery',
+        reasonTags: row.reasons
+      });
+    }
+  }
+
+  const jobs = [...jobsById.values()];
+  const statusCounts = {
+    queued: 0,
+    running: 0,
+    done: 0,
+    failed: 0,
+    cooldown: 0
+  };
+  const typeCounts = {
+    repair_search: 0,
+    staleness_refresh: 0,
+    deficit_rediscovery: 0,
+    domain_backoff: 0
+  };
+  for (const job of jobs) {
+    const status = normalizeAutomationStatus(job.status);
+    statusCounts[status] += 1;
+    const jobType = String(job.job_type || '').trim().toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(typeCounts, jobType)) {
+      typeCounts[jobType] += 1;
+    }
+  }
+
+  const statusOrder = {
+    running: 0,
+    queued: 1,
+    cooldown: 2,
+    failed: 3,
+    done: 4
+  };
+  const sortedJobs = jobs
+    .sort((a, b) => {
+      const aRank = statusOrder[normalizeAutomationStatus(a.status)] ?? 99;
+      const bRank = statusOrder[normalizeAutomationStatus(b.status)] ?? 99;
+      if (aRank !== bRank) return aRank - bRank;
+      if (a.priority !== b.priority) return a.priority - b.priority;
+      const aTs = parseTsMs(a.scheduled_at || a.started_at || a.finished_at || '');
+      const bTs = parseTsMs(b.scheduled_at || b.started_at || b.finished_at || '');
+      if (Number.isFinite(aTs) && Number.isFinite(bTs) && aTs !== bTs) return bTs - aTs;
+      return String(a.job_id || '').localeCompare(String(b.job_id || ''));
+    })
+    .slice(0, 300);
+
+  const sortedActions = actions
+    .sort((a, b) => parseTsMs(String(b.ts || '')) - parseTsMs(String(a.ts || '')))
+    .slice(0, 120);
+
+  return {
+    generated_at: new Date().toISOString(),
+    run_id: context.resolvedRunId,
+    category: context.category,
+    product_id: context.productId,
+    summary: {
+      total_jobs: sortedJobs.length,
+      queue_depth: statusCounts.queued + statusCounts.running + statusCounts.failed,
+      active_jobs: statusCounts.queued + statusCounts.running,
+      ...statusCounts,
+      ...typeCounts
+    },
+    policies: {
+      owner: 'phase_06b',
+      loops: {
+        repair_search: true,
+        staleness_refresh: true,
+        deficit_rediscovery: true
+      }
+    },
+    jobs: sortedJobs,
+    actions: sortedActions
   };
 }
 
@@ -770,6 +2557,21 @@ async function listIndexLabRuns({ limit = 50 } = {}) {
     }
     return { productId, startedAt, endedAt, counters };
   };
+  const normalizeStartupMs = (value) => {
+    const input = value && typeof value === 'object' ? value : {};
+    const parseMetric = (field) => {
+      if (!(field in input)) return null;
+      const raw = Number.parseInt(String(input[field] ?? ''), 10);
+      return Number.isFinite(raw) ? Math.max(0, raw) : null;
+    };
+    return {
+      first_event: parseMetric('first_event'),
+      search_started: parseMetric('search_started'),
+      fetch_started: parseMetric('fetch_started'),
+      parse_started: parseMetric('parse_started'),
+      index_started: parseMetric('index_started')
+    };
+  };
 
   const rows = [];
   for (const dir of dirs) {
@@ -793,6 +2595,11 @@ async function listIndexLabRuns({ limit = 50 } = {}) {
       status: String(resolvedStatus || 'unknown').trim(),
       started_at: String(meta?.started_at || eventSummary.startedAt || stat?.mtime?.toISOString?.() || '').trim(),
       ended_at: String(meta?.ended_at || (resolvedStatus !== 'running' ? eventSummary.endedAt : '') || '').trim(),
+      identity_fingerprint: String(meta?.identity_fingerprint || '').trim(),
+      identity_lock_status: String(meta?.identity_lock_status || '').trim(),
+      dedupe_mode: String(meta?.dedupe_mode || '').trim(),
+      phase_cursor: String(meta?.phase_cursor || '').trim(),
+      startup_ms: normalizeStartupMs(meta?.startup_ms),
       events_path: runEventsPath,
       run_dir: runDir,
       counters: hasMetaCounters ? meta.counters : eventSummary.counters
@@ -836,6 +2643,8 @@ async function buildIndexingDomainChecklist({
         primary_domains: []
       },
       domain_field_yield: [],
+      repair_queries: [],
+      bad_url_patterns: [],
       notes: ['category_required']
     };
   }
@@ -919,6 +2728,9 @@ async function buildIndexingDomainChecklist({
 
   const buckets = new Map();
   const startTimesByKey = new Map();
+  const repairQueryRows = [];
+  const repairQueryDedup = new Set();
+  const badUrlPatterns = new Map();
   const ensureBucket = (domain, siteKind = 'other') => {
     const host = normalizeDomainToken(domain);
     if (!host) return null;
@@ -933,8 +2745,8 @@ async function buildIndexingDomainChecklist({
 
   for (const evt of events) {
     const eventName = String(evt.event || '').trim();
-    const urlRaw = String(evt.url || evt.finalUrl || '').trim();
-    const domain = domainFromUrl(urlRaw || evt.host || '');
+    const urlRaw = String(evt.url || evt.finalUrl || evt.source_url || '').trim();
+    const domain = domainFromUrl(urlRaw || evt.domain || evt.host || '');
     if (!domain) continue;
     if (isHelperPseudoDomain(domain)) continue;
     const siteKind = classifySiteKind({
@@ -994,6 +2806,41 @@ async function buildIndexingDomainChecklist({
       continue;
     }
 
+    if (eventName === 'source_fetch_skipped') {
+      const urlStat = ensureUrlStat(bucket, normalizedUrl);
+      const skipReason = String(evt.skip_reason || evt.reason || '').trim().toLowerCase();
+      if (normalizedUrl) {
+        bucket.candidates_checked_urls.add(normalizedUrl);
+        if (urlStat) {
+          urlStat.checked_count += 1;
+          bumpUrlStatEvent(urlStat, { eventName, ts: evt.ts });
+        }
+      }
+      if (skipReason === 'cooldown') {
+        bucket.dedupe_hits += 1;
+      }
+      if (skipReason === 'blocked_budget') {
+        bucket.blocked_count += 1;
+        if (normalizedUrl) incrementMapCounter(bucket.blocked_by_url, normalizedUrl);
+        if (urlStat) {
+          urlStat.blocked_count += 1;
+        }
+      }
+      const nextRetry = String(evt.next_retry_ts || evt.next_retry_at || '').trim();
+      if (nextRetry) {
+        if (!bucket.next_retry_at) {
+          bucket.next_retry_at = nextRetry;
+        } else {
+          const currentMs = parseTsMs(bucket.next_retry_at);
+          const nextMs = parseTsMs(nextRetry);
+          if (Number.isFinite(nextMs) && (!Number.isFinite(currentMs) || nextMs < currentMs)) {
+            bucket.next_retry_at = nextRetry;
+          }
+        }
+      }
+      continue;
+    }
+
     if (eventName === 'fields_filled_from_source') {
       const urlStat = ensureUrlStat(bucket, normalizedUrl);
       const count = Math.max(
@@ -1016,6 +2863,24 @@ async function buildIndexingDomainChecklist({
       const nextRetry = String(
         evt.next_retry_ts || evt.next_retry_at || evt.cooldown_until || ''
       ).trim();
+      const cooldownReason = String(evt.reason || '').trim();
+      if (cooldownReason === 'path_dead_pattern') {
+        const path = String(urlPathToken(normalizedUrl || evt.url || evt.source_url || '') || '').trim() || '/';
+        const patternKey = `${domain}|${path}`;
+        const existingPattern = badUrlPatterns.get(patternKey) || {
+          domain,
+          path,
+          reason: cooldownReason,
+          count: 0,
+          last_ts: ''
+        };
+        existingPattern.count += 1;
+        const eventTs = String(evt.ts || '').trim();
+        if (eventTs && (!existingPattern.last_ts || parseTsMs(eventTs) >= parseTsMs(existingPattern.last_ts))) {
+          existingPattern.last_ts = eventTs;
+        }
+        badUrlPatterns.set(patternKey, existingPattern);
+      }
       if (nextRetry) {
         if (!bucket.next_retry_at) {
           bucket.next_retry_at = nextRetry;
@@ -1030,12 +2895,43 @@ async function buildIndexingDomainChecklist({
       continue;
     }
 
+    if (eventName === 'repair_query_enqueued') {
+      const query = String(evt.query || '').trim();
+      if (query) {
+        const sourceUrl = String(evt.source_url || normalizedUrl || '').trim();
+        const reason = String(evt.reason || '').trim();
+        const dedupeKey = `${domain}|${query}|${reason}|${sourceUrl}`;
+        if (!repairQueryDedup.has(dedupeKey)) {
+          repairQueryDedup.add(dedupeKey);
+          repairQueryRows.push({
+            ts: String(evt.ts || '').trim() || null,
+            domain,
+            query,
+            status: toInt(evt.status, 0),
+            reason: reason || null,
+            source_url: sourceUrl || null,
+            cooldown_until: String(evt.cooldown_until || evt.next_retry_ts || '').trim() || null,
+            doc_hint: String(evt.doc_hint || '').trim() || null,
+            field_targets: Array.isArray(evt.field_targets)
+              ? evt.field_targets.map((row) => String(row || '').trim()).filter(Boolean).slice(0, 20)
+              : []
+          });
+        }
+      }
+      continue;
+    }
+
     if (eventName === 'source_processed' || eventName === 'source_fetch_failed') {
       const statusCode = toInt(evt.status, 0);
+      const fetchOutcome = classifyFetchOutcomeFromEvent(evt);
       const urlStat = ensureUrlStat(bucket, normalizedUrl);
       bucket.completed_count += 1;
+      if (fetchOutcome && Object.prototype.hasOwnProperty.call(bucket.outcome_counts, fetchOutcome)) {
+        bucket.outcome_counts[fetchOutcome] += 1;
+      }
       if (urlStat) {
         urlStat.processed_count += 1;
+        urlStat.last_outcome = fetchOutcome || urlStat.last_outcome;
         bumpUrlStatEvent(urlStat, { eventName, ts: evt.ts, status: statusCode });
       }
       const startArr = startTimesByKey.get(fetchKey) || [];
@@ -1056,13 +2952,14 @@ async function buildIndexingDomainChecklist({
     if (eventName === 'source_processed') {
       const urlStat = ensureUrlStat(bucket, normalizedUrl);
       const status = toInt(evt.status, 0);
+      const fetchOutcome = classifyFetchOutcomeFromEvent(evt);
       if (normalizedUrl) {
         bucket.candidates_checked_urls.add(normalizedUrl);
         if (urlStat) {
           urlStat.checked_count += 1;
         }
       }
-      if (status >= 200 && status < 400) {
+      if (fetchOutcome === 'ok') {
         if (normalizedUrl) bucket.fetched_ok_urls.add(normalizedUrl);
         if (urlStat) {
           urlStat.fetched_ok = true;
@@ -1072,18 +2969,29 @@ async function buildIndexingDomainChecklist({
           bucket.last_success_at = ts;
         }
       }
-      if (status === 404) {
+      if (fetchOutcome === 'not_found' || status === 404 || status === 410) {
         bucket.err_404 += 1;
         if (normalizedUrl) incrementMapCounter(bucket.err_404_by_url, normalizedUrl);
         if (urlStat) {
           urlStat.err_404_count += 1;
         }
       }
-      if (status === 403 || status === 429) {
+      if (
+        fetchOutcome === 'blocked'
+        || fetchOutcome === 'rate_limited'
+        || fetchOutcome === 'login_wall'
+        || fetchOutcome === 'bot_challenge'
+      ) {
         bucket.blocked_count += 1;
         if (normalizedUrl) incrementMapCounter(bucket.blocked_by_url, normalizedUrl);
         if (urlStat) {
           urlStat.blocked_count += 1;
+        }
+      }
+      if (fetchOutcome === 'bad_content') {
+        bucket.parse_fail_count += 1;
+        if (urlStat) {
+          urlStat.parse_fail_count += 1;
         }
       }
       if (normalizedUrl) {
@@ -1104,22 +3012,27 @@ async function buildIndexingDomainChecklist({
 
     if (eventName === 'source_fetch_failed') {
       const urlStat = ensureUrlStat(bucket, normalizedUrl);
-      const message = String(evt.message || evt.detail || '').toLowerCase();
-      if (/404/.test(message)) {
+      const fetchOutcome = classifyFetchOutcomeFromEvent(evt);
+      if (fetchOutcome === 'not_found') {
         bucket.err_404 += 1;
         if (normalizedUrl) incrementMapCounter(bucket.err_404_by_url, normalizedUrl);
         if (urlStat) {
           urlStat.err_404_count += 1;
         }
       }
-      if (/(403|429|forbidden|captcha|rate.?limit|blocked)/.test(message)) {
+      if (
+        fetchOutcome === 'blocked'
+        || fetchOutcome === 'rate_limited'
+        || fetchOutcome === 'login_wall'
+        || fetchOutcome === 'bot_challenge'
+      ) {
         bucket.blocked_count += 1;
         if (normalizedUrl) incrementMapCounter(bucket.blocked_by_url, normalizedUrl);
         if (urlStat) {
           urlStat.blocked_count += 1;
         }
       }
-      if (/(parse|json|xml|cheerio|dom|extract)/.test(message)) {
+      if (fetchOutcome === 'bad_content') {
         bucket.parse_fail_count += 1;
         if (urlStat) {
           urlStat.parse_fail_count += 1;
@@ -1188,11 +3101,14 @@ async function buildIndexingDomainChecklist({
     notes.push('select_product_for_evidence_contribution_metrics');
   }
 
+  const nowMs = Date.now();
   const rows = [...buckets.values()].map((bucket) => {
     const durations = [...bucket.fetch_durations].filter((n) => Number.isFinite(n) && n >= 0).sort((a, b) => a - b);
     const avgFetch = durations.length > 0
       ? durations.reduce((sum, ms) => sum + ms, 0) / durations.length
       : 0;
+    const cooldownSeconds = cooldownSecondsRemaining(bucket.next_retry_at, nowMs);
+    const hostBudget = resolveHostBudget(bucket, cooldownSeconds);
     return {
       domain: bucket.domain,
       site_kind: bucket.site_kind,
@@ -1212,6 +3128,10 @@ async function buildIndexingDomainChecklist({
       evidence_used: bucket.evidence_used,
       fields_covered: bucket.fields_covered.size,
       status: resolveDomainChecklistStatus(bucket),
+      host_budget_score: hostBudget.score,
+      host_budget_state: hostBudget.state,
+      cooldown_seconds_remaining: cooldownSeconds,
+      outcome_counts: { ...bucket.outcome_counts },
       last_success_at: bucket.last_success_at || null,
       next_retry_at: bucket.next_retry_at || null,
       url_count: bucket.url_stats.size,
@@ -1228,6 +3148,7 @@ async function buildIndexingDomainChecklist({
             err_404_count: urlRow.err_404_count,
             blocked_count: urlRow.blocked_count,
             parse_fail_count: urlRow.parse_fail_count,
+            last_outcome: urlRow.last_outcome || null,
             last_status: urlRow.last_status || null,
             last_event: urlRow.last_event || null,
             last_ts: urlRow.last_ts || null
@@ -1319,6 +3240,10 @@ async function buildIndexingDomainChecklist({
     })
     .sort((a, b) => b.evidence_used_count - a.evidence_used_count || a.domain.localeCompare(b.domain) || a.field.localeCompare(b.field))
     .slice(0, 120);
+  repairQueryRows.sort((a, b) => parseTsMs(String(b.ts || '')) - parseTsMs(String(a.ts || '')));
+  const badUrlPatternRows = [...badUrlPatterns.values()]
+    .sort((a, b) => b.count - a.count || parseTsMs(b.last_ts) - parseTsMs(a.last_ts) || a.domain.localeCompare(b.domain))
+    .slice(0, 120);
 
   if (!manufacturerDomain) {
     notes.push('no_manufacturer_domain_detected_for_scope');
@@ -1340,6 +3265,8 @@ async function buildIndexingDomainChecklist({
       primary_domains: primaryDomainMilestones
     },
     domain_field_yield: domainFieldYieldRows,
+    repair_queries: repairQueryRows,
+    bad_url_patterns: badUrlPatternRows,
     notes
   };
 }
@@ -1473,7 +3400,7 @@ async function getSpecDbReady(category) {
   return getSpecDb(category);
 }
 
-function ensureGridKeyReviewState(specDb, category, productId, fieldKey) {
+function ensureGridKeyReviewState(specDb, category, productId, fieldKey, itemFieldStateId = null) {
   if (!specDb || !productId || !fieldKey) return null;
   try {
     const existing = specDb.getKeyReviewState({
@@ -1481,12 +3408,15 @@ function ensureGridKeyReviewState(specDb, category, productId, fieldKey) {
       targetKind: 'grid_key',
       itemIdentifier: productId,
       fieldKey,
+      itemFieldStateId,
     });
     if (existing) return existing;
 
-    const ifs = specDb.db.prepare(
-      'SELECT * FROM item_field_state WHERE category = ? AND product_id = ? AND field_key = ? LIMIT 1'
-    ).get(category, productId, fieldKey);
+    const ifs = itemFieldStateId
+      ? specDb.getItemFieldStateById(itemFieldStateId)
+      : specDb.db.prepare(
+        'SELECT * FROM item_field_state WHERE category = ? AND product_id = ? AND field_key = ? LIMIT 1'
+      ).get(category, productId, fieldKey);
     if (!ifs) return null;
 
     let aiConfirmPrimaryStatus = null;
@@ -1500,6 +3430,7 @@ function ensureGridKeyReviewState(specDb, category, productId, fieldKey) {
       targetKind: 'grid_key',
       itemIdentifier: productId,
       fieldKey,
+      itemFieldStateId: ifs.id ?? itemFieldStateId ?? null,
       selectedValue: ifs.value ?? null,
       selectedCandidateId: ifs.accepted_candidate_id ?? null,
       confidenceScore: ifs.confidence ?? 0,
@@ -1519,45 +3450,98 @@ function toPositiveId(value) {
   return id > 0 ? id : null;
 }
 
-function resolveGridFieldStateForMutation(specDb, category, body) {
-  if (!specDb) return null;
-  const itemFieldStateId = toPositiveId(
-    body?.itemFieldStateId
-    ?? body?.item_field_state_id
-    ?? body?.slotId
-    ?? body?.slot_id
-  );
-  if (itemFieldStateId) {
-    const byId = specDb.getItemFieldStateById(itemFieldStateId);
-    if (byId && String(byId.category || '').trim() === String(category || '').trim()) {
-      return byId;
-    }
+function resolveExplicitPositiveId(body, keys = []) {
+  if (!body || !Array.isArray(keys) || keys.length === 0) {
+    return { provided: false, id: null, raw: null, key: null };
   }
-
-  const productId = String(body?.productId || body?.product_id || '').trim();
-  const fieldKey = String(body?.field || body?.fieldKey || body?.field_key || '').trim();
-  if (!productId || !fieldKey) return null;
-  return specDb.db.prepare(
-    'SELECT * FROM item_field_state WHERE category = ? AND product_id = ? AND field_key = ? LIMIT 1'
-  ).get(category, productId, fieldKey) || null;
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(body, key)) continue;
+    const raw = body?.[key];
+    const token = String(raw ?? '').trim();
+    if (!token) continue;
+    return {
+      provided: true,
+      id: toPositiveId(raw),
+      raw: token,
+      key,
+    };
+  }
+  return { provided: false, id: null, raw: null, key: null };
 }
 
-function resolveComponentMutationContext(specDb, category, body) {
-  if (!specDb) return null;
-  const componentValueId = toPositiveId(
-    body?.componentValueId
-    ?? body?.component_value_id
-    ?? body?.slotId
-    ?? body?.slot_id
-  );
-  let componentValueRow = componentValueId ? specDb.getComponentValueById(componentValueId) : null;
+function resolveGridFieldStateForMutation(specDb, category, body, options = {}) {
+  if (!specDb) {
+    return {
+      row: null,
+      error: 'specdb_not_ready',
+      errorMessage: 'SpecDb is not available for this category.',
+    };
+  }
+  const requireExplicitId = Boolean(options?.requireExplicitId);
+
+  const idReq = resolveExplicitPositiveId(body, [
+    'itemFieldStateId',
+    'item_field_state_id',
+    'slotId',
+    'slot_id',
+  ]);
+  if (idReq.provided) {
+    const byId = idReq.id ? specDb.getItemFieldStateById(idReq.id) : null;
+    if (byId && String(byId.category || '').trim() === String(category || '').trim()) {
+      return { row: byId, error: null };
+    }
+    return {
+      row: null,
+      error: 'item_field_state_id_not_found',
+      errorMessage: `itemFieldStateId '${idReq.raw}' does not resolve in category '${category}'.`,
+    };
+  }
+  if (requireExplicitId) {
+    return {
+      row: null,
+      error: 'item_field_state_id_required',
+      errorMessage: 'itemFieldStateId is required for this mutation.',
+    };
+  }
+  return { row: null, error: null };
+}
+
+function resolveComponentMutationContext(specDb, category, body, options = {}) {
+  if (!specDb) {
+    return {
+      error: 'specdb_not_ready',
+      errorMessage: 'SpecDb is not available for this category.',
+    };
+  }
+  const requireComponentValueId = Boolean(options?.requireComponentValueId);
+  const requireComponentIdentityId = Boolean(options?.requireComponentIdentityId);
+
+  const componentValueReq = resolveExplicitPositiveId(body, [
+    'componentValueId',
+    'component_value_id',
+    'slotId',
+    'slot_id',
+  ]);
+  let componentValueRow = componentValueReq.id ? specDb.getComponentValueById(componentValueReq.id) : null;
   if (componentValueRow && String(componentValueRow.category || '').trim() !== String(category || '').trim()) {
     componentValueRow = null;
   }
+  if (componentValueReq.provided && !componentValueRow) {
+    return {
+      error: 'component_value_id_not_found',
+      errorMessage: `componentValueId '${componentValueReq.raw}' does not resolve in category '${category}'.`,
+    };
+  }
+  if (requireComponentValueId && !componentValueReq.provided) {
+    return {
+      error: 'component_value_id_required',
+      errorMessage: 'componentValueId is required for component property mutations.',
+    };
+  }
 
-  let componentType = String(body?.componentType || '').trim();
-  let componentName = String(body?.name || body?.componentName || '').trim();
-  let componentMaker = String(body?.maker || body?.componentMaker || '').trim();
+  let componentType = '';
+  let componentName = '';
+  let componentMaker = '';
   let property = String(body?.property || body?.propertyKey || '').trim();
 
   if (componentValueRow) {
@@ -1567,18 +3551,27 @@ function resolveComponentMutationContext(specDb, category, body) {
     property = String(componentValueRow.property_key || '').trim();
   }
 
-  const componentIdentityId = toPositiveId(
-    body?.componentIdentityId
-    ?? body?.component_identity_id
-    ?? body?.identityId
-    ?? body?.identity_id
-  );
-  let identityRow = componentIdentityId ? specDb.getComponentIdentityById(componentIdentityId) : null;
+  const componentIdentityReq = resolveExplicitPositiveId(body, [
+    'componentIdentityId',
+    'component_identity_id',
+    'identityId',
+    'identity_id',
+  ]);
+  let identityRow = componentIdentityReq.id ? specDb.getComponentIdentityById(componentIdentityReq.id) : null;
   if (identityRow && String(identityRow.category || '').trim() !== String(category || '').trim()) {
     identityRow = null;
   }
-  if (!identityRow && componentType && componentName) {
-    identityRow = specDb.getComponentIdentity(componentType, componentName, componentMaker);
+  if (componentIdentityReq.provided && !identityRow) {
+    return {
+      error: 'component_identity_id_not_found',
+      errorMessage: `componentIdentityId '${componentIdentityReq.raw}' does not resolve in category '${category}'.`,
+    };
+  }
+  if (requireComponentIdentityId && !componentIdentityReq.provided) {
+    return {
+      error: 'component_identity_id_required',
+      errorMessage: 'componentIdentityId is required for component identity mutations.',
+    };
   }
   if (identityRow) {
     componentType = String(identityRow.component_type || componentType || '').trim();
@@ -1586,42 +3579,69 @@ function resolveComponentMutationContext(specDb, category, body) {
     componentMaker = String(identityRow.maker || componentMaker || '').trim();
   }
 
-  if (!componentValueRow && property && property !== '__name' && property !== '__maker' && property !== '__links' && property !== '__aliases' && componentType && componentName) {
-    const rows = specDb.getComponentValuesWithMaker(componentType, componentName, componentMaker) || [];
-    componentValueRow = rows.find((row) => String(row?.property_key || '').trim() === property) || null;
-  }
-
   return {
     componentType,
     componentName,
     componentMaker,
     property,
-    componentIdentityId: identityRow?.id ?? componentIdentityId ?? null,
+    componentIdentityId: identityRow?.id ?? componentIdentityReq.id ?? null,
     componentIdentityRow: identityRow || null,
-    componentValueId: componentValueRow?.id ?? componentValueId ?? null,
+    componentValueId: componentValueRow?.id ?? componentValueReq.id ?? null,
     componentValueRow: componentValueRow || null,
+    error: null,
   };
 }
 
-function resolveEnumMutationContext(specDb, category, body) {
-  if (!specDb) return null;
-  const listValueId = toPositiveId(body?.listValueId ?? body?.list_value_id ?? body?.valueId ?? body?.value_id);
-  const enumListId = toPositiveId(body?.enumListId ?? body?.enum_list_id ?? body?.listId ?? body?.list_id);
+function resolveEnumMutationContext(specDb, category, body, options = {}) {
+  if (!specDb) {
+    return {
+      error: 'specdb_not_ready',
+      errorMessage: 'SpecDb is not available for this category.',
+    };
+  }
+  const requireListValueId = Boolean(options?.requireListValueId);
+  const requireEnumListId = Boolean(options?.requireEnumListId);
+  const listValueReq = resolveExplicitPositiveId(body, ['listValueId', 'list_value_id', 'valueId', 'value_id']);
+  const enumListReq = resolveExplicitPositiveId(body, ['enumListId', 'enum_list_id', 'listId', 'list_id']);
 
-  let listValueRow = listValueId ? specDb.getListValueById(listValueId) : null;
+  let listValueRow = listValueReq.id ? specDb.getListValueById(listValueReq.id) : null;
   if (listValueRow && String(listValueRow.category || '').trim() !== String(category || '').trim()) {
     listValueRow = null;
   }
+  if (listValueReq.provided && !listValueRow) {
+    return {
+      error: 'list_value_id_not_found',
+      errorMessage: `listValueId '${listValueReq.raw}' does not resolve in category '${category}'.`,
+    };
+  }
+  if (requireListValueId && !listValueReq.provided) {
+    return {
+      error: 'list_value_id_required',
+      errorMessage: 'listValueId is required for enum value mutations.',
+    };
+  }
 
-  let enumListRow = enumListId ? specDb.getEnumListById(enumListId) : null;
+  let enumListRow = enumListReq.id ? specDb.getEnumListById(enumListReq.id) : null;
   if (enumListRow && String(enumListRow.category || '').trim() !== String(category || '').trim()) {
     enumListRow = null;
+  }
+  if (enumListReq.provided && !enumListRow) {
+    return {
+      error: 'enum_list_id_not_found',
+      errorMessage: `enumListId '${enumListReq.raw}' does not resolve in category '${category}'.`,
+    };
+  }
+  if (requireEnumListId && !enumListReq.provided) {
+    return {
+      error: 'enum_list_id_required',
+      errorMessage: 'enumListId is required for enum list mutations.',
+    };
   }
   if (!enumListRow && listValueRow?.list_id) {
     enumListRow = specDb.getEnumListById(listValueRow.list_id);
   }
 
-  const field = String(body?.field || listValueRow?.field_key || enumListRow?.field_key || '').trim();
+  const field = String(listValueRow?.field_key || enumListRow?.field_key || '').trim();
   const value = body?.value !== undefined && body?.value !== null
     ? String(body.value).trim()
     : String(listValueRow?.value || '').trim();
@@ -1635,27 +3655,68 @@ function resolveEnumMutationContext(specDb, category, body) {
     field,
     value,
     oldValue,
-    listValueId: listValueRow?.id ?? listValueId ?? null,
+    listValueId: listValueRow?.id ?? listValueReq.id ?? null,
     listValueRow: listValueRow || null,
-    enumListId: enumListRow?.id ?? enumListId ?? null,
+    enumListId: enumListRow?.id ?? enumListReq.id ?? null,
     enumListRow: enumListRow || null,
+    error: null,
   };
 }
 
-function resolveKeyReviewForLaneMutation(specDb, category, body) {
-  if (!specDb) return null;
-  const numericId = Number(body?.id);
-  if (Number.isFinite(numericId) && numericId > 0) {
-    const byId = specDb.db.prepare('SELECT * FROM key_review_state WHERE id = ?').get(numericId);
-    if (byId) return byId;
+function resolveKeyReviewForLaneMutation(specDb, category, body, options = {}) {
+  if (!specDb) {
+    return {
+      stateRow: null,
+      error: 'specdb_not_ready',
+      errorMessage: 'SpecDb is not available for this category.',
+    };
+  }
+  const requireIdOrSlotId = Boolean(options?.requireIdOrSlotId);
+  const idReq = resolveExplicitPositiveId(body, ['id']);
+  if (idReq.provided) {
+    const byId = idReq.id ? specDb.db.prepare('SELECT * FROM key_review_state WHERE id = ?').get(idReq.id) : null;
+    if (byId) return { stateRow: byId, error: null };
+    return {
+      stateRow: null,
+      error: 'key_review_state_id_not_found',
+      errorMessage: `key_review_state id '${idReq.raw}' was not found.`,
+    };
+  }
+  if (requireIdOrSlotId) {
+    const slotReq = resolveExplicitPositiveId(body, [
+      'itemFieldStateId',
+      'item_field_state_id',
+      'slotId',
+      'slot_id',
+    ]);
+    if (!slotReq.provided) {
+      return {
+        stateRow: null,
+        error: 'id_or_item_field_state_id_required',
+        errorMessage: 'Provide key_review_state id or itemFieldStateId for this lane mutation.',
+      };
+    }
   }
 
-  const fieldStateRow = resolveGridFieldStateForMutation(specDb, category, body);
-  if (!fieldStateRow) return null;
+  const fieldStateCtx = resolveGridFieldStateForMutation(specDb, category, body, {
+    requireExplicitId: requireIdOrSlotId,
+  });
+  if (fieldStateCtx?.error) {
+    return {
+      stateRow: null,
+      error: fieldStateCtx.error,
+      errorMessage: fieldStateCtx.errorMessage,
+    };
+  }
+  const fieldStateRow = fieldStateCtx?.row;
+  if (!fieldStateRow) return { stateRow: null, error: null };
   const productId = String(fieldStateRow.product_id || '').trim();
   const fieldKey = String(fieldStateRow.field_key || '').trim();
-  if (!productId || !fieldKey) return null;
-  return ensureGridKeyReviewState(specDb, category, productId, fieldKey);
+  if (!productId || !fieldKey) return { stateRow: null, error: null };
+  return {
+    stateRow: ensureGridKeyReviewState(specDb, category, productId, fieldKey, fieldStateRow.id),
+    error: null,
+  };
 }
 
 function markPrimaryLaneReviewedInItemState(specDb, category, keyReviewState) {
@@ -1693,6 +3754,8 @@ function syncItemFieldStateFromPrimaryLaneAccept(specDb, category, keyReviewStat
     : (Number.isFinite(Number(keyReviewState.confidence_score))
       ? Number(keyReviewState.confidence_score)
       : Number(current?.confidence || 0));
+  const aiStatus = String(keyReviewState?.ai_confirm_primary_status || '').trim().toLowerCase();
+  const aiConfirmed = aiStatus === 'confirmed';
   const source = candidateRow
     ? 'pipeline'
     : (String(current?.source || '').trim() || 'pipeline');
@@ -1705,8 +3768,8 @@ function syncItemFieldStateFromPrimaryLaneAccept(specDb, category, keyReviewStat
     source,
     acceptedCandidateId: selectedCandidateId || current?.accepted_candidate_id || null,
     overridden: false,
-    needsAiReview: false,
-    aiReviewComplete: true,
+    needsAiReview: !aiConfirmed,
+    aiReviewComplete: aiConfirmed,
   });
   try {
     specDb.syncItemListLinkForFieldValue({
@@ -1763,43 +3826,6 @@ function syncPrimaryLaneAcceptFromItemSelection({
   return specDb.db.prepare('SELECT * FROM key_review_state WHERE id = ?').get(state.id) || null;
 }
 
-function propagateCandidateLaneAcrossMatchingStates(specDb, category, {
-  candidateId,
-  lane,
-  action,
-  at,
-} = {}) {
-  if (!specDb) return { updated: 0 };
-  const cid = String(candidateId || '').trim();
-  const laneNorm = String(lane || '').trim().toLowerCase();
-  const actionNorm = String(action || '').trim().toLowerCase();
-  if (!cid || !['primary', 'shared'].includes(laneNorm)) return { updated: 0 };
-  if (!['confirm', 'accept'].includes(actionNorm)) return { updated: 0 };
-
-  let updated = 0;
-  const rows = specDb.db.prepare(
-    'SELECT * FROM key_review_state WHERE category = ? AND selected_candidate_id = ?'
-  ).all(category, cid);
-  const when = at || new Date().toISOString();
-
-  for (const row of rows) {
-    // Primary lane exists only for grid_key contexts.
-    if (laneNorm === 'primary' && String(row?.target_kind || '') !== 'grid_key') continue;
-
-    if (actionNorm === 'accept') {
-      specDb.updateKeyReviewUserAccept({ id: row.id, lane: laneNorm, status: 'accepted', at: when });
-    } else {
-      specDb.updateKeyReviewAiConfirm({ id: row.id, lane: laneNorm, status: 'confirmed', confidence: 1.0, at: when });
-    }
-
-    if (laneNorm === 'primary') {
-      markPrimaryLaneReviewedInItemState(specDb, category, row);
-    }
-    updated += 1;
-  }
-  return { updated };
-}
-
 function deleteKeyReviewStateRows(specDb, stateIds = []) {
   if (!specDb || !Array.isArray(stateIds) || stateIds.length === 0) return 0;
   const ids = stateIds
@@ -1837,7 +3863,13 @@ function resetTestModeSharedReviewState(specDb, category) {
 
 function resetTestModeProductReviewState(specDb, category, productId) {
   const pid = String(productId || '').trim();
-  if (!specDb || !category || !pid) return { clearedCandidates: 0, clearedKeyReview: 0 };
+  if (!specDb || !category || !pid) return {
+    clearedCandidates: 0,
+    clearedKeyReview: 0,
+    clearedFieldState: 0,
+    clearedLinks: 0,
+    clearedSources: 0,
+  };
 
   const stateIds = specDb.db.prepare(`
     SELECT id
@@ -1849,7 +3881,61 @@ function resetTestModeProductReviewState(specDb, category, productId) {
   const clearedKeyReview = deleteKeyReviewStateRows(specDb, stateIds);
 
   let deletedCandidates = 0;
+  let deletedFieldState = 0;
+  let deletedLinks = 0;
+  let deletedSources = 0;
   const tx = specDb.db.transaction(() => {
+    const itemFieldStateIds = specDb.db.prepare(`
+      SELECT id
+      FROM item_field_state
+      WHERE category = ? AND product_id = ?
+    `).all(category, pid).map((row) => row.id);
+    const sourceIds = specDb.db.prepare(`
+      SELECT source_id
+      FROM source_registry
+      WHERE category = ? AND product_id = ?
+    `).all(category, pid).map((row) => row.source_id);
+
+    if (itemFieldStateIds.length > 0) {
+      const placeholders = itemFieldStateIds.map(() => '?').join(',');
+      specDb.db.prepare(`
+        DELETE FROM source_evidence_refs
+        WHERE assertion_id IN (
+          SELECT assertion_id
+          FROM source_assertions
+          WHERE item_field_state_id IN (${placeholders})
+        )
+      `).run(...itemFieldStateIds);
+      deletedSources += specDb.db.prepare(`
+        DELETE FROM source_assertions
+        WHERE item_field_state_id IN (${placeholders})
+      `).run(...itemFieldStateIds).changes;
+    }
+
+    if (sourceIds.length > 0) {
+      const placeholders = sourceIds.map(() => '?').join(',');
+      specDb.db.prepare(`
+        DELETE FROM source_evidence_refs
+        WHERE assertion_id IN (
+          SELECT assertion_id
+          FROM source_assertions
+          WHERE source_id IN (${placeholders})
+        )
+      `).run(...sourceIds);
+      deletedSources += specDb.db.prepare(`
+        DELETE FROM source_assertions
+        WHERE source_id IN (${placeholders})
+      `).run(...sourceIds).changes;
+      specDb.db.prepare(`
+        DELETE FROM source_artifacts
+        WHERE source_id IN (${placeholders})
+      `).run(...sourceIds);
+      deletedSources += specDb.db.prepare(`
+        DELETE FROM source_registry
+        WHERE source_id IN (${placeholders})
+      `).run(...sourceIds).changes;
+    }
+
     specDb.db.prepare(`
       DELETE FROM candidate_reviews
       WHERE context_type = 'item'
@@ -1863,6 +3949,20 @@ function resetTestModeProductReviewState(specDb, category, productId) {
         WHERE category = ? AND product_id = ?
       )
     `).run(category, pid);
+
+    deletedLinks += specDb.db.prepare(`
+      DELETE FROM item_component_links
+      WHERE category = ? AND product_id = ?
+    `).run(category, pid).changes;
+    deletedLinks += specDb.db.prepare(`
+      DELETE FROM item_list_links
+      WHERE category = ? AND product_id = ?
+    `).run(category, pid).changes;
+    deletedFieldState = specDb.db.prepare(`
+      DELETE FROM item_field_state
+      WHERE category = ? AND product_id = ?
+    `).run(category, pid).changes;
+
     deletedCandidates = specDb.db
       .prepare('DELETE FROM candidates WHERE category = ? AND product_id = ?')
       .run(category, pid).changes;
@@ -1872,6 +3972,9 @@ function resetTestModeProductReviewState(specDb, category, productId) {
   return {
     clearedCandidates: deletedCandidates,
     clearedKeyReview,
+    clearedFieldState: deletedFieldState,
+    clearedLinks: deletedLinks,
+    clearedSources: deletedSources,
   };
 }
 
@@ -1883,6 +3986,17 @@ const UNKNOWN_LIKE_TOKENS = new Set(['', 'unk', 'unknown', 'n/a', 'na', 'null', 
 
 function isMeaningfulValue(value) {
   return !UNKNOWN_LIKE_TOKENS.has(normalizeLower(value));
+}
+
+function candidateLooksWorkbook(candidateId, sourceToken = '') {
+  const token = String(sourceToken || '').trim().toLowerCase();
+  const cid = String(candidateId || '').trim();
+  return cid.startsWith('wb_')
+    || cid.startsWith('wb-')
+    || cid.includes('::wb_')
+    || cid.includes('::wb-')
+    || token.includes('workbook')
+    || token.includes('excel');
 }
 
 function extractComparableValueTokens(rawValue) {
@@ -1899,6 +4013,19 @@ function extractComparableValueTokens(rawValue) {
     ? text.split(',').map((part) => String(part ?? '').trim()).filter(Boolean)
     : [text];
   return [...new Set(parts.map((part) => normalizeLower(part)).filter(Boolean))];
+}
+
+function splitCandidateParts(rawValue) {
+  if (Array.isArray(rawValue)) {
+    const nested = rawValue.flatMap((entry) => splitCandidateParts(entry));
+    return [...new Set(nested)];
+  }
+  const text = String(rawValue ?? '').trim();
+  if (!text) return [];
+  const parts = text.includes(',')
+    ? text.split(',').map((part) => String(part ?? '').trim()).filter(Boolean)
+    : [text];
+  return [...new Set(parts)];
 }
 
 async function getReviewFieldRow(category, fieldKey) {
@@ -1943,6 +4070,230 @@ function parseReviewItemAttributes(reviewItem) {
   return {};
 }
 
+function isResolvedCandidateReview(reviewRow) {
+  if (!reviewRow) return false;
+  if (Number(reviewRow.human_accepted) === 1) return true;
+  const aiStatus = normalizeLower(reviewRow.ai_review_status || '');
+  return aiStatus === 'accepted' || aiStatus === 'rejected';
+}
+
+function buildCandidateReviewLookup(reviewRows) {
+  const exact = new Map();
+  for (const row of Array.isArray(reviewRows) ? reviewRows : []) {
+    const cid = String(row?.candidate_id || '').trim();
+    if (!cid) continue;
+    exact.set(cid, row);
+  }
+  return { exact };
+}
+
+function getReviewForCandidateId(lookup, candidateId) {
+  if (!lookup) return null;
+  const cid = String(candidateId || '').trim();
+  if (!cid) return null;
+  if (lookup.exact.has(cid)) return lookup.exact.get(cid) || null;
+  return null;
+}
+
+function collectPendingCandidateIds({
+  candidateRows,
+  reviewLookup = null,
+}) {
+  const actionableIds = [];
+  const seen = new Set();
+  for (const row of Array.isArray(candidateRows) ? candidateRows : []) {
+    const cid = String(row?.candidate_id || '').trim();
+    if (!cid || seen.has(cid)) continue;
+    const rowValue = row?.value;
+    if (!isMeaningfulValue(rowValue)) continue;
+    seen.add(cid);
+    actionableIds.push(cid);
+  }
+  const pending = [];
+  for (const cid of actionableIds) {
+    const reviewRow = getReviewForCandidateId(reviewLookup, cid);
+    if (!isResolvedCandidateReview(reviewRow)) pending.push(cid);
+  }
+  return pending;
+}
+
+async function collectComponentReviewPropertyCandidateRows({
+  category,
+  componentType,
+  componentName,
+  propertyKey,
+}) {
+  const normalizedComponentName = normalizeLower(componentName);
+  const normalizedPropertyKey = String(propertyKey || '').trim();
+  if (!category || !componentType || !normalizedComponentName || !normalizedPropertyKey) return [];
+  if (normalizedPropertyKey.startsWith('__')) return [];
+  const filePath = componentReviewPath({ config, category });
+  const data = await safeReadJson(filePath);
+  const items = Array.isArray(data?.items) ? data.items : [];
+  if (!items.length) return [];
+
+  const rows = [];
+  const seen = new Set();
+  for (const item of items) {
+    const status = normalizeLower(item?.status || '');
+    if (status === 'dismissed' || status === 'ignored' || status === 'rejected') continue;
+    if (String(item?.component_type || '').trim() !== String(componentType || '').trim()) continue;
+
+    const matchedName = normalizeLower(item?.matched_component || '');
+    const rawName = normalizeLower(item?.raw_query || '');
+    const isSameComponent = matchedName
+      ? matchedName === normalizedComponentName
+      : rawName === normalizedComponentName;
+    if (!isSameComponent) continue;
+
+    const attrs = parseReviewItemAttributes(item);
+    const matchedEntry = Object.entries(attrs).find(([attrKey]) => (
+      normalizeLower(attrKey) === normalizeLower(normalizedPropertyKey)
+    ));
+    if (!matchedEntry) continue;
+    const [, attrValue] = matchedEntry;
+    for (const valuePart of splitCandidateParts(attrValue)) {
+      if (!isMeaningfulValue(valuePart)) continue;
+      const candidateId = buildComponentReviewSyntheticCandidateId({
+        productId: String(item?.product_id || '').trim(),
+        fieldKey: normalizedPropertyKey,
+        reviewId: String(item?.review_id || '').trim() || null,
+        value: valuePart,
+      });
+      const cid = String(candidateId || '').trim();
+      if (!cid || seen.has(cid)) continue;
+      seen.add(cid);
+      rows.push({ candidate_id: cid, value: valuePart });
+    }
+  }
+  return rows;
+}
+
+function normalizeCandidatePrimaryReviewStatus(candidate, reviewRow = null) {
+  if (candidate?.is_synthetic_selected) return 'accepted';
+  if (reviewRow) {
+    if (Number(reviewRow.human_accepted) === 1) return 'accepted';
+    const aiStatus = normalizeLower(reviewRow.ai_review_status || '');
+    if (aiStatus === 'accepted') return 'accepted';
+    if (aiStatus === 'rejected') return 'rejected';
+    return 'pending';
+  }
+  const sourceToken = normalizeLower(candidate?.source_id || candidate?.source || '');
+  const methodToken = normalizeLower(candidate?.method || candidate?.source_method || '');
+  if (
+    sourceToken === 'workbook'
+    || sourceToken === 'component_db'
+    || sourceToken === 'known_values'
+    || sourceToken === 'user'
+    || sourceToken === 'manual'
+    || methodToken.includes('workbook')
+    || methodToken.includes('manual')
+  ) {
+    return 'accepted';
+  }
+  return 'pending';
+}
+
+function annotateCandidatePrimaryReviews(candidates, reviewRows = []) {
+  const lookup = buildCandidateReviewLookup(reviewRows);
+  for (const candidate of Array.isArray(candidates) ? candidates : []) {
+    const candidateId = String(candidate?.candidate_id || '').trim();
+    const reviewRow = candidateId ? getReviewForCandidateId(lookup, candidateId) : null;
+    candidate.primary_review_status = normalizeCandidatePrimaryReviewStatus(candidate, reviewRow);
+    candidate.human_accepted = Number(reviewRow?.human_accepted || 0) === 1;
+  }
+}
+
+function getPendingItemPrimaryCandidateIds(specDb, {
+  productId,
+  fieldKey,
+  itemFieldStateId,
+}) {
+  if (!specDb || !productId || !fieldKey || !itemFieldStateId) return [];
+  const candidatesByField = specDb.getCandidatesForProduct(productId) || {};
+  const candidateRows = candidatesByField[fieldKey] || [];
+  const reviewRows = specDb.getReviewsForContext('item', String(itemFieldStateId)) || [];
+  const reviewLookup = buildCandidateReviewLookup(reviewRows);
+  return collectPendingCandidateIds({
+    candidateRows,
+    reviewLookup,
+  });
+}
+
+function getPendingComponentSharedCandidateIds(specDb, {
+  componentType,
+  componentName,
+  componentMaker,
+  propertyKey,
+  componentValueId,
+}) {
+  if (!specDb || !componentValueId || !propertyKey) return [];
+  const candidateRows = specDb.getCandidatesForComponentProperty(
+    componentType,
+    componentName,
+    componentMaker || '',
+    propertyKey,
+  ) || [];
+  const reviewRows = specDb.getReviewsForContext('component', String(componentValueId)) || [];
+  const reviewLookup = buildCandidateReviewLookup(reviewRows);
+  // Include synthetic pipeline review candidates derived from component_review queue
+  // so lane status remains pending until all candidate-level confirmations are resolved.
+  return collectPendingCandidateIds({
+    candidateRows: candidateRows,
+    reviewLookup,
+  });
+}
+
+async function getPendingComponentSharedCandidateIdsAsync(specDb, {
+  category,
+  componentType,
+  componentName,
+  componentMaker,
+  propertyKey,
+  componentValueId,
+}) {
+  if (!specDb || !componentValueId || !propertyKey) return [];
+  const candidateRows = specDb.getCandidatesForComponentProperty(
+    componentType,
+    componentName,
+    componentMaker || '',
+    propertyKey,
+  ) || [];
+  const reviewRows = specDb.getReviewsForContext('component', String(componentValueId)) || [];
+  const reviewLookup = buildCandidateReviewLookup(reviewRows);
+  const syntheticRows = await collectComponentReviewPropertyCandidateRows({
+    category,
+    componentType,
+    componentName,
+    propertyKey,
+  });
+  return collectPendingCandidateIds({
+    candidateRows: [...candidateRows, ...syntheticRows],
+    reviewLookup,
+  });
+}
+
+function getPendingEnumSharedCandidateIds(specDb, {
+  fieldKey,
+  listValueId,
+}) {
+  if (!specDb || !fieldKey || !listValueId) return [];
+  let candidateRows = specDb.getCandidatesByListValue(fieldKey, listValueId) || [];
+  if (!candidateRows.length) {
+    const lvRow = specDb.getListValueById(listValueId);
+    const fallbackValue = String(lvRow?.value || '').trim();
+    if (isMeaningfulValue(fallbackValue)) {
+      candidateRows = specDb.getCandidatesForFieldValue(fieldKey, fallbackValue) || [];
+    }
+  }
+  const reviewRows = specDb.getReviewsForContext('list', String(listValueId)) || [];
+  const reviewLookup = buildCandidateReviewLookup(reviewRows);
+  return collectPendingCandidateIds({
+    candidateRows,
+    reviewLookup,
+  });
+}
+
 async function syncSyntheticCandidatesFromComponentReview({ category, specDb }) {
   if (!specDb) return { upserted: 0 };
   const filePath = componentReviewPath({ config, category });
@@ -1951,25 +4302,59 @@ async function syncSyntheticCandidatesFromComponentReview({ category, specDb }) 
   if (!items.length) return { upserted: 0 };
 
   let upserted = 0;
+  let assertionsUpserted = 0;
+  const sourceIds = new Set();
+  const nowIso = new Date().toISOString();
+  const categoryToken = String(specDb.category || category || '').trim();
+  const selectItemFieldSlotId = specDb.db.prepare(
+    'SELECT id FROM item_field_state WHERE category = ? AND product_id = ? AND field_key = ? LIMIT 1'
+  );
+  const selectEvidenceRef = specDb.db.prepare(
+    'SELECT 1 FROM source_evidence_refs WHERE assertion_id = ? LIMIT 1'
+  );
   for (const item of items) {
     const status = String(item?.status || '').trim().toLowerCase();
     if (status === 'dismissed') continue;
     const productId = String(item?.product_id || '').trim();
     const fieldKey = String(item?.field_key || '').trim();
     if (!productId || !fieldKey) continue;
+    const runToken = normalizePathToken(item?.run_id || 'component-review', 'component-review');
+    const reviewToken = normalizePathToken(item?.review_id || 'pending', 'pending');
+    const sourceId = `${categoryToken}::${productId}::pipeline::${runToken}::${reviewToken}`;
+    const sourceUrl = `pipeline://component-review/${reviewToken}`;
+    specDb.upsertSourceRegistry({
+      sourceId,
+      category: categoryToken,
+      itemIdentifier: productId,
+      productId,
+      runId: item?.run_id || null,
+      sourceUrl,
+      sourceHost: 'pipeline',
+      sourceRootDomain: 'pipeline',
+      sourceTier: null,
+      sourceMethod: item?.match_type || 'component_review',
+      crawlStatus: 'fetched',
+      httpStatus: null,
+      fetchedAt: item?.created_at || nowIso,
+    });
+    sourceIds.add(sourceId);
 
-    const pushCandidate = (candidateId, value, score, method, quote, snippetText) => {
+    const pushCandidate = (candidateId, value, score, method, quote, snippetText, candidateFieldKey = fieldKey) => {
       const text = String(value ?? '').trim();
-      if (!text) return;
+      if (!text || !isMeaningfulValue(text)) return;
+      const resolvedFieldKey = String(candidateFieldKey || '').trim();
+      if (!resolvedFieldKey) return;
+      const itemFieldStateId = selectItemFieldSlotId.get(categoryToken, productId, resolvedFieldKey)?.id ?? null;
+      const normalizedText = normalizeLower(text);
       specDb.insertCandidate({
         candidate_id: candidateId,
         product_id: productId,
-        field_key: fieldKey,
+        field_key: resolvedFieldKey,
         value: text,
-        normalized_value: normalizeLower(text),
+        normalized_value: normalizedText,
         score: Number.isFinite(Number(score)) ? Number(score) : 0.5,
         rank: 1,
-        source_url: `pipeline://component-review/${item.review_id || 'pending'}`,
+        source_url: sourceUrl,
         source_host: 'pipeline',
         source_root_domain: 'pipeline',
         source_tier: null,
@@ -1987,10 +4372,41 @@ async function syncSyntheticCandidatesFromComponentReview({ category, specDb }) 
         component_type: item.component_type || null,
         is_list_field: 0,
         llm_extract_model: null,
-        extracted_at: item.created_at || new Date().toISOString(),
+        extracted_at: item.created_at || nowIso,
         run_id: item.run_id || null,
       });
       upserted += 1;
+      const assertionId = String(candidateId || '').trim();
+      if (!assertionId) return;
+      specDb.upsertSourceAssertion({
+        assertionId,
+        sourceId,
+        fieldKey: resolvedFieldKey,
+        contextKind: 'scalar',
+        contextRef: itemFieldStateId ? `item_field_state:${itemFieldStateId}` : `item_field:${productId}:${resolvedFieldKey}`,
+        itemFieldStateId,
+        componentValueId: null,
+        listValueId: null,
+        enumListId: null,
+        valueRaw: text,
+        valueNormalized: normalizedText,
+        unit: null,
+        candidateId: assertionId,
+        extractionMethod: method || item?.match_type || 'component_review',
+      });
+      assertionsUpserted += 1;
+      if (!selectEvidenceRef.get(assertionId)) {
+        const quoteText = String(quote || snippetText || `Pipeline component review candidate for ${fieldKey}`).trim();
+        specDb.insertSourceEvidenceRef({
+          assertionId,
+          evidenceUrl: sourceUrl,
+          snippetId: String(item.review_id || '').trim() || null,
+          quote: quoteText || null,
+          method: method || item?.match_type || 'component_review',
+          tier: null,
+          retrievedAt: item.created_at || nowIso,
+        });
+      }
     };
 
     const primaryValue = String(item?.matched_component || item?.raw_query || '').trim();
@@ -2015,27 +4431,29 @@ async function syncSyntheticCandidatesFromComponentReview({ category, specDb }) 
       ? item.product_attributes
       : {};
     for (const [attrKeyRaw, attrValue] of Object.entries(attrs)) {
-      const attrText = String(attrValue ?? '').trim();
-      if (!attrText) continue;
       const attrKey = String(attrKeyRaw || '').trim();
       if (!attrKey) continue;
-      const id = buildComponentReviewSyntheticCandidateId({
-        productId,
-        fieldKey: `${fieldKey}::${attrKey}`,
-        reviewId: String(item?.review_id || '').trim() || attrKey,
-        value: attrText,
-      });
-      pushCandidate(
-        id,
-        attrText,
-        item?.property_score ?? 0.4,
-        'product_extraction',
-        `Extracted attribute "${attrKey}" from product run`,
-        `${attrKey}: ${attrText}`,
-      );
+      for (const attrText of splitCandidateParts(attrValue)) {
+        if (!isMeaningfulValue(attrText)) continue;
+        const id = buildComponentReviewSyntheticCandidateId({
+          productId,
+          fieldKey: attrKey,
+          reviewId: String(item?.review_id || '').trim() || attrKey,
+          value: attrText,
+        });
+        pushCandidate(
+          id,
+          attrText,
+          item?.property_score ?? 0.4,
+          'product_extraction',
+          `Extracted attribute "${attrKey}" from product run`,
+          `${attrKey}: ${attrText}`,
+          attrKey,
+        );
+      }
     }
   }
-  return { upserted };
+  return { upserted, assertionsUpserted, sourcesUpserted: sourceIds.size };
 }
 
 async function markSharedReviewItemsResolved({
@@ -2186,43 +4604,9 @@ async function propagateSharedLaneDecision({
   ).trim();
   if (!fieldKey || !isMeaningfulValue(selectedValue)) return { propagated: false };
 
-  const row = await getReviewFieldRow(category, fieldKey);
-  if (!row?.field_rule) return { propagated: false };
-
-  const nowIso = new Date().toISOString();
-  const candidateNorm = normalizeLower(selectedValue);
-  const hasComponentShared = Boolean(row.field_rule.component_type);
-  const hasListShared = Boolean(row.field_rule.enum_source || row.field_rule.enum_name);
-  let propagated = false;
-
-  // Intentionally no grid/item -> component writes here.
-  // Component catalog is authoritative and should never be derived from item acceptance.
-
-  // Intentionally no grid/item -> enum writes here.
-  // Enum values are authoritative and should never be derived from item acceptance.
-
-  // Shared decisions fan out across linked grid cells in the same field/value context,
-  // even when candidate_id differs by product.
-  if (hasComponentShared || hasListShared) {
-    try {
-      const peerRows = specDb.db.prepare(
-        `SELECT id, selected_value
-         FROM key_review_state
-         WHERE category = ?
-           AND target_kind = 'grid_key'
-           AND field_key = ?`
-      ).all(category, fieldKey);
-      for (const peer of peerRows) {
-        if (Number(peer?.id) === Number(keyReviewState.id)) continue;
-        const peerValueNorm = normalizeLower(peer?.selected_value || '');
-        if (!peerValueNorm || peerValueNorm !== candidateNorm) continue;
-        specDb.updateKeyReviewUserAccept({ id: peer.id, lane: 'shared', status: 'accepted', at: nowIso });
-        propagated = true;
-      }
-    } catch { /* best-effort shared grid fan-out */ }
-  }
-
-  return { propagated };
+  // Grid shared accepts are strictly slot-scoped: one item field slot action must never
+  // mutate peer item slots, component property slots, or enum value slots.
+  return { propagated: false };
 }
 
 // ── Process Manager ──────────────────────────────────────────────────
@@ -2584,13 +4968,100 @@ function killWindowsProcessTree(pid) {
   });
 }
 
-async function stopProcess(timeoutMs = 8000) {
+function parsePidRows(value) {
+  return [...new Set(
+    String(value || '')
+      .split(/\r?\n/)
+      .map((row) => Number.parseInt(String(row || '').trim(), 10))
+      .filter((pid) => Number.isFinite(pid) && pid > 0)
+  )];
+}
+
+async function findOrphanIndexLabPids() {
+  if (process.platform === 'win32') {
+    const psScript = [
+      "$ErrorActionPreference='SilentlyContinue'",
+      "Get-CimInstance Win32_Process",
+      "| Where-Object {",
+      "  (",
+      "    $_.Name -match '^(node|node\\.exe|cmd\\.exe|powershell\\.exe|pwsh\\.exe)$'",
+      "  )",
+      "  -and $_.CommandLine",
+      "  -and (",
+      "    $_.CommandLine -match 'src[\\\\/]cli[\\\\/](spec|indexlab)\\.js'",
+      "  )",
+      "  -and (",
+      "    $_.CommandLine -match '\\bindexlab\\b'",
+      "    -or $_.CommandLine -match '--mode\\s+indexlab'",
+      "    -or $_.CommandLine -match '--local'",
+      "  )",
+      "}",
+      "| Select-Object -ExpandProperty ProcessId"
+    ].join(' ');
+    const listed = await runCommandCapture(
+      'powershell',
+      ['-NoProfile', '-Command', psScript],
+      { timeoutMs: 8_000 }
+    );
+    if (!listed.ok && !String(listed.stdout || '').trim()) return [];
+    return parsePidRows(listed.stdout);
+  }
+
+  const listed = await runCommandCapture(
+    'sh',
+    ['-lc', "ps -eo pid=,args= | grep -E \"(node|sh|bash).*(src/cli/(spec|indexlab)\\.js).*(indexlab|--mode indexlab|--local)\" | grep -v grep | awk '{print $1}'"],
+    { timeoutMs: 8_000 }
+  );
+  if (!listed.ok && !String(listed.stdout || '').trim()) return [];
+  return parsePidRows(listed.stdout);
+}
+
+async function stopOrphanIndexLabProcesses(timeoutMs = 8000) {
+  const currentPid = Number.parseInt(String(childProc?.pid || 0), 10);
+  const targets = (await findOrphanIndexLabPids())
+    .filter((pid) => !(Number.isFinite(currentPid) && currentPid > 0 && pid === currentPid));
+  if (targets.length === 0) {
+    return {
+      attempted: false,
+      killed: 0,
+      pids: []
+    };
+  }
+
+  let killed = 0;
+  for (const pid of targets) {
+    let ok = false;
+    if (process.platform === 'win32') {
+      ok = await killWindowsProcessTree(pid);
+    } else {
+      const term = await runCommandCapture('kill', ['-TERM', String(pid)], { timeoutMs: Math.min(3_000, timeoutMs) });
+      if (!term.ok) {
+        const force = await runCommandCapture('kill', ['-KILL', String(pid)], { timeoutMs: Math.min(3_000, timeoutMs) });
+        ok = Boolean(force.ok);
+      } else {
+        ok = true;
+      }
+    }
+    if (ok) killed += 1;
+  }
+
+  return {
+    attempted: true,
+    killed,
+    pids: targets
+  };
+}
+
+async function stopProcess(timeoutMs = 8000, options = {}) {
+  const force = Boolean(options?.force);
   const runningProc = childProc;
   if (!runningProc || runningProc.exitCode !== null) {
+    const orphanStop = await stopOrphanIndexLabProcesses(timeoutMs);
     return {
       ...processStatus(),
-      stop_attempted: false,
-      stop_confirmed: true
+      stop_attempted: Boolean(orphanStop.attempted || force),
+      stop_confirmed: true,
+      orphan_killed: orphanStop.killed
     };
   }
 
@@ -2606,11 +5077,27 @@ async function stopProcess(timeoutMs = 8000) {
     await killWindowsProcessTree(runningProc.pid);
     exited = await waitForProcessExit(runningProc, Math.max(1000, timeoutMs - 5000));
   }
+  let orphanKilled = 0;
+  if (!exited && runningProc.exitCode === null) {
+    const orphanStop = await stopOrphanIndexLabProcesses(timeoutMs);
+    orphanKilled = orphanStop.killed;
+    if (orphanStop.killed > 0) {
+      exited = true;
+    }
+  }
+  if (force) {
+    const orphanStop = await stopOrphanIndexLabProcesses(timeoutMs);
+    orphanKilled += Number(orphanStop.killed || 0);
+    if (orphanStop.killed > 0) {
+      exited = true;
+    }
+  }
 
   return {
     ...processStatus(),
     stop_attempted: true,
-    stop_confirmed: Boolean(exited || runningProc.exitCode !== null)
+    stop_confirmed: Boolean(exited || runningProc.exitCode !== null || orphanKilled > 0),
+    orphan_killed: orphanKilled
   };
 }
 
@@ -2985,6 +5472,57 @@ async function handleApi(req, res) {
     });
   }
 
+  if (parts[0] === 'indexlab' && parts[1] === 'run' && parts[2] && parts[3] === 'phase07-retrieval' && method === 'GET') {
+    const runId = String(parts[2] || '').trim();
+    const payload = await readIndexLabRunPhase07Retrieval(runId);
+    if (!payload) {
+      return jsonRes(res, 404, { error: 'phase07_retrieval_not_found', run_id: runId });
+    }
+    return jsonRes(res, 200, {
+      run_id: runId,
+      ...payload
+    });
+  }
+
+  if (parts[0] === 'indexlab' && parts[1] === 'run' && parts[2] && parts[3] === 'phase08-extraction' && method === 'GET') {
+    const runId = String(parts[2] || '').trim();
+    const payload = await readIndexLabRunPhase08Extraction(runId);
+    if (!payload) {
+      return jsonRes(res, 404, { error: 'phase08_extraction_not_found', run_id: runId });
+    }
+    return jsonRes(res, 200, {
+      run_id: runId,
+      ...payload
+    });
+  }
+
+  if (parts[0] === 'indexlab' && parts[1] === 'run' && parts[2] && parts[3] === 'source-indexing-packets' && method === 'GET') {
+    const runId = String(parts[2] || '').trim();
+    const payload = await readIndexLabRunSourceIndexingPackets(runId);
+    if (!payload) {
+      return jsonRes(res, 404, { error: 'source_indexing_packets_not_found', run_id: runId });
+    }
+    return jsonRes(res, 200, payload);
+  }
+
+  if (parts[0] === 'indexlab' && parts[1] === 'run' && parts[2] && parts[3] === 'item-indexing-packet' && method === 'GET') {
+    const runId = String(parts[2] || '').trim();
+    const payload = await readIndexLabRunItemIndexingPacket(runId);
+    if (!payload) {
+      return jsonRes(res, 404, { error: 'item_indexing_packet_not_found', run_id: runId });
+    }
+    return jsonRes(res, 200, payload);
+  }
+
+  if (parts[0] === 'indexlab' && parts[1] === 'run' && parts[2] && parts[3] === 'run-meta-packet' && method === 'GET') {
+    const runId = String(parts[2] || '').trim();
+    const payload = await readIndexLabRunRunMetaPacket(runId);
+    if (!payload) {
+      return jsonRes(res, 404, { error: 'run_meta_packet_not_found', run_id: runId });
+    }
+    return jsonRes(res, 200, payload);
+  }
+
   if (parts[0] === 'indexlab' && parts[1] === 'run' && parts[2] && parts[3] === 'serp' && method === 'GET') {
     const runId = String(parts[2] || '').trim();
     const serp = await readIndexLabRunSerpExplorer(runId);
@@ -2997,6 +5535,36 @@ async function handleApi(req, res) {
     });
   }
 
+  if (parts[0] === 'indexlab' && parts[1] === 'run' && parts[2] && parts[3] === 'llm-traces' && method === 'GET') {
+    const runId = String(parts[2] || '').trim();
+    const limit = Math.max(1, toInt(params.get('limit'), 80));
+    const traces = await readIndexLabRunLlmTraces(runId, limit);
+    if (!traces) {
+      return jsonRes(res, 404, { error: 'llm_traces_not_found', run_id: runId });
+    }
+    return jsonRes(res, 200, traces);
+  }
+
+  if (parts[0] === 'indexlab' && parts[1] === 'run' && parts[2] && parts[3] === 'automation-queue' && method === 'GET') {
+    const runId = String(parts[2] || '').trim();
+    const queue = await readIndexLabRunAutomationQueue(runId);
+    if (!queue) {
+      return jsonRes(res, 404, { error: 'automation_queue_not_found', run_id: runId });
+    }
+    return jsonRes(res, 200, queue);
+  }
+
+  if (parts[0] === 'indexlab' && parts[1] === 'run' && parts[2] && parts[3] === 'evidence-index' && method === 'GET') {
+    const runId = String(parts[2] || '').trim();
+    const query = String(params.get('q') || params.get('query') || '').trim();
+    const limit = Math.max(1, toInt(params.get('limit'), 40));
+    const payload = await readIndexLabRunEvidenceIndex(runId, { query, limit });
+    if (!payload) {
+      return jsonRes(res, 404, { error: 'evidence_index_not_found', run_id: runId });
+    }
+    return jsonRes(res, 200, payload);
+  }
+
   if (parts[0] === 'indexing' && parts[1] === 'llm-config' && method === 'GET') {
     const models = collectLlmModels(config);
     const modelPricing = models.map((modelName) => ({
@@ -3004,25 +5572,65 @@ async function handleApi(req, res) {
       provider: llmProviderFromModel(modelName),
       ...resolvePricingForModel(config, modelName)
     }));
+    const modelTokenProfiles = models.map((modelName) => ({
+      model: modelName,
+      ...resolveTokenProfileForModel(config, modelName)
+    }));
+    const roleDefaults = resolveLlmRoleDefaults(config);
+    const knobDefaults = resolveLlmKnobDefaults(config);
+    const roleTokenDefaults = {
+      plan: toInt(knobDefaults.phase_02_planner?.token_cap, 1200),
+      fast: toInt(knobDefaults.fast_pass?.token_cap, 1200),
+      triage: toInt(knobDefaults.phase_03_triage?.token_cap, 1200),
+      reasoning: toInt(knobDefaults.reasoning_pass?.token_cap, 4096),
+      extract: toInt(knobDefaults.extract_role?.token_cap, 1200),
+      validate: toInt(knobDefaults.validate_role?.token_cap, 1200),
+      write: toInt(knobDefaults.write_role?.token_cap, 1200)
+    };
+    const fallbackDefaults = {
+      enabled: Boolean(
+        String(config.llmPlanFallbackModel || '').trim()
+        || String(config.llmExtractFallbackModel || '').trim()
+        || String(config.llmValidateFallbackModel || '').trim()
+        || String(config.llmWriteFallbackModel || '').trim()
+      ),
+      plan: String(config.llmPlanFallbackModel || '').trim(),
+      extract: String(config.llmExtractFallbackModel || '').trim(),
+      validate: String(config.llmValidateFallbackModel || '').trim(),
+      write: String(config.llmWriteFallbackModel || '').trim(),
+      plan_tokens: toInt(config.llmMaxOutputTokensPlanFallback, roleTokenDefaults.plan),
+      extract_tokens: toInt(config.llmMaxOutputTokensExtractFallback, roleTokenDefaults.extract),
+      validate_tokens: toInt(config.llmMaxOutputTokensValidateFallback, roleTokenDefaults.validate),
+      write_tokens: toInt(config.llmMaxOutputTokensWriteFallback, roleTokenDefaults.write)
+    };
     return jsonRes(res, 200, {
       generated_at: new Date().toISOString(),
       phase2: {
         enabled_default: Boolean(config.llmEnabled && config.llmPlanDiscoveryQueries),
-        model_default: String(config.llmModelPlan || '').trim()
+        model_default: roleDefaults.plan
       },
       phase3: {
         enabled_default: Boolean(config.llmEnabled && config.llmSerpRerankEnabled),
-        model_default: String(
-          config.llmModelTriage ||
-          config.cortexModelRerankFast ||
-          config.cortexModelSearchFast ||
-          config.llmModelFast ||
-          ''
-        ).trim()
+        model_default: roleDefaults.triage
       },
+      model_defaults: roleDefaults,
+      token_defaults: roleTokenDefaults,
+      fallback_defaults: fallbackDefaults,
+      routing_snapshot: llmRoutingSnapshot(config),
       model_options: models,
+      token_presets: Array.isArray(config.llmOutputTokenPresets)
+        ? config.llmOutputTokenPresets.map((value) => toInt(value, 0)).filter((value) => value > 0)
+        : [256, 384, 512, 768, 1024, 1536, 2048, 3072, 4096, 8192],
       pricing_defaults: resolvePricingForModel(config, ''),
-      model_pricing: modelPricing
+      model_pricing: modelPricing,
+      model_token_profiles: modelTokenProfiles,
+      knob_defaults: knobDefaults,
+      pricing_meta: {
+        as_of: String(config.llmPricingAsOf || '').trim() || null,
+        sources: config.llmPricingSources && typeof config.llmPricingSources === 'object'
+          ? config.llmPricingSources
+          : {}
+      }
     });
   }
 
@@ -3713,9 +6321,6 @@ async function handleApi(req, res) {
   if (parts[0] === 'review' && parts[1] && parts[2] === 'candidates' && parts[3] && parts[4] && method === 'GET') {
     const [, category, , productId, field] = parts;
     const specDb = getSpecDb(category);
-    if (specDb) {
-      await syncSyntheticCandidatesFromComponentReview({ category, specDb }).catch(() => ({ upserted: 0 }));
-    }
     // Check product exists — catalog OR SpecDb products table
     const catalog = await loadProductCatalog(config, category);
     const catalogPids = new Set(Object.keys(catalog.products || {}));
@@ -3740,88 +6345,25 @@ async function handleApi(req, res) {
       ? requestedField
       : (availableFields.find((key) => key.toLowerCase() === requestedField.toLowerCase()) || requestedField);
     const fieldState = payload.fields?.[resolvedField] || { candidates: [] };
-    // Augment with pipeline candidates from component_review.json
+    const itemFieldStateId = (() => {
+      const n = Number(fieldState?.slot_id ?? fieldState?.id ?? null);
+      if (!Number.isFinite(n)) return null;
+      const id = Math.trunc(n);
+      return id > 0 ? id : null;
+    })();
+    // Slot-truth contract: drawer candidates must come from the exact same slot payload.
     const allCandidates = Array.isArray(fieldState.candidates) ? [...fieldState.candidates] : [];
-    try {
-      const crPath = componentReviewPath({ config, category });
-      const crData = await safeReadJson(crPath);
-      if (crData && Array.isArray(crData.items)) {
-        const existingValues = new Set(allCandidates.map(c => String(c.value ?? '').trim().toLowerCase()));
-        for (const ri of crData.items) {
-          if (ri.status !== 'pending_ai') continue;
-          if (ri.product_id !== productId) continue;
-          if (ri.field_key !== resolvedField && ri.component_type !== resolvedField) continue;
-          // Add matched_component or raw_query as a pipeline candidate
-          const val = ri.matched_component || ri.raw_query || '';
-          if (!val || existingValues.has(val.trim().toLowerCase())) continue;
-          existingValues.add(val.trim().toLowerCase());
-          allCandidates.push({
-            candidate_id: buildComponentReviewSyntheticCandidateId({
-              productId,
-              fieldKey: resolvedField,
-              reviewId: ri.review_id || ri.raw_query,
-              value: val,
-            }),
-            value: val,
-            score: ri.combined_score || 0.5,
-            source_id: 'pipeline',
-            source: 'Pipeline (component review)',
-            tier: null,
-            method: ri.match_type || 'component_review',
-            evidence: {
-              url: '',
-              retrieved_at: ri.created_at || '',
-              snippet_id: '',
-              snippet_hash: '',
-              quote: `${ri.match_type === 'new_component' ? 'New component' : 'Fuzzy match'}: "${ri.raw_query}"${ri.matched_component ? ` → ${ri.matched_component}` : ''}`,
-              quote_span: null,
-              snippet_text: `Component review item from product ${ri.product_id}`,
-              source_id: 'pipeline',
-            },
-          });
-        }
-      }
-    } catch (_) { /* ignore missing component_review.json */ }
-    // Augment with SpecDb candidates
-    if (specDb) {
-      try {
-        const dbCands = specDb.getCandidatesForField(productId, resolvedField);
-        if (dbCands.length > 0) {
-          const existingIds = new Set(allCandidates.map(c => c.candidate_id));
-          const existingValues = new Set(allCandidates.map(c => String(c.value ?? '').trim().toLowerCase()));
-          for (const c of dbCands) {
-            if (existingIds.has(c.candidate_id)) continue;
-            const val = String(c.value ?? '').trim().toLowerCase();
-            if (existingValues.has(val)) continue;
-            existingValues.add(val);
-            allCandidates.push({
-              candidate_id: c.candidate_id,
-              value: c.value,
-              score: c.score ?? 0,
-              source_id: 'specdb',
-              source: c.source_host || 'SpecDb',
-              tier: c.source_tier ?? null,
-              method: c.source_method || 'specdb',
-              evidence: {
-                url: c.evidence_url || c.source_url || '',
-                retrieved_at: c.evidence_retrieved_at || c.extracted_at || '',
-                snippet_id: c.snippet_id || '',
-                snippet_hash: c.snippet_hash || '',
-                quote: c.quote || '',
-                quote_span: c.quote_span_start != null ? [c.quote_span_start, c.quote_span_end] : null,
-                snippet_text: c.snippet_text || '',
-                source_id: 'specdb',
-              },
-            });
-          }
-        }
-      } catch (_) { /* best-effort SpecDb enrichment */ }
-    }
     // Enrich response with key_review_state data for this field
     let keyReview = null;
     if (specDb) {
       try {
-        const krs = specDb.getKeyReviewState({ targetKind: 'grid_key', itemIdentifier: productId, fieldKey: resolvedField, category });
+        const krs = specDb.getKeyReviewState({
+          targetKind: 'grid_key',
+          itemIdentifier: productId,
+          fieldKey: resolvedField,
+          itemFieldStateId,
+          category,
+        });
         if (krs) {
           keyReview = {
             id: krs.id,
@@ -3838,6 +6380,83 @@ async function handleApi(req, res) {
         }
       } catch { /* best-effort */ }
     }
+    const selectedValue = fieldState?.selected?.value;
+    const selectedValueNorm = String(selectedValue ?? '').trim().toLowerCase();
+    const hasSelectedValue = hasKnownValue(selectedValue);
+    const selectedCandidateId = String(
+      keyReview?.selectedCandidateId
+      || fieldState?.accepted_candidate_id
+      || '',
+    ).trim();
+    const existingIds = new Set(allCandidates.map((candidate) => String(candidate?.candidate_id || '').trim()).filter(Boolean));
+    const hasSelectedId = selectedCandidateId ? existingIds.has(selectedCandidateId) : false;
+    const hasSelectedValueCandidate = hasSelectedValue
+      && allCandidates.some((candidate) => String(candidate?.value ?? '').trim().toLowerCase() === selectedValueNorm);
+    const sourceTokenRaw = String(fieldState?.source || '').trim().toLowerCase();
+    const sourceId = sourceTokenRaw === 'excel import'
+      || sourceTokenRaw === 'workbook'
+      || sourceTokenRaw === 'component_db'
+      || sourceTokenRaw === 'known_values'
+      ? 'workbook'
+      : (sourceTokenRaw.startsWith('pipeline')
+          ? 'pipeline'
+          : (sourceTokenRaw === 'manual' || sourceTokenRaw === 'user' ? 'user' : sourceTokenRaw));
+    const sourceLabel = sourceId === 'workbook'
+      ? 'Excel Import'
+      : (sourceId === 'pipeline'
+          ? 'Pipeline'
+          : (String(fieldState?.source || '').trim() || sourceId || 'Pipeline'));
+    const selectedConfidence = Number.isFinite(Number(fieldState?.selected?.confidence))
+      ? Math.max(0, Math.min(1, Number(fieldState.selected.confidence)))
+      : 0.5;
+    const selectedEvidenceUrl = String(fieldState?.evidence_url || '').trim();
+    const selectedEvidenceQuote = String(fieldState?.evidence_quote || '').trim()
+      || 'Selected value retained from slot state';
+    const ensureSelectedCandidate = (candidateId) => {
+      const cid = String(candidateId || '').trim();
+      if (!cid || existingIds.has(cid) || !hasSelectedValue) return;
+      existingIds.add(cid);
+      allCandidates.push({
+        candidate_id: cid,
+        value: selectedValue,
+        score: selectedConfidence,
+        source_id: sourceId || '',
+        source: sourceLabel,
+        tier: null,
+        method: sourceId === 'workbook' ? 'workbook_import' : (sourceId === 'user' ? 'manual_override' : 'selected_value'),
+        is_synthetic_selected: true,
+        evidence: {
+          url: selectedEvidenceUrl,
+          retrieved_at: String(fieldState?.source_timestamp || '').trim(),
+          snippet_id: '',
+          snippet_hash: '',
+          quote: selectedEvidenceQuote,
+          quote_span: null,
+          snippet_text: selectedEvidenceQuote,
+          source_id: sourceId || '',
+        },
+      });
+    };
+    if (hasSelectedValue && selectedCandidateId && !hasSelectedId) {
+      ensureSelectedCandidate(selectedCandidateId);
+    }
+    if (hasSelectedValue && !hasSelectedValueCandidate) {
+      ensureSelectedCandidate(`selected_${slugify(productId || 'product')}_${slugify(resolvedField || 'field')}`);
+    }
+    if (specDb) {
+      const reviewRows = itemFieldStateId
+        ? (specDb.getReviewsForContext('item', String(itemFieldStateId)) || [])
+        : [];
+      annotateCandidatePrimaryReviews(allCandidates, reviewRows);
+    }
+    allCandidates.sort((a, b) => {
+      const aScore = Number.parseFloat(String(a?.score ?? ''));
+      const bScore = Number.parseFloat(String(b?.score ?? ''));
+      const left = Number.isFinite(aScore) ? aScore : 0;
+      const right = Number.isFinite(bScore) ? bScore : 0;
+      if (right !== left) return right - left;
+      return String(a?.candidate_id || '').localeCompare(String(b?.candidate_id || ''));
+    });
     return jsonRes(res, 200, {
       product_id: productId,
       field: resolvedField,
@@ -3853,13 +6472,19 @@ async function handleApi(req, res) {
     const body = await readJsonBody(req);
     const { candidateId, value, reason, reviewer } = body;
     const specDb = getSpecDb(category);
-    const fieldStateRow = resolveGridFieldStateForMutation(specDb, category, body);
-    const productId = String(body?.productId || body?.product_id || fieldStateRow?.product_id || '').trim();
-    const field = String(body?.field || body?.fieldKey || body?.field_key || fieldStateRow?.field_key || '').trim();
+    const fieldStateCtx = resolveGridFieldStateForMutation(specDb, category, body, {
+      requireExplicitId: true,
+    });
+    if (fieldStateCtx?.error) {
+      return jsonRes(res, 400, { error: fieldStateCtx.error, message: fieldStateCtx.errorMessage });
+    }
+    const fieldStateRow = fieldStateCtx?.row;
+    const productId = String(fieldStateRow?.product_id || '').trim();
+    const field = String(fieldStateRow?.field_key || '').trim();
     if (!productId || !field) {
       return jsonRes(res, 400, {
-        error: 'item_context_required',
-        message: 'Provide productId + field or itemFieldStateId.',
+        error: 'item_field_state_id_required',
+        message: 'Valid itemFieldStateId is required for review override.',
       });
     }
     try {
@@ -3945,13 +6570,19 @@ async function handleApi(req, res) {
       return jsonRes(res, 400, { error: 'value_required', message: 'manual-override requires value' });
     }
     const specDb = getSpecDb(category);
-    const fieldStateRow = resolveGridFieldStateForMutation(specDb, category, body);
-    const productId = String(body?.productId || body?.product_id || fieldStateRow?.product_id || '').trim();
-    const field = String(body?.field || body?.fieldKey || body?.field_key || fieldStateRow?.field_key || '').trim();
+    const fieldStateCtx = resolveGridFieldStateForMutation(specDb, category, body, {
+      requireExplicitId: true,
+    });
+    if (fieldStateCtx?.error) {
+      return jsonRes(res, 400, { error: fieldStateCtx.error, message: fieldStateCtx.errorMessage });
+    }
+    const fieldStateRow = fieldStateCtx?.row;
+    const productId = String(fieldStateRow?.product_id || '').trim();
+    const field = String(fieldStateRow?.field_key || '').trim();
     if (!productId || !field) {
       return jsonRes(res, 400, {
-        error: 'item_context_required',
-        message: 'Provide productId + field or itemFieldStateId.',
+        error: 'item_field_state_id_required',
+        message: 'Valid itemFieldStateId is required for manual override.',
       });
     }
     try {
@@ -4059,14 +6690,149 @@ async function handleApi(req, res) {
     const specDb = getSpecDb(category);
     if (!specDb) return jsonRes(res, 404, { error: 'no_spec_db', message: `No SpecDb for ${category}` });
     try {
-      const stateRow = resolveKeyReviewForLaneMutation(specDb, category, body);
-      if (!stateRow) {
-        return jsonRes(res, 404, { error: 'key_review_state_not_found', message: 'Provide id, itemFieldStateId, or productId + field' });
+      const stateCtx = resolveKeyReviewForLaneMutation(specDb, category, body, {
+        requireIdOrSlotId: true,
+      });
+      if (stateCtx?.error) {
+        return jsonRes(res, 400, { error: stateCtx.error, message: stateCtx.errorMessage });
       }
-      if (lane === 'primary' && String(stateRow.target_kind || '') !== 'grid_key') {
+      const stateRow = stateCtx?.stateRow;
+      if (!stateRow) {
+        return jsonRes(res, 404, { error: 'key_review_state_not_found', message: 'Provide id or itemFieldStateId.' });
+      }
+      if (String(stateRow.target_kind || '') !== 'grid_key') {
         return jsonRes(res, 400, {
           error: 'lane_context_mismatch',
-          message: 'Primary lane is only valid for item_key_context (grid_key).',
+          message: 'Review lane endpoint only supports grid_key context. Use component/enum lane endpoints for shared review.',
+        });
+      }
+      if (!candidateId) {
+        return jsonRes(res, 400, {
+          error: 'candidate_id_required',
+          message: 'candidateId is required for candidate-scoped AI confirm.',
+        });
+      }
+      const stateProductId = String(stateRow.item_identifier || '').trim();
+      const stateFieldKey = String(stateRow.field_key || '').trim();
+      const stateItemFieldStateId = Number.parseInt(String(
+        stateRow.item_field_state_id
+        ?? stateCtx?.fieldStateRow?.id
+        ?? body?.itemFieldStateId
+        ?? body?.item_field_state_id
+        ?? '',
+      ), 10);
+      if (lane === 'primary') {
+        const candidateRow = specDb.getCandidateById(candidateId);
+        if (!candidateRow) {
+          return jsonRes(res, 404, {
+            error: 'candidate_not_found',
+            message: `candidate_id '${candidateId}' was not found.`,
+          });
+        }
+        const persistedCandidateId = String(candidateRow.candidate_id || candidateId).trim();
+        if (
+          String(candidateRow.product_id || '') !== stateProductId
+          || String(candidateRow.field_key || '') !== stateFieldKey
+        ) {
+          return jsonRes(res, 400, {
+            error: 'candidate_context_mismatch',
+            message: `candidate_id '${candidateId}' does not belong to ${stateRow.item_identifier}/${stateRow.field_key}`,
+          });
+        }
+        if (!Number.isFinite(stateItemFieldStateId) || stateItemFieldStateId <= 0) {
+          return jsonRes(res, 400, {
+            error: 'item_field_state_id_required',
+            message: 'Valid itemFieldStateId is required for candidate-scoped item confirm.',
+          });
+        }
+        const now = new Date().toISOString();
+        specDb.upsertReview({
+          candidateId: persistedCandidateId,
+          contextType: 'item',
+          contextId: String(stateItemFieldStateId),
+          humanAccepted: false,
+          humanAcceptedAt: null,
+          aiReviewStatus: 'accepted',
+          aiConfidence: Number.isFinite(Number(body?.candidateConfidence))
+            ? Number(body.candidateConfidence)
+            : (Number.isFinite(Number(candidateRow.score)) ? Number(candidateRow.score) : 1.0),
+          aiReason: 'primary_confirm',
+          aiReviewedAt: now,
+          aiReviewModel: null,
+          humanOverrideAi: false,
+          humanOverrideAiAt: null,
+        });
+        const pendingCandidateIds = getPendingItemPrimaryCandidateIds(specDb, {
+          productId: stateProductId,
+          fieldKey: stateFieldKey,
+          itemFieldStateId: stateItemFieldStateId,
+        });
+        const nextPrimaryStatus = pendingCandidateIds.length > 0 ? 'pending' : 'confirmed';
+        specDb.updateKeyReviewAiConfirm({
+          id: stateRow.id,
+          lane: 'primary',
+          status: nextPrimaryStatus,
+          confidence: nextPrimaryStatus === 'confirmed' ? 1.0 : null,
+          at: now,
+        });
+        if (nextPrimaryStatus === 'confirmed') {
+          const refreshedState = specDb.db.prepare('SELECT * FROM key_review_state WHERE id = ?').get(stateRow.id) || stateRow;
+          markPrimaryLaneReviewedInItemState(specDb, category, refreshedState);
+        } else {
+          try {
+            specDb.db.prepare(`
+              UPDATE item_field_state
+              SET needs_ai_review = 1,
+                  ai_review_complete = 0,
+                  updated_at = datetime('now')
+              WHERE category = ? AND id = ?
+            `).run(category, stateItemFieldStateId);
+          } catch { /* best-effort */ }
+        }
+        const updated = specDb.db.prepare('SELECT * FROM key_review_state WHERE id = ?').get(stateRow.id);
+        broadcastWs('data-change', { type: 'key-review-confirm', category, id: stateRow.id, lane });
+        return jsonRes(res, 200, {
+          ok: true,
+          keyReviewState: updated,
+          pendingPrimaryCandidateIds: pendingCandidateIds,
+          confirmedCandidateId: persistedCandidateId,
+        });
+      }
+      const candidateRow = specDb.getCandidateById(candidateId);
+      if (!candidateRow) {
+        return jsonRes(res, 404, {
+          error: 'candidate_not_found',
+          message: `candidate_id '${candidateId}' was not found.`,
+        });
+      }
+      if (
+        String(candidateRow.product_id || '') !== String(stateRow.item_identifier || '')
+        || String(candidateRow.field_key || '') !== String(stateRow.field_key || '')
+      ) {
+        return jsonRes(res, 400, {
+          error: 'candidate_context_mismatch',
+          message: `candidate_id '${candidateId}' does not belong to ${stateRow.item_identifier}/${stateRow.field_key}`,
+        });
+      }
+      const selectedValueForConfirm = candidateRow.value ?? null;
+      const selectedScore = Number.isFinite(Number(candidateRow.score)) ? Number(candidateRow.score) : null;
+      specDb.db.prepare(`
+        UPDATE key_review_state
+        SET selected_candidate_id = ?,
+            selected_value = ?,
+            confidence_score = COALESCE(?, confidence_score),
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).run(
+        candidateId,
+        selectedValueForConfirm,
+        selectedScore,
+        stateRow.id
+      );
+      if (!isMeaningfulValue(selectedValueForConfirm)) {
+        return jsonRes(res, 400, {
+          error: 'unknown_value_not_actionable',
+          message: 'Cannot confirm AI review for unknown/empty selected values.',
         });
       }
       const now = new Date().toISOString();
@@ -4085,7 +6851,6 @@ async function handleApi(req, res) {
       const updated = specDb.db.prepare('SELECT * FROM key_review_state WHERE id = ?').get(stateRow.id);
       if (lane === 'primary') {
         syncItemFieldStateFromPrimaryLaneAccept(specDb, category, updated);
-        markPrimaryLaneReviewedInItemState(specDb, category, updated);
       }
       broadcastWs('data-change', { type: 'key-review-confirm', category, id: stateRow.id, lane });
       return jsonRes(res, 200, { ok: true, keyReviewState: updated });
@@ -4106,51 +6871,64 @@ async function handleApi(req, res) {
     const specDb = getSpecDb(category);
     if (!specDb) return jsonRes(res, 404, { error: 'no_spec_db', message: `No SpecDb for ${category}` });
     try {
-      const stateRow = resolveKeyReviewForLaneMutation(specDb, category, body);
-      if (!stateRow) {
-        return jsonRes(res, 404, { error: 'key_review_state_not_found', message: 'Provide id, itemFieldStateId, or productId + field' });
+      const stateCtx = resolveKeyReviewForLaneMutation(specDb, category, body, {
+        requireIdOrSlotId: true,
+      });
+      if (stateCtx?.error) {
+        return jsonRes(res, 400, { error: stateCtx.error, message: stateCtx.errorMessage });
       }
-      if (lane === 'primary' && String(stateRow.target_kind || '') !== 'grid_key') {
+      const stateRow = stateCtx?.stateRow;
+      if (!stateRow) {
+        return jsonRes(res, 404, { error: 'key_review_state_not_found', message: 'Provide id or itemFieldStateId.' });
+      }
+      if (String(stateRow.target_kind || '') !== 'grid_key') {
         return jsonRes(res, 400, {
           error: 'lane_context_mismatch',
-          message: 'Primary lane is only valid for item_key_context (grid_key).',
+          message: 'Review lane endpoint only supports grid_key context. Use component/enum lane endpoints for shared review.',
         });
       }
-      if (candidateId) {
-        const candidateRow = specDb.getCandidateById(candidateId);
-        const bodyCandidateValue = body?.candidateValue ?? body?.candidate_value ?? null;
-        const bodyCandidateConfidence = body?.candidateConfidence ?? body?.candidate_confidence ?? null;
-        if (
-          candidateRow
-          &&
-          stateRow.target_kind === 'grid_key'
-          && (
-            String(candidateRow.product_id || '') !== String(stateRow.item_identifier || '')
-            || String(candidateRow.field_key || '') !== String(stateRow.field_key || '')
-          )
-        ) {
-          return jsonRes(res, 400, {
-            error: 'candidate_context_mismatch',
-            message: `candidate_id '${candidateId}' does not belong to ${stateRow.item_identifier}/${stateRow.field_key}`,
-          });
-        }
-        const selectedValue = candidateRow ? (candidateRow.value ?? null) : bodyCandidateValue;
-        const selectedScore = candidateRow
-          ? (Number.isFinite(Number(candidateRow.score)) ? Number(candidateRow.score) : null)
-          : (Number.isFinite(Number(bodyCandidateConfidence)) ? Number(bodyCandidateConfidence) : null);
-        specDb.db.prepare(`
-          UPDATE key_review_state
-          SET selected_candidate_id = ?,
-              selected_value = ?,
-              confidence_score = COALESCE(?, confidence_score),
-              updated_at = datetime('now')
-          WHERE id = ?
-        `).run(
-          candidateId,
-          selectedValue,
-          selectedScore,
-          stateRow.id
-        );
+      if (!candidateId) {
+        return jsonRes(res, 400, {
+          error: 'candidate_id_required',
+          message: 'candidateId is required for candidate-scoped accept.',
+        });
+      }
+      const candidateRow = specDb.getCandidateById(candidateId);
+      if (!candidateRow) {
+        return jsonRes(res, 404, {
+          error: 'candidate_not_found',
+          message: `candidate_id '${candidateId}' was not found.`,
+        });
+      }
+      if (
+        String(candidateRow.product_id || '') !== String(stateRow.item_identifier || '')
+        || String(candidateRow.field_key || '') !== String(stateRow.field_key || '')
+      ) {
+        return jsonRes(res, 400, {
+          error: 'candidate_context_mismatch',
+          message: `candidate_id '${candidateId}' does not belong to ${stateRow.item_identifier}/${stateRow.field_key}`,
+        });
+      }
+      const selectedValueForAccept = candidateRow.value ?? null;
+      const selectedScore = Number.isFinite(Number(candidateRow.score)) ? Number(candidateRow.score) : null;
+      specDb.db.prepare(`
+        UPDATE key_review_state
+        SET selected_candidate_id = ?,
+            selected_value = ?,
+            confidence_score = COALESCE(?, confidence_score),
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).run(
+        candidateId,
+        selectedValueForAccept,
+        selectedScore,
+        stateRow.id
+      );
+      if (!isMeaningfulValue(selectedValueForAccept)) {
+        return jsonRes(res, 400, {
+          error: 'unknown_value_not_actionable',
+          message: 'Cannot accept unknown/empty selected values.',
+        });
       }
       const now = new Date().toISOString();
       specDb.updateKeyReviewUserAccept({ id: stateRow.id, lane, status: 'accepted', at: now });
@@ -4166,7 +6944,6 @@ async function handleApi(req, res) {
       const updated = specDb.db.prepare('SELECT * FROM key_review_state WHERE id = ?').get(stateRow.id);
       if (lane === 'primary') {
         syncItemFieldStateFromPrimaryLaneAccept(specDb, category, updated);
-        markPrimaryLaneReviewedInItemState(specDb, category, updated);
       }
       if (lane === 'shared') {
         await propagateSharedLaneDecision({
@@ -4174,16 +6951,7 @@ async function handleApi(req, res) {
           specDb,
           keyReviewState: updated,
           laneAction: 'accept',
-          candidateValue: body?.candidateValue ?? body?.candidate_value ?? updated?.selected_value ?? null,
-        });
-      }
-      const effectiveCandidateId = String(candidateId || updated?.selected_candidate_id || '').trim();
-      if (effectiveCandidateId) {
-        propagateCandidateLaneAcrossMatchingStates(specDb, category, {
-          candidateId: effectiveCandidateId,
-          lane,
-          action: 'accept',
-          at: now,
+          candidateValue: selectedValueForAccept,
         });
       }
       broadcastWs('data-change', { type: 'key-review-accept', category, id: stateRow.id, lane });
@@ -4244,7 +7012,6 @@ async function handleApi(req, res) {
     if (!specDb || !specDb.isSeeded()) {
       return jsonRes(res, 503, { error: 'specdb_not_ready', message: `SpecDb not ready for ${category}` });
     }
-    await syncSyntheticCandidatesFromComponentReview({ category, specDb }).catch(() => ({ upserted: 0 }));
     const payload = await buildComponentReviewPayloads({ config, category, componentType, specDb });
     return jsonRes(res, 200, payload);
   }
@@ -4256,7 +7023,6 @@ async function handleApi(req, res) {
     if (!specDb || !specDb.isSeeded()) {
       return jsonRes(res, 503, { error: 'specdb_not_ready', message: `SpecDb not ready for ${category}` });
     }
-    await syncSyntheticCandidatesFromComponentReview({ category, specDb }).catch(() => ({ upserted: 0 }));
     const payload = await buildEnumReviewPayloads({ config, category, specDb });
     return jsonRes(res, 200, payload);
   }
@@ -4271,7 +7037,18 @@ async function handleApi(req, res) {
     if (!runtimeSpecDb || !runtimeSpecDb.isSeeded()) {
       return jsonRes(res, 503, { error: 'specdb_not_ready', message: `SpecDb not ready for ${category}` });
     }
-    const componentCtx = resolveComponentMutationContext(runtimeSpecDb, category, body);
+    const requestedProperty = String(body?.property || body?.propertyKey || '').trim();
+    const isIdentityProperty = requestedProperty === '__name'
+      || requestedProperty === '__maker'
+      || requestedProperty === '__links'
+      || requestedProperty === '__aliases';
+    const componentCtx = resolveComponentMutationContext(runtimeSpecDb, category, body, {
+      requireComponentValueId: !isIdentityProperty,
+      requireComponentIdentityId: isIdentityProperty,
+    });
+    if (componentCtx?.error) {
+      return jsonRes(res, 400, { error: componentCtx.error, message: componentCtx.errorMessage });
+    }
     const componentType = String(componentCtx?.componentType || '').trim();
     const name = String(componentCtx?.componentName || '').trim();
     const componentMaker = String(componentCtx?.componentMaker || '').trim();
@@ -4280,25 +7057,24 @@ async function handleApi(req, res) {
     if (!componentType || !name) {
       return jsonRes(res, 400, {
         error: 'component_context_required',
-        message: 'Provide component identity (componentType + name) or slot identifiers.',
+        message: 'Provide required component slot identifiers.',
       });
     }
 
     // SQL-first runtime path (legacy JSON override files removed from the write path)
     try {
       const nowIso = new Date().toISOString();
-      const acceptedCandidateId = String(candidateId || '').trim() || null;
+      const requestedCandidateId = String(candidateId || '').trim() || null;
+      let acceptedCandidateRow = requestedCandidateId
+        ? runtimeSpecDb.getCandidateById(requestedCandidateId)
+        : null;
+      let acceptedCandidateId = acceptedCandidateRow ? requestedCandidateId : null;
       const sourceToken = String(candidateSource || '').trim().toLowerCase();
       const resolveSelectionSource = () => {
-        if (!acceptedCandidateId) return 'user';
-        const candidateLooksWorkbook = acceptedCandidateId.startsWith('wb_')
-          || acceptedCandidateId.startsWith('wb-')
-          || acceptedCandidateId.includes('::wb_')
-          || acceptedCandidateId.includes('::wb-')
-          || sourceToken.includes('workbook')
-          || sourceToken.includes('excel');
+        if (!requestedCandidateId) return 'user';
+        const candidateLooksWorkbookFlag = candidateLooksWorkbook(requestedCandidateId, sourceToken);
         const candidateLooksUser = sourceToken.includes('manual') || sourceToken.includes('user');
-        if (candidateLooksWorkbook) return 'component_db';
+        if (candidateLooksWorkbookFlag) return 'component_db';
         if (candidateLooksUser) return 'user';
         return 'pipeline';
       };
@@ -4306,15 +7082,52 @@ async function handleApi(req, res) {
 
       if (property && value !== undefined) {
         const isIdentity = property === '__name' || property === '__maker' || property === '__links' || property === '__aliases';
+        const valueToken = String(value ?? '').trim();
+        if (requestedCandidateId && !isMeaningfulValue(valueToken)) {
+          return jsonRes(res, 400, {
+            error: 'unknown_value_not_actionable',
+            message: 'Candidate accept cannot persist unknown/empty values.',
+          });
+        }
+        if (!isIdentity && requestedCandidateId && !acceptedCandidateRow) {
+          return jsonRes(res, 404, {
+            error: 'candidate_not_found',
+            message: `candidate_id '${requestedCandidateId}' was not found.`,
+          });
+        }
+        if (acceptedCandidateId && acceptedCandidateRow && !isIdentity) {
+          if (String(acceptedCandidateRow.field_key || '').trim() !== String(property || '').trim()) {
+            return jsonRes(res, 400, {
+              error: 'candidate_context_mismatch',
+              message: `candidate_id '${acceptedCandidateId}' does not belong to component property '${property}'.`,
+            });
+          }
+          const candidateValueToken = String(acceptedCandidateRow.value ?? '').trim();
+          if (
+            isMeaningfulValue(candidateValueToken)
+            && isMeaningfulValue(valueToken)
+            && normalizeLower(candidateValueToken) !== normalizeLower(valueToken)
+          ) {
+            return jsonRes(res, 400, {
+              error: 'candidate_value_mismatch',
+              message: `candidate_id '${acceptedCandidateId}' value does not match requested property value.`,
+            });
+          }
+        }
 
         if (!isIdentity) {
-          const existingValues = runtimeSpecDb.getComponentValuesWithMaker(componentType, name, componentMaker);
           const existingProperty = (
             componentCtx?.componentValueRow
             && String(componentCtx.componentValueRow.property_key || '').trim() === String(property || '').trim()
           )
             ? componentCtx.componentValueRow
-            : existingValues.find((row) => String(row.property_key || '') === String(property));
+            : null;
+          if (!existingProperty?.id) {
+            return jsonRes(res, 400, {
+              error: 'component_value_id_required',
+              message: 'componentValueId is required for component property mutations.',
+            });
+          }
           const componentIdentifier = buildComponentIdentifier(componentType, name, componentMaker);
           const existingSharedLaneState = runtimeSpecDb.getKeyReviewState({
             category,
@@ -4322,6 +7135,7 @@ async function handleApi(req, res) {
             fieldKey: String(property),
             componentIdentifier,
             propertyKey: String(property),
+            componentValueId: componentCtx?.componentValueId ?? existingProperty.id,
           });
           const existingSharedLaneStatus = String(existingSharedLaneState?.ai_confirm_shared_status || '').trim().toLowerCase();
           const keepNeedsReview = acceptedCandidateId
@@ -4349,10 +7163,25 @@ async function handleApi(req, res) {
             needsReview: keepNeedsReview,
             constraints: parsedConstraints,
           });
+          const componentSlotId = componentCtx?.componentValueId ?? existingProperty.id;
+          if (acceptedCandidateId && componentSlotId) {
+            runtimeSpecDb.upsertReview({
+              candidateId: acceptedCandidateId,
+              contextType: 'component',
+              contextId: String(componentSlotId),
+              humanAccepted: true,
+              humanAcceptedAt: nowIso,
+              aiReviewStatus: 'accepted',
+              aiReviewedAt: nowIso,
+              aiReviewModel: null,
+              aiConfidence: 1.0,
+              aiReason: 'shared_accept',
+              humanOverrideAi: false,
+            });
+          }
 
-          const sharedCandidate = acceptedCandidateId
-            ? runtimeSpecDb.getCandidateById(acceptedCandidateId)
-            : null;
+          const sharedCandidate = acceptedCandidateRow
+            || (acceptedCandidateId ? runtimeSpecDb.getCandidateById(acceptedCandidateId) : null);
           const sharedConfidence = Number.isFinite(Number(sharedCandidate?.score))
             ? Number(sharedCandidate.score)
             : 1.0;
@@ -4363,6 +7192,7 @@ async function handleApi(req, res) {
             fieldKey: String(property),
             componentIdentifier,
             propertyKey: String(property),
+            componentValueId: componentCtx?.componentValueId ?? existingProperty.id,
             selectedCandidateId: acceptedCandidateId,
             selectedValue: String(value),
             confidenceScore: sharedConfidence,
@@ -4371,22 +7201,9 @@ async function handleApi(req, res) {
           });
 
           if (!acceptedCandidateId) {
-            if (existingProperty?.id) {
-              runtimeSpecDb.db.prepare(
-                'UPDATE component_values SET accepted_candidate_id = NULL, updated_at = datetime(\'now\') WHERE category = ? AND id = ?'
-              ).run(runtimeSpecDb.category, existingProperty.id);
-            } else {
-              runtimeSpecDb.db.prepare(
-                'UPDATE component_values SET accepted_candidate_id = NULL, updated_at = datetime(\'now\') WHERE category = ? AND component_type = ? AND component_name = ? AND component_maker = ? AND property_key = ?'
-              ).run(runtimeSpecDb.category, componentType, name, componentMaker, property);
-            }
-          } else {
-            propagateCandidateLaneAcrossMatchingStates(runtimeSpecDb, runtimeSpecDb.category, {
-              candidateId: acceptedCandidateId,
-              lane: 'shared',
-              action: 'accept',
-              at: nowIso,
-            });
+            runtimeSpecDb.db.prepare(
+              'UPDATE component_values SET accepted_candidate_id = NULL, updated_at = datetime(\'now\') WHERE category = ? AND id = ?'
+            ).run(runtimeSpecDb.category, existingProperty.id);
           }
 
           await cascadeComponentChange({
@@ -4408,21 +7225,13 @@ async function handleApi(req, res) {
           const aliases = (Array.isArray(value) ? value : [value])
             .map((entry) => String(entry || '').trim())
             .filter(Boolean);
-          let idRow = componentIdentityId ? { id: componentIdentityId } : null;
-          if (!idRow) {
-            idRow = runtimeSpecDb.db.prepare(
-              'SELECT id FROM component_identity WHERE category = ? AND component_type = ? AND canonical_name = ? AND maker = ?'
-            ).get(runtimeSpecDb.category, componentType, name, componentMaker);
-          }
-          if (!idRow) {
-            idRow = runtimeSpecDb.upsertComponentIdentity({
-              componentType,
-              canonicalName: name,
-              maker: componentMaker,
-              links: [],
-              source: 'component_db',
+          if (!componentIdentityId) {
+            return jsonRes(res, 400, {
+              error: 'component_identity_id_required',
+              message: 'componentIdentityId is required for component identity mutations.',
             });
           }
+          const idRow = { id: componentIdentityId };
           if (idRow?.id) {
             runtimeSpecDb.db.prepare('DELETE FROM component_aliases WHERE component_id = ? AND source = ?').run(idRow.id, 'user');
             for (const alias of aliases) {
@@ -4434,19 +7243,17 @@ async function handleApi(req, res) {
           const links = (Array.isArray(value) ? value : [value])
             .map((entry) => String(entry || '').trim())
             .filter(Boolean);
-          if (componentIdentityId) {
-            runtimeSpecDb.db.prepare(`
-              UPDATE component_identity
-              SET links = ?, source = 'user', updated_at = datetime('now')
-              WHERE category = ? AND id = ?
-            `).run(JSON.stringify(links), runtimeSpecDb.category, componentIdentityId);
-          } else {
-            runtimeSpecDb.db.prepare(`
-              UPDATE component_identity
-              SET links = ?, source = 'user', updated_at = datetime('now')
-              WHERE category = ? AND component_type = ? AND canonical_name = ? AND maker = ?
-            `).run(JSON.stringify(links), runtimeSpecDb.category, componentType, name, componentMaker);
+          if (!componentIdentityId) {
+            return jsonRes(res, 400, {
+              error: 'component_identity_id_required',
+              message: 'componentIdentityId is required for component identity mutations.',
+            });
           }
+          runtimeSpecDb.db.prepare(`
+            UPDATE component_identity
+            SET links = ?, source = 'user', updated_at = datetime('now')
+            WHERE category = ? AND id = ?
+          `).run(JSON.stringify(links), runtimeSpecDb.category, componentIdentityId);
         } else if (property === '__name') {
           const newName = String(value || '').trim();
           if (!newName || newName.length < 2) {
@@ -4454,20 +7261,18 @@ async function handleApi(req, res) {
           }
           const oldComponentIdentifier = buildComponentIdentifier(componentType, name, componentMaker);
           const newComponentIdentifier = buildComponentIdentifier(componentType, newName, componentMaker);
+          if (!componentIdentityId) {
+            return jsonRes(res, 400, {
+              error: 'component_identity_id_required',
+              message: 'componentIdentityId is required for component identity mutations.',
+            });
+          }
           const tx = runtimeSpecDb.db.transaction(() => {
-            if (componentIdentityId) {
-              runtimeSpecDb.db.prepare(`
-                UPDATE component_identity
-                SET canonical_name = ?, source = ?, updated_at = datetime('now')
-                WHERE category = ? AND id = ?
-              `).run(newName, selectedSource, runtimeSpecDb.category, componentIdentityId);
-            } else {
-              runtimeSpecDb.db.prepare(`
-                UPDATE component_identity
-                SET canonical_name = ?, source = ?, updated_at = datetime('now')
-                WHERE category = ? AND component_type = ? AND canonical_name = ? AND maker = ?
-              `).run(newName, selectedSource, runtimeSpecDb.category, componentType, name, componentMaker);
-            }
+            runtimeSpecDb.db.prepare(`
+              UPDATE component_identity
+              SET canonical_name = ?, source = ?, updated_at = datetime('now')
+              WHERE category = ? AND id = ?
+            `).run(newName, selectedSource, runtimeSpecDb.category, componentIdentityId);
             runtimeSpecDb.db.prepare(`
               UPDATE component_values
               SET component_name = ?, updated_at = datetime('now')
@@ -4513,14 +7318,6 @@ async function handleApi(req, res) {
             laneAction: 'accept',
             nowIso,
           });
-          if (acceptedCandidateId) {
-            propagateCandidateLaneAcrossMatchingStates(runtimeSpecDb, runtimeSpecDb.category, {
-              candidateId: acceptedCandidateId,
-              lane: 'shared',
-              action: 'accept',
-              at: nowIso,
-            });
-          }
           await cascadeComponentChange({
             storage,
             outputRoot: OUTPUT_ROOT,
@@ -4543,20 +7340,18 @@ async function handleApi(req, res) {
           }
           const oldComponentIdentifier = buildComponentIdentifier(componentType, name, componentMaker);
           const newComponentIdentifier = buildComponentIdentifier(componentType, name, newMaker);
+          if (!componentIdentityId) {
+            return jsonRes(res, 400, {
+              error: 'component_identity_id_required',
+              message: 'componentIdentityId is required for component identity mutations.',
+            });
+          }
           const tx = runtimeSpecDb.db.transaction(() => {
-            if (componentIdentityId) {
-              runtimeSpecDb.db.prepare(`
-                UPDATE component_identity
-                SET maker = ?, source = ?, updated_at = datetime('now')
-                WHERE category = ? AND id = ?
-              `).run(newMaker, selectedSource, runtimeSpecDb.category, componentIdentityId);
-            } else {
-              runtimeSpecDb.db.prepare(`
-                UPDATE component_identity
-                SET maker = ?, source = ?, updated_at = datetime('now')
-                WHERE category = ? AND component_type = ? AND canonical_name = ? AND maker = ?
-              `).run(newMaker, selectedSource, runtimeSpecDb.category, componentType, name, componentMaker);
-            }
+            runtimeSpecDb.db.prepare(`
+              UPDATE component_identity
+              SET maker = ?, source = ?, updated_at = datetime('now')
+              WHERE category = ? AND id = ?
+            `).run(newMaker, selectedSource, runtimeSpecDb.category, componentIdentityId);
             runtimeSpecDb.db.prepare(`
               UPDATE component_values
               SET component_maker = ?, updated_at = datetime('now')
@@ -4595,14 +7390,6 @@ async function handleApi(req, res) {
             laneAction: 'accept',
             nowIso,
           });
-          if (acceptedCandidateId) {
-            propagateCandidateLaneAcrossMatchingStates(runtimeSpecDb, runtimeSpecDb.category, {
-              candidateId: acceptedCandidateId,
-              lane: 'shared',
-              action: 'accept',
-              at: nowIso,
-            });
-          }
           await cascadeComponentChange({
             storage,
             outputRoot: OUTPUT_ROOT,
@@ -4622,15 +7409,17 @@ async function handleApi(req, res) {
       }
 
       if (review_status) {
-        if (componentIdentityId) {
-          runtimeSpecDb.db.prepare(`
-            UPDATE component_identity
-            SET review_status = ?, updated_at = datetime('now')
-            WHERE category = ? AND id = ?
-          `).run(review_status, runtimeSpecDb.category, componentIdentityId);
-        } else {
-          runtimeSpecDb.updateComponentReviewStatus(componentType, name, componentMaker, review_status);
+        if (!componentIdentityId) {
+          return jsonRes(res, 400, {
+            error: 'component_identity_id_required',
+            message: 'componentIdentityId is required for review_status updates.',
+          });
         }
+        runtimeSpecDb.db.prepare(`
+          UPDATE component_identity
+          SET review_status = ?, updated_at = datetime('now')
+          WHERE category = ? AND id = ?
+        `).run(review_status, runtimeSpecDb.category, componentIdentityId);
       }
 
       specDbCache.delete(category);
@@ -4654,7 +7443,19 @@ async function handleApi(req, res) {
     if (!runtimeSpecDb || !runtimeSpecDb.isSeeded()) {
       return jsonRes(res, 503, { error: 'specdb_not_ready', message: `SpecDb not ready for ${category}` });
     }
-    const componentCtx = resolveComponentMutationContext(runtimeSpecDb, category, body);
+    try { await syncSyntheticCandidatesFromComponentReview({ category, specDb: runtimeSpecDb }); } catch { /* best-effort */ }
+    const requestedProperty = String(body?.property || body?.propertyKey || '').trim();
+    const isIdentityProperty = requestedProperty === '__name'
+      || requestedProperty === '__maker'
+      || requestedProperty === '__links'
+      || requestedProperty === '__aliases';
+    const componentCtx = resolveComponentMutationContext(runtimeSpecDb, category, body, {
+      requireComponentValueId: !isIdentityProperty,
+      requireComponentIdentityId: isIdentityProperty,
+    });
+    if (componentCtx?.error) {
+      return jsonRes(res, 400, { error: componentCtx.error, message: componentCtx.errorMessage });
+    }
     const componentType = String(componentCtx?.componentType || '').trim();
     const name = String(componentCtx?.componentName || '').trim();
     const componentMaker = String(componentCtx?.componentMaker || '').trim();
@@ -4662,27 +7463,19 @@ async function handleApi(req, res) {
     if (!componentType || !name || !property) {
       return jsonRes(res, 400, {
         error: 'component_context_required',
-        message: 'componentType/name/property or component slot identifiers are required',
+        message: 'component slot identifiers are required',
       });
     }
 
     try {
       let propertyRow = null;
       if (property !== '__name' && property !== '__maker') {
-        if (componentCtx?.componentValueRow) {
-          propertyRow = componentCtx.componentValueRow;
-        }
-        try {
-          if (!propertyRow) {
-            const rows = runtimeSpecDb.getComponentValuesWithMaker(componentType, name, componentMaker) || [];
-            propertyRow = rows.find((row) => String(row?.property_key || '').trim() === property) || null;
-          }
-        } catch { /* best-effort */ }
-        if (!propertyRow) {
-          try {
-            const rows = runtimeSpecDb.getComponentValues(componentType, name) || [];
-            propertyRow = rows.find((row) => String(row?.property_key || '').trim() === property) || null;
-          } catch { /* best-effort */ }
+        propertyRow = componentCtx?.componentValueRow || null;
+        if (!propertyRow?.id) {
+          return jsonRes(res, 400, {
+            error: 'component_value_id_required',
+            message: 'componentValueId is required for component property mutations.',
+          });
         }
       }
 
@@ -4693,6 +7486,7 @@ async function handleApi(req, res) {
         fieldKey: property,
         componentIdentifier,
         propertyKey: property,
+        componentValueId: componentCtx?.componentValueId ?? propertyRow?.id ?? null,
       });
       const resolvedValue = String(
         existingState?.selected_value
@@ -4701,27 +7495,84 @@ async function handleApi(req, res) {
         ?? propertyRow?.value
         ?? ''
       ).trim();
-      const confirmScopeValue = String(
-        body?.candidateValue
-        ?? body?.candidate_value
-        ?? ''
-      ).trim();
-      const stateValue = resolvedValue || confirmScopeValue;
-      if (!isMeaningfulValue(stateValue)) {
-        return jsonRes(res, 400, { error: 'confirm_value_required', message: 'No resolved value to confirm for this component property' });
-      }
 
-      const resolvedCandidateId = String(
-        existingState?.selected_candidate_id
-        || propertyRow?.accepted_candidate_id
-        || ''
-      ).trim() || null;
+      const requestedCandidateId = String(body?.candidateId || body?.candidate_id || '').trim() || null;
+      if (!requestedCandidateId) {
+        return jsonRes(res, 400, {
+          error: 'candidate_id_required',
+          message: 'candidateId is required for component AI confirm.',
+        });
+      }
+      const requestedCandidateRow = runtimeSpecDb.getCandidateById(requestedCandidateId);
+      if (!requestedCandidateRow) {
+        return jsonRes(res, 404, {
+          error: 'candidate_not_found',
+          message: `candidate_id '${requestedCandidateId}' was not found.`,
+        });
+      }
+      const stateValue = resolvedValue || String(requestedCandidateRow.value ?? '').trim();
+      if (!isMeaningfulValue(stateValue)) {
+        return jsonRes(res, 400, {
+          error: 'confirm_value_required',
+          message: 'No resolved value to confirm for this component property',
+        });
+      }
+      if (property !== '__name' && property !== '__maker') {
+        if (String(requestedCandidateRow.field_key || '').trim() !== String(property || '').trim()) {
+          return jsonRes(res, 400, {
+            error: 'candidate_context_mismatch',
+            message: `candidate_id '${requestedCandidateId}' does not belong to component property '${property}'.`,
+          });
+        }
+        const requestedValueToken = String(requestedCandidateRow.value ?? '').trim();
+        if (
+          isMeaningfulValue(requestedValueToken)
+          && isMeaningfulValue(stateValue)
+          && normalizeLower(requestedValueToken) !== normalizeLower(stateValue)
+        ) {
+          return jsonRes(res, 400, {
+            error: 'candidate_value_mismatch',
+            message: `candidate_id '${requestedCandidateId}' value does not match component property '${property}'.`,
+          });
+        }
+      }
+      const resolvedCandidateId = requestedCandidateId;
       const resolvedConfidence = Number.isFinite(Number(existingState?.confidence_score))
         ? Number(existingState.confidence_score)
         : (Number.isFinite(Number(propertyRow?.confidence))
           ? Number(propertyRow.confidence)
-          : (Number.isFinite(Number(body?.candidateConfidence)) ? Number(body.candidateConfidence) : 1.0));
+          : (Number.isFinite(Number(requestedCandidateRow?.score))
+            ? Number(requestedCandidateRow.score)
+            : (Number.isFinite(Number(body?.candidateConfidence)) ? Number(body.candidateConfidence) : 1.0)));
       const nowIso = new Date().toISOString();
+      const componentSlotId = componentCtx?.componentValueId ?? propertyRow?.id ?? null;
+      if (componentSlotId) {
+        runtimeSpecDb.upsertReview({
+          candidateId: requestedCandidateId,
+          contextType: 'component',
+          contextId: String(componentSlotId),
+          humanAccepted: false,
+          humanAcceptedAt: null,
+          aiReviewStatus: 'accepted',
+          aiConfidence: Number.isFinite(Number(body?.candidateConfidence))
+            ? Number(body.candidateConfidence)
+            : 1.0,
+          aiReason: 'shared_confirm',
+          aiReviewedAt: nowIso,
+          aiReviewModel: null,
+          humanOverrideAi: false,
+          humanOverrideAiAt: null,
+        });
+      }
+      const pendingCandidateIds = await getPendingComponentSharedCandidateIdsAsync(runtimeSpecDb, {
+        category,
+        componentType,
+        componentName: name,
+        componentMaker,
+        propertyKey: property,
+        componentValueId: componentSlotId,
+      });
+      const confirmStatusOverride = pendingCandidateIds.length > 0 ? 'pending' : 'confirmed';
       const state = applySharedLaneState({
         specDb: runtimeSpecDb,
         category,
@@ -4729,12 +7580,21 @@ async function handleApi(req, res) {
         fieldKey: property,
         componentIdentifier,
         propertyKey: property,
+        componentValueId: componentSlotId,
         selectedCandidateId: resolvedCandidateId,
         selectedValue: stateValue,
         confidenceScore: resolvedConfidence,
         laneAction: 'confirm',
         nowIso,
+        confirmStatusOverride,
       });
+      if (componentSlotId) {
+        runtimeSpecDb.db.prepare(`
+          UPDATE component_values
+          SET needs_review = ?, updated_at = datetime('now')
+          WHERE category = ? AND id = ?
+        `).run(confirmStatusOverride === 'pending' ? 1 : 0, runtimeSpecDb.category, componentSlotId);
+      }
 
       specDbCache.delete(category);
       broadcastWs('data-change', {
@@ -4763,7 +7623,14 @@ async function handleApi(req, res) {
     if (!runtimeSpecDb || !runtimeSpecDb.isSeeded()) {
       return jsonRes(res, 503, { error: 'specdb_not_ready', message: `SpecDb not ready for ${category}` });
     }
-    const enumCtx = resolveEnumMutationContext(runtimeSpecDb, category, body);
+    try { await syncSyntheticCandidatesFromComponentReview({ category, specDb: runtimeSpecDb }); } catch { /* best-effort */ }
+    const enumCtx = resolveEnumMutationContext(runtimeSpecDb, category, body, {
+      requireEnumListId: action === 'add',
+      requireListValueId: action === 'remove' || action === 'accept' || action === 'confirm',
+    });
+    if (enumCtx?.error) {
+      return jsonRes(res, 400, { error: enumCtx.error, message: enumCtx.errorMessage });
+    }
     const field = String(enumCtx?.field || '').trim();
     const value = String(enumCtx?.value || '').trim();
     const listValueId = enumCtx?.listValueId ?? null;
@@ -4774,7 +7641,24 @@ async function handleApi(req, res) {
     try {
       const normalized = String(value).trim().toLowerCase();
       const nowIso = new Date().toISOString();
-      const acceptedCandidateId = String(candidateId || '').trim() || null;
+      const requestedCandidateId = String(candidateId || '').trim() || null;
+      let requestedCandidateRow = requestedCandidateId
+        ? runtimeSpecDb.getCandidateById(requestedCandidateId)
+        : null;
+      const needsCandidateAction = action === 'accept' || action === 'confirm';
+      if (needsCandidateAction && !requestedCandidateId) {
+        return jsonRes(res, 400, {
+          error: 'candidate_id_required',
+          message: `candidateId is required for enum ${action}.`,
+        });
+      }
+      if (needsCandidateAction && !requestedCandidateRow) {
+        return jsonRes(res, 404, {
+          error: 'candidate_not_found',
+          message: `candidate_id '${requestedCandidateId}' was not found.`,
+        });
+      }
+      let acceptedCandidateId = requestedCandidateRow ? requestedCandidateId : null;
       const sourceToken = String(candidateSource || '').trim().toLowerCase();
       const priorValue = String(enumCtx?.oldValue || '').trim();
       const normalizedPrior = priorValue.toLowerCase();
@@ -4802,8 +7686,33 @@ async function handleApi(req, res) {
         cascadeValue = String(value).trim();
       } else if (action === 'accept') {
         const resolvedValue = String(value).trim();
+        if (!isMeaningfulValue(resolvedValue)) {
+          return jsonRes(res, 400, {
+            error: 'unknown_value_not_actionable',
+            message: 'Cannot accept unknown/empty enum values.',
+          });
+        }
         const normalizedResolved = resolvedValue.toLowerCase();
         const isRenameAccept = Boolean(priorValue) && normalizedPrior !== normalizedResolved;
+        if (acceptedCandidateId && requestedCandidateRow) {
+          if (String(requestedCandidateRow.field_key || '').trim() !== String(field || '').trim()) {
+            return jsonRes(res, 400, {
+              error: 'candidate_context_mismatch',
+              message: `candidate_id '${acceptedCandidateId}' does not belong to enum field '${field}'.`,
+            });
+          }
+          const candidateValueToken = String(requestedCandidateRow.value ?? '').trim();
+          if (
+            isMeaningfulValue(candidateValueToken)
+            && !isRenameAccept
+            && normalizeLower(candidateValueToken) !== normalizeLower(resolvedValue)
+          ) {
+            return jsonRes(res, 400, {
+              error: 'candidate_value_mismatch',
+              message: `candidate_id '${acceptedCandidateId}' value does not match enum value '${resolvedValue}'.`,
+            });
+          }
+        }
         const oldLv = isRenameAccept
           ? (listValueId
             ? runtimeSpecDb.getListValueById(listValueId)
@@ -4823,6 +7732,7 @@ async function handleApi(req, res) {
           targetKind: 'enum_key',
           fieldKey: field,
           enumValueNorm: normalizedResolved,
+          listValueId: existingLv?.id ?? null,
         });
         const priorState = isRenameAccept
           ? runtimeSpecDb.getKeyReviewState({
@@ -4830,6 +7740,7 @@ async function handleApi(req, res) {
             targetKind: 'enum_key',
             fieldKey: field,
             enumValueNorm: normalizedPrior,
+            listValueId: oldLv?.id ?? null,
           })
           : null;
         const existingStateStatus = String(existingState?.ai_confirm_shared_status || '').trim().toLowerCase();
@@ -4838,21 +7749,13 @@ async function handleApi(req, res) {
           || priorStateStatus === 'pending'
           || Boolean(existingLv?.needs_review)
           || Boolean(oldLv?.needs_review);
-        const looksWorkbook = acceptedCandidateId?.startsWith('wb_')
-          || acceptedCandidateId?.startsWith('wb-')
-          || acceptedCandidateId?.includes('::wb_')
-          || acceptedCandidateId?.includes('::wb-')
-          || sourceToken.includes('workbook')
-          || sourceToken.includes('excel');
+        const looksWorkbook = candidateLooksWorkbook(requestedCandidateId, sourceToken);
         const selectedSource = String(
           existingLv?.source
           || oldLv?.source
           || (looksWorkbook ? 'known_values' : 'pipeline')
         );
-        const resolvedCandidateId = acceptedCandidateId
-          || existingLv?.accepted_candidate_id
-          || oldLv?.accepted_candidate_id
-          || null;
+        const resolvedCandidateId = acceptedCandidateId;
         runtimeSpecDb.upsertListValue({
           fieldKey: field,
           value: resolvedValue,
@@ -4863,6 +7766,22 @@ async function handleApi(req, res) {
           sourceTimestamp: nowIso,
           acceptedCandidateId: resolvedCandidateId,
         });
+        const resolvedLv = runtimeSpecDb.getListValueByFieldAndValue(field, resolvedValue);
+        if (resolvedCandidateId && resolvedLv?.id) {
+          runtimeSpecDb.upsertReview({
+            candidateId: resolvedCandidateId,
+            contextType: 'list',
+            contextId: String(resolvedLv.id),
+            humanAccepted: true,
+            humanAcceptedAt: nowIso,
+            aiReviewStatus: 'accepted',
+            aiReviewedAt: nowIso,
+            aiReviewModel: null,
+            aiConfidence: 1.0,
+            aiReason: 'shared_accept',
+            humanOverrideAi: false,
+          });
+        }
         const sharedCandidate = resolvedCandidateId
           ? runtimeSpecDb.getCandidateById(resolvedCandidateId)
           : null;
@@ -4875,22 +7794,38 @@ async function handleApi(req, res) {
           targetKind: 'enum_key',
           fieldKey: field,
           enumValueNorm: normalized,
+          listValueId: resolvedLv?.id ?? null,
+          enumListId: resolvedLv?.list_id ?? null,
           selectedCandidateId: resolvedCandidateId,
           selectedValue: resolvedValue,
           confidenceScore: sharedConfidence,
           laneAction: 'accept',
           nowIso,
         });
-        if (resolvedCandidateId) {
-          propagateCandidateLaneAcrossMatchingStates(runtimeSpecDb, runtimeSpecDb.category, {
-            candidateId: resolvedCandidateId,
-            lane: 'shared',
-            action: 'accept',
-            at: nowIso,
-          });
-        }
       } else if (action === 'confirm') {
         const resolvedValue = String(value).trim();
+        if (!isMeaningfulValue(resolvedValue)) {
+          return jsonRes(res, 400, {
+            error: 'unknown_value_not_actionable',
+            message: 'Cannot confirm unknown/empty enum values.',
+          });
+        }
+        if (String(requestedCandidateRow.field_key || '').trim() !== String(field || '').trim()) {
+          return jsonRes(res, 400, {
+            error: 'candidate_context_mismatch',
+            message: `candidate_id '${requestedCandidateId}' does not belong to enum field '${field}'.`,
+          });
+        }
+        const requestedValueToken = String(requestedCandidateRow.value ?? '').trim();
+        if (
+          isMeaningfulValue(requestedValueToken)
+          && normalizeLower(requestedValueToken) !== normalizeLower(resolvedValue)
+        ) {
+          return jsonRes(res, 400, {
+            error: 'candidate_value_mismatch',
+            message: `candidate_id '${requestedCandidateId}' value does not match enum value '${resolvedValue}'.`,
+          });
+        }
         let existingLv = runtimeSpecDb.getListValueByFieldAndValue(field, resolvedValue);
         if (!existingLv) {
           runtimeSpecDb.upsertListValue({
@@ -4906,6 +7841,13 @@ async function handleApi(req, res) {
           });
           existingLv = runtimeSpecDb.getListValueByFieldAndValue(field, resolvedValue);
         } else {
+          const persistedAcceptedCandidateId = String(existingLv?.accepted_candidate_id || '').trim();
+          const sanitizedAcceptedCandidateId = (
+            persistedAcceptedCandidateId
+            && runtimeSpecDb.getCandidateById(persistedAcceptedCandidateId)
+          )
+            ? persistedAcceptedCandidateId
+            : null;
           runtimeSpecDb.upsertListValue({
             fieldKey: field,
             value: resolvedValue,
@@ -4915,11 +7857,46 @@ async function handleApi(req, res) {
             overridden: Boolean(existingLv.overridden),
             needsReview: false,
             sourceTimestamp: nowIso,
-            acceptedCandidateId: existingLv.accepted_candidate_id || null,
+            acceptedCandidateId: sanitizedAcceptedCandidateId,
           });
           existingLv = runtimeSpecDb.getListValueByFieldAndValue(field, resolvedValue);
         }
-        const resolvedCandidateId = existingLv?.accepted_candidate_id || null;
+        const resolvedCandidateId = requestedCandidateId;
+        if (existingLv?.id) {
+          runtimeSpecDb.upsertReview({
+            candidateId: requestedCandidateId,
+            contextType: 'list',
+            contextId: String(existingLv.id),
+            humanAccepted: false,
+            humanAcceptedAt: null,
+            aiReviewStatus: 'accepted',
+            aiConfidence: Number.isFinite(Number(body?.candidateConfidence))
+              ? Number(body.candidateConfidence)
+              : 1.0,
+            aiReason: 'shared_confirm',
+            aiReviewedAt: nowIso,
+            aiReviewModel: null,
+            humanOverrideAi: false,
+            humanOverrideAiAt: null,
+          });
+        }
+        const pendingCandidateIds = getPendingEnumSharedCandidateIds(runtimeSpecDb, {
+          fieldKey: field,
+          listValueId: existingLv?.id ?? null,
+        });
+        const confirmStatusOverride = pendingCandidateIds.length > 0 ? 'pending' : 'confirmed';
+        runtimeSpecDb.upsertListValue({
+          fieldKey: field,
+          value: resolvedValue,
+          normalizedValue: normalized,
+          source: existingLv?.source || 'pipeline',
+          enumPolicy: existingLv?.enum_policy ?? null,
+          overridden: Boolean(existingLv?.overridden),
+          needsReview: confirmStatusOverride === 'pending',
+          sourceTimestamp: nowIso,
+          acceptedCandidateId: resolvedCandidateId,
+        });
+        existingLv = runtimeSpecDb.getListValueByFieldAndValue(field, resolvedValue);
         const sharedCandidate = resolvedCandidateId
           ? runtimeSpecDb.getCandidateById(resolvedCandidateId)
           : null;
@@ -4932,11 +7909,14 @@ async function handleApi(req, res) {
           targetKind: 'enum_key',
           fieldKey: field,
           enumValueNorm: normalized,
+          listValueId: existingLv?.id ?? null,
+          enumListId: existingLv?.list_id ?? null,
           selectedCandidateId: resolvedCandidateId,
           selectedValue: resolvedValue,
           confidenceScore: sharedConfidence,
           laneAction: 'confirm',
           nowIso,
+          confirmStatusOverride,
         });
       } else {
         const resolvedValue = String(value).trim();
@@ -4950,12 +7930,15 @@ async function handleApi(req, res) {
           sourceTimestamp: nowIso,
           acceptedCandidateId: null,
         });
+        const manualLv = runtimeSpecDb.getListValueByFieldAndValue(field, resolvedValue);
         applySharedLaneState({
           specDb: runtimeSpecDb,
           category,
           targetKind: 'enum_key',
           fieldKey: field,
           enumValueNorm: normalized,
+          listValueId: manualLv?.id ?? null,
+          enumListId: manualLv?.list_id ?? null,
           selectedCandidateId: null,
           selectedValue: resolvedValue,
           confidenceScore: 1.0,
@@ -5013,7 +7996,12 @@ async function handleApi(req, res) {
     if (!runtimeSpecDb || !runtimeSpecDb.isSeeded()) {
       return jsonRes(res, 503, { error: 'specdb_not_ready', message: `SpecDb not ready for ${category}` });
     }
-    const enumCtx = resolveEnumMutationContext(runtimeSpecDb, category, body);
+    const enumCtx = resolveEnumMutationContext(runtimeSpecDb, category, body, {
+      requireListValueId: true,
+    });
+    if (enumCtx?.error) {
+      return jsonRes(res, 400, { error: enumCtx.error, message: enumCtx.errorMessage });
+    }
     const field = String(enumCtx?.field || '').trim();
     const oldValue = String(enumCtx?.oldValue || '').trim();
     const listValueId = enumCtx?.listValueId ?? null;
@@ -5084,10 +8072,6 @@ async function handleApi(req, res) {
   // Get component review items (flagged for AI/human review)
   if (parts[0] === 'review-components' && parts[1] && parts[2] === 'component-review' && method === 'GET') {
     const category = parts[1];
-    const specDb = getSpecDb(category);
-    if (specDb) {
-      await syncSyntheticCandidatesFromComponentReview({ category, specDb }).catch(() => ({ upserted: 0 }));
-    }
     const filePath = componentReviewPath({ config, category });
     const data = await safeReadJson(filePath);
     return jsonRes(res, 200, data || { version: 1, category, items: [], updated_at: null });
@@ -5215,6 +8199,14 @@ async function handleApi(req, res) {
       extractionMode,             // balanced | aggressive | uber_aggressive
       profile,                    // fast | standard | thorough
       dryRun,                     // boolean — simulation mode
+      fetchConcurrency,           // number - phase 05 fetch parallelism cap
+      perHostMinDelayMs,          // number - phase 05 per-host throttle delay
+      dynamicCrawleeEnabled,      // boolean - force Crawlee fetch mode when HTTP is not preferred
+      crawleeHeadless,            // boolean - run Crawlee browser headless/non-headless
+      crawleeRequestHandlerTimeoutSecs, // number - per-request Crawlee handler timeout
+      dynamicFetchRetryBudget,    // number - retries for dynamic fetch failures
+      dynamicFetchRetryBackoffMs, // number - retry backoff in milliseconds
+      dynamicFetchPolicyMapJson,  // string - optional domain policy json
       resumeMode,                 // auto | force_resume | start_over
       resumeWindowHours,          // number — max age window for resume state
       reextractAfterHours,        // number — re-extract successful URLs older than this
@@ -5225,6 +8217,29 @@ async function handleApi(req, res) {
       phase2LlmModel,
       phase3LlmTriageEnabled,
       phase3LlmModel,
+      llmModelPlan,
+      llmModelFast,
+      llmModelTriage,
+      llmModelReasoning,
+      llmModelExtract,
+      llmModelValidate,
+      llmModelWrite,
+      llmTokensPlan,
+      llmTokensFast,
+      llmTokensTriage,
+      llmTokensReasoning,
+      llmTokensExtract,
+      llmTokensValidate,
+      llmTokensWrite,
+      llmFallbackEnabled,
+      llmPlanFallbackModel,
+      llmExtractFallbackModel,
+      llmValidateFallbackModel,
+      llmWriteFallbackModel,
+      llmTokensPlanFallback,
+      llmTokensExtractFallback,
+      llmTokensValidateFallback,
+      llmTokensWriteFallback,
       seed,
       fields,
       providers,
@@ -5316,6 +8331,50 @@ async function handleApi(req, res) {
     if (typeof reextractIndexed === 'boolean') {
       envOverrides.INDEXING_REEXTRACT_ENABLED = reextractIndexed ? 'true' : 'false';
     }
+    const parsedFetchConcurrency = Number.parseInt(String(fetchConcurrency ?? ''), 10);
+    if (Number.isFinite(parsedFetchConcurrency) && parsedFetchConcurrency > 0) {
+      envOverrides.CONCURRENCY = String(Math.max(1, Math.min(64, parsedFetchConcurrency)));
+    }
+    const parsedPerHostDelay = Number.parseInt(String(perHostMinDelayMs ?? ''), 10);
+    if (Number.isFinite(parsedPerHostDelay) && parsedPerHostDelay >= 0) {
+      envOverrides.PER_HOST_MIN_DELAY_MS = String(Math.max(0, Math.min(120_000, parsedPerHostDelay)));
+    }
+    if (typeof dynamicCrawleeEnabled === 'boolean') {
+      envOverrides.DYNAMIC_CRAWLEE_ENABLED = dynamicCrawleeEnabled ? 'true' : 'false';
+    }
+    if (typeof crawleeHeadless === 'boolean') {
+      envOverrides.CRAWLEE_HEADLESS = crawleeHeadless ? 'true' : 'false';
+    }
+    const parsedCrawleeTimeoutSecs = Number.parseInt(String(crawleeRequestHandlerTimeoutSecs ?? ''), 10);
+    if (Number.isFinite(parsedCrawleeTimeoutSecs) && parsedCrawleeTimeoutSecs >= 0) {
+      envOverrides.CRAWLEE_REQUEST_HANDLER_TIMEOUT_SECS = String(Math.max(0, Math.min(300, parsedCrawleeTimeoutSecs)));
+    }
+    const parsedDynamicRetryBudget = Number.parseInt(String(dynamicFetchRetryBudget ?? ''), 10);
+    if (Number.isFinite(parsedDynamicRetryBudget) && parsedDynamicRetryBudget >= 0) {
+      envOverrides.DYNAMIC_FETCH_RETRY_BUDGET = String(Math.max(0, Math.min(5, parsedDynamicRetryBudget)));
+    }
+    const parsedDynamicRetryBackoffMs = Number.parseInt(String(dynamicFetchRetryBackoffMs ?? ''), 10);
+    if (Number.isFinite(parsedDynamicRetryBackoffMs) && parsedDynamicRetryBackoffMs >= 0) {
+      envOverrides.DYNAMIC_FETCH_RETRY_BACKOFF_MS = String(Math.max(0, Math.min(30_000, parsedDynamicRetryBackoffMs)));
+    }
+    const normalizedDynamicFetchPolicyMap = String(dynamicFetchPolicyMapJson || '').trim();
+    if (normalizedDynamicFetchPolicyMap) {
+      try {
+        const parsedDynamicFetchPolicyMap = JSON.parse(normalizedDynamicFetchPolicyMap);
+        if (!parsedDynamicFetchPolicyMap || Array.isArray(parsedDynamicFetchPolicyMap) || typeof parsedDynamicFetchPolicyMap !== 'object') {
+          return jsonRes(res, 400, {
+            error: 'invalid_dynamic_fetch_policy_json',
+            message: 'dynamicFetchPolicyMapJson must be a JSON object.'
+          });
+        }
+        envOverrides.DYNAMIC_FETCH_POLICY_MAP_JSON = JSON.stringify(parsedDynamicFetchPolicyMap);
+      } catch {
+        return jsonRes(res, 400, {
+          error: 'invalid_dynamic_fetch_policy_json',
+          message: 'dynamicFetchPolicyMapJson must be valid JSON.'
+        });
+      }
+    }
     const hasPhase2LlmOverride = typeof phase2LlmEnabled === 'boolean';
     if (hasPhase2LlmOverride) {
       envOverrides.LLM_PLAN_DISCOVERY_QUERIES = phase2LlmEnabled ? 'true' : 'false';
@@ -5333,7 +8392,72 @@ async function handleApi(req, res) {
       envOverrides.LLM_MODEL_TRIAGE = normalizedPhase3LlmModel;
       envOverrides.CORTEX_MODEL_RERANK_FAST = normalizedPhase3LlmModel;
     }
-    if ((hasPhase2LlmOverride && phase2LlmEnabled) || (hasPhase3LlmOverride && phase3LlmTriageEnabled)) {
+
+    const applyModelOverride = (envKey, value, { allowEmpty = false } = {}) => {
+      if (value === undefined || value === null) return false;
+      const token = String(value || '').trim();
+      if (!token && !allowEmpty) return false;
+      envOverrides[envKey] = token;
+      return Boolean(token);
+    };
+    const applyTokenOverride = (envKey, value) => {
+      if (value === undefined || value === null || value === '') return false;
+      const parsed = Number.parseInt(String(value), 10);
+      if (!Number.isFinite(parsed) || parsed <= 0) return false;
+      envOverrides[envKey] = String(parsed);
+      return true;
+    };
+
+    const hasRoleModelOverride = [
+      applyModelOverride('LLM_MODEL_PLAN', llmModelPlan),
+      applyModelOverride('LLM_MODEL_FAST', llmModelFast),
+      applyModelOverride('LLM_MODEL_TRIAGE', llmModelTriage),
+      applyModelOverride('LLM_MODEL_REASONING', llmModelReasoning),
+      applyModelOverride('LLM_MODEL_EXTRACT', llmModelExtract),
+      applyModelOverride('LLM_MODEL_VALIDATE', llmModelValidate),
+      applyModelOverride('LLM_MODEL_WRITE', llmModelWrite)
+    ].some(Boolean);
+
+    const normalizedTriageForCortex = String(llmModelTriage || '').trim();
+    if (normalizedTriageForCortex) {
+      envOverrides.CORTEX_MODEL_RERANK_FAST = normalizedTriageForCortex;
+      envOverrides.CORTEX_MODEL_SEARCH_FAST = normalizedTriageForCortex;
+    }
+
+    applyTokenOverride('LLM_MAX_OUTPUT_TOKENS_PLAN', llmTokensPlan);
+    applyTokenOverride('LLM_MAX_OUTPUT_TOKENS_FAST', llmTokensFast);
+    applyTokenOverride('LLM_MAX_OUTPUT_TOKENS_TRIAGE', llmTokensTriage);
+    applyTokenOverride('LLM_MAX_OUTPUT_TOKENS_REASONING', llmTokensReasoning);
+    applyTokenOverride('LLM_MAX_OUTPUT_TOKENS_EXTRACT', llmTokensExtract);
+    applyTokenOverride('LLM_MAX_OUTPUT_TOKENS_VALIDATE', llmTokensValidate);
+    applyTokenOverride('LLM_MAX_OUTPUT_TOKENS_WRITE', llmTokensWrite);
+
+    const hasFallbackToggle = typeof llmFallbackEnabled === 'boolean';
+    if (hasFallbackToggle && !llmFallbackEnabled) {
+      envOverrides.LLM_PLAN_FALLBACK_MODEL = '';
+      envOverrides.LLM_EXTRACT_FALLBACK_MODEL = '';
+      envOverrides.LLM_VALIDATE_FALLBACK_MODEL = '';
+      envOverrides.LLM_WRITE_FALLBACK_MODEL = '';
+      envOverrides.LLM_MAX_OUTPUT_TOKENS_PLAN_FALLBACK = '';
+      envOverrides.LLM_MAX_OUTPUT_TOKENS_EXTRACT_FALLBACK = '';
+      envOverrides.LLM_MAX_OUTPUT_TOKENS_VALIDATE_FALLBACK = '';
+      envOverrides.LLM_MAX_OUTPUT_TOKENS_WRITE_FALLBACK = '';
+    } else {
+      applyModelOverride('LLM_PLAN_FALLBACK_MODEL', llmPlanFallbackModel, { allowEmpty: true });
+      applyModelOverride('LLM_EXTRACT_FALLBACK_MODEL', llmExtractFallbackModel, { allowEmpty: true });
+      applyModelOverride('LLM_VALIDATE_FALLBACK_MODEL', llmValidateFallbackModel, { allowEmpty: true });
+      applyModelOverride('LLM_WRITE_FALLBACK_MODEL', llmWriteFallbackModel, { allowEmpty: true });
+      applyTokenOverride('LLM_MAX_OUTPUT_TOKENS_PLAN_FALLBACK', llmTokensPlanFallback);
+      applyTokenOverride('LLM_MAX_OUTPUT_TOKENS_EXTRACT_FALLBACK', llmTokensExtractFallback);
+      applyTokenOverride('LLM_MAX_OUTPUT_TOKENS_VALIDATE_FALLBACK', llmTokensValidateFallback);
+      applyTokenOverride('LLM_MAX_OUTPUT_TOKENS_WRITE_FALLBACK', llmTokensWriteFallback);
+    }
+
+    if (
+      (hasPhase2LlmOverride && phase2LlmEnabled)
+      || (hasPhase3LlmOverride && phase3LlmTriageEnabled)
+      || hasRoleModelOverride
+    ) {
       envOverrides.LLM_ENABLED = 'true';
     }
 
@@ -5353,7 +8477,14 @@ async function handleApi(req, res) {
   }
 
   if (parts[0] === 'process' && parts[1] === 'stop' && method === 'POST') {
-    const status = await stopProcess(9000);
+    let body = {};
+    try {
+      body = await readJsonBody(req);
+    } catch {
+      body = {};
+    }
+    const force = Boolean(body?.force);
+    const status = await stopProcess(9000, { force });
     return jsonRes(res, 200, status);
   }
 
@@ -5605,19 +8736,27 @@ async function handleApi(req, res) {
       // Check if run artifacts exist for this product
       try {
         const latest = await readLatestArtifacts(storage, testCategory, job.productId);
-        if (latest.summary) {
+        const summary = latest.summary && typeof latest.summary === 'object'
+          ? latest.summary
+          : null;
+        if (summary && Object.keys(summary).length > 0) {
+          const confidence = toUnitRatio(summary.confidence) ?? toUnitRatio(summary.confidence_percent);
+          const coverage = toUnitRatio(summary.coverage_overall) ?? toUnitRatio(summary.coverage_overall_percent);
+          const completeness = toUnitRatio(summary.completeness_required) ?? toUnitRatio(summary.completeness_required_percent);
+          const trafficLight = deriveTrafficLightCounts({ summary, provenance: latest.provenance });
           runResults.push({
             productId: job.productId,
             status: 'complete',
             testCase: job._testCase,
-            confidence: latest.summary?.confidence,
-            coverage: latest.summary?.coverage_overall,
-            completeness: latest.summary?.completeness_required,
-            trafficLight: latest.summary?.traffic_light?.counts,
-            constraintConflicts: latest.summary?.constraint_analysis?.contradictionCount || latest.summary?.constraint_analysis?.contradiction_count || 0,
-            missingRequired: latest.summary?.missing_required_fields || [],
-            curationSuggestions: latest.summary?.runtime_engine?.curation_suggestions_count || 0,
-            runtimeFailures: (latest.summary?.runtime_engine?.failures || []).length
+            confidence,
+            coverage,
+            completeness,
+            trafficLight,
+            constraintConflicts: summary?.constraint_analysis?.contradictionCount || summary?.constraint_analysis?.contradiction_count || 0,
+            missingRequired: Array.isArray(summary?.missing_required_fields) ? summary.missing_required_fields : [],
+            curationSuggestions: summary?.runtime_engine?.curation_suggestions_count || 0,
+            runtimeFailures: (summary?.runtime_engine?.failures || []).length,
+            durationMs: toInt(summary?.duration_ms, 0) || undefined
           });
         }
       } catch { /* no artifacts yet */ }
@@ -5798,6 +8937,22 @@ async function handleApi(req, res) {
       try {
         await runComponentReviewBatch({ config, category, logger: null });
       } catch { /* non-fatal — AI review is optional */ }
+    }
+
+    const resyncSpecDb = body?.resyncSpecDb !== false;
+    if (runtimeSpecDb && resyncSpecDb) {
+      try {
+        const { loadFieldRules } = await import('../field-rules/loader.js');
+        const { seedSpecDb } = await import('../db/seed.js');
+        const seedFieldRules = await loadFieldRules(category, { config });
+        await seedSpecDb({ db: runtimeSpecDb, config, category, fieldRules: seedFieldRules });
+      } catch (err) {
+        results.push({
+          status: 'warning',
+          warning: 'specdb_resync_failed',
+          error: err?.message || 'Unknown SpecDb resync error',
+        });
+      }
     }
 
     broadcastWs('data-change', { type: 'review', category });
@@ -6149,3 +9304,5 @@ server.listen(PORT, '0.0.0.0', () => {
     execCb(cmd);
   }
 });
+
+

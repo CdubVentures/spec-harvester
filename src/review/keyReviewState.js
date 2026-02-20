@@ -7,12 +7,17 @@ export function applySharedLaneState({
   enumValueNorm = null,
   componentIdentifier = null,
   propertyKey = null,
+  itemFieldStateId = null,
+  componentValueId = null,
+  listValueId = null,
+  enumListId = null,
   selectedCandidateId = null,
   selectedValue = null,
   confidenceScore = 0,
   laneAction = 'confirm',
   nowIso = null,
   updateSelection = null,
+  confirmStatusOverride = null,
 }) {
   if (!specDb || !targetKind) return null;
   const normalizeComparable = (value) => String(value ?? '').trim().toLowerCase();
@@ -28,6 +33,9 @@ export function applySharedLaneState({
     enumValueNorm,
     componentIdentifier,
     propertyKey,
+    itemFieldStateId,
+    componentValueId,
+    listValueId,
   });
 
   if (!state) {
@@ -39,6 +47,10 @@ export function applySharedLaneState({
       enumValueNorm,
       componentIdentifier,
       propertyKey,
+      itemFieldStateId,
+      componentValueId,
+      listValueId,
+      enumListId,
       selectedValue,
       selectedCandidateId,
       confidenceScore,
@@ -81,7 +93,10 @@ export function applySharedLaneState({
     specDb.updateKeyReviewAiConfirm({ id: state.id, lane: 'shared', status: nextAiStatus, confidence: nextAiConfidence, at });
     specDb.updateKeyReviewUserAccept({ id: state.id, lane: 'shared', status: 'accepted', at });
   } else {
-    specDb.updateKeyReviewAiConfirm({ id: state.id, lane: 'shared', status: 'confirmed', confidence: 1.0, at });
+    const overrideToken = String(confirmStatusOverride || '').trim().toLowerCase();
+    const nextStatus = overrideToken === 'pending' ? 'pending' : 'confirmed';
+    const nextConfidence = nextStatus === 'confirmed' ? 1.0 : null;
+    specDb.updateKeyReviewAiConfirm({ id: state.id, lane: 'shared', status: nextStatus, confidence: nextConfidence, at });
   }
 
   return specDb.db.prepare('SELECT * FROM key_review_state WHERE id = ?').get(state.id) || state;

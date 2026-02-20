@@ -111,6 +111,7 @@ export class FrontierDbSqlite {
     this._cooldown404RepeatMs = toInt(config.frontierCooldown404RepeatSeconds, 1209600) * 1000;
     this._cooldown410Ms = toInt(config.frontierCooldown410Seconds, 7776000) * 1000;
     this._cooldownTimeoutMs = toInt(config.frontierCooldownTimeoutSeconds, 21600) * 1000;
+    this._cooldown403BaseMs = Math.max(60000, toInt(config.frontierCooldown403BaseSeconds, 1800) * 1000);
     this._cooldown429BaseMs = Math.max(60000, toInt(config.frontierCooldown429BaseSeconds, 900) * 1000);
     this._pathPenaltyThreshold = Math.max(2, toInt(config.frontierPathPenaltyNotfoundThreshold, 3));
   }
@@ -184,17 +185,26 @@ export class FrontierDbSqlite {
       'SELECT cooldown_next_retry_ts, cooldown_reason FROM urls WHERE canonical_url = ?'
     ).get(normalized.canonical_url);
 
-    if (!row || !row.cooldown_next_retry_ts) {
-      return { skip: false, reason: null, next_retry_ts: null };
+    if (row && row.cooldown_next_retry_ts) {
+      const retryMs = Date.parse(row.cooldown_next_retry_ts);
+      if (Number.isFinite(retryMs) && now < retryMs) {
+        return {
+          skip: true,
+          reason: 'cooldown',
+          next_retry_ts: row.cooldown_next_retry_ts
+        };
+      }
     }
 
-    const retryMs = Date.parse(row.cooldown_next_retry_ts);
-    if (Number.isFinite(retryMs) && now < retryMs) {
-      return {
-        skip: true,
-        reason: 'cooldown',
-        next_retry_ts: row.cooldown_next_retry_ts
-      };
+    if (normalized.domain && normalized.path_sig) {
+      const pathStats = this.db.prepare(
+        'SELECT SUM(notfound_count) AS notfound_total, SUM(ok_count) AS ok_total FROM urls WHERE domain = ? AND path_sig = ?'
+      ).get(normalized.domain, normalized.path_sig);
+      const notfoundTotal = toInt(pathStats?.notfound_total, 0);
+      const okTotal = toInt(pathStats?.ok_total, 0);
+      if (notfoundTotal >= this._pathPenaltyThreshold && okTotal === 0) {
+        return { skip: true, reason: 'path_dead_pattern', next_retry_ts: null };
+      }
     }
 
     return { skip: false, reason: null, next_retry_ts: null };
@@ -230,6 +240,10 @@ export class FrontierDbSqlite {
       cooldownSeconds = Math.round(this._cooldown410Ms / 1000);
       cooldownReason = '410_gone';
       cooldownNextRetryTs = new Date(Date.parse(ts) + cooldownSeconds * 1000).toISOString();
+    } else if (statusCode === 403) {
+      cooldownSeconds = Math.round(this._cooldown403BaseMs * Math.pow(2, Math.min(fetchCount - 1, 8)) / 1000);
+      cooldownReason = '403_forbidden_backoff';
+      cooldownNextRetryTs = new Date(Date.parse(ts) + cooldownSeconds * 1000).toISOString();
     } else if (statusCode === 429) {
       cooldownSeconds = Math.round(this._cooldown429BaseMs * Math.pow(2, Math.min(fetchCount - 1, 8)) / 1000);
       cooldownReason = '429_rate_limited';
@@ -252,7 +266,7 @@ export class FrontierDbSqlite {
       const redirectDelta = (statusCode >= 300 && statusCode < 400) ? 1 : 0;
       const notfoundDelta = statusCode === 404 ? 1 : 0;
       const goneDelta = statusCode === 410 ? 1 : 0;
-      const blockedDelta = statusCode === 429 ? 1 : 0;
+      const blockedDelta = statusCode === 403 || statusCode === 429 ? 1 : 0;
       const serverErrDelta = statusCode >= 500 ? 1 : 0;
       const timeoutDelta = (statusCode === 0 && error) ? 1 : 0;
       const conflictDelta = conflictFlag ? 1 : 0;
@@ -295,7 +309,7 @@ export class FrontierDbSqlite {
         (statusCode >= 300 && statusCode < 400) ? 1 : 0,
         statusCode === 404 ? 1 : 0,
         statusCode === 410 ? 1 : 0,
-        statusCode === 429 ? 1 : 0,
+        (statusCode === 403 || statusCode === 429) ? 1 : 0,
         statusCode >= 500 ? 1 : 0,
         (statusCode === 0 && error) ? 1 : 0,
         JSON.stringify(mergedFields), confidence, conflictFlag ? 1 : 0,

@@ -1,0 +1,245 @@
+{
+  "schema_version": "2026-02-20.item-indexing-extraction-packet.simple.v1",
+  "record_kind": "item_indexing_extraction_packet_simple",
+  "item_packet_id": "sha256:<category|item_identifier>",
+  "category": "mice",
+  "item_identifier": "mice-logitech-g-pro-x",
+  "generated_at": "2026-02-20T11:35:10.000Z",
+  "run_scope": {
+    "current_run_id": "20260220-113255-3f7aa1",
+    "included_run_ids": [
+      "20260220-113255-3f7aa1"
+    ]
+  },
+  "source_packet_refs": [
+    {
+      "source_packet_id": "sha256:<source-url-1>",
+      "source_id": "src_01",
+      "canonical_url": "https://example.com/product-page",
+      "source_version_id": "sha256:<source-url-1|content>",
+      "content_hash": "sha256:<content-1>",
+      "run_id": "20260220-113255-3f7aa1"
+    }
+  ],
+  "field_source_index": {
+    "polling_rate_hz": {
+      "field_key": "polling_rate_hz",
+      "sources": [
+        {
+          "source_packet_id": "sha256:<source-url-1>",
+          "source_version_id": "sha256:<source-url-1|content>",
+          "source_id": "src_01",
+          "canonical_url": "https://example.com/product-page",
+          "source_tier": 1,
+          "assertion_ids": [
+            "cand_item_polling_rate_hz_1"
+          ],
+          "evidence_ids": [
+            "e1"
+          ],
+          "best_parser_score": 0.98,
+          "best_target_match_score": 0.97,
+          "ambiguity_level": "low",
+          "ambiguity_score": 0.08
+        }
+      ],
+      "source_count": 1,
+      "best_parser_score": 0.98
+    }
+  },
+  "field_key_map": {
+    "polling_rate_hz": {
+      "field_key": "polling_rate_hz",
+      "field_key_id": "sha256:<item_packet_id|polling_rate_hz>",
+      "field_meta": {
+        "field_key": "polling_rate_hz",
+        "shape": "scalar",
+        "required_level": "critical",
+        "unit_expected": "Hz"
+      },
+      "contexts": [
+        {
+          "field_instance_id": "sha256:<item_packet_id|grid_key|polling_rate_hz>",
+          "context_kind": "scalar",
+          "target_kind": "grid_key",
+          "selected_candidate_id": "item_cand_01",
+          "candidates": [
+            {
+              "item_candidate_id": "item_cand_01",
+              "source_packet_id": "sha256:<source-url-1>",
+              "source_version_id": "sha256:<source-url-1|content>",
+              "source_id": "src_01",
+              "assertion_id": "cand_item_polling_rate_hz_1",
+              "candidate_id": "cand_item_polling_rate_hz_1",
+              "field_key": "polling_rate_hz",
+              "value_normalized": 8000,
+              "unit": "Hz",
+              "parser_score": 0.98,
+              "target_match": {
+                "page_product_cluster_id": "cluster_main_product",
+                "target_match_score": 0.97,
+                "target_match_passed": true
+              },
+              "suggested_start_rank": 1,
+              "ambiguity": {
+                "level": "low",
+                "score": 0.08
+              },
+              "evidence_refs": [
+                {
+                  "source_packet_id": "sha256:<source-url-1>",
+                  "evidence_id": "e1"
+                }
+              ],
+              "image_evidence_refs": [
+                {
+                  "source_packet_id": "sha256:<source-url-1>",
+                  "image_asset_id": "img1",
+                  "region_id": "r1"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "field_metrics": {
+        "candidate_count": 1,
+        "distinct_source_count": 1,
+        "ambiguity_level": "low",
+        "ambiguity_score": 0.08,
+        "has_conflict": false
+      }
+    }
+  },
+  "coverage_summary": {
+    "field_count": 1,
+    "known_field_count": 1,
+    "required_coverage": "1/1",
+    "critical_coverage": "1/1"
+  },
+  "indexing_projection": {
+    "retrieval_ready": true,
+    "candidate_chunk_count": 4,
+    "priority_field_keys": [
+      "polling_rate_hz"
+    ],
+    "token_estimate_total": 420
+  },
+  "visual_index": {
+    "field_visual_links": {
+      "polling_rate_hz": [
+        {
+          "source_packet_id": "sha256:<source-url-1>",
+          "source_id": "src_01",
+          "image_asset_id": "img1",
+          "region_id": "r1",
+          "role": "identity_proof"
+        }
+      ]
+    },
+    "model_variant_clusters": [
+      {
+        "cluster_id": "mvc_01",
+        "candidate_model": "G PRO X",
+        "candidate_variant": "Wireless",
+        "source_image_refs": [
+          {
+            "source_packet_id": "sha256:<source-url-1>",
+            "source_id": "src_01",
+            "image_asset_id": "img1",
+            "region_id": "r1",
+            "role": "variant_proof"
+          }
+        ],
+        "cluster_confidence": 0.94
+      }
+    ],
+    "winner_model_visual_validation": {
+      "winner_model": "G PRO X",
+      "winner_variant": "Wireless",
+      "validated": true,
+      "confidence": 0.94,
+      "validated_at": "2026-02-20T11:36:20.000Z",
+      "supporting_image_refs": [
+        {
+          "source_packet_id": "sha256:<source-url-1>",
+          "source_id": "src_01",
+          "image_asset_id": "img1",
+          "region_id": "r1",
+          "role": "variant_proof"
+        }
+      ]
+    }
+  },
+  "sql_projection": {
+    "item_field_state_rows": [
+      {
+        "id": 2122,
+        "category": "mice",
+        "product_id": "mice-logitech-g-pro-x",
+        "field_key": "polling_rate_hz",
+        "value": 8000,
+        "confidence": 0.97,
+        "source": "pipeline",
+        "accepted_candidate_id": "cand_item_polling_rate_hz_1",
+        "overridden": false,
+        "needs_ai_review": true,
+        "ai_review_complete": false
+      }
+    ],
+    "candidate_rows": [
+      {
+        "candidate_id": "cand_item_polling_rate_hz_1",
+        "category": "mice",
+        "product_id": "mice-logitech-g-pro-x",
+        "field_key": "polling_rate_hz",
+        "value": "8000",
+        "normalized_value": "8000",
+        "score": 0.98,
+        "rank": 1,
+        "source_url": "https://example.com/product-page",
+        "source_host": "example.com",
+        "source_root_domain": "example.com",
+        "source_tier": 1,
+        "source_method": "network_json",
+        "snippet_id": "s1",
+        "snippet_hash": "sha256:<snippet>",
+        "snippet_text": "\"pollingRateHz\": 8000",
+        "quote": "\"pollingRateHz\": 8000",
+        "evidence_url": "https://example.com/product-page",
+        "evidence_retrieved_at": "2026-02-20T11:33:01.050Z",
+        "is_component_field": false,
+        "component_type": null,
+        "is_list_field": false,
+        "run_id": "20260220-113255-3f7aa1"
+      }
+    ],
+    "key_review_state_rows": [
+      {
+        "id": 781,
+        "category": "mice",
+        "target_kind": "grid_key",
+        "item_identifier": "mice-logitech-g-pro-x",
+        "field_key": "polling_rate_hz",
+        "enum_value_norm": null,
+        "component_identifier": null,
+        "property_key": null,
+        "item_field_state_id": 2122,
+        "component_value_id": null,
+        "list_value_id": null,
+        "enum_list_id": null,
+        "selected_value": 8000,
+        "selected_candidate_id": "cand_item_polling_rate_hz_1",
+        "confidence_score": 0.97,
+        "ai_confirm_primary_status": "confirmed",
+        "ai_confirm_primary_confidence": 0.95,
+        "ai_confirm_shared_status": null,
+        "ai_confirm_shared_confidence": null,
+        "user_accept_primary_status": "accepted",
+        "user_accept_shared_status": null,
+        "user_override_ai_primary": false,
+        "user_override_ai_shared": false
+      }
+    ]
+  }
+}

@@ -120,6 +120,36 @@ test('sqlite frontier: 404 triggers cooldown', () => {
   }
 });
 
+test('sqlite frontier: 403 triggers cooldown', () => {
+  const dbPath = tmpDbPath();
+  try {
+    const frontier = new FrontierDbSqlite({ dbPath, config: { frontierCooldown403BaseSeconds: 60 } });
+    frontier.recordFetch({ productId: 'p1', url: 'https://example.com/forbidden', status: 403 });
+    const skip = frontier.shouldSkipUrl('https://example.com/forbidden');
+    assert.equal(skip.skip, true);
+    const row = frontier.getUrlRow('https://example.com/forbidden');
+    assert.equal(row?.cooldown?.reason, '403_forbidden_backoff');
+    frontier.close();
+  } finally {
+    cleanup(dbPath);
+  }
+});
+
+test('sqlite frontier: path dead pattern skips sibling URLs', () => {
+  const dbPath = tmpDbPath();
+  try {
+    const frontier = new FrontierDbSqlite({ dbPath, config: { frontierPathPenaltyNotfoundThreshold: 2 } });
+    frontier.recordFetch({ productId: 'p1', url: 'https://example.com/support/123', status: 404 });
+    frontier.recordFetch({ productId: 'p1', url: 'https://example.com/support/456', status: 404 });
+    const skip = frontier.shouldSkipUrl('https://example.com/support/789');
+    assert.equal(skip.skip, true);
+    assert.equal(skip.reason, 'path_dead_pattern');
+    frontier.close();
+  } finally {
+    cleanup(dbPath);
+  }
+});
+
 test('sqlite frontier: shouldSkipUrl returns false for unknown URLs', () => {
   const dbPath = tmpDbPath();
   try {

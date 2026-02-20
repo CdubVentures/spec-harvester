@@ -17,6 +17,32 @@ Phase 14 upgrades the GUI into a **live, evidence-first “Operations Cockpit”
 
 ---
 
+## 2026-02-19 Status Addendum (IndexLab Runtime)
+
+The active IndexLab runtime UI is now implemented in React:
+- `tools/gui-react/src/pages/indexing/IndexingPage.tsx`
+
+Implemented now (already live):
+- unified one-run flow across phases (single run action)
+- phase 02 and phase 03 explicit toggles
+- full LLM lane controls with model + token cap:
+  - plan, triage, fast, reasoning, extract, validate, write
+  - fallback plan/extract/validate/write
+- model-aware token preset clamping in GUI
+- separate DeepSeek fallback token limits (chat vs reasoner)
+- readable LLM output review (search profile + triage + per-call traces)
+- real-time LLM runtime proof in top overview:
+  - `llm call activity`
+  - `pending llm calls` grouped by purpose/model
+
+Still planned from this Phase 14 spec:
+- broader fleet-ops ergonomics beyond current IndexLab controls
+- deeper artifact inspection surfaces and richer intervention tooling
+
+Notes:
+- Streamlit references in this document are legacy context.
+- Use this doc as runtime-ops target architecture; use `implementation/ai-indexing-plans/` for current phase execution details.
+
 ## 0) CURRENT GUI ANALYSIS (FROM `tools/gui/app.py` IN THE ZIP)
 
 The current GUI has these good foundations:
@@ -462,4 +488,3 @@ Once it exists, you can:
 - confirm you’re scanning the right surfaces (DOM/JSON/PDF/network)
 
 This is how you reach “24/7, always improving” in practice.
-

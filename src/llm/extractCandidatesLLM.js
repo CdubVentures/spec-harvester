@@ -5,6 +5,7 @@ import { buildFieldBatches, resolveBatchModel } from './fieldBatching.js';
 import { LLMCache } from './llmCache.js';
 import { verifyCandidateEvidence } from './evidenceVerifier.js';
 import { callLlmWithRouting, hasAnyLlmApiKey } from './routing.js';
+import { buildExtractionContextMatrix } from './extractionContext.js';
 import { ruleType, ruleShape, ruleRequiredLevel, ruleUnit, ruleAiMode, ruleAiReasoningNote, autoGenerateExtractionGuidance } from '../engine/ruleAccessors.js';
 
 const IDENTITY_KEYS = ['brand', 'model', 'sku', 'mpn', 'gtin', 'variant'];
@@ -218,7 +219,11 @@ const FIELD_TERM_HINTS = {
   weight: ['weight', 'gram', 'grams', 'g'],
   colors: ['color', 'colour', 'black', 'white', 'red', 'blue'],
   coating: ['coating', 'coat', 'finish', 'surface'],
-  material: ['material', 'plastic', 'aluminum', 'aluminium', 'magnesium', 'shell', 'body']
+  material: ['material', 'plastic', 'aluminum', 'aluminium', 'magnesium', 'shell', 'body'],
+  connection: ['connection', 'connectivity', 'wired', 'wireless', 'usb', 'usb-c', 'hdmi', 'displayport', 'dp'],
+  wireless_technology: ['wireless', 'bluetooth', '2.4ghz', 'wifi', 'rf'],
+  cable_type: ['cable', 'usb', 'usb-c', 'micro-usb', 'lightning'],
+  cable_length: ['cable length', 'length', 'meter', 'meters', 'm', 'mm', 'cm', 'ft', 'feet']
 };
 
 const IDENTITY_FIELDS = new Set(['brand', 'model', 'variant', 'sku', 'mpn', 'gtin', 'base_model']);
@@ -259,6 +264,29 @@ function clipText(value, maxChars = 900) {
   return `${token.slice(0, cap)}...`;
 }
 
+function normalizeSourceToken(value = '') {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function hostFromUrl(value = '') {
+  try {
+    return String(new URL(String(value || '')).host || '').trim().toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function inferImageMimeFromUri(value = '') {
+  const token = String(value || '').trim().toLowerCase();
+  if (token.endsWith('.png')) return 'image/png';
+  if (token.endsWith('.webp')) return 'image/webp';
+  return 'image/jpeg';
+}
+
 function buildPromptEvidencePayload(scoped = {}, config = {}) {
   const maxCharsPerSnippet = Math.max(160, Number.parseInt(String(config.llmExtractMaxSnippetChars || 900), 10) || 900);
   const promptRefs = (scoped.references || []).map((row) => ({
@@ -266,7 +294,11 @@ function buildPromptEvidencePayload(scoped = {}, config = {}) {
     source_id: row?.source_id || row?.source || '',
     url: row?.url || '',
     type: row?.type || 'text',
-    snippet_hash: row?.snippet_hash || ''
+    snippet_hash: row?.snippet_hash || '',
+    file_uri: row?.file_uri || '',
+    mime_type: row?.mime_type || '',
+    content_hash: row?.content_hash || '',
+    surface: row?.surface || ''
   })).filter((row) => row.id);
   const promptSnippets = (scoped.snippets || []).map((row) => ({
     id: String(row?.id || '').trim(),
@@ -276,11 +308,153 @@ function buildPromptEvidencePayload(scoped = {}, config = {}) {
     field_hints: Array.isArray(row?.field_hints) ? row.field_hints : [],
     text: clipText(row?.normalized_text || row?.text || '', maxCharsPerSnippet),
     snippet_hash: row?.snippet_hash || '',
-    url: row?.url || ''
+    url: row?.url || '',
+    file_uri: row?.file_uri || '',
+    mime_type: row?.mime_type || '',
+    content_hash: row?.content_hash || '',
+    surface: row?.surface || ''
   })).filter((row) => row.id && row.text);
   return {
     references: promptRefs,
     snippets: promptSnippets
+  };
+}
+
+function normalizeVisualAssetsFromEvidencePack(evidencePack = {}) {
+  const fromPack = Array.isArray(evidencePack?.visual_assets)
+    ? evidencePack.visual_assets
+    : [];
+  const fromRefs = Array.isArray(evidencePack?.references)
+    ? evidencePack.references
+        .filter((row) => String(row?.file_uri || '').trim())
+        .map((row) => ({
+          id: String(row?.id || '').trim(),
+          kind: String(row?.type || '').trim() || 'visual_asset',
+          source_id: String(row?.source_id || '').trim(),
+          source_url: String(row?.url || '').trim(),
+          file_uri: String(row?.file_uri || '').trim(),
+          mime_type: String(row?.mime_type || '').trim(),
+          content_hash: String(row?.content_hash || '').trim(),
+          width: Number(row?.width || 0) || null,
+          height: Number(row?.height || 0) || null,
+          size_bytes: Number(row?.size_bytes || 0) || null,
+          surface: String(row?.surface || '').trim()
+        }))
+    : [];
+  const dedupe = new Map();
+  for (const row of [...fromPack, ...fromRefs]) {
+    const uri = String(row?.file_uri || '').trim();
+    if (!uri) continue;
+    const key = `${uri}|${String(row?.content_hash || '').trim()}`;
+    if (!dedupe.has(key)) {
+      dedupe.set(key, {
+        id: String(row?.id || '').trim() || '',
+        kind: String(row?.kind || row?.type || '').trim() || 'visual_asset',
+        source_id: String(row?.source_id || '').trim() || '',
+        source_url: String(row?.source_url || row?.url || '').trim() || '',
+        file_uri: uri,
+        mime_type: String(row?.mime_type || '').trim() || '',
+        content_hash: String(row?.content_hash || '').trim() || '',
+        width: Number(row?.width || 0) || null,
+        height: Number(row?.height || 0) || null,
+        size_bytes: Number(row?.size_bytes || 0) || null,
+        surface: String(row?.surface || '').trim() || ''
+      });
+    }
+  }
+  return [...dedupe.values()];
+}
+
+function shouldSendPrimeSourceVisuals({
+  routeMatrixPolicy = null
+} = {}) {
+  const componentSend = String(routeMatrixPolicy?.component_values_send || '').trim().toLowerCase();
+  const scalarSend = String(routeMatrixPolicy?.scalar_linked_send || '').trim().toLowerCase();
+  const listSend = String(routeMatrixPolicy?.list_values_send || '').trim().toLowerCase();
+  const explicit = routeMatrixPolicy?.table_linked_send ?? routeMatrixPolicy?.prime_sources_visual_send ?? null;
+  if (explicit !== null && explicit !== undefined && String(explicit).trim() !== '') {
+    if (typeof explicit === 'boolean') {
+      return explicit;
+    }
+    const token = String(explicit).trim().toLowerCase();
+    if (token === 'true' || token === '1' || token === 'yes' || token === 'on') return true;
+    if (token === 'false' || token === '0' || token === 'no' || token === 'off') return false;
+    return token.includes('prime');
+  }
+  if (componentSend.includes('prime')) {
+    return true;
+  }
+  if (scalarSend.includes('prime')) {
+    return true;
+  }
+  if (listSend.includes('prime')) {
+    return true;
+  }
+  return false;
+}
+
+function buildMultimodalUserInput({
+  userPayload = {},
+  promptEvidence = {},
+  scopedEvidencePack = {},
+  routeMatrixPolicy = null,
+  maxImages = 6
+} = {}) {
+  const text = JSON.stringify(userPayload);
+  const allowImages = shouldSendPrimeSourceVisuals({ routeMatrixPolicy });
+  if (!allowImages) {
+    return {
+      text,
+      images: []
+    };
+  }
+  const visuals = normalizeVisualAssetsFromEvidencePack(scopedEvidencePack);
+  const rankedVisuals = visuals
+    .map((row) => ({
+      ...row,
+      ref_match: (promptEvidence.references || []).some((ref) => String(ref?.file_uri || '').trim() === row.file_uri) ? 1 : 0
+    }))
+    .sort((a, b) => {
+      if (b.ref_match !== a.ref_match) return b.ref_match - a.ref_match;
+      const aSize = Number(a.size_bytes || 0);
+      const bSize = Number(b.size_bytes || 0);
+      return bSize - aSize;
+    })
+    .slice(0, Math.max(1, Number(maxImages || 6)));
+
+  const images = rankedVisuals.map((row) => ({
+    id: row.id || '',
+    file_uri: row.file_uri,
+    mime_type: row.mime_type || '',
+    content_hash: row.content_hash || '',
+    kind: row.kind || '',
+    source_id: row.source_id || '',
+    source_url: row.source_url || '',
+    caption: [
+      row.kind ? `kind=${row.kind}` : '',
+      row.surface ? `surface=${row.surface}` : '',
+      row.width && row.height ? `size=${row.width}x${row.height}` : ''
+    ].filter(Boolean).join(' | ')
+  }));
+  if (images.length === 0) {
+    const fallbackScreenshotUri = String(scopedEvidencePack?.meta?.visual_artifacts?.screenshot_uri || '').trim();
+    if (fallbackScreenshotUri) {
+      images.push({
+        id: `img_fallback_${sha256(fallbackScreenshotUri).slice(7, 19)}`,
+        file_uri: fallbackScreenshotUri,
+        mime_type: inferImageMimeFromUri(fallbackScreenshotUri),
+        content_hash: String(scopedEvidencePack?.meta?.visual_artifacts?.screenshot_content_hash || '').trim(),
+        kind: 'screenshot_capture',
+        source_id: String(scopedEvidencePack?.meta?.source_id || '').trim(),
+        source_url: String(scopedEvidencePack?.meta?.url || '').trim(),
+        caption: 'kind=screenshot_capture | source=meta_fallback'
+      });
+    }
+  }
+
+  return {
+    text,
+    images
   };
 }
 
@@ -342,7 +516,8 @@ function buildBatchEvidence(evidencePack = {}, batchFields = [], config = {}) {
   if (selectedSnippets.length === 0) {
     return {
       references: [],
-      snippets: []
+      snippets: [],
+      visual_assets: []
     };
   }
 
@@ -354,7 +529,14 @@ function buildBatchEvidence(evidencePack = {}, batchFields = [], config = {}) {
         source_id: row?.source_id || row?.source || '',
         url: row?.url || '',
         type: row?.type || 'text',
-        snippet_hash: row?.snippet_hash || ''
+        snippet_hash: row?.snippet_hash || '',
+        file_uri: row?.file_uri || '',
+        mime_type: row?.mime_type || '',
+        content_hash: row?.content_hash || '',
+        width: Number(row?.width || 0) || null,
+        height: Number(row?.height || 0) || null,
+        size_bytes: Number(row?.size_bytes || 0) || null,
+        surface: row?.surface || ''
       });
       continue;
     }
@@ -367,13 +549,61 @@ function buildBatchEvidence(evidencePack = {}, batchFields = [], config = {}) {
       url: snippet?.url || evidencePack?.meta?.url || '',
       type: snippet?.type || 'text',
       source_id: snippet?.source_id || snippet?.source || '',
-      snippet_hash: snippet?.snippet_hash || ''
+      snippet_hash: snippet?.snippet_hash || '',
+      file_uri: snippet?.file_uri || '',
+      mime_type: snippet?.mime_type || '',
+      content_hash: snippet?.content_hash || '',
+      width: Number(snippet?.width || 0) || null,
+      height: Number(snippet?.height || 0) || null,
+      size_bytes: Number(snippet?.size_bytes || 0) || null,
+      surface: snippet?.surface || ''
     });
   }
 
+  const selectedRefUris = new Set(
+    selectedRefs
+      .map((row) => String(row?.file_uri || '').trim())
+      .filter(Boolean)
+  );
+  const selectedSourceIds = new Set(
+    selectedRefs
+      .map((row) => String(row?.source_id || '').trim())
+      .filter(Boolean)
+  );
+  const selectedSourceTokens = new Set(
+    [...selectedSourceIds]
+      .map((token) => normalizeSourceToken(token))
+      .filter(Boolean)
+  );
+  const selectedHosts = new Set(
+    selectedRefs
+      .map((row) => hostFromUrl(row?.url || ''))
+      .filter(Boolean)
+  );
+  const selectedVisualAssets = normalizeVisualAssetsFromEvidencePack(evidencePack).filter((row) => {
+    const uri = String(row?.file_uri || '').trim();
+    const sourceId = String(row?.source_id || '').trim();
+    const sourceToken = normalizeSourceToken(sourceId);
+    const sourceHost = hostFromUrl(row?.source_url || '');
+    if (uri && selectedRefUris.has(uri)) {
+      return true;
+    }
+    if (sourceId && selectedSourceIds.has(sourceId)) {
+      return true;
+    }
+    if (sourceToken && selectedSourceTokens.has(sourceToken)) {
+      return true;
+    }
+    if (sourceHost && selectedHosts.has(sourceHost)) {
+      return true;
+    }
+    return false;
+  });
+
   return {
     references: selectedRefs,
-    snippets: selectedSnippets.map(({ _score, _length, ...row }) => row)
+    snippets: selectedSnippets.map(({ _score, _length, ...row }) => row),
+    visual_assets: selectedVisualAssets
   };
 }
 
@@ -382,24 +612,48 @@ function sanitizeExtractionResult({
   job,
   fieldSet,
   validRefs,
-  evidencePack
+  evidencePack,
+  minEvidenceRefsByField = {}
 }) {
   const identityCandidates = sanitizeIdentity(result?.identityCandidates, job.identityLock || {});
   const fieldCandidates = [];
   let droppedByEvidenceVerifier = 0;
+  let droppedUnknownField = 0;
+  let droppedUnknownValue = 0;
+  let droppedMissingRefs = 0;
+  let droppedInsufficientRefs = 0;
+  let droppedInvalidRefs = 0;
+  const rawFieldCandidates = Array.isArray(result?.fieldCandidates) ? result.fieldCandidates : [];
 
-  for (const row of result?.fieldCandidates || []) {
+  for (const row of rawFieldCandidates) {
     const field = String(row.field || '').trim();
     const value = normalizeCandidateValue(row.value);
+    const originalRefs = Array.isArray(row?.evidenceRefs)
+      ? row.evidenceRefs.map((id) => String(id || '').trim()).filter(Boolean)
+      : [];
     const refs = filterEvidenceRefs(row.evidenceRefs, validRefs);
 
     if (!fieldSet.has(field)) {
+      droppedUnknownField += 1;
       continue;
     }
     if (!hasKnownValue(value)) {
+      droppedUnknownValue += 1;
       continue;
     }
     if (!refs.length) {
+      droppedMissingRefs += 1;
+      if (originalRefs.length > 0) {
+        droppedInvalidRefs += 1;
+      }
+      continue;
+    }
+    const requiredMinRefs = Math.max(
+      1,
+      Number.parseInt(String(minEvidenceRefsByField?.[field] ?? 1), 10) || 1
+    );
+    if (refs.length < requiredMinRefs) {
+      droppedInsufficientRefs += 1;
       continue;
     }
 
@@ -456,13 +710,26 @@ function sanitizeExtractionResult({
   if (droppedByEvidenceVerifier > 0) {
     notes.push(`Dropped ${droppedByEvidenceVerifier} candidates by evidence verifier.`);
   }
+  if (droppedInsufficientRefs > 0) {
+    notes.push(`Dropped ${droppedInsufficientRefs} candidates below min_evidence_refs.`);
+  }
 
   return {
     identityCandidates,
     fieldCandidates,
     conflicts,
     notes,
-    droppedByEvidenceVerifier
+    droppedByEvidenceVerifier,
+    metrics: {
+      raw_candidate_count: rawFieldCandidates.length,
+      accepted_candidate_count: fieldCandidates.length,
+      dropped_unknown_field: droppedUnknownField,
+      dropped_unknown_value: droppedUnknownValue,
+      dropped_missing_refs: droppedMissingRefs,
+      dropped_insufficient_refs: droppedInsufficientRefs,
+      dropped_invalid_refs: droppedInvalidRefs,
+      dropped_evidence_verifier: droppedByEvidenceVerifier
+    }
   };
 }
 
@@ -484,6 +751,53 @@ function shouldRunVerifyExtraction(llmContext = {}) {
 
 function toArray(value) {
   return Array.isArray(value) ? value : [];
+}
+
+function createEmptyPhase08() {
+  return {
+    generated_at: new Date().toISOString(),
+    summary: {
+      batch_count: 0,
+      batch_error_count: 0,
+      schema_fail_rate: 0,
+      raw_candidate_count: 0,
+      accepted_candidate_count: 0,
+      dangling_snippet_ref_count: 0,
+      dangling_snippet_ref_rate: 0,
+      evidence_policy_violation_count: 0,
+      evidence_policy_violation_rate: 0,
+      min_refs_satisfied_count: 0,
+      min_refs_total: 0,
+      min_refs_satisfied_rate: 0
+    },
+    batches: [],
+    field_contexts: {},
+    prime_sources: {
+      rows: []
+    }
+  };
+}
+
+function mergePhase08FieldContexts(target = {}, source = {}) {
+  const out = { ...(target || {}) };
+  for (const [field, context] of Object.entries(source || {})) {
+    const key = String(field || '').trim();
+    if (!key || out[key]) continue;
+    out[key] = context;
+  }
+  return out;
+}
+
+function mergePhase08PrimeRows(target = [], source = []) {
+  const out = [...(target || [])];
+  const seen = new Set(out.map((row) => `${row?.field_key || ''}|${row?.snippet_id || ''}|${row?.url || ''}`));
+  for (const row of source || []) {
+    const key = `${row?.field_key || ''}|${row?.snippet_id || ''}|${row?.url || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+  }
+  return out;
 }
 
 export function buildPromptFieldContracts(categoryConfig = {}, fields = [], componentDBs = {}, knownValuesMap = {}) {
@@ -577,7 +891,8 @@ export async function extractCandidatesLLM({
       identityCandidates: {},
       fieldCandidates: [],
       conflicts: [],
-      notes: ['LLM disabled']
+      notes: ['LLM disabled'],
+      phase08: createEmptyPhase08()
     };
   }
 
@@ -621,7 +936,8 @@ export async function extractCandidatesLLM({
       identityCandidates: {},
       fieldCandidates: [],
       conflicts: [],
-      notes: ['LLM extraction skipped by budget guard']
+      notes: ['LLM extraction skipped by budget guard'],
+      phase08: createEmptyPhase08()
     };
   }
 
@@ -635,6 +951,7 @@ export async function extractCandidatesLLM({
     })
     : null;
   let cacheHits = 0;
+  const routeMatrixPolicy = llmContext?.route_matrix_policy || llmContext?.routeMatrixPolicy || null;
 
     const invokeModel = async ({
       model,
@@ -644,9 +961,12 @@ export async function extractCandidatesLLM({
       maxTokens = 0,
       usageTracker,
       userPayload,
+      promptEvidence,
       fieldSet,
       validRefs,
-      scopedEvidencePack
+      minEvidenceRefsByField = {},
+      scopedEvidencePack,
+      routeMatrixPolicy = null
     }) => {
     const defaultExtractMaxTokens = Math.max(
       256,
@@ -662,6 +982,13 @@ export async function extractCandidatesLLM({
         10
       ) || 4096
     );
+    const multimodalUserInput = buildMultimodalUserInput({
+      userPayload,
+      promptEvidence,
+      scopedEvidencePack,
+      routeMatrixPolicy,
+      maxImages: Math.max(1, Number.parseInt(String(config.llmExtractMaxImagesPerBatch || 6), 10) || 6)
+    });
     const result = await callLlmWithRouting({
       config,
       reason,
@@ -677,7 +1004,7 @@ export async function extractCandidatesLLM({
         '- Always return object keys: identityCandidates, fieldCandidates, conflicts, notes.',
         '- No prose; JSON only.'
       ].join('\n'),
-      user: JSON.stringify(userPayload),
+      user: multimodalUserInput,
       jsonSchema: llmSchema(),
       usageContext: {
         category: job.category || categoryConfig.category || '',
@@ -688,6 +1015,7 @@ export async function extractCandidatesLLM({
         host: scopedEvidencePack?.meta?.host || evidencePack?.meta?.host || '',
         url_count: Math.max(0, Number(scopedEvidencePack?.references?.length || 0)),
         evidence_chars: Math.max(0, Number(scopedEvidencePack?.meta?.total_chars || evidencePack?.meta?.total_chars || 0)),
+        multimodal_image_count: Array.isArray(multimodalUserInput?.images) ? multimodalUserInput.images.length : 0,
         traceWriter: llmContext.traceWriter || null,
         trace_context: {
           purpose: 'extract_candidates',
@@ -718,7 +1046,8 @@ export async function extractCandidatesLLM({
       job,
       fieldSet,
       validRefs,
-      evidencePack: scopedEvidencePack
+      evidencePack: scopedEvidencePack,
+      minEvidenceRefsByField
     });
   };
 
@@ -727,8 +1056,13 @@ export async function extractCandidatesLLM({
     let aggregateCandidates = [];
     let aggregateConflicts = [];
     let aggregateNotes = [];
+    let phase08FieldContexts = {};
+    let phase08PrimeRows = [];
+    const phase08BatchRows = [];
+    let phase08BatchErrorCount = 0;
 
     for (const batch of usableBatches) {
+      const batchStartedAt = Date.now();
       const batchFields = normalizeFieldList(batch.fields || [], {
         fieldOrder: effectiveFieldOrder
       });
@@ -748,12 +1082,62 @@ export async function extractCandidatesLLM({
           reason: canCall.reason
         });
         aggregateNotes.push(`Batch ${batch.id} skipped by budget guard.`);
+        phase08BatchRows.push({
+          batch_id: String(batch.id || ''),
+          status: 'skipped_budget',
+          route_reason: 'budget_guard',
+          model: '',
+          target_field_count: batchFields.length,
+          snippet_count: 0,
+          reference_count: 0,
+          raw_candidate_count: 0,
+          accepted_candidate_count: 0,
+          dropped_missing_refs: 0,
+          dropped_invalid_refs: 0,
+          dropped_evidence_verifier: 0,
+          min_refs_satisfied_count: 0,
+          min_refs_total: 0,
+          elapsed_ms: Math.max(0, Date.now() - batchStartedAt)
+        });
         continue;
       }
 
       const scoped = buildBatchEvidence(evidencePack, batchFields, config);
       const validRefs = new Set((scoped.references || []).map((item) => String(item.id || '').trim()).filter(Boolean));
       const fieldSet = new Set(batchFields);
+      const contextMatrix = buildExtractionContextMatrix({
+        category: job.category || categoryConfig.category || '',
+        categoryConfig,
+        fields: batchFields,
+        componentDBs,
+        knownValuesMap: knownValuesFlat,
+        evidencePack: scoped,
+        options: {
+          maxPrimePerField: 3,
+          maxPrimeRows: 24,
+          maxParseExamples: 2,
+          maxComponentEntities: 120,
+          maxEnumOptions: 80
+        }
+      });
+      phase08FieldContexts = mergePhase08FieldContexts(phase08FieldContexts, contextMatrix.fields || {});
+      phase08PrimeRows = mergePhase08PrimeRows(phase08PrimeRows, contextMatrix?.prime_sources?.rows || []);
+      const routeMinRefsFloor = Math.max(
+        1,
+        Number.parseInt(
+          String(
+            routeMatrixPolicy?.min_evidence_refs_effective
+            ?? routeMatrixPolicy?.llm_output_min_evidence_refs_required
+            ?? 1
+          ),
+          10
+        ) || 1
+      );
+      const minEvidenceRefsByField = {};
+      for (const field of batchFields) {
+        const fieldMinRefs = Number(contextMatrix?.fields?.[field]?.evidence_policy?.min_evidence_refs || 1);
+        minEvidenceRefsByField[field] = Math.max(1, fieldMinRefs, routeMinRefsFloor);
+      }
       const modelRoute = resolveBatchModel({
         batch,
         config,
@@ -768,6 +1152,23 @@ export async function extractCandidatesLLM({
           field_count: batchFields.length
         });
         aggregateNotes.push(`Batch ${batch.id} skipped: no relevant evidence snippets.`);
+        phase08BatchRows.push({
+          batch_id: String(batch.id || ''),
+          status: 'skipped_no_signal',
+          route_reason: String(modelRoute.reason || ''),
+          model: String(model || ''),
+          target_field_count: batchFields.length,
+          snippet_count: 0,
+          reference_count: 0,
+          raw_candidate_count: 0,
+          accepted_candidate_count: 0,
+          dropped_missing_refs: 0,
+          dropped_invalid_refs: 0,
+          dropped_evidence_verifier: 0,
+          min_refs_satisfied_count: 0,
+          min_refs_total: 0,
+          elapsed_ms: Math.max(0, Date.now() - batchStartedAt)
+        });
         continue;
       }
       const promptEvidence = buildPromptEvidencePayload(scoped, config);
@@ -783,6 +1184,11 @@ export async function extractCandidatesLLM({
         ...buildPromptFieldContracts(categoryConfig, batchFields, componentDBs, knownValuesFlat),
         anchors: job.anchors || {},
         golden_examples: (goldenExamples || []).slice(0, 5),
+        extraction_context: {
+          summary: contextMatrix.summary || {},
+          fields: contextMatrix.fields || {},
+          prime_sources: contextMatrix?.prime_sources || { by_field: {}, rows: [] }
+        },
         references: promptEvidence.references,
         snippets: promptEvidence.snippets
       };
@@ -798,6 +1204,8 @@ export async function extractCandidatesLLM({
           (sum, row) => sum + String(row?.text || '').length,
           0
         ),
+        visual_asset_count: Array.isArray(scoped?.visual_assets) ? scoped.visual_assets.length : 0,
+        prime_source_rows: Number(contextMatrix?.prime_sources?.rows?.length || 0),
         payload_chars: JSON.stringify(userPayload).length
       });
 
@@ -830,26 +1238,121 @@ export async function extractCandidatesLLM({
       }
 
       if (!sanitized) {
-        sanitized = await invokeModel({
-          model,
-          routeRole: modelRoute.routeRole || 'extract',
-          reasoningMode: Boolean(modelRoute.reasoningMode),
-          reason: modelRoute.reason,
-          maxTokens: modelRoute.maxTokens || 0,
-          usageTracker: null,
-          userPayload,
-          fieldSet,
-          validRefs,
-          scopedEvidencePack: {
-            ...evidencePack,
-            references: scoped.references,
-            snippets: scoped.snippets
-          }
-        });
+        try {
+          sanitized = await invokeModel({
+            model,
+            routeRole: modelRoute.routeRole || 'extract',
+            reasoningMode: Boolean(modelRoute.reasoningMode),
+            reason: modelRoute.reason,
+            maxTokens: modelRoute.maxTokens || 0,
+            usageTracker: null,
+            userPayload,
+            promptEvidence,
+            fieldSet,
+            validRefs,
+            minEvidenceRefsByField,
+            scopedEvidencePack: {
+              ...evidencePack,
+              references: Array.isArray(evidencePack?.references)
+                ? evidencePack.references
+                : scoped.references,
+              snippets: Array.isArray(evidencePack?.snippets)
+                ? evidencePack.snippets
+                : scoped.snippets,
+              visual_assets: (Array.isArray(scoped.visual_assets) && scoped.visual_assets.length > 0)
+                ? scoped.visual_assets
+                : (Array.isArray(evidencePack?.visual_assets) ? evidencePack.visual_assets : [])
+            },
+            routeMatrixPolicy
+          });
+        } catch (error) {
+          phase08BatchErrorCount += 1;
+          phase08BatchRows.push({
+            batch_id: String(batch.id || ''),
+            status: 'failed',
+            route_reason: String(modelRoute.reason || ''),
+            model: String(model || ''),
+            target_field_count: batchFields.length,
+            snippet_count: Number(promptEvidence.snippets.length || 0),
+            reference_count: Number(promptEvidence.references.length || 0),
+            raw_candidate_count: 0,
+            accepted_candidate_count: 0,
+            dropped_missing_refs: 0,
+            dropped_invalid_refs: 0,
+            dropped_evidence_verifier: 0,
+            min_refs_satisfied_count: 0,
+            min_refs_total: 0,
+            elapsed_ms: Math.max(0, Date.now() - batchStartedAt),
+            error: String(error?.message || 'llm_extract_batch_failed')
+          });
+          aggregateNotes.push(`Batch ${batch.id} failed: ${error?.message || 'unknown error'}.`);
+          logger?.warn?.('llm_extract_batch_failed', {
+            productId: job.productId,
+            batch: batch.id,
+            model,
+            reason: modelRoute.reason,
+            message: error?.message || 'unknown_error'
+          });
+          continue;
+        }
         if (cache && cacheKey) {
           await cache.set(cacheKey, sanitized);
         }
       }
+
+      const batchMetrics = sanitized?.metrics && typeof sanitized.metrics === 'object'
+        ? sanitized.metrics
+        : {
+          raw_candidate_count: Number(sanitized?.fieldCandidates?.length || 0),
+          accepted_candidate_count: Number(sanitized?.fieldCandidates?.length || 0),
+          dropped_missing_refs: 0,
+          dropped_insufficient_refs: 0,
+          dropped_invalid_refs: 0,
+          dropped_evidence_verifier: 0
+        };
+      let minRefsSatisfiedCount = 0;
+      let minRefsTotal = 0;
+      for (const row of sanitized?.fieldCandidates || []) {
+        const field = String(row?.field || '').trim();
+        const refsCount = Array.isArray(row?.evidenceRefs) ? row.evidenceRefs.length : 0;
+        const minRefs = Number(minEvidenceRefsByField?.[field] || 1);
+        minRefsTotal += 1;
+        if (refsCount >= Math.max(1, minRefs)) {
+          minRefsSatisfiedCount += 1;
+        }
+      }
+      const batchElapsedMs = Math.max(0, Date.now() - batchStartedAt);
+      phase08BatchRows.push({
+        batch_id: String(batch.id || ''),
+        status: 'completed',
+        route_reason: String(modelRoute.reason || ''),
+        model: String(model || ''),
+        target_field_count: batchFields.length,
+        snippet_count: Number(promptEvidence.snippets.length || 0),
+        reference_count: Number(promptEvidence.references.length || 0),
+        raw_candidate_count: Number(batchMetrics.raw_candidate_count || 0),
+        accepted_candidate_count: Number(batchMetrics.accepted_candidate_count || 0),
+        dropped_missing_refs: Number(batchMetrics.dropped_missing_refs || 0),
+        dropped_invalid_refs: Number(batchMetrics.dropped_invalid_refs || 0),
+        dropped_evidence_verifier: Number(batchMetrics.dropped_evidence_verifier || 0),
+        min_refs_satisfied_count: Number(minRefsSatisfiedCount || 0),
+        min_refs_total: Number(minRefsTotal || 0),
+        elapsed_ms: batchElapsedMs
+      });
+      logger?.info?.('llm_extract_batch_outcome', {
+        productId: job.productId,
+        batch: batch.id,
+        model,
+        status: 'completed',
+        raw_candidate_count: Number(batchMetrics.raw_candidate_count || 0),
+        accepted_candidate_count: Number(batchMetrics.accepted_candidate_count || 0),
+        dropped_missing_refs: Number(batchMetrics.dropped_missing_refs || 0),
+        dropped_invalid_refs: Number(batchMetrics.dropped_invalid_refs || 0),
+        dropped_evidence_verifier: Number(batchMetrics.dropped_evidence_verifier || 0),
+        min_refs_satisfied_count: Number(minRefsSatisfiedCount || 0),
+        min_refs_total: Number(minRefsTotal || 0),
+        elapsed_ms: batchElapsedMs
+      });
 
       // Stamp model attribution on each candidate
       for (const cand of sanitized.fieldCandidates || []) {
@@ -871,6 +1374,49 @@ export async function extractCandidatesLLM({
       fieldCandidates: dedupeFieldCandidates(aggregateCandidates),
       conflicts: aggregateConflicts,
       notes: aggregateNotes
+    };
+    const phase08RawCandidateCount = phase08BatchRows.reduce((sum, row) => sum + Number(row?.raw_candidate_count || 0), 0);
+    const phase08AcceptedCandidateCount = phase08BatchRows.reduce((sum, row) => sum + Number(row?.accepted_candidate_count || 0), 0);
+    const phase08DanglingRefCount = phase08BatchRows.reduce((sum, row) => sum + Number(row?.dropped_invalid_refs || 0), 0);
+    const phase08PolicyViolationCount = phase08BatchRows.reduce(
+      (sum, row) => sum
+        + Number(row?.dropped_missing_refs || 0)
+        + Number(row?.dropped_invalid_refs || 0)
+        + Number(row?.dropped_evidence_verifier || 0),
+      0
+    );
+    const phase08MinRefsSatisfiedCount = phase08BatchRows.reduce((sum, row) => sum + Number(row?.min_refs_satisfied_count || 0), 0);
+    const phase08MinRefsTotal = phase08BatchRows.reduce((sum, row) => sum + Number(row?.min_refs_total || 0), 0);
+    const phase08BatchCount = phase08BatchRows.length;
+    primary.phase08 = {
+      generated_at: new Date().toISOString(),
+      summary: {
+        batch_count: phase08BatchCount,
+        batch_error_count: phase08BatchErrorCount,
+        schema_fail_rate: phase08BatchCount > 0
+          ? Number((phase08BatchErrorCount / phase08BatchCount).toFixed(6))
+          : 0,
+        raw_candidate_count: phase08RawCandidateCount,
+        accepted_candidate_count: phase08AcceptedCandidateCount,
+        dangling_snippet_ref_count: phase08DanglingRefCount,
+        dangling_snippet_ref_rate: phase08RawCandidateCount > 0
+          ? Number((phase08DanglingRefCount / phase08RawCandidateCount).toFixed(6))
+          : 0,
+        evidence_policy_violation_count: phase08PolicyViolationCount,
+        evidence_policy_violation_rate: phase08RawCandidateCount > 0
+          ? Number((phase08PolicyViolationCount / phase08RawCandidateCount).toFixed(6))
+          : 0,
+        min_refs_satisfied_count: phase08MinRefsSatisfiedCount,
+        min_refs_total: phase08MinRefsTotal,
+        min_refs_satisfied_rate: phase08MinRefsTotal > 0
+          ? Number((phase08MinRefsSatisfiedCount / phase08MinRefsTotal).toFixed(6))
+          : 0
+      },
+      batches: phase08BatchRows,
+      field_contexts: phase08FieldContexts,
+      prime_sources: {
+        rows: phase08PrimeRows.slice(0, 120)
+      }
     };
     if (cacheHits > 0) {
       primary.notes.push(`LLM cache hits: ${cacheHits}.`);
@@ -935,6 +1481,21 @@ export async function extractCandidatesLLM({
           const verifyRefs = new Set((verifyScoped.references || []).map((item) => String(item.id || '').trim()).filter(Boolean));
           const verifyFieldSet = new Set(verifyFields);
           const verifyPromptEvidence = buildPromptEvidencePayload(verifyScoped, config);
+          const verifyContextMatrix = buildExtractionContextMatrix({
+            category: job.category || categoryConfig.category || '',
+            categoryConfig,
+            fields: verifyFields,
+            componentDBs,
+            knownValuesMap: knownValuesFlat,
+            evidencePack: verifyScoped,
+            options: {
+              maxPrimePerField: 2,
+              maxPrimeRows: 16,
+              maxParseExamples: 2,
+              maxComponentEntities: 80,
+              maxEnumOptions: 60
+            }
+          });
           const verifyPayload = {
             product: {
               productId: job.productId,
@@ -944,9 +1505,14 @@ export async function extractCandidatesLLM({
               category: job.category || 'mouse'
             },
             targetFields: verifyFields,
-            ...buildPromptFieldContracts(categoryConfig, verifyFields),
+            ...buildPromptFieldContracts(categoryConfig, verifyFields, componentDBs, knownValuesFlat),
             anchors: job.anchors || {},
             golden_examples: (goldenExamples || []).slice(0, 5),
+            extraction_context: {
+              summary: verifyContextMatrix.summary || {},
+              fields: verifyContextMatrix.fields || {},
+              prime_sources: verifyContextMatrix?.prime_sources || { by_field: {}, rows: [] }
+            },
             references: verifyPromptEvidence.references,
             snippets: verifyPromptEvidence.snippets
           };
@@ -967,13 +1533,22 @@ export async function extractCandidatesLLM({
                 reason: 'verify_extract_fast',
                 usageTracker: usageFast,
                 userPayload: verifyPayload,
+                promptEvidence: verifyPromptEvidence,
                 fieldSet: verifyFieldSet,
                 validRefs: verifyRefs,
                 scopedEvidencePack: {
                   ...evidencePack,
-                  references: verifyScoped.references,
-                  snippets: verifyScoped.snippets
-                }
+                  references: Array.isArray(evidencePack?.references)
+                    ? evidencePack.references
+                    : verifyScoped.references,
+                  snippets: Array.isArray(evidencePack?.snippets)
+                    ? evidencePack.snippets
+                    : verifyScoped.snippets,
+                  visual_assets: (Array.isArray(verifyScoped.visual_assets) && verifyScoped.visual_assets.length > 0)
+                    ? verifyScoped.visual_assets
+                    : (Array.isArray(evidencePack?.visual_assets) ? evidencePack.visual_assets : [])
+                },
+                routeMatrixPolicy
               });
             }
           }
@@ -991,13 +1566,22 @@ export async function extractCandidatesLLM({
                 reason: 'verify_extract_reason',
                 usageTracker: usageReason,
                 userPayload: verifyPayload,
+                promptEvidence: verifyPromptEvidence,
                 fieldSet: verifyFieldSet,
                 validRefs: verifyRefs,
                 scopedEvidencePack: {
                   ...evidencePack,
-                  references: verifyScoped.references,
-                  snippets: verifyScoped.snippets
-                }
+                  references: Array.isArray(evidencePack?.references)
+                    ? evidencePack.references
+                    : verifyScoped.references,
+                  snippets: Array.isArray(evidencePack?.snippets)
+                    ? evidencePack.snippets
+                    : verifyScoped.snippets,
+                  visual_assets: (Array.isArray(verifyScoped.visual_assets) && verifyScoped.visual_assets.length > 0)
+                    ? verifyScoped.visual_assets
+                    : (Array.isArray(evidencePack?.visual_assets) ? evidencePack.visual_assets : [])
+                },
+                routeMatrixPolicy
               });
             }
           }
@@ -1091,7 +1675,8 @@ export async function extractCandidatesLLM({
       identityCandidates: {},
       fieldCandidates: [],
       conflicts: [],
-      notes: ['LLM extraction failed']
+      notes: ['LLM extraction failed'],
+      phase08: createEmptyPhase08()
     };
   }
 }

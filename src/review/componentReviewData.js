@@ -8,6 +8,7 @@ import path from 'node:path';
 import { confidenceColor } from './confidenceColor.js';
 import { evaluateVarianceBatch } from './varianceEvaluator.js';
 import {
+  buildComponentReviewSyntheticCandidateId,
   buildSyntheticComponentCandidateId,
   buildWorkbookComponentCandidateId,
   buildPipelineEnumCandidateId,
@@ -17,6 +18,7 @@ import { buildComponentIdentifier } from '../utils/componentIdentifier.js';
 
 function isObject(v) { return Boolean(v) && typeof v === 'object' && !Array.isArray(v); }
 function toArray(v) { return Array.isArray(v) ? v : []; }
+function normalizeToken(v) { return String(v ?? '').trim().toLowerCase(); }
 function slugify(v) { return String(v || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''); }
 function splitCandidateParts(v) {
   if (Array.isArray(v)) {
@@ -31,21 +33,302 @@ function splitCandidateParts(v) {
   return [...new Set(parts)];
 }
 
+function stableSerialize(value) {
+  if (Array.isArray(value)) return `[${value.map((item) => stableSerialize(item)).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
+    return `{${entries.map(([k, v]) => `${k}:${stableSerialize(v)}`).join(',')}}`;
+  }
+  return String(value ?? '');
+}
+
+function valueToken(value) {
+  if (value == null) return '';
+  if (typeof value === 'string') return normalizeToken(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return normalizeToken(value);
+  return normalizeToken(stableSerialize(value));
+}
+
+function hasKnownValue(value) {
+  const token = valueToken(value);
+  return token !== '' && token !== 'unk' && token !== 'unknown' && token !== 'n/a' && token !== 'null';
+}
+
+function clamp01(value, fallback = 0) {
+  const n = Number.parseFloat(String(value ?? ''));
+  if (!Number.isFinite(n)) return fallback;
+  if (n < 0) return 0;
+  if (n > 1) return 1;
+  return n;
+}
+
+function normalizeSourceToken(source) {
+  const token = normalizeToken(source);
+  if (!token) return '';
+  if (token === 'component_db' || token === 'known_values' || token === 'workbook' || token === 'excel import') {
+    return 'workbook';
+  }
+  if (token === 'pipeline' || token.startsWith('pipeline')) return 'pipeline';
+  if (token === 'specdb') return 'specdb';
+  if (token === 'manual' || token === 'user') return 'user';
+  return token;
+}
+
+function sourceLabelFromToken(token, fallback = '') {
+  const normalized = normalizeSourceToken(token);
+  if (normalized === 'workbook') return 'Excel Import';
+  if (normalized === 'pipeline') return 'Pipeline';
+  if (normalized === 'specdb') return 'SpecDb';
+  if (normalized === 'user') return 'user';
+  return fallback || normalized || '';
+}
+
+function sourceMethodFromToken(token, fallback = null) {
+  const normalized = normalizeSourceToken(token);
+  if (normalized === 'workbook') return 'workbook_import';
+  if (normalized === 'pipeline') return 'pipeline_extraction';
+  if (normalized === 'specdb') return 'specdb_lookup';
+  if (normalized === 'user') return 'manual_override';
+  return fallback;
+}
+
+function candidateSourceToken(candidate, fallback = '') {
+  return normalizeSourceToken(candidate?.source_id || candidate?.source || fallback);
+}
+
+function sortCandidatesByScore(candidates) {
+  return [...candidates].sort((a, b) => {
+    const aScore = clamp01(a?.score, -1);
+    const bScore = clamp01(b?.score, -1);
+    if (bScore !== aScore) return bScore - aScore;
+    return String(a?.candidate_id || '').localeCompare(String(b?.candidate_id || ''));
+  });
+}
+
+function ensureCandidateShape(candidate, fallbackId, fallbackSourceToken = '') {
+  const sourceToken = candidateSourceToken(candidate, fallbackSourceToken);
+  const sourceLabel = sourceLabelFromToken(sourceToken, String(candidate?.source || '').trim());
+  const existingEvidence = isObject(candidate?.evidence) ? candidate.evidence : {};
+  const isSyntheticSelected = Boolean(candidate?.is_synthetic_selected);
+  return {
+    candidate_id: String(candidate?.candidate_id || fallbackId || '').trim() || String(fallbackId || 'candidate'),
+    value: candidate?.value ?? null,
+    score: clamp01(candidate?.score, 0),
+    source_id: sourceToken || String(candidate?.source_id || '').trim(),
+    source: sourceLabel,
+    tier: candidate?.tier ?? null,
+    method: String(candidate?.method || '').trim() || sourceMethodFromToken(sourceToken, null),
+    evidence: {
+      url: String(existingEvidence.url || '').trim(),
+      retrieved_at: String(existingEvidence.retrieved_at || '').trim(),
+      snippet_id: String(existingEvidence.snippet_id || '').trim(),
+      snippet_hash: String(existingEvidence.snippet_hash || '').trim(),
+      quote: String(existingEvidence.quote || '').trim(),
+      quote_span: Array.isArray(existingEvidence.quote_span) ? existingEvidence.quote_span : null,
+      snippet_text: String(existingEvidence.snippet_text || '').trim(),
+      source_id: String(existingEvidence.source_id || sourceToken || '').trim(),
+    },
+    is_synthetic_selected: isSyntheticSelected,
+  };
+}
+
+function buildSyntheticSelectedCandidate({
+  candidateId,
+  value,
+  confidence,
+  sourceToken,
+  sourceTimestamp = null,
+  quote = '',
+}) {
+  const normalizedSource = normalizeSourceToken(sourceToken) || 'pipeline';
+  const message = String(quote || '').trim() || 'Selected value carried from current slot state';
+  return {
+    candidate_id: String(candidateId || '').trim() || 'selected_value',
+    value,
+    score: clamp01(confidence, 0.5),
+    source_id: normalizedSource,
+    source: sourceLabelFromToken(normalizedSource),
+    tier: null,
+    method: sourceMethodFromToken(normalizedSource, 'selected_value'),
+    evidence: {
+      url: '',
+      retrieved_at: String(sourceTimestamp || '').trim(),
+      snippet_id: '',
+      snippet_hash: '',
+      quote: message,
+      quote_span: null,
+      snippet_text: message,
+      source_id: normalizedSource,
+    },
+    is_synthetic_selected: true,
+  };
+}
+
+function ensureTrackedStateCandidateInvariant(state, {
+  fallbackCandidateId,
+  fallbackQuote = '',
+} = {}) {
+  if (!isObject(state)) return;
+  const sourceToken = normalizeSourceToken(state.source);
+  const userDriven = Boolean(state.overridden) || sourceToken === 'user';
+  const selectedValue = state?.selected?.value;
+  const selectedToken = valueToken(selectedValue);
+  const selectedConfidence = clamp01(state?.selected?.confidence, 0.5);
+  const acceptedCandidateId = String(state?.accepted_candidate_id || '').trim();
+
+  let candidates = toArray(state.candidates)
+    .filter((candidate) => hasKnownValue(candidate?.value))
+    .map((candidate, index) => ensureCandidateShape(
+      candidate,
+      `${fallbackCandidateId || 'candidate'}_${index + 1}`,
+      sourceToken,
+    ));
+
+  const hasAcceptedCandidateId = acceptedCandidateId
+    ? candidates.some((candidate) => String(candidate.candidate_id || '').trim() === acceptedCandidateId)
+    : false;
+
+  if (!userDriven && selectedToken && acceptedCandidateId && !hasAcceptedCandidateId) {
+    candidates.push(buildSyntheticSelectedCandidate({
+      candidateId: acceptedCandidateId,
+      value: selectedValue,
+      confidence: selectedConfidence,
+      sourceToken,
+      sourceTimestamp: state.source_timestamp,
+      quote: fallbackQuote,
+    }));
+  }
+
+  if (!userDriven && selectedToken && !candidates.some((candidate) => valueToken(candidate.value) === selectedToken)) {
+    candidates.push(buildSyntheticSelectedCandidate({
+      candidateId: `${fallbackCandidateId || 'candidate'}_selected`,
+      value: selectedValue,
+      confidence: selectedConfidence,
+      sourceToken,
+      sourceTimestamp: state.source_timestamp,
+      quote: fallbackQuote,
+    }));
+  }
+
+  candidates = sortCandidatesByScore(candidates);
+  state.candidates = candidates;
+  state.candidate_count = candidates.length;
+
+  if (userDriven) {
+    if (isObject(state.selected) && hasKnownValue(state.selected.value)) {
+      const conf = clamp01(state.selected.confidence, selectedConfidence);
+      state.selected.confidence = conf;
+      state.selected.color = confidenceColor(conf, toArray(state.reason_codes));
+    }
+    return;
+  }
+
+  const acceptedId = String(state.accepted_candidate_id || '').trim();
+  const acceptedCandidate = acceptedId
+    ? candidates.find((candidate) => String(candidate.candidate_id || '').trim() === acceptedId)
+    : null;
+  const selectedCandidate = acceptedCandidate || candidates[0] || null;
+  if (!selectedCandidate || !hasKnownValue(selectedCandidate.value)) return;
+
+  const confidence = clamp01(selectedCandidate.score, selectedConfidence);
+  state.selected = {
+    ...(isObject(state.selected) ? state.selected : {}),
+    value: selectedCandidate.value,
+    confidence,
+    status: acceptedCandidate ? 'accepted' : (state.needs_review ? 'needs_review' : 'ok'),
+    color: confidenceColor(confidence, toArray(state.reason_codes)),
+  };
+  const candidateSource = candidateSourceToken(selectedCandidate, sourceToken);
+  if (candidateSource) {
+    state.source = candidateSource;
+  }
+}
+
+function ensureEnumValueCandidateInvariant(entry, {
+  fieldKey,
+  fallbackQuote = '',
+} = {}) {
+  if (!isObject(entry)) return;
+  const sourceToken = normalizeSourceToken(entry.source);
+  const userDriven = sourceToken === 'user' || sourceToken === 'manual' || Boolean(entry.overridden);
+  const selectedToken = valueToken(entry.value);
+  const selectedConfidence = clamp01(entry.confidence, 0.5);
+  const acceptedCandidateId = String(entry.accepted_candidate_id || '').trim();
+
+  let candidates = toArray(entry.candidates)
+    .filter((candidate) => hasKnownValue(candidate?.value))
+    .map((candidate, index) => ensureCandidateShape(
+      candidate,
+      `enum_${slugify(fieldKey || 'field')}_${slugify(entry.value || index)}_${index + 1}`,
+      sourceToken,
+    ));
+
+  const hasAcceptedCandidateId = acceptedCandidateId
+    ? candidates.some((candidate) => String(candidate.candidate_id || '').trim() === acceptedCandidateId)
+    : false;
+
+  if (!userDriven && selectedToken && acceptedCandidateId && !hasAcceptedCandidateId) {
+    candidates.push(buildSyntheticSelectedCandidate({
+      candidateId: acceptedCandidateId,
+      value: entry.value,
+      confidence: selectedConfidence,
+      sourceToken,
+      sourceTimestamp: entry.source_timestamp,
+      quote: fallbackQuote,
+    }));
+  }
+
+  if (!userDriven && selectedToken && !candidates.some((candidate) => valueToken(candidate.value) === selectedToken)) {
+    candidates.push(buildSyntheticSelectedCandidate({
+      candidateId: `enum_${slugify(fieldKey || 'field')}_${slugify(entry.value || 'value')}_selected`,
+      value: entry.value,
+      confidence: selectedConfidence,
+      sourceToken,
+      sourceTimestamp: entry.source_timestamp,
+      quote: fallbackQuote,
+    }));
+  }
+
+  candidates = sortCandidatesByScore(candidates);
+  entry.candidates = candidates;
+
+  if (userDriven) {
+    if (hasKnownValue(entry.value)) {
+      entry.confidence = clamp01(entry.confidence, selectedConfidence);
+      entry.color = confidenceColor(entry.confidence, entry.needs_review ? ['pending_ai'] : []);
+    }
+    return;
+  }
+
+  const acceptedId = String(entry.accepted_candidate_id || '').trim();
+  const acceptedCandidate = acceptedId
+    ? candidates.find((candidate) => String(candidate.candidate_id || '').trim() === acceptedId)
+    : null;
+  const selectedCandidate = acceptedCandidate || candidates[0] || null;
+  if (!selectedCandidate || !hasKnownValue(selectedCandidate.value)) return;
+
+  entry.value = String(selectedCandidate.value);
+  entry.confidence = clamp01(selectedCandidate.score, selectedConfidence);
+  const candidateSource = candidateSourceToken(selectedCandidate, sourceToken);
+  if (candidateSource) {
+    entry.source = candidateSource;
+  }
+  entry.color = confidenceColor(entry.confidence, entry.needs_review ? ['pending_ai'] : []);
+}
+
 function isSharedLanePending(state, basePending = false) {
   const laneStatus = String(state?.ai_confirm_shared_status || '').trim().toLowerCase();
-  const userAccepted = String(state?.user_accept_shared_status || '').trim().toLowerCase() === 'accepted';
   const userOverride = Boolean(state?.user_override_ai_shared);
-  if (userAccepted || userOverride) return false;
+  // Shared lane remains pending until explicitly AI-confirmed; user-accept is independent.
+  if (userOverride) return false;
   if (laneStatus) return laneStatus !== 'confirmed';
   return Boolean(basePending);
 }
 
 function toSpecDbCandidate(row, fallbackId) {
-  const rawId = String(row?.candidate_id || fallbackId || '').trim();
+  const candidateId = String(row?.candidate_id || fallbackId || '').trim()
+    || `${fallbackId || 'specdb_candidate'}`;
   const productId = String(row?.product_id || '').trim();
-  const candidateId = productId && rawId && !rawId.startsWith(`${productId}::`)
-    ? `${productId}::${rawId}`
-    : (rawId || `${fallbackId || 'specdb_candidate'}`);
   return {
     candidate_id: candidateId,
     value: row?.value ?? null,
@@ -79,6 +362,77 @@ function appendAllSpecDbCandidates(target, rows, fallbackPrefix) {
   }
 }
 
+function hasActionableCandidate(candidates) {
+  return toArray(candidates).some((candidate) => (
+    !candidate?.is_synthetic_selected
+    && hasKnownValue(candidate?.value)
+    && String(candidate?.candidate_id || '').trim().length > 0
+  ));
+}
+
+function buildCandidateReviewLookup(reviewRows) {
+  const exact = new Map();
+  for (const row of toArray(reviewRows)) {
+    const candidateId = String(row?.candidate_id || '').trim();
+    if (!candidateId) continue;
+    exact.set(candidateId, row);
+  }
+  return { exact };
+}
+
+function getCandidateReviewRow(lookup, candidateId) {
+  if (!lookup) return null;
+  const cid = String(candidateId || '').trim();
+  if (!cid) return null;
+  if (lookup.exact.has(cid)) return lookup.exact.get(cid) || null;
+  return null;
+}
+
+function normalizeCandidateSharedReviewStatus(candidate, reviewRow = null) {
+  if (candidate?.is_synthetic_selected) return 'accepted';
+  if (reviewRow) {
+    if (Number(reviewRow.human_accepted) === 1) return 'accepted';
+    const aiStatus = normalizeToken(reviewRow.ai_review_status);
+    if (aiStatus === 'accepted') return 'accepted';
+    if (aiStatus === 'rejected') return 'rejected';
+    return 'pending';
+  }
+  const sourceToken = candidateSourceToken(candidate, '');
+  if (
+    sourceToken === 'workbook'
+    || sourceToken === 'known_values'
+    || sourceToken === 'component_db'
+    || sourceToken === 'manual'
+    || sourceToken === 'user'
+  ) {
+    return 'accepted';
+  }
+  return 'pending';
+}
+
+function annotateCandidateSharedReviews(candidates, reviewRows = []) {
+  const lookup = buildCandidateReviewLookup(reviewRows);
+  for (const candidate of toArray(candidates)) {
+    const candidateId = String(candidate?.candidate_id || '').trim();
+    const reviewRow = candidateId ? getCandidateReviewRow(lookup, candidateId) : null;
+    candidate.shared_review_status = normalizeCandidateSharedReviewStatus(candidate, reviewRow);
+    candidate.human_accepted = Number(reviewRow?.human_accepted || 0) === 1;
+  }
+}
+
+function reviewStatusToken(reviewItem) {
+  return normalizeToken(reviewItem?.status);
+}
+
+function isReviewItemCandidateVisible(reviewItem) {
+  const status = reviewStatusToken(reviewItem);
+  // Keep historical reviewed rows (confirmed/accepted) as candidate evidence.
+  // Only explicitly dismissed/ignored rows are hidden from candidate hydration.
+  if (!status) return true;
+  if (status === 'dismissed' || status === 'ignored' || status === 'rejected') return false;
+  return true;
+}
+
 async function safeReadJson(fp) {
   try { return JSON.parse(await fs.readFile(fp, 'utf8')); } catch { return null; }
 }
@@ -94,7 +448,7 @@ async function listJsonFiles(dirPath) {
 
 export async function buildComponentReviewLayout({ config = {}, category, specDb = null }) {
   if (!specDb) {
-    return { category, types: [] };
+    return buildComponentReviewLayoutLegacy({ config, category });
   }
   const typeRows = specDb.getComponentTypeList();
   const types = typeRows.map(row => ({
@@ -139,12 +493,7 @@ async function buildComponentReviewLayoutLegacy({ config = {}, category }) {
 
 export async function buildComponentReviewPayloads({ config = {}, category, componentType, specDb = null }) {
   if (!specDb) {
-    return {
-      category,
-      componentType,
-      items: [],
-      metrics: { total: 0, avg_confidence: 0, flags: 0 },
-    };
+    return buildComponentReviewPayloadsLegacy({ config, category, componentType, specDb });
   }
   return buildComponentReviewPayloadsSpecDb({ config, category, componentType, specDb });
 }
@@ -154,10 +503,7 @@ export async function buildComponentReviewPayloads({ config = {}, category, comp
 async function buildComponentReviewPayloadsSpecDb({ config = {}, category, componentType, specDb }) {
   const helperRoot = path.resolve(config.helperFilesRoot || 'helper_files');
 
-  const allComponents = specDb.getAllComponentsForType(componentType);
-  if (!allComponents.length) {
-    return { category, componentType, items: [], metrics: { total: 0, avg_confidence: 0, flags: 0 } };
-  }
+  let allComponents = specDb.getAllComponentsForType(componentType);
 
   // Property columns from SpecDb
   const propertyColumns = specDb.getPropertyColumnsForType(componentType);
@@ -199,18 +545,21 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
   }
   const reviewByComponent = new Map();
   for (const ri of reviewItems) {
-    if (ri.status !== 'pending_ai') continue;
+    if (!isReviewItemCandidateVisible(ri)) continue;
     if (ri.component_type !== componentType) continue;
     let dbName = null;
     if (ri.matched_component) {
-      dbName = ri.matched_component;
+      const matched = String(ri.matched_component || '').trim();
+      dbName = dbNameLower.get(matched.toLowerCase()) || matched;
     } else {
       const rawQuery = String(ri.raw_query || '').trim();
       dbName = dbNameLower.get(rawQuery.toLowerCase()) || rawQuery || null;
     }
     if (!dbName) continue;
-    if (!reviewByComponent.has(dbName)) reviewByComponent.set(dbName, []);
-    reviewByComponent.get(dbName).push(ri);
+    const componentKey = String(dbName).trim().toLowerCase();
+    if (!componentKey) continue;
+    if (!reviewByComponent.has(componentKey)) reviewByComponent.set(componentKey, []);
+    reviewByComponent.get(componentKey).push(ri);
   }
 
   // Include unresolved component names seen in item field state and/or review queue.
@@ -222,7 +571,7 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
   const unresolvedNames = new Set();
 
   for (const ri of reviewItems) {
-    if (ri.status !== 'pending_ai') continue;
+    if (!isReviewItemCandidateVisible(ri)) continue;
     if (ri.component_type !== componentType) continue;
     const hasMatchedComponent = Boolean(String(ri.matched_component || '').trim());
     const matchType = String(ri.match_type || '').trim().toLowerCase();
@@ -243,31 +592,83 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
     // Best-effort only
   }
 
+  let unresolvedInserted = false;
   for (const unresolvedName of unresolvedNames) {
     const lower = unresolvedName.toLowerCase();
     if (existingNames.has(lower)) continue;
-    allComponents.push({
-      identity: {
-        canonical_name: unresolvedName,
-        maker: '',
-        links: null,
-        source: 'pipeline',
-        review_status: 'pending',
-        aliases_overridden: 0,
-        created_at: null,
-      },
-      aliases: [],
-      properties: [],
+    specDb.upsertComponentIdentity({
+      componentType,
+      canonicalName: unresolvedName,
+      maker: '',
+      links: [],
+      source: 'pipeline',
     });
+    unresolvedInserted = true;
     existingNames.add(lower);
+  }
+  if (unresolvedInserted) {
+    allComponents = specDb.getAllComponentsForType(componentType);
+  }
+  if (!allComponents.length) {
+    return { category, componentType, items: [], metrics: { total: 0, avg_confidence: 0, flags: 0 } };
+  }
+
+  const propertyTemplateByKey = new Map();
+  for (const comp of allComponents) {
+    for (const row of toArray(comp?.properties)) {
+      const key = String(row?.property_key || '').trim();
+      if (!key || propertyTemplateByKey.has(key)) continue;
+      let constraints = [];
+      if (typeof row?.constraints === 'string' && row.constraints.trim()) {
+        try {
+          const parsed = JSON.parse(row.constraints);
+          constraints = Array.isArray(parsed) ? parsed : [];
+        } catch {
+          constraints = [];
+        }
+      }
+      propertyTemplateByKey.set(key, {
+        variance_policy: row?.variance_policy ?? null,
+        constraints,
+      });
+    }
   }
 
   const items = [];
 
   for (const comp of allComponents) {
-    const { identity, aliases: aliasRows, properties: propRows } = comp;
+    let { identity, aliases: aliasRows, properties: propRows } = comp;
     const itemName = identity.canonical_name;
     const itemMaker = identity.maker || '';
+    if (identity?.id) {
+      const propByKey = new Map(
+        toArray(propRows).map((row) => [String(row?.property_key || '').trim(), row]),
+      );
+      let insertedSlots = false;
+      for (const propertyKey of propertyColumns) {
+        const key = String(propertyKey || '').trim();
+        if (!key || propByKey.has(key)) continue;
+        const template = propertyTemplateByKey.get(key) || null;
+        specDb.upsertComponentValue({
+          componentType,
+          componentName: itemName,
+          componentMaker: itemMaker,
+          propertyKey: key,
+          value: null,
+          confidence: 0,
+          variancePolicy: template?.variance_policy ?? null,
+          source: 'pipeline',
+          acceptedCandidateId: null,
+          needsReview: true,
+          overridden: false,
+          constraints: template?.constraints || [],
+        });
+        insertedSlots = true;
+      }
+      if (insertedSlots) {
+        propRows = specDb.getComponentValuesWithMaker(componentType, itemName, itemMaker) || [];
+      }
+    }
     const itemAliases = aliasRows
       .filter(a => a.alias !== itemName) // exclude canonical_name alias
       .map(a => a.alias);
@@ -403,36 +804,38 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
     }));
 
     // Enrich name/maker candidates from pipeline review items
-    const itemReviewItems = reviewByComponent.get(itemName) || [];
+    const itemReviewItems = reviewByComponent.get(String(itemName || '').toLowerCase()) || [];
     if (itemReviewItems.length > 0) {
-      // Name candidates from pipeline
-      const nameByValue = new Map();
+      // Name candidates from pipeline (per review item / source identity)
+      const existingNameCandidateIds = new Set(name_tracked.candidates.map((candidate) => String(candidate?.candidate_id || '').trim()));
       for (const ri of itemReviewItems) {
         const val = (ri.raw_query || '').trim();
         if (!val) continue;
-        if (!nameByValue.has(val)) nameByValue.set(val, { products: [], latest: '', matchType: ri.match_type, score: ri.combined_score || 0.5 });
-        const entry = nameByValue.get(val);
-        entry.products.push(ri.product_id);
-        if (!entry.latest || ri.created_at > entry.latest) entry.latest = ri.created_at;
-      }
-      const existingNameVals = new Set(name_tracked.candidates.map(c => c.value));
-      for (const [val, meta] of nameByValue) {
-        if (existingNameVals.has(val)) continue;
-        const count = meta.products.length;
+        const candidateId = buildComponentReviewSyntheticCandidateId({
+          productId: ri.product_id || '',
+          fieldKey: '__name',
+          reviewId: ri.review_id || '',
+          value: val,
+        });
+        if (existingNameCandidateIds.has(candidateId)) continue;
+        existingNameCandidateIds.add(candidateId);
+        const productLabel = String(ri.product_id || '').trim() || 'unknown_product';
         name_tracked.candidates.push({
-          candidate_id: buildSyntheticComponentCandidateId({
-            componentType,
-            componentName: itemName,
-            propertyKey: '__name',
-            value: val,
-          }),
-          value: val, score: meta.score, source_id: 'pipeline',
-          source: `Pipeline (${count} product${count !== 1 ? 's' : ''})`,
-          tier: null, method: meta.matchType || 'component_review',
+          candidate_id: candidateId,
+          value: val,
+          score: Number.isFinite(Number(ri.combined_score)) ? Number(ri.combined_score) : 0.5,
+          source_id: 'pipeline',
+          source: `Pipeline (${productLabel})`,
+          tier: null,
+          method: ri.match_type || 'component_review',
           evidence: {
-            url: '', retrieved_at: meta.latest, snippet_id: '', snippet_hash: '',
-            quote: `Extracted from ${count} product${count !== 1 ? 's' : ''}: ${meta.products.slice(0, 3).join(', ')}${count > 3 ? ` +${count - 3} more` : ''}`,
-            quote_span: null, snippet_text: `Component ${meta.matchType === 'fuzzy_flagged' ? 'fuzzy matched' : 'not found in DB'}`,
+            url: '',
+            retrieved_at: ri.created_at || '',
+            snippet_id: '',
+            snippet_hash: '',
+            quote: `Extracted from ${productLabel}${ri.review_id ? ` (${ri.review_id})` : ''}`,
+            quote_span: null,
+            snippet_text: `Component ${ri.match_type === 'fuzzy_flagged' ? 'fuzzy matched' : 'not found in DB'}`,
             source_id: 'pipeline',
           },
         });
@@ -441,46 +844,47 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
 
       // Maker candidates from pipeline product_attributes
       const brandKey = `${componentType}_brand`;
-      const makerByValue = new Map();
+      const existingMakerCandidateIds = new Set(maker_tracked.candidates.map((candidate) => String(candidate?.candidate_id || '').trim()));
       for (const ri of itemReviewItems) {
         const attrs = isObject(ri.product_attributes) ? ri.product_attributes : {};
         const makerFromPipeline = attrs[brandKey] || attrs.ai_suggested_maker || ri.ai_suggested_maker;
         if (!makerFromPipeline) continue;
-        for (const makerStr of splitCandidateParts(makerFromPipeline)) {
-          if (!makerByValue.has(makerStr)) makerByValue.set(makerStr, { products: [], latest: '' });
-          const entry = makerByValue.get(makerStr);
-          entry.products.push(ri.product_id);
-          if (!entry.latest || ri.created_at > entry.latest) entry.latest = ri.created_at;
-        }
-      }
-      const existingMakerVals = new Set(maker_tracked.candidates.map(c => c.value));
-      for (const [val, meta] of makerByValue) {
-        if (existingMakerVals.has(val)) continue;
-        const count = meta.products.length;
-        maker_tracked.candidates.push({
-          candidate_id: buildSyntheticComponentCandidateId({
-            componentType,
-            componentName: itemName,
-            propertyKey: '__maker',
+        for (const val of splitCandidateParts(makerFromPipeline)) {
+          const candidateId = buildComponentReviewSyntheticCandidateId({
+            productId: ri.product_id || '',
+            fieldKey: '__maker',
+            reviewId: ri.review_id || '',
             value: val,
-          }),
-          value: val, score: 0.5, source_id: 'pipeline',
-          source: `Pipeline (${count} product${count !== 1 ? 's' : ''})`,
-          tier: null, method: 'product_extraction',
-          evidence: {
-            url: '', retrieved_at: meta.latest, snippet_id: '', snippet_hash: '',
-            quote: `Extracted ${brandKey}="${val}" from ${count} product${count !== 1 ? 's' : ''}`,
-            quote_span: null, snippet_text: 'Pipeline extraction from product runs',
+          });
+          if (existingMakerCandidateIds.has(candidateId)) continue;
+          existingMakerCandidateIds.add(candidateId);
+          const productLabel = String(ri.product_id || '').trim() || 'unknown_product';
+          maker_tracked.candidates.push({
+            candidate_id: candidateId,
+            value: val,
+            score: Number.isFinite(Number(ri.combined_score)) ? Number(ri.combined_score) : 0.5,
             source_id: 'pipeline',
-          },
-        });
+            source: `Pipeline (${productLabel})`,
+            tier: null,
+            method: 'product_extraction',
+            evidence: {
+              url: '',
+              retrieved_at: ri.created_at || '',
+              snippet_id: '',
+              snippet_hash: '',
+              quote: `Extracted ${brandKey}="${val}" from ${productLabel}${ri.review_id ? ` (${ri.review_id})` : ''}`,
+              quote_span: null,
+              snippet_text: 'Pipeline extraction from product runs',
+              source_id: 'pipeline',
+            },
+          });
+        }
       }
       maker_tracked.candidate_count = maker_tracked.candidates.length;
     }
 
     // Build properties
     const properties = {};
-    let itemConfSum = 0;
     let itemPropCount = 0;
     let itemFlags = 0;
 
@@ -551,7 +955,6 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
           || null,
       };
 
-      itemConfSum += confidence;
       itemPropCount++;
     }
 
@@ -560,39 +963,41 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
       for (const key of propertyColumns) {
         const prop = properties[key];
         if (!prop) continue;
-        const propByValue = new Map();
+        const existingPropCandidateIds = new Set(prop.candidates.map((candidate) => String(candidate?.candidate_id || '').trim()));
         for (const ri of itemReviewItems) {
           const attrs = isObject(ri.product_attributes) ? ri.product_attributes : {};
           const pipelineVal = attrs[key];
           if (pipelineVal === undefined || pipelineVal === null || pipelineVal === '') continue;
           for (const valStr of splitCandidateParts(pipelineVal)) {
-            if (!propByValue.has(valStr)) propByValue.set(valStr, { products: [], latest: '' });
-            const entry = propByValue.get(valStr);
-            entry.products.push(ri.product_id);
-            if (!entry.latest || ri.created_at > entry.latest) entry.latest = ri.created_at;
-          }
-        }
-        const existingPropVals = new Set(prop.candidates.map(c => String(c.value)));
-        for (const [val, meta] of propByValue) {
-          if (existingPropVals.has(val)) continue;
-          const count = meta.products.length;
-          prop.candidates.push({
-            candidate_id: buildSyntheticComponentCandidateId({
-              componentType,
-              componentName: itemName,
-              propertyKey: key,
-              value: val,
-            }),
-            value: val, score: 0.5, source_id: 'pipeline',
-            source: `Pipeline (${count} product${count !== 1 ? 's' : ''})`,
-            tier: null, method: 'product_extraction',
-            evidence: {
-              url: '', retrieved_at: meta.latest, snippet_id: '', snippet_hash: '',
-              quote: `Extracted ${key}="${val}" from ${count} product${count !== 1 ? 's' : ''}`,
-              quote_span: null, snippet_text: 'Pipeline extraction from product runs',
+            const candidateId = buildComponentReviewSyntheticCandidateId({
+              productId: ri.product_id || '',
+              fieldKey: key,
+              reviewId: ri.review_id || '',
+              value: valStr,
+            });
+            if (existingPropCandidateIds.has(candidateId)) continue;
+            existingPropCandidateIds.add(candidateId);
+            const productLabel = String(ri.product_id || '').trim() || 'unknown_product';
+            prop.candidates.push({
+              candidate_id: candidateId,
+              value: valStr,
+              score: Number.isFinite(Number(ri.combined_score)) ? Number(ri.combined_score) : 0.5,
               source_id: 'pipeline',
-            },
-          });
+              source: `Pipeline (${productLabel})`,
+              tier: null,
+              method: 'product_extraction',
+              evidence: {
+                url: '',
+                retrieved_at: ri.created_at || '',
+                snippet_id: '',
+                snippet_hash: '',
+                quote: `Extracted ${key}="${valStr}" from ${productLabel}${ri.review_id ? ` (${ri.review_id})` : ''}`,
+                quote_span: null,
+                snippet_text: 'Pipeline extraction from product runs',
+                source_id: 'pipeline',
+              },
+            });
+          }
         }
         prop.candidate_count = prop.candidates.length;
       }
@@ -683,8 +1088,50 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
     } catch (_specDbErr) {
       // SpecDb enrichment is best-effort
     }
+    if (linkedProducts.length === 0 && itemReviewItems.length > 0) {
+      const productIdsFromReview = [...new Set(
+        itemReviewItems
+          .map((ri) => String(ri?.product_id || '').trim())
+          .filter(Boolean)
+      )];
+      linkedProducts = productIdsFromReview.map((productId) => ({
+        product_id: productId,
+        field_key: componentType,
+        match_type: 'pipeline_review',
+        match_score: null,
+      }));
+    }
 
-    const avgConf = itemPropCount > 0 ? itemConfSum / itemPropCount : 0;
+    ensureTrackedStateCandidateInvariant(name_tracked, {
+      fallbackCandidateId: `component_${slugify(componentType)}_${slugify(itemName)}_name`,
+      fallbackQuote: `Selected ${componentType} name retained for authoritative review`,
+    });
+    annotateCandidateSharedReviews(name_tracked.candidates, []);
+    ensureTrackedStateCandidateInvariant(maker_tracked, {
+      fallbackCandidateId: `component_${slugify(componentType)}_${slugify(itemName)}_maker`,
+      fallbackQuote: `Selected ${componentType} maker retained for authoritative review`,
+    });
+    annotateCandidateSharedReviews(maker_tracked.candidates, []);
+    for (const key of propertyColumns) {
+      const prop = properties[key];
+      if (!prop) continue;
+      ensureTrackedStateCandidateInvariant(prop, {
+        fallbackCandidateId: `component_${slugify(componentType)}_${slugify(itemName)}_${slugify(key)}`,
+        fallbackQuote: `Selected ${key} retained for authoritative review`,
+      });
+      const slotId = Number(prop?.slot_id);
+      const reviewRows = Number.isFinite(slotId) && slotId > 0
+        ? (specDb.getReviewsForContext('component', String(slotId)) || [])
+        : [];
+      annotateCandidateSharedReviews(prop.candidates, reviewRows);
+    }
+
+    const confidenceValues = propertyColumns
+      .map((key) => Number.parseFloat(String(properties[key]?.selected?.confidence ?? '')))
+      .filter((value) => Number.isFinite(value));
+    const avgConf = confidenceValues.length > 0
+      ? confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length
+      : 0;
 
     items.push({
       component_identity_id: identity.id ?? null,
@@ -709,10 +1156,31 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
 
   const visibleItems = items.filter((item) => {
     const linkedCount = Array.isArray(item.linked_products) ? item.linked_products.length : 0;
-    const pipelineCandidateCount = item.name_tracked?.source === 'pipeline'
-      ? Number(item.name_tracked?.candidate_count || 0)
-      : 0;
-    return linkedCount > 0 || pipelineCandidateCount > 0;
+    const hasNamePending = Boolean(item.name_tracked?.needs_review) && hasActionableCandidate(item.name_tracked?.candidates);
+    const hasMakerPending = Boolean(item.maker_tracked?.needs_review) && hasActionableCandidate(item.maker_tracked?.candidates);
+    const hasPropertyPending = propertyColumns.some((key) => {
+      const prop = item?.properties?.[key];
+      return Boolean(prop?.needs_review) && hasActionableCandidate(prop?.candidates);
+    });
+    const hasCandidateEvidence = hasActionableCandidate(item?.name_tracked?.candidates)
+      || hasActionableCandidate(item?.maker_tracked?.candidates)
+      || propertyColumns.some((key) => hasActionableCandidate(item?.properties?.[key]?.candidates));
+    const identitySources = [item?.name_tracked?.source, item?.maker_tracked?.source]
+      .map((source) => String(source || '').trim().toLowerCase())
+      .filter(Boolean);
+    const hasStableIdentitySource = identitySources.some((source) => source !== 'pipeline' && source !== 'unknown');
+    const hasStablePropertySource = propertyColumns.some((key) => {
+      const source = String(item?.properties?.[key]?.source || '').trim().toLowerCase();
+      const selectedValue = item?.properties?.[key]?.selected?.value;
+      return source && source !== 'pipeline' && source !== 'unknown' && hasKnownValue(selectedValue);
+    });
+    return linkedCount > 0
+      || hasNamePending
+      || hasMakerPending
+      || hasPropertyPending
+      || hasCandidateEvidence
+      || hasStableIdentitySource
+      || hasStablePropertySource;
   });
   const visibleFlags = visibleItems.reduce((sum, item) => sum + (item.metrics?.flags || 0), 0);
   const visibleAvgConfidence = visibleItems.length > 0
@@ -786,20 +1254,24 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
   for (const dbItem of dbData.items) {
     dbNameLower.set((dbItem.name || '').toLowerCase(), dbItem.name);
   }
-  const reviewByComponent = new Map(); // actual DB name → review items[]
+  const reviewByComponent = new Map(); // lowercase component name → review items[]
   for (const ri of reviewItems) {
-    if (ri.status !== 'pending_ai') continue;
+    if (!isReviewItemCandidateVisible(ri)) continue;
     if (ri.component_type !== componentType) continue;
     // Match via matched_component (fuzzy_flagged) or raw_query (new_component matching DB name)
     let dbName = null;
     if (ri.matched_component) {
-      dbName = ri.matched_component;
+      const matched = String(ri.matched_component || '').trim();
+      dbName = dbNameLower.get(matched.toLowerCase()) || matched;
     } else {
-      dbName = dbNameLower.get((ri.raw_query || '').toLowerCase()) || null;
+      const rawQuery = String(ri.raw_query || '').trim();
+      dbName = dbNameLower.get(rawQuery.toLowerCase()) || rawQuery || null;
     }
     if (!dbName) continue;
-    if (!reviewByComponent.has(dbName)) reviewByComponent.set(dbName, []);
-    reviewByComponent.get(dbName).push(ri);
+    const componentKey = String(dbName).trim().toLowerCase();
+    if (!componentKey) continue;
+    if (!reviewByComponent.has(componentKey)) reviewByComponent.set(componentKey, []);
+    reviewByComponent.get(componentKey).push(ri);
   }
 
   // Collect all property keys
@@ -814,8 +1286,6 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
   const propertyColumns = [...allPropKeys].sort();
 
   const items = [];
-  let totalConf = 0;
-  let totalFlags = 0;
 
   for (const item of dbData.items) {
     const props = isObject(item.properties) ? item.properties : {};
@@ -913,44 +1383,38 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
     }
 
     // Enrich name/maker candidates from component_review items (pipeline product extractions)
-    // Consolidate by unique value — multiple products with same value become one candidate with count
-    const itemReviewItems = reviewByComponent.get(item.name) || [];
+    // Keep one candidate per review item/source (no value-collapsing).
+    const itemReviewItems = reviewByComponent.get(String(item.name || '').toLowerCase()) || [];
     if (itemReviewItems.length > 0) {
-      // Group name values across products
-      const nameByValue = new Map(); // value → { products: string[], latest: string, matchType: string, score: number }
+      const existingNameCandidateIds = new Set(name_tracked.candidates.map((candidate) => String(candidate?.candidate_id || '').trim()));
       for (const ri of itemReviewItems) {
         const val = (ri.raw_query || '').trim();
         if (!val) continue;
-        if (!nameByValue.has(val)) nameByValue.set(val, { products: [], latest: '', matchType: ri.match_type, score: ri.combined_score || 0.5 });
-        const entry = nameByValue.get(val);
-        entry.products.push(ri.product_id);
-        if (!entry.latest || ri.created_at > entry.latest) entry.latest = ri.created_at;
-      }
-      const existingNameCandidateValues = new Set(name_tracked.candidates.map(c => c.value));
-      for (const [val, meta] of nameByValue) {
-        if (existingNameCandidateValues.has(val)) continue;
-        const count = meta.products.length;
-        name_tracked.candidates.push({
-          candidate_id: buildSyntheticComponentCandidateId({
-            componentType,
-            componentName: item.name,
-            propertyKey: '__name',
-            value: val,
-          }),
+        const candidateId = buildComponentReviewSyntheticCandidateId({
+          productId: ri.product_id || '',
+          fieldKey: '__name',
+          reviewId: ri.review_id || '',
           value: val,
-          score: meta.score,
+        });
+        if (existingNameCandidateIds.has(candidateId)) continue;
+        existingNameCandidateIds.add(candidateId);
+        const productLabel = String(ri.product_id || '').trim() || 'unknown_product';
+        name_tracked.candidates.push({
+          candidate_id: candidateId,
+          value: val,
+          score: Number.isFinite(Number(ri.combined_score)) ? Number(ri.combined_score) : 0.5,
           source_id: 'pipeline',
-          source: `Pipeline (${count} product${count !== 1 ? 's' : ''})`,
+          source: `Pipeline (${productLabel})`,
           tier: null,
-          method: meta.matchType || 'component_review',
+          method: ri.match_type || 'component_review',
           evidence: {
             url: '',
-            retrieved_at: meta.latest,
+            retrieved_at: ri.created_at || '',
             snippet_id: '',
             snippet_hash: '',
-            quote: `Extracted from ${count} product${count !== 1 ? 's' : ''}: ${meta.products.slice(0, 3).join(', ')}${count > 3 ? ` +${count - 3} more` : ''}`,
+            quote: `Extracted from ${productLabel}${ri.review_id ? ` (${ri.review_id})` : ''}`,
             quote_span: null,
-            snippet_text: `Component ${meta.matchType === 'fuzzy_flagged' ? 'fuzzy matched' : 'not found in DB'}`,
+            snippet_text: `Component ${ri.match_type === 'fuzzy_flagged' ? 'fuzzy matched' : 'not found in DB'}`,
             source_id: 'pipeline',
           },
         });
@@ -1010,46 +1474,41 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
     // Enrich maker candidates from pipeline product_attributes (e.g. sensor_brand, switch_brand)
     if (itemReviewItems.length > 0) {
       const brandKey = `${componentType}_brand`;
-      const makerByValue = new Map();
+      const existingMakerCandidateIds = new Set(maker_tracked.candidates.map((candidate) => String(candidate?.candidate_id || '').trim()));
       for (const ri of itemReviewItems) {
         const attrs = isObject(ri.product_attributes) ? ri.product_attributes : {};
         const makerFromPipeline = attrs[brandKey] || attrs.ai_suggested_maker || ri.ai_suggested_maker;
         if (!makerFromPipeline) continue;
-        for (const makerStr of splitCandidateParts(makerFromPipeline)) {
-          if (!makerByValue.has(makerStr)) makerByValue.set(makerStr, { products: [], latest: '' });
-          const entry = makerByValue.get(makerStr);
-          entry.products.push(ri.product_id);
-          if (!entry.latest || ri.created_at > entry.latest) entry.latest = ri.created_at;
-        }
-      }
-      const existingMakerValues = new Set(maker_tracked.candidates.map(c => c.value));
-      for (const [val, meta] of makerByValue) {
-        if (existingMakerValues.has(val)) continue;
-        const count = meta.products.length;
-        maker_tracked.candidates.push({
-          candidate_id: buildSyntheticComponentCandidateId({
-            componentType,
-            componentName: item.name,
-            propertyKey: '__maker',
+        for (const val of splitCandidateParts(makerFromPipeline)) {
+          const candidateId = buildComponentReviewSyntheticCandidateId({
+            productId: ri.product_id || '',
+            fieldKey: '__maker',
+            reviewId: ri.review_id || '',
             value: val,
-          }),
-          value: val,
-          score: 0.5,
-          source_id: 'pipeline',
-          source: `Pipeline (${count} product${count !== 1 ? 's' : ''})`,
-          tier: null,
-          method: 'product_extraction',
-          evidence: {
-            url: '',
-            retrieved_at: meta.latest,
-            snippet_id: '',
-            snippet_hash: '',
-            quote: `Extracted ${brandKey}="${val}" from ${count} product${count !== 1 ? 's' : ''}`,
-            quote_span: null,
-            snippet_text: `Pipeline extraction from product runs`,
+          });
+          if (existingMakerCandidateIds.has(candidateId)) continue;
+          existingMakerCandidateIds.add(candidateId);
+          const productLabel = String(ri.product_id || '').trim() || 'unknown_product';
+          maker_tracked.candidates.push({
+            candidate_id: candidateId,
+            value: val,
+            score: Number.isFinite(Number(ri.combined_score)) ? Number(ri.combined_score) : 0.5,
             source_id: 'pipeline',
-          },
-        });
+            source: `Pipeline (${productLabel})`,
+            tier: null,
+            method: 'product_extraction',
+            evidence: {
+              url: '',
+              retrieved_at: ri.created_at || '',
+              snippet_id: '',
+              snippet_hash: '',
+              quote: `Extracted ${brandKey}="${val}" from ${productLabel}${ri.review_id ? ` (${ri.review_id})` : ''}`,
+              quote_span: null,
+              snippet_text: `Pipeline extraction from product runs`,
+              source_id: 'pipeline',
+            },
+          });
+        }
       }
       maker_tracked.candidate_count = maker_tracked.candidates.length;
     }
@@ -1072,7 +1531,6 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
     }));
 
     const properties = {};
-    let itemConfSum = 0;
     let itemPropCount = 0;
     let itemFlags = 0;
 
@@ -1153,55 +1611,49 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
         accepted_candidate_id: null,
       };
 
-      itemConfSum += confidence;
       itemPropCount++;
     }
 
-    // Enrich property candidates from pipeline product_attributes (consolidated by value)
+    // Enrich property candidates from pipeline product_attributes (per review item/source).
     if (itemReviewItems.length > 0) {
       for (const key of propertyColumns) {
         const prop = properties[key];
         if (!prop) continue;
-        const propByValue = new Map();
+        const existingPropCandidateIds = new Set(prop.candidates.map((candidate) => String(candidate?.candidate_id || '').trim()));
         for (const ri of itemReviewItems) {
           const attrs = isObject(ri.product_attributes) ? ri.product_attributes : {};
           const pipelineVal = attrs[key];
           if (pipelineVal === undefined || pipelineVal === null || pipelineVal === '') continue;
           for (const valStr of splitCandidateParts(pipelineVal)) {
-            if (!propByValue.has(valStr)) propByValue.set(valStr, { products: [], latest: '' });
-            const entry = propByValue.get(valStr);
-            entry.products.push(ri.product_id);
-            if (!entry.latest || ri.created_at > entry.latest) entry.latest = ri.created_at;
-          }
-        }
-        const existingPropValues = new Set(prop.candidates.map(c => String(c.value)));
-        for (const [val, meta] of propByValue) {
-          if (existingPropValues.has(val)) continue;
-          const count = meta.products.length;
-          prop.candidates.push({
-            candidate_id: buildSyntheticComponentCandidateId({
-              componentType,
-              componentName: item.name,
-              propertyKey: key,
-              value: val,
-            }),
-            value: val,
-            score: 0.5,
-            source_id: 'pipeline',
-            source: `Pipeline (${count} product${count !== 1 ? 's' : ''})`,
-            tier: null,
-            method: 'product_extraction',
-            evidence: {
-              url: '',
-              retrieved_at: meta.latest,
-              snippet_id: '',
-              snippet_hash: '',
-              quote: `Extracted ${key}="${val}" from ${count} product${count !== 1 ? 's' : ''}`,
-              quote_span: null,
-              snippet_text: `Pipeline extraction from product runs`,
+            const candidateId = buildComponentReviewSyntheticCandidateId({
+              productId: ri.product_id || '',
+              fieldKey: key,
+              reviewId: ri.review_id || '',
+              value: valStr,
+            });
+            if (existingPropCandidateIds.has(candidateId)) continue;
+            existingPropCandidateIds.add(candidateId);
+            const productLabel = String(ri.product_id || '').trim() || 'unknown_product';
+            prop.candidates.push({
+              candidate_id: candidateId,
+              value: valStr,
+              score: Number.isFinite(Number(ri.combined_score)) ? Number(ri.combined_score) : 0.5,
               source_id: 'pipeline',
-            },
-          });
+              source: `Pipeline (${productLabel})`,
+              tier: null,
+              method: 'product_extraction',
+              evidence: {
+                url: '',
+                retrieved_at: ri.created_at || '',
+                snippet_id: '',
+                snippet_hash: '',
+                quote: `Extracted ${key}="${valStr}" from ${productLabel}${ri.review_id ? ` (${ri.review_id})` : ''}`,
+                quote_span: null,
+                snippet_text: `Pipeline extraction from product runs`,
+                source_id: 'pipeline',
+              },
+            });
+          }
         }
         prop.candidate_count = prop.candidates.length;
       }
@@ -1376,19 +1828,56 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
         // SpecDb enrichment is best-effort — don't break the drawer
       }
     }
+    if (linkedProducts.length === 0 && itemReviewItems.length > 0) {
+      const productIdsFromReview = [...new Set(
+        itemReviewItems
+          .map((ri) => String(ri?.product_id || '').trim())
+          .filter(Boolean)
+      )];
+      linkedProducts = productIdsFromReview.map((productId) => ({
+        product_id: productId,
+        field_key: componentType,
+        match_type: 'pipeline_review',
+        match_score: null,
+      }));
+    }
 
-    const avgConf = itemPropCount > 0 ? itemConfSum / itemPropCount : 0;
-    totalConf += avgConf;
-    totalFlags += itemFlags;
+    ensureTrackedStateCandidateInvariant(name_tracked, {
+      fallbackCandidateId: `component_${slugify(componentType)}_${slugify(item.name)}_name`,
+      fallbackQuote: `Selected ${componentType} name retained for authoritative review`,
+    });
+    ensureTrackedStateCandidateInvariant(maker_tracked, {
+      fallbackCandidateId: `component_${slugify(componentType)}_${slugify(item.name)}_maker`,
+      fallbackQuote: `Selected ${componentType} maker retained for authoritative review`,
+    });
+    for (const key of propertyColumns) {
+      const prop = properties[key];
+      if (!prop) continue;
+      ensureTrackedStateCandidateInvariant(prop, {
+        fallbackCandidateId: `component_${slugify(componentType)}_${slugify(item.name)}_${slugify(key)}`,
+        fallbackQuote: `Selected ${key} retained for authoritative review`,
+      });
+    }
 
+    const confidenceValues = propertyColumns
+      .map((key) => Number.parseFloat(String(properties[key]?.selected?.confidence ?? '')))
+      .filter((value) => Number.isFinite(value));
+    const avgConf = confidenceValues.length > 0
+      ? confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length
+      : 0;
     const aliasOverride = override?.identity?.aliases;
     const effectiveAliases = aliasOverride ?? toArray(item.aliases);
     const aliasesOverridden = Boolean(aliasOverride);
+    const resolvedName = nameVal || item.name || '';
+    const resolvedMaker = makerVal || item.maker || '';
+    const legacyIdentity = specDb
+      ? specDb.getComponentIdentity(componentType, resolvedName, resolvedMaker)
+      : null;
 
     items.push({
-      component_identity_id: null,
-      name: nameVal || item.name || '',
-      maker: makerVal || item.maker || '',
+      component_identity_id: legacyIdentity?.id ?? null,
+      name: resolvedName,
+      maker: resolvedMaker,
       aliases: effectiveAliases,
       aliases_overridden: aliasesOverridden,
       links: effectiveLinks,
@@ -1406,15 +1895,48 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
     });
   }
 
+  const visibleItems = items.filter((item) => {
+    const linkedCount = Array.isArray(item.linked_products) ? item.linked_products.length : 0;
+    const hasNamePending = Boolean(item.name_tracked?.needs_review) && hasActionableCandidate(item.name_tracked?.candidates);
+    const hasMakerPending = Boolean(item.maker_tracked?.needs_review) && hasActionableCandidate(item.maker_tracked?.candidates);
+    const hasPropertyPending = propertyColumns.some((key) => {
+      const prop = item?.properties?.[key];
+      return Boolean(prop?.needs_review) && hasActionableCandidate(prop?.candidates);
+    });
+    const hasCandidateEvidence = hasActionableCandidate(item?.name_tracked?.candidates)
+      || hasActionableCandidate(item?.maker_tracked?.candidates)
+      || propertyColumns.some((key) => hasActionableCandidate(item?.properties?.[key]?.candidates));
+    const identitySources = [item?.name_tracked?.source, item?.maker_tracked?.source]
+      .map((source) => String(source || '').trim().toLowerCase())
+      .filter(Boolean);
+    const hasStableIdentitySource = identitySources.some((source) => source !== 'pipeline' && source !== 'unknown');
+    const hasStablePropertySource = propertyColumns.some((key) => {
+      const source = String(item?.properties?.[key]?.source || '').trim().toLowerCase();
+      const selectedValue = item?.properties?.[key]?.selected?.value;
+      return source && source !== 'pipeline' && source !== 'unknown' && hasKnownValue(selectedValue);
+    });
+    return linkedCount > 0
+      || hasNamePending
+      || hasMakerPending
+      || hasPropertyPending
+      || hasCandidateEvidence
+      || hasStableIdentitySource
+      || hasStablePropertySource;
+  });
+  const visibleFlags = visibleItems.reduce((sum, item) => sum + (item.metrics?.flags || 0), 0);
+  const visibleAvgConfidence = visibleItems.length > 0
+    ? Math.round((visibleItems.reduce((sum, item) => sum + (item.metrics?.confidence || 0), 0) / visibleItems.length) * 100) / 100
+    : 0;
+
   return {
     category,
     componentType,
     property_columns: propertyColumns,
-    items,
+    items: visibleItems,
     metrics: {
-      total: items.length,
-      avg_confidence: items.length > 0 ? Math.round((totalConf / items.length) * 100) / 100 : 0,
-      flags: totalFlags,
+      total: visibleItems.length,
+      avg_confidence: visibleAvgConfidence,
+      flags: visibleFlags,
     },
   };
 }
@@ -1423,7 +1945,7 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
 
 export async function buildEnumReviewPayloads({ config = {}, category, specDb = null }) {
   if (!specDb) {
-    return { category, fields: [] };
+    return buildEnumReviewPayloadsLegacy({ config, category, specDb });
   }
   return buildEnumReviewPayloadsSpecDb({ config, category, specDb });
 }
@@ -1448,6 +1970,7 @@ async function buildEnumReviewPayloadsSpecDb({ config = {}, category, specDb }) 
         targetKind: 'enum_key',
         fieldKey: field,
         enumValueNorm: normalized,
+        listValueId: row.id ?? null,
       });
       const basePending = Boolean(row.needs_review);
       const isPending = isSharedLanePending(enumKeyState, basePending);
@@ -1540,11 +2063,25 @@ async function buildEnumReviewPayloadsSpecDb({ config = {}, category, specDb }) 
         // Best-effort enrichment
       }
 
+      ensureEnumValueCandidateInvariant(entry, {
+        fieldKey: field,
+        fallbackQuote: `Selected ${field} enum value retained for authoritative review`,
+      });
+      const listValueSlotId = Number(row?.id);
+      const reviewRows = Number.isFinite(listValueSlotId) && listValueSlotId > 0
+        ? (specDb.getReviewsForContext('list', String(listValueSlotId)) || [])
+        : [];
+      annotateCandidateSharedReviews(entry.candidates, reviewRows);
+
       valueMap.set(normalized, entry);
     }
 
-    const values = [...valueMap.values()].sort((a, b) => a.value.localeCompare(b.value));
-    const flagCount = values.filter(v => v.needs_review).length;
+    const values = [...valueMap.values()]
+      .sort((a, b) => a.value.localeCompare(b.value));
+    const flagCount = values.filter(v => (
+      v.needs_review
+      && hasActionableCandidate(v.candidates)
+    )).length;
 
     fields.push({
       field,
@@ -1746,8 +2283,19 @@ async function buildEnumReviewPayloadsLegacy({ config = {}, category, specDb = n
       }
     }
 
-    const values = [...valueMap.values()].sort((a, b) => a.value.localeCompare(b.value));
-    const flagCount = values.filter(v => v.needs_review).length;
+    for (const [, entry] of valueMap) {
+      ensureEnumValueCandidateInvariant(entry, {
+        fieldKey: field,
+        fallbackQuote: `Selected ${field} enum value retained for authoritative review`,
+      });
+    }
+
+    const values = [...valueMap.values()]
+      .sort((a, b) => a.value.localeCompare(b.value));
+    const flagCount = values.filter(v => (
+      v.needs_review
+      && hasActionableCandidate(v.candidates)
+    )).length;
 
     fields.push({
       field,

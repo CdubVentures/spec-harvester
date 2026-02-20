@@ -200,14 +200,17 @@ export function ReviewMatrix({
                         // Only show AI badges for products that have run data with actual field state
                         const kr = fieldState?.keyReview;
                         const hasFieldData = p.hasRun !== false && !!fieldState;
-                        // Primary (item-level): pending until explicitly confirmed.
-                        const hasPendingAIPrimary = hasFieldData && (kr
-                          ? isKeyReviewLanePending({
-                            status: kr.primaryStatus,
-                            userAcceptStatus: kr.userAcceptPrimary,
-                            override: kr.overridePrimary,
-                          })
-                          : true);  // no row = AI review never ran = pending
+                        const actionableCandidateCount = Number(
+                          fieldState?.candidate_count ?? fieldState?.candidates?.length ?? 0,
+                        );
+                        const hasPendingAIPrimary = hasFieldData
+                          && actionableCandidateCount > 0
+                          && Boolean(kr)
+                          && isKeyReviewLanePending({
+                            status: kr?.primaryStatus,
+                            userAcceptStatus: kr?.userAcceptPrimary,
+                            override: kr?.overridePrimary,
+                          });
                         return (
                           <div
                             key={p.product_id}

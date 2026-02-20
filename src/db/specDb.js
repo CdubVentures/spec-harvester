@@ -10,6 +10,32 @@
 
 import Database from 'better-sqlite3';
 
+function normalizeListLinkToken(value) {
+  return String(value ?? '').trim();
+}
+
+function expandListLinkValues(value) {
+  if (Array.isArray(value)) {
+    return [...new Set(value.map(normalizeListLinkToken).filter(Boolean))];
+  }
+  const raw = normalizeListLinkToken(value);
+  if (!raw) return [];
+  const split = raw
+    .split(/[,;|/]+/)
+    .map((part) => normalizeListLinkToken(part))
+    .filter(Boolean);
+  const ordered = split.length > 1 ? split : [raw];
+  const seen = new Set();
+  const out = [];
+  for (const token of ordered) {
+    const key = token.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(token);
+  }
+  return out;
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS candidates (
   candidate_id TEXT PRIMARY KEY,
@@ -400,6 +426,10 @@ CREATE TABLE IF NOT EXISTS key_review_state (
   enum_value_norm TEXT,
   component_identifier TEXT,
   property_key TEXT,
+  item_field_state_id INTEGER REFERENCES item_field_state(id),
+  component_value_id INTEGER REFERENCES component_values(id),
+  list_value_id INTEGER REFERENCES list_values(id),
+  enum_list_id INTEGER REFERENCES enum_lists(id),
 
   required_level TEXT,
   availability TEXT,
@@ -854,6 +884,10 @@ export class SpecDb {
       `ALTER TABLE source_assertions ADD COLUMN component_value_id INTEGER REFERENCES component_values(id)`,
       `ALTER TABLE source_assertions ADD COLUMN list_value_id INTEGER REFERENCES list_values(id)`,
       `ALTER TABLE source_assertions ADD COLUMN enum_list_id INTEGER REFERENCES enum_lists(id)`,
+      `ALTER TABLE key_review_state ADD COLUMN item_field_state_id INTEGER REFERENCES item_field_state(id)`,
+      `ALTER TABLE key_review_state ADD COLUMN component_value_id INTEGER REFERENCES component_values(id)`,
+      `ALTER TABLE key_review_state ADD COLUMN list_value_id INTEGER REFERENCES list_values(id)`,
+      `ALTER TABLE key_review_state ADD COLUMN enum_list_id INTEGER REFERENCES enum_lists(id)`,
       `ALTER TABLE llm_route_matrix ADD COLUMN enable_websearch INTEGER DEFAULT 1`,
     ];
     for (const sql of migrations) {
@@ -866,8 +900,18 @@ export class SpecDb {
       CREATE INDEX IF NOT EXISTS idx_sa_item_slot ON source_assertions(item_field_state_id);
       CREATE INDEX IF NOT EXISTS idx_sa_component_slot ON source_assertions(component_value_id);
       CREATE INDEX IF NOT EXISTS idx_sa_list_slot ON source_assertions(list_value_id, enum_list_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS ux_krs_grid_slot ON key_review_state(category, item_field_state_id)
+        WHERE target_kind = 'grid_key' AND item_field_state_id IS NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS ux_krs_enum_slot ON key_review_state(category, list_value_id)
+        WHERE target_kind = 'enum_key' AND list_value_id IS NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS ux_krs_component_slot ON key_review_state(category, component_value_id)
+        WHERE target_kind = 'component_key' AND component_value_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_krs_item_slot ON key_review_state(item_field_state_id);
+      CREATE INDEX IF NOT EXISTS idx_krs_component_slot ON key_review_state(component_value_id);
+      CREATE INDEX IF NOT EXISTS idx_krs_list_slot ON key_review_state(list_value_id, enum_list_id);
     `);
     this.backfillEnumListIds();
+    this.backfillKeyReviewSlotIds();
 
     // Prepared statements
     this._insertCandidate = this.db.prepare(`
@@ -1227,6 +1271,7 @@ export class SpecDb {
       INSERT INTO key_review_state (
         category, target_kind, item_identifier, field_key, enum_value_norm,
         component_identifier, property_key,
+        item_field_state_id, component_value_id, list_value_id, enum_list_id,
         required_level, availability, difficulty, effort, ai_mode, parse_template,
         evidence_policy, min_evidence_refs_effective, min_distinct_sources_required,
         send_mode, component_send_mode, list_send_mode,
@@ -1243,6 +1288,7 @@ export class SpecDb {
       ) VALUES (
         @category, @target_kind, @item_identifier, @field_key, @enum_value_norm,
         @component_identifier, @property_key,
+        @item_field_state_id, @component_value_id, @list_value_id, @enum_list_id,
         @required_level, @availability, @difficulty, @effort, @ai_mode, @parse_template,
         @evidence_policy, @min_evidence_refs_effective, @min_distinct_sources_required,
         @send_mode, @component_send_mode, @list_send_mode,
@@ -1424,9 +1470,23 @@ export class SpecDb {
   }
 
   getCandidateById(candidateId) {
-    return this.db
+    const key = String(candidateId || '').trim();
+    if (!key) return null;
+    const exact = this.db
       .prepare('SELECT * FROM candidates WHERE candidate_id = ?')
-      .get(candidateId) || null;
+      .get(key);
+    if (exact) return exact;
+    if (key.includes('::')) return null;
+    return this.db
+      .prepare(`
+        SELECT *
+        FROM candidates
+        WHERE category = ?
+          AND candidate_id LIKE ?
+        ORDER BY candidate_id
+        LIMIT 1
+      `)
+      .get(this.category, `%::${key}`) || null;
   }
 
   // --- Reviews ---
@@ -1451,16 +1511,17 @@ export class SpecDb {
   getReviewsForCandidate(candidateId) {
     const key = String(candidateId || '').trim();
     if (!key) return [];
-
     const exact = this.db
       .prepare('SELECT * FROM candidate_reviews WHERE candidate_id = ?')
       .all(key);
     if (exact.length > 0) return exact;
-
-    // Backward compatibility for callers that still pass legacy, unscoped ids.
     if (key.includes('::')) return [];
     return this.db
-      .prepare('SELECT * FROM candidate_reviews WHERE candidate_id LIKE ?')
+      .prepare(`
+        SELECT *
+        FROM candidate_reviews
+        WHERE candidate_id LIKE ?
+      `)
       .all(`%::${key}`);
   }
 
@@ -1567,6 +1628,90 @@ export class SpecDb {
             AND el.field_key = list_values.field_key
         )
         WHERE list_id IS NULL
+      `).run();
+    });
+    tx();
+  }
+
+  backfillKeyReviewSlotIds() {
+    const tx = this.db.transaction(() => {
+      this.db.prepare(`
+        UPDATE key_review_state
+        SET item_field_state_id = (
+          SELECT ifs.id
+          FROM item_field_state ifs
+          WHERE ifs.category = key_review_state.category
+            AND ifs.product_id = key_review_state.item_identifier
+            AND ifs.field_key = key_review_state.field_key
+          LIMIT 1
+        ),
+        updated_at = datetime('now')
+        WHERE target_kind = 'grid_key'
+          AND item_field_state_id IS NULL
+      `).run();
+
+      this.db.prepare(`
+        UPDATE key_review_state
+        SET component_value_id = (
+          SELECT cv.id
+          FROM component_values cv
+          WHERE cv.category = key_review_state.category
+            AND cv.property_key = key_review_state.property_key
+            AND (
+              cv.component_type || '::' || cv.component_name || '::' || COALESCE(cv.component_maker, '')
+            ) = key_review_state.component_identifier
+          LIMIT 1
+        ),
+        updated_at = datetime('now')
+        WHERE target_kind = 'component_key'
+          AND component_value_id IS NULL
+          AND COALESCE(property_key, '') NOT IN ('__name', '__maker', '__links', '__aliases')
+      `).run();
+
+      this.db.prepare(`
+        UPDATE key_review_state
+        SET list_value_id = (
+          SELECT lv.id
+          FROM list_values lv
+          WHERE lv.category = key_review_state.category
+            AND lv.field_key = key_review_state.field_key
+            AND (
+              (key_review_state.enum_value_norm IS NOT NULL AND lv.normalized_value = key_review_state.enum_value_norm)
+              OR (key_review_state.enum_value_norm IS NULL AND lv.normalized_value = LOWER(TRIM(COALESCE(key_review_state.selected_value, ''))))
+            )
+          LIMIT 1
+        ),
+        updated_at = datetime('now')
+        WHERE target_kind = 'enum_key'
+          AND list_value_id IS NULL
+      `).run();
+
+      this.db.prepare(`
+        UPDATE key_review_state
+        SET enum_list_id = (
+          SELECT lv.list_id
+          FROM list_values lv
+          WHERE lv.id = key_review_state.list_value_id
+          LIMIT 1
+        ),
+        updated_at = datetime('now')
+        WHERE target_kind = 'enum_key'
+          AND list_value_id IS NOT NULL
+          AND enum_list_id IS NULL
+      `).run();
+
+      this.db.prepare(`
+        UPDATE key_review_state
+        SET enum_list_id = (
+          SELECT el.id
+          FROM enum_lists el
+          WHERE el.category = key_review_state.category
+            AND el.field_key = key_review_state.field_key
+          LIMIT 1
+        ),
+        updated_at = datetime('now')
+        WHERE target_kind = 'enum_key'
+          AND enum_list_id IS NULL
       `).run();
     });
     tx();
@@ -1727,17 +1872,22 @@ export class SpecDb {
     const tx = this.db.transaction(() => {
       this.removeItemListLinksForField(pid, key);
 
-      const valueText = String(value ?? '').trim();
-      if (!valueText) return;
-      const listRow = this.getListValueByFieldAndValue(key, valueText);
-      if (!listRow?.id) return;
+      const valueTokens = expandListLinkValues(value);
+      if (!valueTokens.length) return;
 
-      this.upsertItemListLink({
-        productId: pid,
-        fieldKey: key,
-        listValueId: listRow.id,
-      });
-      linkedRow = listRow;
+      const linkedIds = new Set();
+      for (const token of valueTokens) {
+        const listRow = this.getListValueByFieldAndValue(key, token);
+        if (!listRow?.id) continue;
+        if (linkedIds.has(listRow.id)) continue;
+        linkedIds.add(listRow.id);
+        this.upsertItemListLink({
+          productId: pid,
+          fieldKey: key,
+          listValueId: listRow.id,
+        });
+        if (!linkedRow) linkedRow = listRow;
+      }
     });
     tx();
     return linkedRow;
@@ -1985,12 +2135,53 @@ export class SpecDb {
       .run(overridden ? 1 : 0, this.category, componentType, componentName, componentMaker || '');
   }
 
+  deleteKeyReviewStateRowsByIds(stateIds = []) {
+    const ids = Array.isArray(stateIds)
+      ? stateIds
+        .map((value) => Number.parseInt(String(value), 10))
+        .filter((value) => Number.isFinite(value) && value > 0)
+      : [];
+    if (ids.length === 0) return 0;
+    const tx = this.db.transaction((rows) => {
+      for (const id of rows) {
+        this.db.prepare(`
+          DELETE FROM key_review_run_sources
+          WHERE key_review_run_id IN (
+            SELECT run_id
+            FROM key_review_runs
+            WHERE key_review_state_id = ?
+          )
+        `).run(id);
+        this.db.prepare('DELETE FROM key_review_runs WHERE key_review_state_id = ?').run(id);
+        this.db.prepare('DELETE FROM key_review_audit WHERE key_review_state_id = ?').run(id);
+        this.db.prepare('DELETE FROM key_review_state WHERE id = ?').run(id);
+      }
+    });
+    tx(ids);
+    return ids.length;
+  }
+
   deleteListValue(fieldKey, value) {
     const tx = this.db.transaction(() => {
       const row = this.db
         .prepare('SELECT id FROM list_values WHERE category = ? AND field_key = ? AND value = ?')
         .get(this.category, fieldKey, value);
       if (row?.id != null) {
+        const stateIds = this.db.prepare(`
+          SELECT id
+          FROM key_review_state
+          WHERE category = ?
+            AND target_kind = 'enum_key'
+            AND (
+              list_value_id = ?
+              OR (field_key = ? AND enum_value_norm = LOWER(TRIM(?)))
+            )
+        `).all(this.category, row.id, fieldKey, value).map((entry) => entry.id);
+        this.deleteKeyReviewStateRowsByIds(stateIds);
+
+        this.db
+          .prepare('UPDATE source_assertions SET list_value_id = NULL WHERE list_value_id = ?')
+          .run(row.id);
         this.db
           .prepare('DELETE FROM item_list_links WHERE category = ? AND field_key = ? AND list_value_id = ?')
           .run(this.category, fieldKey, row.id);
@@ -2058,11 +2249,36 @@ export class SpecDb {
 
       // Update item_list_links first, then delete old list value row.
       if (oldRow && newRow && Number(oldRow.id) !== Number(newRow.id)) {
+        const oldStateIds = this.db.prepare(`
+          SELECT id
+          FROM key_review_state
+          WHERE category = ?
+            AND target_kind = 'enum_key'
+            AND list_value_id = ?
+        `).all(this.category, oldRow.id).map((entry) => entry.id);
+        this.deleteKeyReviewStateRowsByIds(oldStateIds);
+
+        this.db
+          .prepare('UPDATE source_assertions SET list_value_id = ? WHERE list_value_id = ?')
+          .run(newRow.id, oldRow.id);
         this.db
           .prepare('UPDATE item_list_links SET list_value_id = ? WHERE category = ? AND field_key = ? AND list_value_id = ?')
           .run(newRow.id, this.category, fieldKey, oldRow.id);
       }
       if (oldRow && (!newRow || Number(oldRow.id) !== Number(newRow.id))) {
+        if (!newRow) {
+          const oldStateIds = this.db.prepare(`
+            SELECT id
+            FROM key_review_state
+            WHERE category = ?
+              AND target_kind = 'enum_key'
+              AND list_value_id = ?
+          `).all(this.category, oldRow.id).map((entry) => entry.id);
+          this.deleteKeyReviewStateRowsByIds(oldStateIds);
+          this.db
+            .prepare('UPDATE source_assertions SET list_value_id = NULL WHERE list_value_id = ?')
+            .run(oldRow.id);
+        }
         this.db
           .prepare('DELETE FROM list_values WHERE category = ? AND field_key = ? AND value = ?')
           .run(this.category, fieldKey, oldValue);
@@ -2879,23 +3095,52 @@ export class SpecDb {
   // --- Key Review Methods ---
 
   upsertKeyReviewState(row) {
+    const toPositiveId = (value) => {
+      const n = Number.parseInt(String(value ?? ''), 10);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    };
     const targetKind = row.targetKind || row.target_kind;
     const category = row.category || this.category;
+    const itemFieldStateId = toPositiveId(row.itemFieldStateId ?? row.item_field_state_id);
+    const componentValueId = toPositiveId(row.componentValueId ?? row.component_value_id);
+    const listValueId = toPositiveId(row.listValueId ?? row.list_value_id);
+    const enumListId = toPositiveId(row.enumListId ?? row.enum_list_id);
 
     // Check for existing row using target-kind-specific lookup
     let existing = null;
     if (targetKind === 'grid_key') {
-      existing = this.db.prepare(
-        "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'grid_key' AND item_identifier = ? AND field_key = ?"
-      ).get(category, row.itemIdentifier || row.item_identifier, row.fieldKey || row.field_key);
+      if (itemFieldStateId) {
+        existing = this.db.prepare(
+          "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'grid_key' AND item_field_state_id = ?"
+        ).get(category, itemFieldStateId);
+      }
+      if (!existing) {
+        existing = this.db.prepare(
+          "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'grid_key' AND item_identifier = ? AND field_key = ?"
+        ).get(category, row.itemIdentifier || row.item_identifier, row.fieldKey || row.field_key);
+      }
     } else if (targetKind === 'enum_key') {
-      existing = this.db.prepare(
-        "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'enum_key' AND field_key = ? AND enum_value_norm = ?"
-      ).get(category, row.fieldKey || row.field_key, row.enumValueNorm || row.enum_value_norm);
+      if (listValueId) {
+        existing = this.db.prepare(
+          "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'enum_key' AND list_value_id = ?"
+        ).get(category, listValueId);
+      }
+      if (!existing) {
+        existing = this.db.prepare(
+          "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'enum_key' AND field_key = ? AND enum_value_norm = ?"
+        ).get(category, row.fieldKey || row.field_key, row.enumValueNorm || row.enum_value_norm);
+      }
     } else if (targetKind === 'component_key') {
-      existing = this.db.prepare(
-        "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'component_key' AND component_identifier = ? AND property_key = ?"
-      ).get(category, row.componentIdentifier || row.component_identifier, row.propertyKey || row.property_key);
+      if (componentValueId) {
+        existing = this.db.prepare(
+          "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'component_key' AND component_value_id = ?"
+        ).get(category, componentValueId);
+      }
+      if (!existing) {
+        existing = this.db.prepare(
+          "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'component_key' AND component_identifier = ? AND property_key = ?"
+        ).get(category, row.componentIdentifier || row.component_identifier, row.propertyKey || row.property_key);
+      }
     }
 
     const params = {
@@ -2906,6 +3151,10 @@ export class SpecDb {
       enum_value_norm: row.enumValueNorm ?? row.enum_value_norm ?? null,
       component_identifier: row.componentIdentifier ?? row.component_identifier ?? null,
       property_key: row.propertyKey ?? row.property_key ?? null,
+      item_field_state_id: itemFieldStateId,
+      component_value_id: componentValueId,
+      list_value_id: listValueId,
+      enum_list_id: enumListId,
       required_level: row.requiredLevel ?? row.required_level ?? null,
       availability: row.availability ?? null,
       difficulty: row.difficulty ?? null,
@@ -2952,6 +3201,10 @@ export class SpecDb {
       // Update existing row
       this.db.prepare(`
         UPDATE key_review_state SET
+          item_field_state_id = COALESCE(@item_field_state_id, item_field_state_id),
+          component_value_id = COALESCE(@component_value_id, component_value_id),
+          list_value_id = COALESCE(@list_value_id, list_value_id),
+          enum_list_id = COALESCE(@enum_list_id, enum_list_id),
           required_level = @required_level, availability = @availability, difficulty = @difficulty,
           effort = @effort, ai_mode = @ai_mode, parse_template = @parse_template,
           evidence_policy = @evidence_policy, min_evidence_refs_effective = @min_evidence_refs_effective,
@@ -2992,17 +3245,50 @@ export class SpecDb {
     }
   }
 
-  getKeyReviewState({ category, targetKind, itemIdentifier, fieldKey, enumValueNorm, componentIdentifier, propertyKey }) {
+  getKeyReviewState({
+    category,
+    targetKind,
+    itemIdentifier,
+    fieldKey,
+    enumValueNorm,
+    componentIdentifier,
+    propertyKey,
+    itemFieldStateId,
+    componentValueId,
+    listValueId,
+  }) {
+    const toPositiveId = (value) => {
+      const n = Number.parseInt(String(value ?? ''), 10);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    };
     const cat = category || this.category;
     if (targetKind === 'grid_key') {
+      const slotId = toPositiveId(itemFieldStateId);
+      if (slotId) {
+        return this.db.prepare(
+          "SELECT * FROM key_review_state WHERE category = ? AND target_kind = 'grid_key' AND item_field_state_id = ?"
+        ).get(cat, slotId) || null;
+      }
       return this.db.prepare(
         "SELECT * FROM key_review_state WHERE category = ? AND target_kind = 'grid_key' AND item_identifier = ? AND field_key = ?"
       ).get(cat, itemIdentifier, fieldKey) || null;
     } else if (targetKind === 'enum_key') {
+      const slotId = toPositiveId(listValueId);
+      if (slotId) {
+        return this.db.prepare(
+          "SELECT * FROM key_review_state WHERE category = ? AND target_kind = 'enum_key' AND list_value_id = ?"
+        ).get(cat, slotId) || null;
+      }
       return this.db.prepare(
         "SELECT * FROM key_review_state WHERE category = ? AND target_kind = 'enum_key' AND field_key = ? AND enum_value_norm = ?"
       ).get(cat, fieldKey, enumValueNorm) || null;
     } else if (targetKind === 'component_key') {
+      const slotId = toPositiveId(componentValueId);
+      if (slotId) {
+        return this.db.prepare(
+          "SELECT * FROM key_review_state WHERE category = ? AND target_kind = 'component_key' AND component_value_id = ?"
+        ).get(cat, slotId) || null;
+      }
       return this.db.prepare(
         "SELECT * FROM key_review_state WHERE category = ? AND target_kind = 'component_key' AND component_identifier = ? AND property_key = ?"
       ).get(cat, componentIdentifier, propertyKey) || null;
@@ -3115,6 +3401,168 @@ export class SpecDb {
       new_value: newValue ?? null,
       reason: reason ?? null
     });
+  }
+
+  /**
+   * Clear slot/state candidate pointers that no longer map to a valid candidate row.
+   * This protects UI lane actions from stale IDs after reseed/reset cycles.
+   */
+  pruneOrphanCandidateReferences() {
+    const category = this.category;
+    const result = {
+      itemFieldStateCleared: 0,
+      componentValueCleared: 0,
+      listValueCleared: 0,
+      keyReviewStateCleared: 0,
+    };
+
+    const tx = this.db.transaction(() => {
+      result.itemFieldStateCleared = this.db.prepare(`
+        UPDATE item_field_state
+        SET accepted_candidate_id = NULL,
+            updated_at = datetime('now')
+        WHERE category = ?
+          AND accepted_candidate_id IS NOT NULL
+          AND TRIM(accepted_candidate_id) <> ''
+          AND NOT EXISTS (
+            SELECT 1
+            FROM candidates c
+            WHERE c.category = item_field_state.category
+              AND c.candidate_id = item_field_state.accepted_candidate_id
+              AND c.product_id = item_field_state.product_id
+              AND c.field_key = item_field_state.field_key
+          )
+      `).run(category).changes;
+
+      result.componentValueCleared = this.db.prepare(`
+        UPDATE component_values
+        SET accepted_candidate_id = NULL,
+            updated_at = datetime('now')
+        WHERE category = ?
+          AND accepted_candidate_id IS NOT NULL
+          AND TRIM(accepted_candidate_id) <> ''
+          AND NOT EXISTS (
+            SELECT 1
+            FROM candidates c
+            WHERE c.category = component_values.category
+              AND c.candidate_id = component_values.accepted_candidate_id
+              AND c.field_key = component_values.property_key
+          )
+      `).run(category).changes;
+
+      result.listValueCleared = this.db.prepare(`
+        UPDATE list_values
+        SET accepted_candidate_id = NULL,
+            updated_at = datetime('now')
+        WHERE category = ?
+          AND accepted_candidate_id IS NOT NULL
+          AND TRIM(accepted_candidate_id) <> ''
+          AND NOT EXISTS (
+            SELECT 1
+            FROM candidates c
+            WHERE c.category = list_values.category
+              AND c.candidate_id = list_values.accepted_candidate_id
+              AND c.field_key = list_values.field_key
+          )
+      `).run(category).changes;
+
+      result.keyReviewStateCleared = this.db.prepare(`
+        UPDATE key_review_state
+        SET selected_candidate_id = NULL,
+            updated_at = datetime('now')
+        WHERE category = ?
+          AND selected_candidate_id IS NOT NULL
+          AND TRIM(selected_candidate_id) <> ''
+          AND (
+            NOT EXISTS (
+              SELECT 1
+              FROM candidates c
+              WHERE c.category = key_review_state.category
+                AND c.candidate_id = key_review_state.selected_candidate_id
+            )
+            OR (
+              target_kind = 'grid_key'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM candidates c
+                WHERE c.category = key_review_state.category
+                  AND c.candidate_id = key_review_state.selected_candidate_id
+                  AND (
+                    (
+                      key_review_state.item_field_state_id IS NOT NULL
+                      AND EXISTS (
+                        SELECT 1
+                        FROM item_field_state ifs
+                        WHERE ifs.id = key_review_state.item_field_state_id
+                          AND ifs.category = key_review_state.category
+                          AND c.product_id = ifs.product_id
+                          AND c.field_key = ifs.field_key
+                      )
+                    )
+                    OR (
+                      key_review_state.item_field_state_id IS NULL
+                      AND c.product_id = key_review_state.item_identifier
+                      AND c.field_key = key_review_state.field_key
+                    )
+                  )
+              )
+            )
+            OR (
+              target_kind = 'enum_key'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM candidates c
+                WHERE c.category = key_review_state.category
+                  AND c.candidate_id = key_review_state.selected_candidate_id
+                  AND (
+                    (
+                      key_review_state.list_value_id IS NOT NULL
+                      AND EXISTS (
+                        SELECT 1
+                        FROM list_values lv
+                        WHERE lv.id = key_review_state.list_value_id
+                          AND lv.category = key_review_state.category
+                          AND c.field_key = lv.field_key
+                      )
+                    )
+                    OR (
+                      key_review_state.list_value_id IS NULL
+                      AND c.field_key = key_review_state.field_key
+                    )
+                  )
+              )
+            )
+            OR (
+              target_kind = 'component_key'
+              AND property_key NOT IN ('__name', '__maker', '__links', '__aliases')
+              AND NOT EXISTS (
+                SELECT 1
+                FROM candidates c
+                WHERE c.category = key_review_state.category
+                  AND c.candidate_id = key_review_state.selected_candidate_id
+                  AND (
+                    (
+                      key_review_state.component_value_id IS NOT NULL
+                      AND EXISTS (
+                        SELECT 1
+                        FROM component_values cv
+                        WHERE cv.id = key_review_state.component_value_id
+                          AND cv.category = key_review_state.category
+                          AND c.field_key = cv.property_key
+                      )
+                    )
+                    OR (
+                      key_review_state.component_value_id IS NULL
+                      AND c.field_key = key_review_state.property_key
+                    )
+                  )
+              )
+            )
+          )
+      `).run(category).changes;
+    });
+    tx();
+    return result;
   }
 
   counts() {
