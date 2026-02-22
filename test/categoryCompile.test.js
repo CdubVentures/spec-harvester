@@ -425,3 +425,206 @@ test('compileCategoryWorkbook applies workbook_map field_overrides for latency/f
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
+
+test('FRC-05-B — buildStudioFieldRule emits constraints for component property fields', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-frc05b-'));
+  const helperRoot = path.join(tempRoot, 'helper_files');
+  await fs.mkdir(path.join(helperRoot, 'mouse'), { recursive: true });
+  const workbookPath = mouseWorkbookPath();
+  const workbookMap = buildMouseWorkbookMap(workbookPath);
+  workbookMap.component_sources = [
+    {
+      type: 'sensor',
+      sheet: 'sensors',
+      auto_derive_aliases: true,
+      header_row: 1,
+      first_data_row: 2,
+      stop_after_blank_primary: 10,
+      roles: {
+        primary_identifier: 'C',
+        maker: 'B',
+        aliases: [],
+        links: ['J'],
+        properties: [
+          {
+            column: 'F',
+            field_key: 'dpi',
+            type: 'number',
+            unit: 'dpi',
+            variance_policy: 'upper_bound',
+            constraints: []
+          },
+          {
+            column: 'I',
+            field_key: 'sensor_date',
+            type: 'string',
+            unit: '',
+            variance_policy: 'authoritative',
+            constraints: ['sensor_date <= release_date']
+          }
+        ]
+      }
+    }
+  ];
+
+  try {
+    await saveWorkbookMap({
+      category: 'mouse',
+      workbookMap,
+      config: { helperFilesRoot: helperRoot }
+    });
+    const result = await compileCategoryWorkbook({
+      category: 'mouse',
+      workbookPath,
+      config: { helperFilesRoot: helperRoot }
+    });
+    assert.equal(result.compiled, true);
+
+    const generatedRoot = path.join(helperRoot, 'mouse', '_generated');
+    const fieldRules = JSON.parse(await fs.readFile(path.join(generatedRoot, 'field_rules.json'), 'utf8'));
+
+    const sensorDate = fieldRules.fields?.sensor_date;
+    assert.ok(sensorDate, 'sensor_date field should exist in compiled output');
+    assert.ok(Array.isArray(sensorDate.constraints),
+      'sensor_date.constraints should be an array (buildStudioFieldRule must emit constraints)');
+    assert.deepStrictEqual(sensorDate.constraints, ['sensor_date <= release_date'],
+      'sensor_date constraints should carry through from workbook_map component_sources');
+
+    const dpi = fieldRules.fields?.dpi;
+    assert.ok(dpi, 'dpi field should exist');
+    assert.ok(Array.isArray(dpi.constraints),
+      'dpi.constraints should be an empty array');
+    assert.deepStrictEqual(dpi.constraints, []);
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('FRC-05-C — buildStudioFieldRule auto-derives property_keys from component_sources', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-harvester-frc05c-'));
+  const helperRoot = path.join(tempRoot, 'helper_files');
+  await fs.mkdir(path.join(helperRoot, 'mouse'), { recursive: true });
+  const workbookPath = mouseWorkbookPath();
+  const workbookMap = buildMouseWorkbookMap(workbookPath);
+  workbookMap.component_sources = [
+    {
+      type: 'sensor',
+      sheet: 'sensors',
+      auto_derive_aliases: true,
+      header_row: 1,
+      first_data_row: 2,
+      stop_after_blank_primary: 10,
+      roles: {
+        primary_identifier: 'C',
+        maker: 'B',
+        aliases: [],
+        links: ['J'],
+        properties: [
+          {
+            column: 'F',
+            field_key: 'dpi',
+            type: 'number',
+            unit: 'dpi',
+            variance_policy: 'upper_bound',
+            constraints: []
+          },
+          {
+            column: 'I',
+            field_key: 'sensor_date',
+            type: 'string',
+            unit: '',
+            variance_policy: 'authoritative',
+            constraints: ['sensor_date <= release_date']
+          }
+        ]
+      }
+    }
+  ];
+
+  try {
+    await saveWorkbookMap({
+      category: 'mouse',
+      workbookMap,
+      config: { helperFilesRoot: helperRoot }
+    });
+    const result = await compileCategoryWorkbook({
+      category: 'mouse',
+      workbookPath,
+      config: { helperFilesRoot: helperRoot }
+    });
+    assert.equal(result.compiled, true);
+
+    const generatedRoot = path.join(helperRoot, 'mouse', '_generated');
+    const fieldRules = JSON.parse(await fs.readFile(path.join(generatedRoot, 'field_rules.json'), 'utf8'));
+
+    const sensor = fieldRules.fields?.sensor;
+    assert.ok(sensor, 'sensor field should exist in compiled output');
+    assert.ok(sensor.component, 'sensor field should have a component block');
+    assert.ok(sensor.component.match, 'sensor component should have a match block');
+    assert.ok(Array.isArray(sensor.component.match.property_keys),
+      'property_keys should be an array');
+    assert.ok(sensor.component.match.property_keys.length > 0,
+      'property_keys should be auto-derived from component_sources (not empty)');
+    assert.deepStrictEqual(
+      sensor.component.match.property_keys,
+      ['dpi', 'sensor_date'],
+      'property_keys should be derived from component_sources[sensor].roles.properties[].field_key'
+    );
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('FRC-05-D — compiler coerces string property variance_policy to authoritative', () => {
+  const rawMap = {
+    component_sources: [
+      {
+        type: 'sensor',
+        sheet: 'sensors',
+        header_row: 1,
+        first_data_row: 2,
+        roles: {
+          primary_identifier: 'C',
+          maker: 'B',
+          aliases: [],
+          links: ['J'],
+          properties: [
+            { column: 'F', field_key: 'dpi', type: 'number', variance_policy: 'upper_bound' },
+            { column: 'G', field_key: 'sensor_type', type: 'string', variance_policy: 'upper_bound' },
+            { column: 'I', field_key: 'sensor_date', type: 'string', variance_policy: 'range' },
+            { column: 'H', field_key: 'detent_type', variance_policy: 'lower_bound' },
+          ]
+        }
+      }
+    ]
+  };
+
+  const result = validateWorkbookMap(rawMap);
+
+  const warnings = result.warnings || [];
+  const coercionWarnings = warnings.filter(w => w.includes('variance_policy') && w.includes('authoritative'));
+  assert.ok(coercionWarnings.length >= 3,
+    `should have at least 3 coercion warnings for string properties, got ${coercionWarnings.length}: ${JSON.stringify(coercionWarnings)}`);
+  assert.ok(coercionWarnings.find(w => w.includes('sensor_type')),
+    'should warn about sensor_type string property with upper_bound');
+  assert.ok(coercionWarnings.find(w => w.includes('sensor_date')),
+    'should warn about sensor_date string property with range');
+  assert.ok(coercionWarnings.find(w => w.includes('detent_type')),
+    'should warn about detent_type (default string) with lower_bound');
+
+  const normalizedSensor = result.normalized.component_sources[0];
+  const props = normalizedSensor.roles.properties;
+  const dpiProp = props.find(p => p.field_key === 'dpi');
+  const sensorTypeProp = props.find(p => p.field_key === 'sensor_type');
+  const sensorDateProp = props.find(p => p.field_key === 'sensor_date');
+  const detentTypeProp = props.find(p => p.field_key === 'detent_type');
+
+  assert.equal(dpiProp.variance_policy, 'upper_bound',
+    'numeric property should keep upper_bound');
+  assert.equal(sensorTypeProp.variance_policy, 'authoritative',
+    'string property with upper_bound should be coerced to authoritative');
+  assert.equal(sensorDateProp.variance_policy, 'authoritative',
+    'string property with range should be coerced to authoritative');
+  assert.equal(detentTypeProp.variance_policy, 'authoritative',
+    'default string property with lower_bound should be coerced to authoritative');
+});

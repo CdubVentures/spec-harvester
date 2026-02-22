@@ -687,3 +687,267 @@ test('selection_policy object: no-op when no engine provided', () => {
   assert.equal(result.fields.click_latency, '1.5');
   assert.equal(result.applied.length, 0);
 });
+
+// ===========================================================================
+// PART 3 — tier-aware LLM method weight tuning
+// ===========================================================================
+
+test('tier-aware LLM weight: Tier-1 llm_extract scores higher than Tier-3 llm_extract', () => {
+  const categoryConfig = { criticalFieldSet: new Set([]) };
+  const fieldOrder = ['id', 'brand', 'model', 'base_model', 'category', 'sku', 'weight'];
+
+  const result = runConsensusEngine({
+    sourceResults: [
+      {
+        host: 'razer.com', rootDomain: 'razer.com', tier: 1, tierName: 'manufacturer',
+        role: 'manufacturer', approvedDomain: true, identity: { match: true },
+        anchorCheck: { majorConflicts: [] },
+        fieldCandidates: [{ field: 'weight', value: '60', method: 'llm_extract', keyPath: 'llm.weight' }]
+      },
+      {
+        host: 'review-a.com', rootDomain: 'review-a.com', tier: 2, tierName: 'lab',
+        role: 'review', approvedDomain: true, identity: { match: true },
+        anchorCheck: { majorConflicts: [] },
+        fieldCandidates: [{ field: 'weight', value: '60', method: 'llm_extract', keyPath: 'llm.weight' }]
+      },
+      {
+        host: 'review-b.com', rootDomain: 'review-b.com', tier: 2, tierName: 'lab',
+        role: 'review', approvedDomain: true, identity: { match: true },
+        anchorCheck: { majorConflicts: [] },
+        fieldCandidates: [{ field: 'weight', value: '60', method: 'llm_extract', keyPath: 'llm.weight' }]
+      }
+    ],
+    categoryConfig,
+    fieldOrder,
+    anchors: {},
+    identityLock: { brand: 'Razer', model: 'Viper V3 Pro' },
+    productId: 'mouse-w',
+    category: 'mouse'
+  });
+
+  const weightEvidence = result.candidates.weight || [];
+  const tier1Candidate = weightEvidence.find((c) => c.host === 'razer.com');
+  const tier2Candidate = weightEvidence.find((c) => c.host === 'review-a.com');
+
+  assert.equal(tier1Candidate.score > tier2Candidate.score, true,
+    `Tier-1 LLM score (${tier1Candidate.score}) should exceed Tier-2 (${tier2Candidate.score})`);
+});
+
+test('tier-aware LLM weight: non-LLM methods unaffected by tier-aware weighting', () => {
+  const categoryConfig = { criticalFieldSet: new Set([]) };
+  const fieldOrder = ['id', 'brand', 'model', 'base_model', 'category', 'sku', 'dpi'];
+
+  const result = runConsensusEngine({
+    sourceResults: [
+      {
+        host: 'razer.com', rootDomain: 'razer.com', tier: 1, tierName: 'manufacturer',
+        role: 'manufacturer', approvedDomain: true, identity: { match: true },
+        anchorCheck: { majorConflicts: [] },
+        fieldCandidates: [{ field: 'dpi', value: '32000', method: 'network_json', keyPath: 'payload.dpi' }]
+      },
+      {
+        host: 'lab-a.com', rootDomain: 'lab-a.com', tier: 2, tierName: 'lab',
+        role: 'review', approvedDomain: true, identity: { match: true },
+        anchorCheck: { majorConflicts: [] },
+        fieldCandidates: [{ field: 'dpi', value: '32000', method: 'network_json', keyPath: 'payload.dpi' }]
+      },
+      {
+        host: 'lab-b.com', rootDomain: 'lab-b.com', tier: 2, tierName: 'lab',
+        role: 'review', approvedDomain: true, identity: { match: true },
+        anchorCheck: { majorConflicts: [] },
+        fieldCandidates: [{ field: 'dpi', value: '32000', method: 'network_json', keyPath: 'payload.dpi' }]
+      }
+    ],
+    categoryConfig,
+    fieldOrder,
+    anchors: {},
+    identityLock: { brand: 'Razer', model: 'Viper V3 Pro' },
+    productId: 'mouse-d',
+    category: 'mouse'
+  });
+
+  const dpiEvidence = result.candidates.dpi || [];
+  const tier1Candidate = dpiEvidence.find((c) => c.host === 'razer.com');
+  assert.equal(tier1Candidate.score, 1);
+});
+
+test('consensus uses config.consensusLlmWeightTier1 to score LLM candidates differently', () => {
+  const categoryConfig = { criticalFieldSet: new Set() };
+  const fieldOrder = ['id', 'brand', 'model', 'base_model', 'category', 'sku', 'sensor'];
+
+  const baseSources = [
+    {
+      host: 'a.com', rootDomain: 'a.com', tier: 1, tierName: 'manufacturer',
+      approvedDomain: true, identity: { match: true }, anchorCheck: { majorConflicts: [] },
+      fieldCandidates: [{ field: 'sensor', value: 'Hero 2', method: 'llm_extract', keyPath: 'sensor' }]
+    },
+    {
+      host: 'b.com', rootDomain: 'b.com', tier: 1, tierName: 'manufacturer',
+      approvedDomain: true, identity: { match: true }, anchorCheck: { majorConflicts: [] },
+      fieldCandidates: [{ field: 'sensor', value: 'Hero 2', method: 'llm_extract', keyPath: 'sensor' }]
+    },
+    {
+      host: 'c.com', rootDomain: 'c.com', tier: 1, tierName: 'manufacturer',
+      approvedDomain: true, identity: { match: true }, anchorCheck: { majorConflicts: [] },
+      fieldCandidates: [{ field: 'sensor', value: 'Hero 2', method: 'llm_extract', keyPath: 'sensor' }]
+    }
+  ];
+
+  const defaultResult = runConsensusEngine({
+    sourceResults: baseSources, categoryConfig, fieldOrder,
+    anchors: {}, identityLock: { brand: 'Test', model: 'P' },
+    productId: 'test', category: 'mouse'
+  });
+  const defaultCandidateScore = defaultResult.candidates.sensor[0].score;
+
+  const boostedResult = runConsensusEngine({
+    sourceResults: baseSources, categoryConfig, fieldOrder,
+    anchors: {}, identityLock: { brand: 'Test', model: 'P' },
+    productId: 'test', category: 'mouse',
+    config: { consensusLlmWeightTier1: 0.9 }
+  });
+  const boostedCandidateScore = boostedResult.candidates.sensor[0].score;
+
+  assert.ok(boostedCandidateScore > defaultCandidateScore, 'higher LLM weight should produce higher candidate score');
+});
+
+test('consensus uses config.consensusTier3Weight to adjust tier-3 candidate scoring', () => {
+  const categoryConfig = { criticalFieldSet: new Set() };
+  const fieldOrder = ['id', 'brand', 'model', 'base_model', 'category', 'sku', 'sensor'];
+
+  const sources = [
+    {
+      host: 'shop-a.com', rootDomain: 'shop-a.com', tier: 3, tierName: 'retail',
+      role: 'retail', approvedDomain: true, identity: { match: true },
+      anchorCheck: { majorConflicts: [] },
+      fieldCandidates: [{ field: 'sensor', value: 'PAW3950', method: 'network_json', keyPath: 'sensor' }]
+    }
+  ];
+
+  const args = {
+    sourceResults: sources, categoryConfig, fieldOrder,
+    anchors: {}, identityLock: { brand: 'Test', model: 'Mouse' },
+    productId: 'test', category: 'mouse'
+  };
+
+  const defaultResult = runConsensusEngine(args);
+  const defaultScore = defaultResult.candidates.sensor[0].score;
+
+  const boostedResult = runConsensusEngine({
+    ...args,
+    config: { consensusTier3Weight: 0.95 }
+  });
+  const boostedScore = boostedResult.candidates.sensor[0].score;
+
+  assert.ok(boostedScore > defaultScore,
+    `tier-3 weight boost should increase candidate score: default=${defaultScore}, boosted=${boostedScore}`);
+});
+
+test('consensus returns identical scores when no config overrides (regression)', () => {
+  const categoryConfig = { criticalFieldSet: new Set() };
+  const fieldOrder = ['id', 'brand', 'model', 'base_model', 'category', 'sku', 'sensor'];
+  const sources = [
+    makeSource({ host: 'a.com', rootDomain: 'a.com', approvedDomain: true, value: 'Focus Pro' }),
+    makeSource({ host: 'b.com', rootDomain: 'b.com', approvedDomain: true, value: 'Focus Pro' }),
+    makeSource({ host: 'c.com', rootDomain: 'c.com', approvedDomain: true, value: 'Focus Pro' })
+  ];
+  const args = {
+    sourceResults: sources, categoryConfig, fieldOrder,
+    anchors: {}, identityLock: { brand: 'Test', model: 'P' },
+    productId: 'test', category: 'mouse'
+  };
+  const result1 = runConsensusEngine(args);
+  const result2 = runConsensusEngine({ ...args, config: {} });
+  assert.equal(result1.provenance.sensor.confidence, result2.provenance.sensor.confidence);
+});
+
+test('Tier-1 LLM (weight 0.6) beats Tier-3 deterministic on conflict', () => {
+  const categoryConfig = { criticalFieldSet: new Set(['sensor']) };
+  const fieldOrder = ['id', 'brand', 'model', 'base_model', 'category', 'sku', 'sensor'];
+
+  function makeConflictSource({ host, rootDomain, tier, tierName, value, method }) {
+    return {
+      host, rootDomain, tier, tierName, role: 'review', approvedDomain: true,
+      identity: { match: true }, anchorCheck: { majorConflicts: [] },
+      fieldCandidates: [{ field: 'sensor', value, method, keyPath: 'data.sensor' }]
+    };
+  }
+
+  const result = runConsensusEngine({
+    sourceResults: [
+      makeConflictSource({ host: 'a.com', rootDomain: 'a.com', tier: 1, tierName: 'manufacturer', value: 'Focus Pro 35K', method: 'llm_extract' }),
+      makeConflictSource({ host: 'b.com', rootDomain: 'b.com', tier: 1, tierName: 'manufacturer', value: 'Focus Pro 35K', method: 'llm_extract' }),
+      makeConflictSource({ host: 'c.com', rootDomain: 'c.com', tier: 1, tierName: 'manufacturer', value: 'Focus Pro 35K', method: 'llm_extract' }),
+      makeConflictSource({ host: 'd.com', rootDomain: 'd.com', tier: 3, tierName: 'retail', value: 'PAW 3950', method: 'network_json' }),
+      makeConflictSource({ host: 'e.com', rootDomain: 'e.com', tier: 3, tierName: 'retail', value: 'PAW 3950', method: 'network_json' }),
+      makeConflictSource({ host: 'f.com', rootDomain: 'f.com', tier: 3, tierName: 'retail', value: 'PAW 3950', method: 'network_json' })
+    ],
+    categoryConfig, fieldOrder, anchors: {},
+    identityLock: { brand: 'Razer', model: 'Viper V3 Pro' },
+    productId: 'mouse-a', category: 'mouse',
+    config: { consensusLlmWeightTier1: 0.6 }
+  });
+
+  assert.equal(result.fields.sensor, 'Focus Pro 35K');
+});
+
+test('Tier-3 LLM (weight 0.2) loses to Tier-1 deterministic', () => {
+  const categoryConfig = { criticalFieldSet: new Set(['sensor']) };
+  const fieldOrder = ['id', 'brand', 'model', 'base_model', 'category', 'sku', 'sensor'];
+
+  function makeConflictSource({ host, rootDomain, tier, tierName, value, method }) {
+    return {
+      host, rootDomain, tier, tierName, role: 'review', approvedDomain: true,
+      identity: { match: true }, anchorCheck: { majorConflicts: [] },
+      fieldCandidates: [{ field: 'sensor', value, method, keyPath: 'data.sensor' }]
+    };
+  }
+
+  const result = runConsensusEngine({
+    sourceResults: [
+      makeConflictSource({ host: 'a.com', rootDomain: 'a.com', tier: 1, tierName: 'manufacturer', value: 'Focus Pro 35K', method: 'network_json' }),
+      makeConflictSource({ host: 'b.com', rootDomain: 'b.com', tier: 1, tierName: 'manufacturer', value: 'Focus Pro 35K', method: 'network_json' }),
+      makeConflictSource({ host: 'c.com', rootDomain: 'c.com', tier: 1, tierName: 'manufacturer', value: 'Focus Pro 35K', method: 'network_json' }),
+      makeConflictSource({ host: 'd.com', rootDomain: 'd.com', tier: 3, tierName: 'retail', value: 'PAW 3950', method: 'llm_extract' }),
+      makeConflictSource({ host: 'e.com', rootDomain: 'e.com', tier: 3, tierName: 'retail', value: 'PAW 3950', method: 'llm_extract' }),
+      makeConflictSource({ host: 'f.com', rootDomain: 'f.com', tier: 3, tierName: 'retail', value: 'PAW 3950', method: 'llm_extract' })
+    ],
+    categoryConfig, fieldOrder, anchors: {},
+    identityLock: { brand: 'Razer', model: 'Viper V3 Pro' },
+    productId: 'mouse-a', category: 'mouse',
+    config: { consensusLlmWeightTier3: 0.2 }
+  });
+
+  assert.equal(result.fields.sensor, 'Focus Pro 35K');
+});
+
+test('Custom consensusTier4Weight overrides implicit 0.4 fallback', () => {
+  const categoryConfig = { criticalFieldSet: new Set(['sensor']) };
+  const fieldOrder = ['id', 'brand', 'model', 'base_model', 'category', 'sku', 'sensor'];
+
+  function makeTier4Source({ host, rootDomain, value }) {
+    return {
+      host, rootDomain, tier: 4, tierName: 'unverified', role: 'forum', approvedDomain: true,
+      identity: { match: true }, anchorCheck: { majorConflicts: [] },
+      fieldCandidates: [{ field: 'sensor', value, method: 'network_json', keyPath: 'data.sensor' }]
+    };
+  }
+
+  const baseArgs = {
+    sourceResults: [
+      makeTier4Source({ host: 'a.com', rootDomain: 'a.com', value: 'Focus Pro 35K' }),
+      makeTier4Source({ host: 'b.com', rootDomain: 'b.com', value: 'Focus Pro 35K' }),
+      makeTier4Source({ host: 'c.com', rootDomain: 'c.com', value: 'Focus Pro 35K' })
+    ],
+    categoryConfig, fieldOrder, anchors: {},
+    identityLock: { brand: 'Razer', model: 'Viper V3 Pro' },
+    productId: 'mouse-a', category: 'mouse'
+  };
+
+  const resultDefault = runConsensusEngine({ ...baseArgs, config: {} });
+  const resultCustom = runConsensusEngine({ ...baseArgs, config: { consensusTier4Weight: 0.9 } });
+
+  const defaultConf = resultDefault.provenance?.sensor?.confidence ?? 0;
+  const customConf = resultCustom.provenance?.sensor?.confidence ?? 0;
+  assert.ok(customConf >= defaultConf, `custom tier4 weight 0.9 should yield >= confidence: ${customConf} vs ${defaultConf}`);
+});

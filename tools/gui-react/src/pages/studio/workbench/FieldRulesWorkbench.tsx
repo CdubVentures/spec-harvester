@@ -1,28 +1,27 @@
 // ── FieldRulesWorkbench: top-level orchestrator for Tab 3 ────────────
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import type { UseMutationResult } from '@tanstack/react-query';
 import type { SortingState } from '@tanstack/react-table';
 import type { ColumnPreset } from './workbenchTypes';
-import type { SheetPreview, EnumListEntry, ComponentDbResponse } from '../../../types/studio';
+import type { EnumEntry, ComponentDbResponse, ComponentSource } from '../../../types/studio';
 import type { ProcessStatus } from '../../../types/events';
-import { buildWorkbenchRows, setNested } from './workbenchHelpers';
+import { buildWorkbenchRows } from './workbenchHelpers';
 import { buildColumns, getPresetVisibility } from './workbenchColumns';
 import { WorkbenchColumnPresets } from './WorkbenchColumnPresets';
 import { WorkbenchTable } from './WorkbenchTable';
 import { WorkbenchDrawer } from './WorkbenchDrawer';
 import { WorkbenchBulkBar } from './WorkbenchBulkBar';
+import { useFieldRulesStore } from '../useFieldRulesStore';
 
 interface Props {
   category: string;
-  fieldOrder: string[];
-  rules: Record<string, Record<string, unknown>>;
   knownValues: Record<string, string[]>;
-  enumLists: EnumListEntry[];
-  sheets: SheetPreview[];
+  enumLists: EnumEntry[];
   componentDb: ComponentDbResponse;
+  componentSources: ComponentSource[];
   wbMap: Record<string, unknown>;
   guardrails?: Record<string, unknown> | null;
-  onSaveRules: (rules: Record<string, unknown>) => void;
+  onSave: () => void;
   saving: boolean;
   saveSuccess: boolean;
   compileMut: UseMutationResult<ProcessStatus, Error, void, unknown>;
@@ -30,31 +29,18 @@ interface Props {
 
 export function FieldRulesWorkbench({
   category: _category,
-  fieldOrder,
-  rules,
   knownValues,
   enumLists,
-  sheets,
   componentDb,
+  componentSources,
   wbMap: _wbMap,
   guardrails,
-  onSaveRules,
+  onSave,
   saving,
   saveSuccess,
   compileMut,
 }: Props) {
-  // ── Local editable copy of rules ─────────────────────────────────
-  const [editedRules, setEditedRules] = useState<Record<string, Record<string, unknown>>>({});
-  const [initialized, setInitialized] = useState(false);
-
-  useEffect(() => {
-    if (Object.keys(rules).length > 0 && !initialized) {
-      setEditedRules(JSON.parse(JSON.stringify(rules)));
-      setInitialized(true);
-    }
-  }, [rules, initialized]);
-
-  const currentRules = Object.keys(editedRules).length > 0 ? editedRules : rules;
+  const { editedRules, editedFieldOrder, updateField } = useFieldRulesStore();
 
   // ── Table state ──────────────────────────────────────────────────
   const [activePreset, setActivePreset] = useState<ColumnPreset>('minimal');
@@ -69,8 +55,8 @@ export function FieldRulesWorkbench({
 
   // ── Build rows ───────────────────────────────────────────────────
   const rows = useMemo(
-    () => buildWorkbenchRows(fieldOrder, currentRules, guardrails, knownValues),
-    [fieldOrder, currentRules, guardrails, knownValues],
+    () => buildWorkbenchRows(editedFieldOrder, editedRules, guardrails, knownValues),
+    [editedFieldOrder, editedRules, guardrails, knownValues],
   );
 
   // ── Preset change ────────────────────────────────────────────────
@@ -83,132 +69,6 @@ export function FieldRulesWorkbench({
   const handleToggleColumn = useCallback((id: string) => {
     setColumnVisibility((prev) => ({ ...prev, [id]: prev[id] === false ? true : false }));
     setActivePreset('all'); // switch to "all" since we're manually overriding
-  }, []);
-
-  // ── updateField with full coupling logic (same as KeyNavigator) ──
-  const updateField = useCallback((key: string, path: string, value: unknown) => {
-    setEditedRules((prev) => {
-      const next = { ...prev };
-      const rule = { ...(next[key] || {}) };
-
-      setNested(rule, path, value);
-
-      // Flat mirror properties
-      if (path === 'contract.type') { rule.type = value; rule.data_type = value; }
-      if (path === 'contract.shape') { rule.shape = value; rule.output_shape = value; rule.value_form = value; }
-      if (path === 'contract.unit') { rule.unit = value; }
-      if (path === 'priority.required_level') rule.required_level = value;
-      if (path === 'priority.availability') rule.availability = value;
-      if (path === 'priority.difficulty') rule.difficulty = value;
-      if (path === 'priority.effort') rule.effort = value;
-      if (path === 'priority.publish_gate') rule.publish_gate = value;
-      if (path === 'evidence.required') rule.evidence_required = value;
-      if (path === 'evidence.min_evidence_refs') rule.min_evidence_refs = value;
-      if (path === 'enum.policy') rule.enum_policy = value;
-      if (path === 'enum.source') rule.enum_source = value;
-      if (path === 'parse.template') rule.parse_template = value;
-      if (path === 'ui.group') rule.group = value;
-      if (path === 'ui.label') rule.display_name = value;
-
-      // Parse Template → Enum + UI coupling
-      if (path === 'parse.template') {
-        const tpl = String(value || '');
-        if (tpl === 'boolean_yes_no_unk') {
-          setNested(rule, 'enum.policy', 'closed');
-          setNested(rule, 'enum.source', 'yes_no');
-          setNested(rule, 'enum.match.strategy', 'exact');
-          rule.enum_policy = 'closed'; rule.enum_source = 'yes_no';
-          setNested(rule, 'ui.input_control', 'text');
-        } else if (tpl === 'component_reference') {
-          const COMP_MAP: Record<string, string> = { sensor: 'sensor', switch: 'switch', encoder: 'encoder', material: 'material' };
-          const compType = COMP_MAP[key] || '';
-          if (compType) {
-            setNested(rule, 'component.type', compType);
-            setNested(rule, 'enum.source', `component_db.${compType}`);
-            rule.enum_source = `component_db.${compType}`;
-          }
-          setNested(rule, 'enum.policy', 'open_prefer_known');
-          setNested(rule, 'enum.match.strategy', 'alias');
-          rule.enum_policy = 'open_prefer_known';
-          setNested(rule, 'ui.input_control', 'component_picker');
-        } else if (['number_with_unit', 'list_of_numbers_with_unit', 'list_numbers_or_ranges_with_unit'].includes(tpl)) {
-          setNested(rule, 'enum.policy', 'open');
-          setNested(rule, 'enum.source', null);
-          rule.enum_policy = 'open'; rule.enum_source = '';
-          setNested(rule, 'ui.input_control', 'number');
-        } else if (tpl === 'url_field') {
-          setNested(rule, 'enum.policy', 'open');
-          setNested(rule, 'enum.source', null);
-          rule.enum_policy = 'open'; rule.enum_source = '';
-          setNested(rule, 'ui.input_control', 'url');
-        } else if (tpl === 'date_field') {
-          setNested(rule, 'enum.policy', 'open');
-          setNested(rule, 'enum.source', null);
-          rule.enum_policy = 'open'; rule.enum_source = '';
-          setNested(rule, 'ui.input_control', 'date');
-        } else if (tpl === 'list_of_tokens_delimited' || tpl === 'token_list') {
-          setNested(rule, 'ui.input_control', 'multi_select');
-        }
-      }
-
-      // Enum source → UI coupling
-      if (path === 'enum.source') {
-        const src = String(value || '');
-        if (src.startsWith('component_db.')) {
-          setNested(rule, 'ui.input_control', 'component_picker');
-        } else if (src === 'yes_no') {
-          setNested(rule, 'ui.input_control', 'text');
-        } else if (src.startsWith('data_lists.')) {
-          const pol = String((rule.enum as Record<string, unknown>)?.policy || rule.enum_policy || 'open');
-          setNested(rule, 'ui.input_control', pol === 'closed' ? 'select' : 'text');
-        }
-      }
-
-      // Enum policy → UI coupling
-      if (path === 'enum.policy') {
-        const pol = String(value || 'open');
-        const src = String((rule.enum as Record<string, unknown>)?.source || rule.enum_source || '');
-        if (src.startsWith('data_lists.') && pol === 'closed') {
-          setNested(rule, 'ui.input_control', 'select');
-        } else if (src.startsWith('component_db.')) {
-          setNested(rule, 'ui.input_control', 'component_picker');
-        }
-      }
-
-      // Priority/difficulty/effort → auto-generate reasoning note
-      if (['priority.required_level', 'priority.difficulty', 'priority.effort'].includes(path)) {
-        const ai = (rule.ai_assist || {}) as Record<string, unknown>;
-        const explicitMode = String(ai.mode || '');
-        // Only auto-generate if no explicit AI mode override is set
-        if (!explicitMode) {
-          const rl = String((rule.priority as Record<string, unknown>)?.required_level || rule.required_level || 'expected');
-          const diff = String((rule.priority as Record<string, unknown>)?.difficulty || rule.difficulty || 'easy');
-          const eff = Number((rule.priority as Record<string, unknown>)?.effort || rule.effort || 3);
-          let derivedMode = 'off';
-          if (['identity', 'required', 'critical'].includes(rl)) derivedMode = 'judge';
-          else if (rl === 'expected' && diff === 'hard') derivedMode = 'planner';
-          else if (rl === 'expected') derivedMode = 'advisory';
-          const maxCalls = eff <= 3 ? 1 : eff <= 6 ? 2 : 3;
-          const note = derivedMode === 'off'
-            ? `${rl} field - LLM extraction skipped (deterministic only)`
-            : `${rl}/${diff} field (effort ${eff}) - auto: ${derivedMode}, budget ${maxCalls} call${maxCalls > 1 ? 's' : ''}`;
-          setNested(rule, 'ai_assist.reasoning_note', note);
-        }
-      }
-
-      // Component type → enum source coupling
-      if (path === 'component.type') {
-        const ct = String(value || '');
-        if (ct) {
-          setNested(rule, 'enum.source', `component_db.${ct}`);
-          rule.enum_source = `component_db.${ct}`;
-        }
-      }
-
-      rule._edited = true;
-      next[key] = rule;
-      return next;
-    });
   }, []);
 
   // ── Inline edit handlers ─────────────────────────────────────────
@@ -255,8 +115,8 @@ export function FieldRulesWorkbench({
 
   // ── Save ─────────────────────────────────────────────────────────
   const handleSave = useCallback(() => {
-    onSaveRules(editedRules);
-  }, [editedRules, onSaveRules]);
+    onSave();
+  }, [onSave]);
 
   // ── Build columns ────────────────────────────────────────────────
   const columns = useMemo(
@@ -273,7 +133,7 @@ export function FieldRulesWorkbench({
   );
 
   // ── Drawer ───────────────────────────────────────────────────────
-  const drawerRule = drawerKey ? (currentRules[drawerKey] || null) : null;
+  const drawerRule = drawerKey ? (editedRules[drawerKey] || null) : null;
   const drawerOpen = drawerKey !== null && drawerRule !== null;
 
   return (
@@ -319,12 +179,11 @@ export function FieldRulesWorkbench({
         <WorkbenchDrawer
           fieldKey={drawerKey}
           rule={drawerRule}
-          fieldOrder={fieldOrder}
+          fieldOrder={editedFieldOrder}
           knownValues={knownValues}
           enumLists={enumLists}
-          sheets={sheets}
           componentDb={componentDb}
-          onUpdate={updateField}
+          componentSources={componentSources}
           onClose={() => setDrawerKey(null)}
           onNavigate={(key) => setDrawerKey(key)}
         />

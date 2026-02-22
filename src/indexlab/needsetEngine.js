@@ -3,6 +3,7 @@ import {
   ruleRequiredLevel
 } from '../engine/ruleAccessors.js';
 import { normalizeAmbiguityLevel } from '../utils/identityNormalize.js';
+import { toTierNumber, parseTierPreferenceFromRule } from '../utils/tierHelpers.js';
 
 const UNKNOWN_VALUE_TOKENS = new Set(['', 'unk', 'unknown', 'n/a', 'na', 'none', 'null', 'undefined']);
 
@@ -44,33 +45,6 @@ function hasKnownFieldValue(value) {
   return !UNKNOWN_VALUE_TOKENS.has(String(value ?? '').trim().toLowerCase());
 }
 
-function toTierNumber(value) {
-  if (value === null || value === undefined || value === '') return null;
-  if (Number.isFinite(Number(value))) {
-    const n = Math.max(1, Math.floor(Number(value)));
-    return n;
-  }
-  const token = String(value).trim().toLowerCase();
-  if (!token) return null;
-  const match = token.match(/tier\s*([1-9])/i);
-  if (match) return Number.parseInt(match[1], 10);
-  if (token.includes('manufacturer')) return 1;
-  if (token.includes('lab') || token.includes('review')) return 2;
-  if (token.includes('retailer')) return 3;
-  if (token.includes('database') || token.includes('aggregator') || token.includes('community')) return 4;
-  return null;
-}
-
-function parseTierPreference(rule = {}) {
-  const evidence = isObject(rule.evidence) ? rule.evidence : {};
-  const raw = Array.isArray(evidence.tier_preference) ? evidence.tier_preference : [];
-  const out = [];
-  for (const entry of raw) {
-    const tier = toTierNumber(entry);
-    if (tier && !out.includes(tier)) out.push(tier);
-  }
-  return out;
-}
 
 function countDistinctEvidenceRefs(evidenceRows = []) {
   const seen = new Set();
@@ -181,25 +155,25 @@ function normalizeIdentityState(input = {}) {
     || code.includes('mismatch')
     || code.includes('major_anchor')
   );
-  if (gateValidated && confidence >= 0.99) {
+  if (gateValidated && confidence >= 0.95) {
     return 'locked';
   }
   if (hasConflictCode) {
     return 'conflict';
   }
-  if (confidence >= 0.9) {
+  if (confidence >= 0.70) {
     return 'provisional';
   }
   return 'unlocked';
 }
 
 
-function confidenceCapForIdentityState(status = 'unlocked') {
+function confidenceCapForIdentityState(status = 'unlocked', caps = null) {
   const token = String(status || '').trim().toLowerCase();
-  if (token === 'locked') return 1;
-  if (token === 'provisional') return 0.74;
-  if (token === 'conflict') return 0.39;
-  return 0.59;
+  if (token === 'locked') return caps?.locked ?? 1;
+  if (token === 'provisional') return caps?.provisional ?? 0.74;
+  if (token === 'conflict') return caps?.conflict ?? 0.39;
+  return caps?.unlocked ?? 0.59;
 }
 
 function normalizeIdentityContext(identityContext = {}, now = '') {
@@ -247,6 +221,33 @@ function normalizeIdentityContext(identityContext = {}, now = '') {
   };
 }
 
+function mostRecentRetrievedAt(evidenceRows = []) {
+  let latest = null;
+  for (const row of evidenceRows || []) {
+    if (!isObject(row)) continue;
+    const raw = String(row.retrieved_at || row.retrievedAt || '').trim();
+    if (!raw) continue;
+    const ms = Date.parse(raw);
+    if (!Number.isFinite(ms)) continue;
+    if (latest === null || ms > latest) latest = ms;
+  }
+  return latest === null ? null : new Date(latest).toISOString();
+}
+
+export function computeEvidenceDecay({ retrievedAt, now, decayDays, decayFloor }) {
+  if (!retrievedAt || !String(retrievedAt).trim()) return 1.0;
+  const retrievedMs = Date.parse(String(retrievedAt));
+  if (!Number.isFinite(retrievedMs)) return 1.0;
+  const nowMs = Date.parse(String(now));
+  if (!Number.isFinite(nowMs)) return 1.0;
+  const halfLife = Number(decayDays);
+  if (!Number.isFinite(halfLife) || halfLife <= 0) return 1.0;
+  const floor = Number.isFinite(Number(decayFloor)) ? Number(decayFloor) : 0;
+  const ageDays = Math.max(0, (nowMs - retrievedMs) / (1000 * 60 * 60 * 24));
+  const raw = Math.pow(2, -(ageDays / halfLife));
+  return Math.max(floor, Math.min(1, raw));
+}
+
 export function computeNeedSet({
   runId = '',
   category = '',
@@ -257,6 +258,8 @@ export function computeNeedSet({
   fieldReasoning = {},
   constraintAnalysis = {},
   identityContext = {},
+  identityCaps = null,
+  decayConfig = null,
   now = new Date().toISOString()
 } = {}) {
   const identity = normalizeIdentityContext(identityContext, now);
@@ -289,7 +292,7 @@ export function computeNeedSet({
     const evidenceRows = Array.isArray(bucket.evidence) ? bucket.evidence : [];
     const refsFound = countDistinctEvidenceRefs(evidenceRows);
     const minRefs = Math.max(1, Number(ruleMinEvidenceRefs(rule) || 1));
-    const tierPreference = parseTierPreference(rule);
+    const tierPreference = parseTierPreferenceFromRule(rule);
     const bestTier = bestTierSeen(evidenceRows);
     const missing = !hasKnownFieldValue(value);
     const conflict = isFieldConflict(field, fieldReasoning, constraintAnalysis);
@@ -297,11 +300,22 @@ export function computeNeedSet({
     const blockedByIdentity = gatedField && !identity.extraction_gate_open;
     const publishGateBlocked = gatedField && !identity.publishable;
     const confidenceCap = gatedField && !identity.extraction_gate_open
-      ? confidenceCapForIdentityState(identity.status)
+      ? confidenceCapForIdentityState(identity.status, identityCaps)
       : 1;
-    const effectiveConfidence = confidence === null
+    const cappedConfidence = confidence === null
       ? null
       : Math.min(clamp01(confidence), confidenceCap);
+    const decayFactor = decayConfig
+      ? computeEvidenceDecay({
+          retrievedAt: mostRecentRetrievedAt(evidenceRows),
+          now,
+          decayDays: decayConfig.decayDays,
+          decayFloor: decayConfig.decayFloor
+        })
+      : 1.0;
+    const effectiveConfidence = cappedConfidence === null
+      ? null
+      : clamp01(cappedConfidence * decayFactor);
     const confidenceCapped = confidence !== null && effectiveConfidence !== null && effectiveConfidence < clamp01(confidence);
     const minRefsDeficit = refsFound < minRefs;
     const lowConf = effectiveConfidence === null ? !missing : effectiveConfidence < passTarget;

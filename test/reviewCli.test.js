@@ -173,8 +173,10 @@ test('review CLI builds artifacts, lists review queue, and writes suggestion fil
     await seedLatest(outputRoot, productId);
     await seedQueue(outputRoot, productId);
 
+    const specDbDir = path.join(tempRoot, 'specdb');
     const env = {
-      HELPER_FILES_ROOT: helperRoot
+      HELPER_FILES_ROOT: helperRoot,
+      SPEC_DB_DIR: specDbDir
     };
 
     const built = await runCli([

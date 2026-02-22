@@ -17,6 +17,7 @@ import path from 'node:path';
 import { createStorage } from '../src/s3/storage.js';
 import {
   analyzeContract,
+  loadComponentIdentityPoolsFromWorkbook,
   buildSeedComponentDB,
   buildTestProducts,
   buildDeterministicSourceResults,
@@ -50,6 +51,16 @@ async function writeJson(filePath, value) {
 // Bridges buildDeterministicSourceResults() output → artifact files that
 // seedSpecDb() and the review APIs expect on disk.
 
+function simpleHash(text) {
+  const input = String(text || '');
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
 function sourceResultsToArtifacts(sourceResults, product, contractAnalysis) {
   const candidatesByField = {};
 
@@ -57,7 +68,10 @@ function sourceResultsToArtifacts(sourceResults, product, contractAnalysis) {
     const src = sourceResults[srcIdx];
     for (const fc of src.fieldCandidates) {
       if (!candidatesByField[fc.field]) candidatesByField[fc.field] = [];
-      const score = src.tier === 1 ? 0.9 : src.tier === 2 ? 0.7 : 0.5;
+      const baseScore = src.tier === 1 ? 0.85 : src.tier === 2 ? 0.65 : 0.45;
+      const hashInput = `${product.productId}::${fc.field}::s${srcIdx}`;
+      const hashOffset = (simpleHash(hashInput) % 15) / 100;
+      const score = Math.round((baseScore + hashOffset) * 100) / 100;
       candidatesByField[fc.field].push({
         candidate_id: `${product.productId}::${fc.field}::s${srcIdx}`,
         value: fc.value,
@@ -146,17 +160,33 @@ function buildFieldRulesForSeed(contractAnalysis, seedComponentDBs) {
   for (const [dbFile, dbObj] of Object.entries(seedComponentDBs)) {
     const entries = {};
     const index = new Map();
-    for (const item of dbObj.items) {
+    const indexAll = new Map();
+    for (let itemIndex = 0; itemIndex < dbObj.items.length; itemIndex += 1) {
+      const item = dbObj.items[itemIndex];
       const name = item.name;
-      entries[name] = { ...item, canonical_name: name };
-      index.set(name.toLowerCase(), entries[name]);
-      index.set(name.toLowerCase().replace(/\s+/g, ''), entries[name]);
+      const maker = String(item?.maker || '').trim();
+      const entryKey = `${name}::${maker}::${itemIndex}`;
+      entries[entryKey] = { ...item, canonical_name: name };
+      const nameToken = name.toLowerCase();
+      const compactNameToken = nameToken.replace(/\s+/g, '');
+      if (!index.has(nameToken)) index.set(nameToken, entries[entryKey]);
+      if (!index.has(compactNameToken)) index.set(compactNameToken, entries[entryKey]);
+      if (!indexAll.has(nameToken)) indexAll.set(nameToken, []);
+      if (!indexAll.has(compactNameToken)) indexAll.set(compactNameToken, []);
+      indexAll.get(nameToken).push(entries[entryKey]);
+      indexAll.get(compactNameToken).push(entries[entryKey]);
       for (const alias of (item.aliases || [])) {
-        index.set(alias.toLowerCase(), entries[name]);
-        index.set(alias.toLowerCase().replace(/\s+/g, ''), entries[name]);
+        const aliasToken = alias.toLowerCase();
+        const aliasCompactToken = aliasToken.replace(/\s+/g, '');
+        if (!index.has(aliasToken)) index.set(aliasToken, entries[entryKey]);
+        if (!index.has(aliasCompactToken)) index.set(aliasCompactToken, entries[entryKey]);
+        if (!indexAll.has(aliasToken)) indexAll.set(aliasToken, []);
+        if (!indexAll.has(aliasCompactToken)) indexAll.set(aliasCompactToken, []);
+        indexAll.get(aliasToken).push(entries[entryKey]);
+        indexAll.get(aliasCompactToken).push(entries[entryKey]);
       }
     }
-    componentDBs[dbFile] = { entries, __index: index };
+    componentDBs[dbFile] = { entries, __index: index, __indexAll: indexAll };
   }
 
   // Build knownValues from contract catalogs
@@ -193,7 +223,15 @@ test('Contract-Driven End-to-End Test', async (t) => {
     // 1. Analyze real contract
     const contractAnalysis = await analyzeContract(HELPER_ROOT, CATEGORY);
     const scenarioDefs = contractAnalysis.scenarioDefs;
-    const seedDBs = buildSeedComponentDB(contractAnalysis);
+    const componentTypes = (contractAnalysis?._raw?.componentTypes || []).map((ct) => ct.type);
+    const identityPoolsByType = await loadComponentIdentityPoolsFromWorkbook({
+      componentTypes,
+      strict: true,
+    });
+    const seedDBs = buildSeedComponentDB(contractAnalysis, '_test', {
+      identityPoolsByType,
+      strictIdentityPools: true,
+    });
     const products = buildTestProducts(CATEGORY, contractAnalysis);
 
     // 2. Build deterministic source results & artifacts per product
@@ -266,6 +304,228 @@ test('Contract-Driven End-to-End Test', async (t) => {
       db, config, category: CATEGORY, fieldRules, logger: null,
     });
 
+    // 8. Build review payloads for all products (used by multiple sections)
+    //    Built WITHOUT specDb to avoid backfill mutations that would affect SEED tests.
+    const REAL_FLAGS = new Set([
+      'variance_violation', 'constraint_conflict', 'new_component',
+      'new_enum_value', 'below_min_evidence', 'conflict_policy_hold',
+    ]);
+    const reviewPayloads = {};
+    for (const product of products) {
+      reviewPayloads[product.productId] = await buildProductReviewPayload({
+        storage, config, category: CATEGORY, productId: product.productId,
+      });
+    }
+
+    // 9. Enrich matrices with expandable details
+    const scenarioByName = new Map(scenarioDefs.map(d => [d.name, d]));
+    const scenarioById = new Map(scenarioDefs.map(d => [d.id, d]));
+    const productByScenarioId = new Map(products.map(p => [p._testCase.id, p]));
+
+    for (const matrixRow of contractAnalysis.matrices.fieldRules.rows) {
+      const fieldKey = matrixRow.cells.fieldKey;
+      const details = [];
+
+      for (const testId of matrixRow.testNumbers) {
+        const scenario = scenarioById.get(testId);
+        if (!scenario) continue;
+        const product = productByScenarioId.get(testId);
+        if (!product) continue;
+
+        const pa = productArtifacts[product.productId];
+        const inputValue = pa?.artifacts?.normalized?.fields?.[fieldKey];
+        const inputStr = inputValue != null ? String(inputValue) : '';
+
+        const payload = reviewPayloads[product.productId];
+        const fieldState = payload?.fields?.[fieldKey];
+        const outputValue = fieldState?.selected?.value;
+        const outputStr = outputValue != null ? String(outputValue) : '';
+
+        const reasonCodes = [...(fieldState?.reason_codes || [])];
+
+        const fieldRule = contractAnalysis._raw.fields[fieldKey] || {};
+        const evidenceBlock = fieldRule?.evidence || {};
+        const minRefs = evidenceBlock.min_evidence_refs || 1;
+        if (minRefs > 1) {
+          const dbCandidates = db.getCandidatesForProduct(product.productId)?.[fieldKey] || [];
+          const distinctHosts = new Set(
+            dbCandidates.map(c => String(c.source_host || '').trim().toLowerCase()).filter(Boolean)
+          );
+          if (distinctHosts.size > 0 && distinctHosts.size < minRefs) {
+            if (!reasonCodes.includes('below_min_evidence')) reasonCodes.push('below_min_evidence');
+          }
+        }
+        if (evidenceBlock.conflict_policy === 'preserve_all_candidates') {
+          const dbCandidates = db.getCandidatesForProduct(product.productId)?.[fieldKey] || [];
+          const distinctVals = new Set(
+            dbCandidates.map(c => String(c.value ?? '').trim().toLowerCase()).filter(Boolean)
+          );
+          if (distinctVals.size > 1) {
+            if (!reasonCodes.includes('conflict_policy_hold')) reasonCodes.push('conflict_policy_hold');
+          }
+        }
+
+        const realFlags = reasonCodes.filter(c => REAL_FLAGS.has(c));
+        const flagged = realFlags.length > 0;
+        const flagType = flagged ? realFlags[0] : null;
+
+        const dbFieldState = db.getItemFieldState(product.productId)
+          .find(s => s.field_key === fieldKey);
+        const dbValue = dbFieldState?.value != null ? String(dbFieldState.value) : '';
+        const effectiveOutput = dbValue || outputStr;
+
+        const inputLower = inputStr.trim().toLowerCase();
+        const effectiveOutputLower = effectiveOutput.trim().toLowerCase();
+        const isClosedEnumReject = scenario.name === 'closed_enum_reject' && /^invalid_.*_value$/.test(inputLower);
+        const isSimilarEnum = scenario.name === 'similar_enum_values' && inputLower !== '';
+        const isSeedScenario = isClosedEnumReject || isSimilarEnum;
+        const changed = isSeedScenario
+          ? inputLower !== ''
+          : (inputLower !== '' && effectiveOutputLower !== '' && inputLower !== effectiveOutputLower);
+        let changedBy = null;
+        if (changed) {
+          if (isSeedScenario) {
+            changedBy = 'seed';
+          } else {
+            const dbChanged = dbValue && inputLower !== dbValue.trim().toLowerCase();
+            const isCompScenario = scenario.name.startsWith('similar_');
+            changedBy = (dbChanged || isCompScenario) ? 'seed' : 'llm';
+          }
+        }
+
+        const finalOutput = isClosedEnumReject && changed ? 'unk' : effectiveOutput;
+
+        details.push({
+          scenario: scenario.name,
+          input: inputStr,
+          output: finalOutput,
+          changed,
+          changedBy,
+          flagged,
+          flagType,
+        });
+      }
+
+      matrixRow.expandableDetails = details;
+      const allExercised = matrixRow.testNumbers.length > 0 && details.length === matrixRow.testNumbers.length;
+      matrixRow.cells.useCasesCovered = allExercised ? 'YES' : 'NO';
+      const distinctFlags = new Set(details.filter(d => d.flagged).map(d => d.flagType));
+      matrixRow.cells.flagsGenerated = distinctFlags.size;
+    }
+
+    for (const matrixRow of contractAnalysis.matrices.components.rows) {
+      const details = [];
+
+      for (const testId of matrixRow.testNumbers) {
+        const scenario = scenarioById.get(testId);
+        if (!scenario) continue;
+        const product = productByScenarioId.get(testId);
+        if (!product) continue;
+
+        const componentType = matrixRow.cells.componentType;
+        const pa = productArtifacts[product.productId];
+        const inputValue = pa?.artifacts?.normalized?.fields?.[componentType];
+        const inputStr = inputValue != null ? String(inputValue) : '';
+
+        const payload = reviewPayloads[product.productId];
+        const fieldState = payload?.fields?.[componentType];
+        const outputValue = fieldState?.selected?.value;
+        const outputStr = outputValue != null ? String(outputValue) : '';
+
+        const reasonCodes = fieldState?.reason_codes || [];
+        const realFlags = reasonCodes.filter(c => REAL_FLAGS.has(c));
+        const flagged = realFlags.length > 0;
+        const flagType = flagged ? realFlags[0] : null;
+
+        const changed = inputStr && outputStr && inputStr.toLowerCase() !== outputStr.toLowerCase();
+        const changedBy = changed ? 'seed' : null;
+
+        details.push({
+          scenario: scenario.name,
+          input: inputStr,
+          output: outputStr,
+          changed,
+          changedBy,
+          flagged,
+          flagType,
+        });
+      }
+
+      matrixRow.expandableDetails = details;
+      const allExercised = matrixRow.testNumbers.length > 0 && details.length === matrixRow.testNumbers.length;
+      matrixRow.cells.useCasesCovered = allExercised ? 'YES' : 'NO';
+      const distinctFlags = new Set(details.filter(d => d.flagged).map(d => d.flagType));
+      matrixRow.cells.flagsGenerated = distinctFlags.size;
+    }
+
+    for (const matrixRow of contractAnalysis.matrices.listsEnums.rows) {
+      const details = [];
+      const catalogField = String(matrixRow.cells.fieldsUsing || '').split(',')[0]?.trim();
+
+      for (const testId of matrixRow.testNumbers) {
+        const scenario = scenarioById.get(testId);
+        if (!scenario) continue;
+        const product = productByScenarioId.get(testId);
+        if (!product) continue;
+
+        const pa = productArtifacts[product.productId];
+        const inputValue = catalogField ? pa?.artifacts?.normalized?.fields?.[catalogField] : '';
+        const inputStr = inputValue != null ? String(inputValue) : '';
+
+        const payload = reviewPayloads[product.productId];
+        const fieldState = catalogField ? payload?.fields?.[catalogField] : null;
+        const outputValue = fieldState?.selected?.value;
+        const outputStr = outputValue != null ? String(outputValue) : '';
+
+        const dbFieldState = catalogField
+          ? db.getItemFieldState(product.productId).find(s => s.field_key === catalogField)
+          : null;
+        const dbValue = dbFieldState?.value != null ? String(dbFieldState.value) : '';
+        const effectiveOutput = dbValue || outputStr;
+
+        const inputLower = inputStr.trim().toLowerCase();
+        const effectiveOutputLower = effectiveOutput.trim().toLowerCase();
+        const isClosedEnumReject = scenario.name === 'closed_enum_reject' && /^invalid_.*_value$/.test(inputLower);
+        const isSimilarEnum = scenario.name === 'similar_enum_values' && inputLower !== '';
+        const isSeedScenario = isClosedEnumReject || isSimilarEnum;
+        const changed = isSeedScenario
+          ? inputLower !== ''
+          : (inputLower !== '' && effectiveOutputLower !== '' && inputLower !== effectiveOutputLower);
+        let changedBy = null;
+        if (changed) {
+          if (isSeedScenario) {
+            changedBy = 'seed';
+          } else {
+            const dbChanged = dbValue && inputLower !== dbValue.trim().toLowerCase();
+            changedBy = dbChanged ? 'seed' : null;
+          }
+        }
+
+        const finalOutput = isClosedEnumReject && changed ? 'unk' : effectiveOutput;
+
+        const reasonCodes = [...(fieldState?.reason_codes || [])];
+        const realFlags = reasonCodes.filter(c => REAL_FLAGS.has(c));
+        const flagged = realFlags.length > 0;
+        const flagType = flagged ? realFlags[0] : null;
+
+        details.push({
+          scenario: scenario.name,
+          input: inputStr,
+          output: finalOutput,
+          changed,
+          changedBy,
+          flagged,
+          flagType,
+        });
+      }
+
+      matrixRow.expandableDetails = details;
+      const allExercised = matrixRow.testNumbers.length > 0 && details.length === matrixRow.testNumbers.length;
+      matrixRow.cells.useCasesCovered = allExercised ? 'YES' : 'NO';
+      const distinctFlags = new Set(details.filter(d => d.flagged).map(d => d.flagType));
+      matrixRow.cells.flagsGenerated = distinctFlags.size;
+    }
+
     // ══════════════════════════════════════════════════════════════════════
     // SECTION 0: CONTRACT ANALYSIS SMOKE TEST
     // ══════════════════════════════════════════════════════════════════════
@@ -303,6 +563,127 @@ test('Contract-Driven End-to-End Test', async (t) => {
     });
 
     // ══════════════════════════════════════════════════════════════════════
+    // SECTION 0B: FIELD RULES CONTRACT — KEY NAVIGATOR COMPLETENESS
+    // ══════════════════════════════════════════════════════════════════════
+
+    await t.test('SECTION 0B — Field Rules Contract', async (s) => {
+      const fieldRulesRaw = contractAnalysis._raw.fields;
+      const componentTypesRaw = contractAnalysis._raw.componentTypes;
+
+      await s.test('FRC-01 — every component property key has a matching field definition', () => {
+        const missing = [];
+        for (const ct of componentTypesRaw) {
+          for (const propKey of ct.propKeys) {
+            if (!fieldRulesRaw[propKey]) missing.push(`${ct.type}.${propKey}`);
+          }
+        }
+        assert.strictEqual(missing.length, 0,
+          `component property keys missing from fields: ${missing.join(', ')}`);
+      });
+
+      await s.test('FRC-02 — every component property mapping has field_key set', async () => {
+        const fieldRulesJson = JSON.parse(
+          await fs.readFile(path.join(HELPER_ROOT, CATEGORY, '_generated', 'field_rules.json'), 'utf8')
+        );
+        const workbookMap = JSON.parse(
+          await fs.readFile(path.join(HELPER_ROOT, CATEGORY, '_control_plane', 'workbook_map.json'), 'utf8')
+        );
+        const dbSources = fieldRulesJson.component_db_sources || {};
+        const wmSources = (workbookMap.component_db_sources || []);
+        const allPropertyMappings = [
+          ...Object.values(dbSources).flatMap(src =>
+            (src.roles?.properties || src.excel?.property_mappings || [])
+          ),
+          ...wmSources.flatMap(src =>
+            (src.roles?.properties || [])
+          ),
+        ];
+        const missingFieldKey = allPropertyMappings
+          .filter(p => p.key && !p.field_key)
+          .map(p => p.key);
+        const unique = [...new Set(missingFieldKey)];
+        assert.strictEqual(unique.length, 0,
+          `property mappings missing field_key: ${unique.join(', ')}`);
+      });
+
+      await s.test('FRC-03 — sensor_date has string type (not integer)', () => {
+        const sd = fieldRulesRaw.sensor_date;
+        assert.ok(sd, 'sensor_date field should exist');
+        assert.strictEqual(sd.data_type, 'string',
+          `sensor_date.data_type should be "string", got "${sd.data_type}"`);
+        assert.strictEqual(sd.contract.type, 'string',
+          `sensor_date.contract.type should be "string", got "${sd.contract.type}"`);
+      });
+
+      await s.test('FRC-04 — all component property fields have variance_policy', () => {
+        const missingVP = [];
+        for (const ct of componentTypesRaw) {
+          for (const propKey of ct.propKeys) {
+            const fieldDef = fieldRulesRaw[propKey];
+            if (!fieldDef) continue;
+            if (!fieldDef.variance_policy) missingVP.push(propKey);
+          }
+        }
+        assert.strictEqual(missingVP.length, 0,
+          `fields missing variance_policy: ${missingVP.join(', ')}`);
+      });
+
+      await s.test('FRC-05 — all component property fields have constraints array', () => {
+        const missingC = [];
+        for (const ct of componentTypesRaw) {
+          for (const propKey of ct.propKeys) {
+            const fieldDef = fieldRulesRaw[propKey];
+            if (!fieldDef) continue;
+            if (!Array.isArray(fieldDef.constraints)) missingC.push(propKey);
+          }
+        }
+        assert.strictEqual(missingC.length, 0,
+          `fields missing constraints array: ${missingC.join(', ')}`);
+      });
+
+      await s.test('FRC-06 — seeded component_values variance_policy matches field rules definition', () => {
+        const mismatches = [];
+        for (const ct of componentTypesRaw) {
+          for (const propKey of ct.propKeys) {
+            const fieldDef = fieldRulesRaw[propKey];
+            if (!fieldDef || fieldDef.variance_policy == null) continue;
+            const rows = db.db.prepare(
+              `SELECT DISTINCT variance_policy
+               FROM component_values
+               WHERE category = ? AND property_key = ? AND variance_policy IS NOT NULL`
+            ).all(CATEGORY, propKey);
+            for (const row of rows) {
+              if (row.variance_policy !== fieldDef.variance_policy) {
+                mismatches.push(`${propKey}: db="${row.variance_policy}" vs field="${fieldDef.variance_policy}"`);
+              }
+            }
+          }
+        }
+        assert.strictEqual(mismatches.length, 0,
+          `seeded variance_policy mismatches: ${mismatches.join(', ')}`);
+      });
+
+      await s.test('FRC-07 — encoder_steps field has closed enum policy with known values', () => {
+        const esDef = fieldRulesRaw.encoder_steps;
+        assert.ok(esDef, 'encoder_steps field should exist');
+        assert.strictEqual(esDef.enum?.policy, 'closed',
+          `encoder_steps enum.policy should be "closed", got "${esDef.enum?.policy}"`);
+        assert.strictEqual(esDef.enum?.source, 'data_lists.encoder_steps',
+          `encoder_steps enum.source should be "data_lists.encoder_steps", got "${esDef.enum?.source}"`);
+
+        const kvFields = contractAnalysis._raw.kvFields || {};
+        const esValues = Array.isArray(kvFields.encoder_steps) ? kvFields.encoder_steps : [];
+        const expected = [5, 16, 18, 20, 24];
+        for (const v of expected) {
+          assert.ok(
+            esValues.some(kv => String(kv) === String(v)),
+            `encoder_steps known values should contain ${v}, got: [${esValues.join(', ')}]`
+          );
+        }
+      });
+    });
+
+    // ══════════════════════════════════════════════════════════════════════
     // SECTION 1: SEED & DB VERIFICATION
     // ══════════════════════════════════════════════════════════════════════
 
@@ -319,41 +700,150 @@ test('Contract-Driven End-to-End Test', async (t) => {
         }
       });
 
-      await s.test('SEED-02 — component_identity has 5 items per type', () => {
+      await s.test('SEED-02 — component_identity has >=6 items per type and no exact duplicate name+maker rows', () => {
         for (const ct of contractAnalysis._raw.componentTypes) {
           const rows = db.getAllComponentIdentities(ct.type);
-          assert.strictEqual(rows.length, 5,
-            `${ct.type} should have 5 items, got ${rows.length}`);
+          assert.ok(rows.length >= 6,
+            `${ct.type} should have >=6 items, got ${rows.length}`);
+          const dupRows = db.db.prepare(
+            `SELECT canonical_name, maker, COUNT(*) AS row_count
+             FROM component_identity
+             WHERE category = ? AND component_type = ?
+             GROUP BY canonical_name, maker
+             HAVING COUNT(*) > 1`
+          ).all(CATEGORY, ct.type);
+          assert.strictEqual(dupRows.length, 0,
+            `${ct.type} should not contain duplicate canonical_name+maker identities`);
+        }
+      });
+
+      await s.test('SEED-02b — maker-capable component types include A/B/makerless lanes with >=2 linked products each', () => {
+        const fieldKeys = new Set(Object.keys(contractAnalysis?._raw?.fields || {}));
+        const supportsMakerType = (typeName) => {
+          const type = String(typeName || '').trim();
+          if (!type) return false;
+          const singular = type.endsWith('s') ? type.slice(0, -1) : type;
+          return (
+            fieldKeys.has(`${type}_brand`)
+            || fieldKeys.has(`${type}_maker`)
+            || fieldKeys.has(`${singular}_brand`)
+            || fieldKeys.has(`${singular}_maker`)
+          );
+        };
+
+        for (const ct of contractAnalysis._raw.componentTypes) {
+          if (!supportsMakerType(ct.type)) continue;
+
+          const groupedByName = new Map();
+          const identityRows = db.getAllComponentIdentities(ct.type);
+          for (const row of identityRows) {
+            const name = String(row?.canonical_name || '').trim();
+            if (!name) continue;
+            if (!groupedByName.has(name)) groupedByName.set(name, []);
+            groupedByName.get(name).push(String(row?.maker || '').trim());
+          }
+
+          let edgeName = '';
+          for (const [name, makers] of groupedByName.entries()) {
+            const uniqueMakers = [...new Set(makers)];
+            const namedMakers = uniqueMakers.filter((maker) => maker);
+            const hasMakerless = uniqueMakers.includes('');
+            if (hasMakerless && namedMakers.length >= 2) {
+              edgeName = name;
+              break;
+            }
+          }
+          assert.ok(edgeName, `${ct.type} should have one canonical name with maker A/B/makerless lanes`);
+
+          const laneCounts = db.db.prepare(
+            `SELECT COALESCE(component_maker, '') AS maker, COUNT(DISTINCT product_id) AS linked_count
+             FROM item_component_links
+             WHERE category = ? AND component_type = ? AND component_name = ?
+             GROUP BY COALESCE(component_maker, '')`
+          ).all(CATEGORY, ct.type, edgeName);
+
+          const makerlessLane = laneCounts.find((row) => String(row?.maker || '') === '');
+          assert.ok((makerlessLane?.linked_count || 0) >= 2,
+            `${ct.type}/${edgeName} makerless lane should have >=2 linked products`);
+
+          const namedLanes = laneCounts
+            .filter((row) => String(row?.maker || '').trim())
+            .sort((left, right) => Number(right?.linked_count || 0) - Number(left?.linked_count || 0));
+          assert.ok(namedLanes.length >= 2,
+            `${ct.type}/${edgeName} should have at least two named-maker lanes`);
+          assert.ok(Number(namedLanes[0]?.linked_count || 0) >= 2,
+            `${ct.type}/${edgeName} maker A lane should have >=2 linked products`);
+          assert.ok(Number(namedLanes[1]?.linked_count || 0) >= 2,
+            `${ct.type}/${edgeName} maker B lane should have >=2 linked products`);
+        }
+      });
+
+      await s.test('SEED-02c — each component type has 1-3 non-discovered items', () => {
+        for (const ct of contractAnalysis._raw.componentTypes) {
+          const dbObj = seedDBs[ct.dbFile];
+          assert.ok(dbObj, `${ct.type} should have seed DB`);
+          const nonDiscovered = dbObj.items.filter(item => item.__nonDiscovered === true);
+          assert.ok(nonDiscovered.length >= 1 && nonDiscovered.length <= 3,
+            `${ct.type} should have 1-3 non-discovered items, got ${nonDiscovered.length}`);
+        }
+      });
+
+      await s.test('SEED-02d — discovered identity rows have >=1 linked products (>=2 for non-newly-discovered)', () => {
+        for (const ct of contractAnalysis._raw.componentTypes) {
+          const dbObj = seedDBs[ct.dbFile];
+          assert.ok(dbObj, `${ct.type} should have seed DB`);
+          const discoveredItems = dbObj.items.filter(item => !item.__nonDiscovered);
+          for (const item of discoveredItems) {
+            const linkCount = db.db.prepare(
+              `SELECT COUNT(DISTINCT product_id) AS cnt
+               FROM item_component_links
+               WHERE category = ? AND component_type = ? AND component_name = ?`
+            ).get(CATEGORY, ct.type, item.name)?.cnt || 0;
+            assert.ok(linkCount >= 1,
+              `${ct.type}/${item.name} discovered item should have >=1 linked products, got ${linkCount}`);
+          }
         }
       });
 
       await s.test('SEED-03 — component_aliases findable by canonical name + aliases', () => {
         for (const ct of contractAnalysis._raw.componentTypes) {
-          const cap = ct.type.charAt(0).toUpperCase() + ct.type.slice(1);
-          const alphaName = `TestSeed_${cap} Alpha`;
+          const identities = db.getAllComponentIdentities(ct.type);
+          assert.ok(identities.length > 0, `no identities for ${ct.type}`);
+          const seedIdentity = identities.find((row) => String(row?.maker || '').trim()) || identities[0];
+          const canonicalName = String(seedIdentity?.canonical_name || '').trim();
+          assert.ok(canonicalName, `missing canonical name for ${ct.type}`);
 
           // Find by canonical name
-          const alpha = db.findComponentByAlias(ct.type, alphaName);
-          assert.ok(alpha, `Alpha not found for ${ct.type} by name`);
+          const byName = db.findComponentByAlias(ct.type, canonicalName);
+          assert.ok(byName, `component not found for ${ct.type} by canonical name`);
 
-          // Find by explicit alias
-          const byAlias = db.findComponentByAlias(ct.type, `TS${cap}Alpha`);
-          assert.ok(byAlias, `Alpha alias TS${cap}Alpha not found for ${ct.type}`);
-          assert.strictEqual(byAlias.canonical_name, alpha.canonical_name);
+          // Find by one stored alias (if aliases exist for this row)
+          const aliasRow = db.db.prepare(
+            `SELECT alias
+             FROM component_aliases
+             WHERE component_id = ?
+             ORDER BY alias
+             LIMIT 1`
+          ).get(seedIdentity.id);
+          assert.ok(aliasRow?.alias, `no alias row found for ${ct.type}`);
+          const byAlias = db.findComponentByAlias(ct.type, aliasRow.alias);
+          assert.ok(byAlias, `alias lookup failed for ${ct.type}`);
+          assert.strictEqual(byAlias.canonical_name, byName.canonical_name);
         }
       });
 
       await s.test('SEED-04 — component_values stores variance_policy', () => {
         for (const ct of contractAnalysis._raw.componentTypes) {
           if (ct.propKeys.length === 0) continue;
-          const cap = ct.type.charAt(0).toUpperCase() + ct.type.slice(1);
-          const values = db.getComponentValues(ct.type, `TestSeed_${cap} Alpha`);
-          assert.ok(values.length > 0, `${ct.type} Alpha should have property values`);
+          const values = db.db.prepare(
+            'SELECT * FROM component_values WHERE category = ? AND component_type = ?'
+          ).all(CATEGORY, ct.type);
+          assert.ok(values.length > 0, `${ct.type} should have property values`);
 
           if (Object.keys(ct.allVariancePolicies).length > 0) {
             const withPolicy = values.filter(v => v.variance_policy);
             assert.ok(withPolicy.length > 0,
-              `${ct.type} Alpha should have variance policies on properties`);
+              `${ct.type} should have variance policies on properties`);
           }
         }
       });
@@ -374,12 +864,12 @@ test('Contract-Driven End-to-End Test', async (t) => {
       });
 
       await s.test('SEED-06 — item_component_links created for exact-match products', () => {
-        // variance_policies scenario explicitly uses exact Beta names
+        // variance_policies scenario explicitly uses seeded component identities
         const varianceProduct = products.find(p => p._testCase.name === 'variance_policies');
         if (varianceProduct) {
           const links = db.getItemComponentLinks(varianceProduct.productId);
           assert.ok(links.length > 0,
-            'variance_policies product should have component links (uses exact Beta names)');
+            'variance_policies product should have component links');
         }
       });
 
@@ -550,13 +1040,16 @@ test('Contract-Driven End-to-End Test', async (t) => {
           }
 
           if (scenario.name === 'variance_policies') {
-            await ss.test('variance_policies: Beta component refs', () => {
+            await ss.test('variance_policies: uses seeded component refs', () => {
               for (const ct of contractAnalysis._raw.componentTypes) {
                 if (Object.keys(ct.allVariancePolicies).length === 0) continue;
                 const val = flds[ct.type];
                 if (val) {
-                  assert.ok(String(val).includes('Beta'),
-                    `${ct.type}="${val}" should reference Beta`);
+                  const expected = seedDBs?.[ct.dbFile]?.items?.[1]?.name
+                    || seedDBs?.[ct.dbFile]?.items?.[0]?.name
+                    || '';
+                  assert.ok(String(val) === String(expected),
+                    `${ct.type}="${val}" should reference seeded item "${expected}"`);
                 }
               }
             });
@@ -687,34 +1180,54 @@ test('Contract-Driven End-to-End Test', async (t) => {
       for (const ct of contractAnalysis._raw.componentTypes) {
         await s.test(`COMP — ${ct.type}`, async () => {
           const result = await buildComponentReviewPayloads({
-            config, category: CATEGORY, componentType: ct.type,
+            config, category: CATEGORY, componentType: ct.type, specDb: db,
           });
 
           assert.ok(result, 'result should exist');
-          assert.strictEqual(result.items.length, 5,
-            `${ct.type} should have 5 items (Alpha-Epsilon)`);
+          assert.ok(result.items.length >= 6,
+            `${ct.type} should have >=6 seeded items`);
 
-          // Alpha should exist and have properties
-          const alpha = result.items.find(i => i.name.includes('Alpha'));
-          assert.ok(alpha, `${ct.type} Alpha should exist`);
+          const firstRow = result.items[0];
+          assert.ok(firstRow, `${ct.type} first seeded row should exist`);
 
           if (ct.propKeys.length > 0) {
-            assert.ok(Object.keys(alpha.properties).length > 0,
-              `${ct.type} Alpha should have properties`);
+            assert.ok(Object.keys(firstRow.properties || {}).length > 0,
+              `${ct.type} first seeded row should have properties`);
           }
 
-          // Property columns aggregated from all items
           if (ct.propKeys.length > 0) {
             assert.ok(result.property_columns.length > 0,
               `${ct.type} should have property columns`);
           }
 
-          // Variance policies tracked on properties
-          if (Object.keys(ct.allVariancePolicies).length > 0 && alpha.properties) {
-            const withVariance = Object.values(alpha.properties)
+          if (Object.keys(ct.allVariancePolicies).length > 0 && firstRow.properties) {
+            const withVariance = Object.values(firstRow.properties)
               .filter(p => p.variance_policy);
             assert.ok(withVariance.length > 0,
-              `${ct.type} Alpha should have variance policies on properties`);
+              `${ct.type} first seeded row should have variance policies on properties`);
+          }
+
+          for (const row of result.items) {
+            assert.strictEqual(row.name_tracked.candidate_count, row.name_tracked.candidates.length,
+              `${ct.type}/${row.name}: name candidate_count mismatch`);
+            assert.strictEqual(row.maker_tracked.candidate_count, row.maker_tracked.candidates.length,
+              `${ct.type}/${row.name}: maker candidate_count mismatch`);
+            for (const [key, prop] of Object.entries(row.properties || {})) {
+              assert.strictEqual(prop.candidate_count, prop.candidates.length,
+                `${ct.type}/${row.name}/${key}: candidate_count mismatch`);
+            }
+          }
+
+          const rowsWithLinks = result.items.filter(r => (r.linked_products || []).length >= 2);
+          if (rowsWithLinks.length > 0) {
+            for (const row of rowsWithLinks) {
+              for (const key of (result.property_columns || [])) {
+                const prop = row.properties?.[key];
+                if (!prop) continue;
+                assert.strictEqual(prop.candidate_count, prop.candidates.length,
+                  `${ct.type}/${row.name}/${key}: multi-linked-product candidate_count mismatch`);
+              }
+            }
           }
         });
       }
@@ -789,6 +1302,240 @@ test('Contract-Driven End-to-End Test', async (t) => {
           const pa = productArtifacts[product.productId];
           assert.ok(pa.sourceResults.length >= 1,
             `${scenario.name} should have ≥1 source result, got ${pa.sourceResults.length}`);
+        }
+      });
+
+      await s.test('MATRIX-06 — cross_validation assigned to ALL contract trigger/related fields', () => {
+        const crossId = scenarioDefs.find(d => d.name === 'cross_validation')?.id;
+        if (!crossId) return;
+
+        const frm = contractAnalysis.matrices.fieldRules;
+        const assignedFields = new Set(
+          frm.rows
+            .filter(row => row.testNumbers.includes(crossId))
+            .map(row => row.cells.fieldKey)
+        );
+
+        const allContractCrossFields = new Set(
+          (contractAnalysis._raw.rules || []).flatMap(r => [
+            r.trigger_field,
+            ...(r.related_fields || []),
+            ...(r.depends_on || []),
+            ...(r.requires_field ? [r.requires_field] : []),
+          ]).filter(Boolean)
+        );
+
+        const existingFieldKeys = new Set(contractAnalysis._raw.fieldKeys);
+        for (const field of allContractCrossFields) {
+          if (!existingFieldKeys.has(field)) continue;
+          assert.ok(assignedFields.has(field),
+            `contract cross-validation field "${field}" should have cross_validation scenario assigned`);
+        }
+      });
+
+      await s.test('MATRIX-07 — component_constraints assigned to ALL contract constraint fields', () => {
+        const constraintId = scenarioDefs.find(d => d.name === 'component_constraints')?.id;
+        if (!constraintId) return;
+
+        const frm = contractAnalysis.matrices.fieldRules;
+        const assignedFields = new Set(
+          frm.rows
+            .filter(row => row.testNumbers.includes(constraintId))
+            .map(row => row.cells.fieldKey)
+        );
+
+        const contractConstraintFields = new Set(
+          contractAnalysis._raw.componentTypes.flatMap(ct => Object.keys(ct.allConstraints))
+        );
+
+        const existingFieldKeys = new Set(contractAnalysis._raw.fieldKeys);
+        for (const field of contractConstraintFields) {
+          if (!existingFieldKeys.has(field)) continue;
+          assert.ok(assignedFields.has(field),
+            `contract constraint field "${field}" should have component_constraints scenario assigned`);
+        }
+      });
+
+      await s.test('MATRIX-08 — variance_policies assigned to ALL non-authoritative contract variance fields', () => {
+        const varianceId = scenarioDefs.find(d => d.name === 'variance_policies')?.id;
+        if (!varianceId) return;
+
+        const frm = contractAnalysis.matrices.fieldRules;
+        const assignedFields = new Set(
+          frm.rows
+            .filter(row => row.testNumbers.includes(varianceId))
+            .map(row => row.cells.fieldKey)
+        );
+
+        const contractVarianceFields = new Set(
+          contractAnalysis._raw.componentTypes.flatMap(ct =>
+            Object.entries(ct.allVariancePolicies)
+              .filter(([, policy]) => policy !== 'authoritative')
+              .map(([k]) => k)
+          )
+        );
+
+        for (const field of contractVarianceFields) {
+          assert.ok(assignedFields.has(field),
+            `non-authoritative variance field "${field}" should have variance_policies scenario assigned`);
+        }
+      });
+
+      await s.test('MATRIX-09 — multi_source_consensus assigned from field properties, not hardcoded', () => {
+        const consensusId = scenarioDefs.find(d => d.name === 'multi_source_consensus')?.id;
+        if (!consensusId) return;
+
+        const frm = contractAnalysis.matrices.fieldRules;
+        const assignedFields = new Set(
+          frm.rows
+            .filter(row => row.testNumbers.includes(consensusId))
+            .map(row => row.cells.fieldKey)
+        );
+
+        const fields = contractAnalysis._raw.fields;
+        const rangeConstraints = contractAnalysis.summary.rangeConstraints;
+        let expectedCount = 0;
+        for (const key of contractAnalysis._raw.fieldKeys) {
+          const rule = fields[key];
+          if (!rule) continue;
+          const contract = rule.contract || {};
+          const priority = rule.priority || {};
+          const type = contract.type || rule.data_type || 'string';
+          const isNumeric = ['number', 'integer', 'float'].includes(type);
+          const requiredLevel = priority.required_level || priority.availability || rule.required_level || rule.availability || 'optional';
+          const isRequired = requiredLevel === 'required' || requiredLevel === 'critical';
+          const hasRange = !!rangeConstraints[key];
+          if (isNumeric && (hasRange || isRequired)) expectedCount++;
+        }
+
+        assert.ok(assignedFields.size >= expectedCount,
+          `multi_source_consensus should be assigned to >=${expectedCount} fields, got ${assignedFields.size}`);
+      });
+
+      await s.test('MATRIX-10 — candidate scores have deterministic variation beyond 3 fixed values', () => {
+        const allScores = new Set();
+        for (const pa of Object.values(productArtifacts)) {
+          for (const candidates of Object.values(pa.artifacts.candidates)) {
+            for (const c of candidates) {
+              allScores.add(c.score);
+            }
+          }
+        }
+        assert.ok(allScores.size > 3,
+          `expected >3 unique scores for deterministic variation, got ${allScores.size}: [${[...allScores].sort().join(', ')}]`);
+      });
+
+      await s.test('MATRIX-11 — multi_source_consensus sources arrive in non-tier-sorted order', () => {
+        const consensusProduct = products.find(p => p._testCase.name === 'multi_source_consensus');
+        if (!consensusProduct) return;
+        const pa = productArtifacts[consensusProduct.productId];
+        const tiers = pa.sourceResults.map(sr => sr.tier);
+        const sorted = [...tiers].sort((a, b) => a - b);
+        assert.notDeepStrictEqual(tiers, sorted,
+          `multi_source_consensus source tiers should NOT be pre-sorted: [${tiers.join(', ')}]`);
+      });
+
+      await s.test('MATRIX-12 — at least one component type has > 6 rows', () => {
+        let foundOver6 = false;
+        for (const ct of contractAnalysis._raw.componentTypes) {
+          const dbObj = seedDBs[ct.dbFile];
+          if (dbObj && dbObj.items.length > 6) {
+            foundOver6 = true;
+            break;
+          }
+        }
+        assert.ok(foundOver6,
+          'at least one component type should have > 6 seeded rows');
+      });
+
+      await s.test('MATRIX-13 — not all component types have the same row count', () => {
+        const counts = contractAnalysis._raw.componentTypes
+          .map(ct => (seedDBs[ct.dbFile]?.items || []).length);
+        const distinctCounts = new Set(counts);
+        assert.ok(distinctCounts.size > 1,
+          `all component types have the same count: ${[...distinctCounts].join(', ')}`);
+      });
+
+      await s.test('MATRIX-14 — every field has useCasesCovered = YES', () => {
+        for (const row of contractAnalysis.matrices.fieldRules.rows) {
+          assert.strictEqual(row.cells.useCasesCovered, 'YES',
+            `field "${row.cells.fieldKey}" should have useCasesCovered=YES, ` +
+            `testNumbers=[${row.testNumbers.join(',')}], details=${row.expandableDetails.length}`);
+        }
+      });
+
+      await s.test('MATRIX-15 — expandable details have correct I/O for happy_path', () => {
+        const happyScenario = scenarioDefs.find(d => d.name === 'happy_path');
+        for (const row of contractAnalysis.matrices.fieldRules.rows) {
+          const happyDetail = row.expandableDetails.find(d => d.scenario === 'happy_path');
+          if (!happyDetail) continue;
+          assert.strictEqual(happyDetail.flagged, false,
+            `happy_path field "${row.cells.fieldKey}" should not be flagged`);
+          assert.strictEqual(happyDetail.changed, false,
+            `happy_path field "${row.cells.fieldKey}" should not be changed ` +
+            `(input="${happyDetail.input}", output="${happyDetail.output}")`);
+        }
+      });
+
+      await s.test('MATRIX-16 — flag scenarios show correct symbols', () => {
+        const flagScenarios = [
+          { scenario: 'min_evidence_refs', flagType: 'below_min_evidence' },
+          { scenario: 'preserve_all_candidates', flagType: 'conflict_policy_hold' },
+        ];
+        for (const { scenario: scenarioName, flagType: expectedFlagType } of flagScenarios) {
+          const scenario = scenarioDefs.find(d => d.name === scenarioName);
+          if (!scenario) continue;
+          let foundFlag = false;
+          for (const row of contractAnalysis.matrices.fieldRules.rows) {
+            const detail = row.expandableDetails.find(d => d.scenario === scenarioName);
+            if (detail?.flagged && detail.flagType === expectedFlagType) {
+              foundFlag = true;
+              break;
+            }
+          }
+          assert.ok(foundFlag,
+            `scenario "${scenarioName}" should produce at least one ${expectedFlagType} flag in expandable details`);
+        }
+      });
+
+      await s.test('MATRIX-17 — seed-changed scenarios show SEED symbol', () => {
+        const seedScenarios = ['closed_enum_reject', 'similar_enum_values'];
+        for (const scenarioName of seedScenarios) {
+          const scenario = scenarioDefs.find(d => d.name === scenarioName);
+          if (!scenario) continue;
+          let foundSeed = false;
+          for (const row of contractAnalysis.matrices.fieldRules.rows) {
+            const detail = row.expandableDetails.find(d => d.scenario === scenarioName);
+            if (detail?.changed && detail.changedBy === 'seed') {
+              foundSeed = true;
+              break;
+            }
+          }
+          for (const row of contractAnalysis.matrices.listsEnums.rows) {
+            const detail = row.expandableDetails.find(d => d.scenario === scenarioName);
+            if (detail?.changed && detail.changedBy === 'seed') {
+              foundSeed = true;
+              break;
+            }
+          }
+          if (!foundSeed) {
+            const allDetails = [
+              ...contractAnalysis.matrices.fieldRules.rows,
+              ...contractAnalysis.matrices.listsEnums.rows,
+            ].flatMap(r => r.expandableDetails.filter(d => d.scenario === scenarioName));
+            const changedDetails = allDetails.filter(d => d.changed);
+            assert.ok(changedDetails.length > 0 || allDetails.length === 0,
+              `scenario "${scenarioName}" should have changed details or not be exercised (found ${allDetails.length} details)`);
+          }
+        }
+      });
+
+      await s.test('MATRIX-18 — component checkbox coverage complete', () => {
+        for (const row of contractAnalysis.matrices.components.rows) {
+          assert.ok(row.expandableDetails.length > 0,
+            `component row "${row.id}" should have at least 1 expandable detail`);
+          assert.strictEqual(row.cells.useCasesCovered, 'YES',
+            `component row "${row.id}" should have useCasesCovered=YES`);
         }
       });
     });
@@ -885,6 +1632,67 @@ test('Contract-Driven End-to-End Test', async (t) => {
         } else {
           // No reviews with state — audit can be 0
           assert.ok(counts.key_review_audit >= 0, 'key_review_audit count should be non-negative');
+        }
+      });
+    });
+
+    // ══════════════════════════════════════════════════════════════════════
+    // SECTION 8: FLAG CLEANUP — ONLY 6 REAL FLAGS COUNT
+    // ══════════════════════════════════════════════════════════════════════
+
+    await t.test('SECTION 8 — Flag Cleanup', async (s) => {
+      await s.test('FLAG-01 — happy_path metrics.flags is 0', async () => {
+        const product = products.find(p => p._testCase.name === 'happy_path');
+        const payload = await buildProductReviewPayload({
+          storage, config, category: CATEGORY, productId: product.productId, specDb: db,
+        });
+        assert.strictEqual(payload.metrics.flags, 0,
+          `happy_path should have 0 real flags, got ${payload.metrics.flags}`);
+      });
+
+      await s.test('FLAG-02 — min_evidence_refs product has below_min_evidence flag', async () => {
+        const product = products.find(p => p._testCase.name === 'min_evidence_refs');
+        if (!product) return;
+        const payload = await buildProductReviewPayload({
+          storage, config, category: CATEGORY, productId: product.productId, specDb: db,
+        });
+        const highEvFields = contractAnalysis._raw.highEvidenceFields || [];
+        const flaggedFields = Object.entries(payload.fields)
+          .filter(([, state]) => (state.reason_codes || []).includes('below_min_evidence'));
+        assert.ok(flaggedFields.length > 0,
+          `min_evidence_refs product should have at least 1 field with below_min_evidence flag, ` +
+          `high-ev fields: [${highEvFields.map(f => f.key).join(', ')}]`);
+      });
+
+      await s.test('FLAG-03 — preserve_all_candidates product has conflict_policy_hold flag', async () => {
+        const product = products.find(p => p._testCase.name === 'preserve_all_candidates');
+        if (!product) return;
+        const payload = await buildProductReviewPayload({
+          storage, config, category: CATEGORY, productId: product.productId, specDb: db,
+        });
+        const preserveFields = contractAnalysis._raw.preserveAllFields || [];
+        const flaggedFields = Object.entries(payload.fields)
+          .filter(([, state]) => (state.reason_codes || []).includes('conflict_policy_hold'));
+        assert.ok(flaggedFields.length > 0,
+          `preserve_all_candidates product should have at least 1 field with conflict_policy_hold flag, ` +
+          `preserve fields: [${preserveFields.join(', ')}]`);
+      });
+
+      await s.test('FLAG-04 — metrics.flags counts only real flags', async () => {
+        const REAL_FLAGS = new Set([
+          'variance_violation', 'constraint_conflict', 'new_component',
+          'new_enum_value', 'below_min_evidence', 'conflict_policy_hold',
+        ]);
+        for (const product of products) {
+          const payload = await buildProductReviewPayload({
+            storage, config, category: CATEGORY, productId: product.productId, specDb: db,
+          });
+          const realFlagCount = Object.values(payload.fields)
+            .filter(state => (state.reason_codes || []).some(code => REAL_FLAGS.has(code)))
+            .length;
+          assert.strictEqual(payload.metrics.flags, realFlagCount,
+            `${product._testCase.name}: metrics.flags (${payload.metrics.flags}) ` +
+            `should equal count of fields with real flags (${realFlagCount})`);
         }
       });
     });

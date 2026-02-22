@@ -16,6 +16,12 @@ const OPERATORS = ['<=', '>=', '!=', '==', '<', '>'];
 function parseConstraint(expr) {
   if (!expr || typeof expr !== 'string') return null;
   const trimmed = expr.trim();
+
+  const requiresMatch = trimmed.match(/^(.+?)\s+requires\s+(.+)$/);
+  if (requiresMatch) {
+    return { left: requiresMatch[1].trim(), op: 'requires', right: requiresMatch[2].trim(), raw: trimmed };
+  }
+
   for (const op of OPERATORS) {
     const idx = trimmed.indexOf(op);
     if (idx > 0) {
@@ -141,6 +147,40 @@ function evaluateConstraint(expr, componentProps = {}, productValues = {}) {
   const leftResolved = resolveValue(parsed.left, componentProps, productValues);
   const rightResolved = resolveValue(parsed.right, componentProps, productValues);
 
+  const unkTokens = new Set(['unk', 'unknown', 'n/a', '']);
+  const leftIsUnk = leftResolved.source === 'unresolved' || unkTokens.has(String(leftResolved.value).toLowerCase().trim());
+  const rightIsUnk = rightResolved.source === 'unresolved' || unkTokens.has(String(rightResolved.value).toLowerCase().trim());
+
+  if (parsed.op === 'requires') {
+    if (leftIsUnk) {
+      return {
+        pass: true,
+        message: `Constraint "${expr}" skipped: ${parsed.left} is unknown/unresolved`,
+        parsed,
+        leftVal: leftResolved.value,
+        rightVal: rightResolved.value,
+        skipped: true,
+      };
+    }
+    if (rightIsUnk) {
+      return {
+        pass: false,
+        message: `Constraint VIOLATION: ${parsed.left}(${leftResolved.value}) requires ${parsed.right} — dependency missing`,
+        parsed,
+        leftVal: leftResolved.value,
+        rightVal: rightResolved.value,
+        dependencyMissing: true,
+      };
+    }
+    return {
+      pass: true,
+      message: `Constraint OK: ${parsed.left}(${leftResolved.value}) requires ${parsed.right}(${rightResolved.value})`,
+      parsed,
+      leftVal: leftResolved.value,
+      rightVal: rightResolved.value,
+    };
+  }
+
   // If either side is unresolved, skip (don't flag — missing data is handled elsewhere)
   if (leftResolved.source === 'unresolved' || rightResolved.source === 'unresolved') {
     return {
@@ -154,9 +194,7 @@ function evaluateConstraint(expr, componentProps = {}, productValues = {}) {
   }
 
   // Check for unknown tokens — skip constraint if either value is unknown
-  const unkTokens = new Set(['unk', 'unknown', 'n/a', '']);
-  if (unkTokens.has(String(leftResolved.value).toLowerCase().trim()) ||
-      unkTokens.has(String(rightResolved.value).toLowerCase().trim())) {
+  if (leftIsUnk || rightIsUnk) {
     return {
       pass: true,
       message: `Constraint "${expr}" skipped: value is unknown`,

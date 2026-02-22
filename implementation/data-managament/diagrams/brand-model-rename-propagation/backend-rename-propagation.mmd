@@ -1,0 +1,52 @@
+flowchart TB
+  classDef trigger fill:#e8f0fe,stroke:#2563eb,color:#0f172a,stroke-width:1px;
+  classDef api fill:#ffedd5,stroke:#c2410c,color:#111827,stroke-width:1px;
+  classDef write fill:#dcfce7,stroke:#16a34a,color:#052e16,stroke-width:1px;
+  classDef migrate fill:#fef9c3,stroke:#ca8a04,color:#111827,stroke-width:1px;
+  classDef sql fill:#ede9fe,stroke:#7c3aed,color:#2e1065,stroke-width:1px;
+  classDef note fill:#f8fafc,stroke:#64748b,color:#0f172a,stroke-dasharray:3 3;
+
+  subgraph P["A) Product identity rename (model/variant or brand slug impact)"]
+    PT0["PUT /api/v1/catalog/{cat}/products/{pid}"]:::trigger
+    PT1["guiServer -> catalogUpdateProduct(...)"]:::api
+    PT0 --> PT1
+
+    PT1 --> PT2{"new productId<br/>old != new ?"}:::api
+
+    PT2 -- yes --> PM1["migrateProductArtifacts(...)"]:::migrate
+    PM1 --> PM1A["Move storage artifact prefixes:<br/>outputs/latest, outputs/runs,<br/>final/review, published, final"]:::write
+    PM1 --> PM1B["Move override file:<br/>helper_files/{cat}/_overrides/{oldPid}.overrides.json<br/>-> {newPid}.overrides.json"]:::write
+    PM1 --> PM1C["migrateQueueEntry:<br/>_queue/{cat}/state.json key old->new<br/>(also legacy queue state path mirror)"]:::write
+
+    PT2 -- yes --> PLOG["Append helper_files/{cat}/_control_plane/rename_log.json"]:::write
+    PT2 -- yes/no --> PSAVE["Write helper_files/{cat}/_control_plane/product_catalog.json"]:::write
+    PT2 -- yes/no --> PIN["Write specs/inputs/{cat}/products/{newPid}.json<br/>(delete old input on rename)"]:::write
+    PT2 -- if queue_migrated=false --> PQ["upsertQueueProduct(...)<br/>JSON queue write path"]:::write
+  end
+
+  subgraph B["B) Brand rename from Catalog > Brands tab"]
+    BT0["PUT /api/v1/brands/{slug}<br/>(name changed)"]:::trigger
+    BT1["guiServer -> renameBrand(...)"]:::api
+    BT0 --> BT1
+
+    BT1 --> BREG["Write helper_files/_global/brand_registry.json<br/>(slug move, canonical name update,<br/>alias + rename_history)"]:::write
+    BT1 --> BLOG["Append helper_files/_global/brand_rename_log.json"]:::write
+    BT1 --> BCAS["Cascade loop:<br/>for category in brand.categories,<br/>for products where brand==old canonical,<br/>call catalogUpdateProduct({ brand:newName })"]:::api
+
+    BCAS --> PT2
+  end
+
+  subgraph S["SQL / SpecDb impact"]
+    S0["Relevant tables (eventual consistency path):<br/>products, product_queue"]:::sql
+    S1["Direct rename-route SpecDb writes:<br/>none in this code path<br/>(rename helpers are invoked without specDb arg)"]:::note
+    S2["Indirect SQL refresh path:<br/>seedSpecDb -> seedProductCatalog -> upsertProduct(products)<br/>seedSpecDb -> seedQueueState -> upsertQueueProduct(product_queue)"]:::sql
+    S3["QUEUE_JSON_WRITE default=false,<br/>but rename path still writes queue JSON<br/>because specDb is omitted in this flow"]:::note
+  end
+
+  PM1C -.-> S3
+  PQ -.-> S3
+  PT1 -.-> S1
+  PM1C -.-> S1
+  S1 -.-> S2
+  S2 --> S0
+

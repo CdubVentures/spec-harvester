@@ -1,0 +1,45 @@
+flowchart TD
+  A["PUT /studio/:category/workbook-map"] --> B["saveWorkbookMap()"]
+  B --> B1["normalizeWorkbookMap(...)"]
+  B --> B2["_control_plane/workbook_map.json write"]
+  B --> B3["_control_plane/_versions/<id>/ snapshot"]
+  B --> B4["map_hash returned to client"]
+
+  C["GET /workbook/:category/context"] --> C1["loadWorkbookMap(...)"]
+  C1 --> C2["extractWorkbookContext(...)"]
+  C2 --> C3["keys + products + enums + componentSummary"]
+
+  D["POST /studio/:category/compile"] --> E["category-compile process"]
+  E --> E1["validateWorkbookMap(...)"]
+  E1 --> E2["mergeWorkbookMapDefaults(...)"]
+  E2 --> E3["pullKeyRowsFromMap + selected_keys filter"]
+  E3 --> E4["pullMatrix/Row samples"]
+  E4 --> E5["pullEnumLists(...)"]
+  E4 --> E6["pullComponentDbs(...)"]
+
+  E5 --> F1["_generated/known_values.json"]
+  E6 --> F2["_generated/component_db/*.json"]
+  E3 --> F3["_generated/field_rules.json + runtime pair"]
+  E3 --> F4["_generated/ui_field_catalog.json"]
+  E3 --> F5["_generated/_compile_report.json"]
+  E3 --> F6["_control_plane draft/full snapshots"]
+
+  E --> G["process-completed data-change (exit code 0)"]
+
+  F3 --> H["loadCategoryConfig() uses generated field rules"]
+  H --> H1["/field-labels/:category"]
+  H --> H2["/review/:category/layout"]
+  H2 --> H3["buildProductReviewPayload + inferFlags"]
+
+  I["/review-components/:category/components|enums"] --> J["getSpecDbReady()"]
+  J --> K{"SpecDb seeded?"}
+  K -- "No" --> K1["triggerAutoSeed (only for missing/unseeded DB)"]
+  K -- "Yes" --> K2["Use existing SQL rows"]
+
+  K1 --> L["seedSpecDb(...) upserts component/list/item/key-review rows"]
+  K2 --> M["No automatic reseed on compile"]
+  M --> N["SQL-backed component/enum views can lag new compile JSON"]
+
+  O["Manual sync command"] --> O1["node src/cli/spec.js seed-db --category <cat> --local"]
+  O1 --> L
+

@@ -49,7 +49,7 @@ export function AppShell() {
 
   useEffect(() => {
     wsManager.connect();
-    wsManager.subscribe(['events', 'queue', 'process', 'indexlab-event'], category);
+    wsManager.subscribe(['events', 'queue', 'process', 'data-change', 'indexlab-event'], category);
 
     const unsub = wsManager.onMessage((channel, data) => {
       if (channel === 'events' && Array.isArray(data)) {
@@ -72,6 +72,10 @@ export function AppShell() {
           queryClient.invalidateQueries({ queryKey: ['product', cat] });
           queryClient.invalidateQueries({ queryKey: ['catalog', cat] });
           queryClient.invalidateQueries({ queryKey: ['studio-known-values', cat] });
+          queryClient.invalidateQueries({ queryKey: ['fieldLabels', cat] });
+          queryClient.invalidateQueries({ queryKey: ['reviewLayout', cat] });
+          queryClient.invalidateQueries({ queryKey: ['studio', cat] });
+          queryClient.invalidateQueries({ queryKey: ['studio-drafts', cat] });
         }
       }
     });

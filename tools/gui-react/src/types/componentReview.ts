@@ -27,6 +27,8 @@ export interface ComponentPropertyState {
   candidate_count: number;
   candidates: ReviewCandidate[];
   accepted_candidate_id?: string | null;
+  enum_values?: string[] | null;
+  enum_policy?: string | null;
 }
 
 export interface ComponentLinkTracked {
@@ -42,6 +44,8 @@ export interface ComponentReviewItem {
   component_identity_id?: number | null;
   name: string;
   maker: string;
+  discovered?: boolean;
+  discovery_source?: string;
   aliases: string[];
   aliases_overridden: boolean;
   links: string[];
@@ -71,7 +75,7 @@ export interface EnumValueReviewItem {
   list_value_id?: number | null;
   enum_list_id?: number | null;
   value: string;
-  source: 'workbook' | 'pipeline' | 'manual';
+  source: 'reference' | 'workbook' | 'pipeline' | 'manual';
   source_timestamp?: string | null;
   confidence: number;
   color: 'green' | 'yellow' | 'red' | 'gray' | 'purple';

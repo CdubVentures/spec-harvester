@@ -739,6 +739,101 @@ CREATE TABLE IF NOT EXISTS runtime_events (
 );
 CREATE INDEX IF NOT EXISTS idx_re_ts ON runtime_events(ts);
 CREATE INDEX IF NOT EXISTS idx_re_product ON runtime_events(product_id);
+
+-- Migration Phase 10: Evidence index tables
+CREATE TABLE IF NOT EXISTS evidence_documents (
+  doc_id TEXT PRIMARY KEY,
+  content_hash TEXT NOT NULL,
+  parser_version TEXT NOT NULL,
+  url TEXT NOT NULL,
+  host TEXT NOT NULL DEFAULT '',
+  tier INTEGER DEFAULT 99,
+  role TEXT DEFAULT '',
+  category TEXT NOT NULL DEFAULT '',
+  product_id TEXT NOT NULL DEFAULT '',
+  dedupe_outcome TEXT NOT NULL DEFAULT 'new',
+  indexed_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(content_hash, parser_version)
+);
+
+CREATE TABLE IF NOT EXISTS evidence_chunks (
+  chunk_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  doc_id TEXT NOT NULL REFERENCES evidence_documents(doc_id),
+  snippet_id TEXT NOT NULL,
+  chunk_index INTEGER NOT NULL,
+  chunk_type TEXT NOT NULL DEFAULT '',
+  text TEXT NOT NULL DEFAULT '',
+  normalized_text TEXT NOT NULL DEFAULT '',
+  snippet_hash TEXT NOT NULL DEFAULT '',
+  extraction_method TEXT NOT NULL DEFAULT '',
+  field_hints TEXT NOT NULL DEFAULT '[]',
+  UNIQUE(doc_id, snippet_id)
+);
+
+CREATE TABLE IF NOT EXISTS evidence_facts (
+  fact_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  chunk_id INTEGER NOT NULL REFERENCES evidence_chunks(chunk_id),
+  doc_id TEXT NOT NULL REFERENCES evidence_documents(doc_id),
+  field_key TEXT NOT NULL,
+  value_raw TEXT NOT NULL DEFAULT '',
+  value_normalized TEXT NOT NULL DEFAULT '',
+  unit TEXT NOT NULL DEFAULT '',
+  extraction_method TEXT NOT NULL DEFAULT '',
+  confidence REAL NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_ed_category_product ON evidence_documents(category, product_id);
+CREATE INDEX IF NOT EXISTS idx_ed_content_hash ON evidence_documents(content_hash);
+CREATE INDEX IF NOT EXISTS idx_ec_doc ON evidence_chunks(doc_id);
+CREATE INDEX IF NOT EXISTS idx_ec_snippet ON evidence_chunks(snippet_id);
+CREATE INDEX IF NOT EXISTS idx_ef_doc ON evidence_facts(doc_id);
+CREATE INDEX IF NOT EXISTS idx_ef_field ON evidence_facts(field_key);
+CREATE INDEX IF NOT EXISTS idx_ef_chunk ON evidence_facts(chunk_id);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS evidence_chunks_fts USING fts5(
+  text,
+  normalized_text,
+  field_hints,
+  content='evidence_chunks',
+  content_rowid='chunk_id',
+  tokenize='porter unicode61'
+);
+
+-- Sprint 4: LLM-Guided Discovery tables
+
+CREATE TABLE IF NOT EXISTS brand_domains (
+  brand TEXT NOT NULL,
+  category TEXT NOT NULL,
+  official_domain TEXT,
+  aliases TEXT,
+  support_domain TEXT,
+  confidence REAL DEFAULT 0.8,
+  resolved_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (brand, category)
+);
+
+CREATE TABLE IF NOT EXISTS domain_classifications (
+  domain TEXT PRIMARY KEY,
+  classification TEXT NOT NULL,
+  safe INTEGER NOT NULL DEFAULT 1,
+  reason TEXT,
+  classified_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS source_strategy (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  host TEXT NOT NULL UNIQUE,
+  display_name TEXT NOT NULL,
+  source_type TEXT NOT NULL,
+  default_tier INTEGER DEFAULT 2,
+  discovery_method TEXT NOT NULL DEFAULT 'search_first',
+  search_pattern TEXT,
+  priority INTEGER DEFAULT 50,
+  enabled INTEGER DEFAULT 1,
+  category_scope TEXT,
+  notes TEXT,
+  updated_at TEXT DEFAULT (datetime('now'))
+);
 `;
 
 const LLM_ROUTE_BOOLEAN_KEYS = [
@@ -1524,6 +1619,116 @@ export class SpecDb {
 
   close() {
     this.db.close();
+  }
+
+  // --- Brand Domains ---
+
+  getBrandDomain(brand, category) {
+    return this.db.prepare(
+      'SELECT * FROM brand_domains WHERE brand = ? AND category = ?'
+    ).get(brand, category) || null;
+  }
+
+  upsertBrandDomain(row) {
+    this.db.prepare(`
+      INSERT OR REPLACE INTO brand_domains (brand, category, official_domain, aliases, support_domain, confidence)
+      VALUES (@brand, @category, @official_domain, @aliases, @support_domain, @confidence)
+    `).run({
+      brand: row.brand,
+      category: row.category,
+      official_domain: row.official_domain || null,
+      aliases: row.aliases || '[]',
+      support_domain: row.support_domain || null,
+      confidence: row.confidence ?? 0.8
+    });
+  }
+
+  // --- Domain Classifications ---
+
+  getDomainClassification(domain) {
+    return this.db.prepare(
+      'SELECT * FROM domain_classifications WHERE domain = ?'
+    ).get(domain) || null;
+  }
+
+  upsertDomainClassification(row) {
+    this.db.prepare(`
+      INSERT OR REPLACE INTO domain_classifications (domain, classification, safe, reason)
+      VALUES (@domain, @classification, @safe, @reason)
+    `).run({
+      domain: row.domain,
+      classification: row.classification,
+      safe: row.safe ?? 1,
+      reason: row.reason || null
+    });
+  }
+
+  // --- Source Strategy ---
+
+  listSourceStrategies() {
+    return this.db.prepare('SELECT * FROM source_strategy ORDER BY priority DESC').all();
+  }
+
+  listEnabledSourceStrategies(categoryScope) {
+    if (categoryScope) {
+      return this.db.prepare(
+        "SELECT * FROM source_strategy WHERE enabled = 1 AND (category_scope IS NULL OR category_scope = '' OR category_scope = ?) ORDER BY priority DESC"
+      ).all(categoryScope);
+    }
+    return this.db.prepare('SELECT * FROM source_strategy WHERE enabled = 1 ORDER BY priority DESC').all();
+  }
+
+  getSourceStrategy(id) {
+    return this.db.prepare('SELECT * FROM source_strategy WHERE id = ?').get(id) || null;
+  }
+
+  insertSourceStrategy(row) {
+    const result = this.db.prepare(`
+      INSERT INTO source_strategy (host, display_name, source_type, default_tier, discovery_method, search_pattern, priority, enabled, category_scope, notes)
+      VALUES (@host, @display_name, @source_type, @default_tier, @discovery_method, @search_pattern, @priority, @enabled, @category_scope, @notes)
+    `).run({
+      host: row.host,
+      display_name: row.display_name || row.host,
+      source_type: row.source_type || 'lab_review',
+      default_tier: row.default_tier ?? 2,
+      discovery_method: row.discovery_method || 'search_first',
+      search_pattern: row.search_pattern || null,
+      priority: row.priority ?? 50,
+      enabled: row.enabled ?? 1,
+      category_scope: row.category_scope || null,
+      notes: row.notes || null
+    });
+    return { id: result.lastInsertRowid };
+  }
+
+  updateSourceStrategy(id, updates) {
+    const existing = this.getSourceStrategy(id);
+    if (!existing) return null;
+    this.db.prepare(`
+      UPDATE source_strategy SET
+        host = @host, display_name = @display_name, source_type = @source_type,
+        default_tier = @default_tier, discovery_method = @discovery_method,
+        search_pattern = @search_pattern, priority = @priority, enabled = @enabled,
+        category_scope = @category_scope, notes = @notes, updated_at = datetime('now')
+      WHERE id = @id
+    `).run({
+      id,
+      host: updates.host ?? existing.host,
+      display_name: updates.display_name ?? existing.display_name,
+      source_type: updates.source_type ?? existing.source_type,
+      default_tier: updates.default_tier ?? existing.default_tier,
+      discovery_method: updates.discovery_method ?? existing.discovery_method,
+      search_pattern: updates.search_pattern ?? existing.search_pattern,
+      priority: updates.priority ?? existing.priority,
+      enabled: updates.enabled ?? existing.enabled,
+      category_scope: updates.category_scope ?? existing.category_scope,
+      notes: updates.notes ?? existing.notes
+    });
+    return this.getSourceStrategy(id);
+  }
+
+  deleteSourceStrategy(id) {
+    return this.db.prepare('DELETE FROM source_strategy WHERE id = ?').run(id);
   }
 
   // --- Candidates ---

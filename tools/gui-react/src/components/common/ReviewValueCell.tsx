@@ -30,6 +30,8 @@ interface ReviewValueCellProps {
   pendingAIShared?: boolean;
   showLinkedProductBadge?: boolean;
   linkedProductCount?: number;
+  showSourceCountBadge?: boolean;
+  sourceCount?: number;
 }
 
 function joinClassNames(parts: Array<string | false | null | undefined>): string {
@@ -54,12 +56,17 @@ export function ReviewValueCell({
   pendingAIShared = false,
   showLinkedProductBadge = false,
   linkedProductCount = 0,
+  showSourceCountBadge = false,
+  sourceCount = 0,
 }: ReviewValueCellProps) {
   // Two-lane pending flags; legacy pendingAI maps to shared for backward compat
   const hasPrimary = pendingAIPrimary;
   const hasShared = pendingAIShared || (pendingAI && !pendingAIPrimary && !pendingAIShared);
   const normalizedLinkedProductCount = Number.isFinite(Number(linkedProductCount))
     ? Math.max(0, Math.trunc(Number(linkedProductCount)))
+    : 0;
+  const normalizedSourceCount = Number.isFinite(Number(sourceCount))
+    ? Math.max(0, Math.trunc(Number(sourceCount)))
     : 0;
   if (hasRun === false) {
     return <>{emptyWhenNoRun}</>;
@@ -124,6 +131,14 @@ export function ReviewValueCell({
           title={`${normalizedLinkedProductCount} linked product${normalizedLinkedProductCount !== 1 ? 's' : ''}`}
         >
           LP {normalizedLinkedProductCount}
+        </span>
+      )}
+      {showSourceCountBadge && normalizedSourceCount > 0 && (
+        <span
+          className="px-1 py-0.5 rounded text-[8px] font-bold bg-cyan-100 dark:bg-cyan-900/50 text-cyan-700 dark:text-cyan-300 shrink-0"
+          title={`${normalizedSourceCount} candidate source${normalizedSourceCount !== 1 ? 's' : ''}`}
+        >
+          SC {normalizedSourceCount}
         </span>
       )}
       {flagCount > 0 && (

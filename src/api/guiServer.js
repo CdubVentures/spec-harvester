@@ -11,7 +11,7 @@ import { loadConfig, loadDotEnvFile } from '../config.js';
 import { createStorage } from '../s3/storage.js';
 import { loadCategoryConfig } from '../categories/loader.js';
 import { loadQueueState, saveQueueState, listQueueProducts, upsertQueueProduct, clearQueueByStatus } from '../queue/queueState.js';
-import { buildReviewLayout, buildProductReviewPayload, buildReviewQueue, readLatestArtifacts } from '../review/reviewGridData.js';
+import { buildReviewLayout, buildProductReviewPayload, buildReviewQueue, readLatestArtifacts, buildFieldLabelsMap } from '../review/reviewGridData.js';
 import { buildComponentReviewLayout, buildComponentReviewPayloads, buildEnumReviewPayloads } from '../review/componentReviewData.js';
 import { setOverrideFromCandidate, setManualOverride, buildReviewMetrics } from '../review/overrideWorkflow.js';
 import { applySharedLaneState } from '../review/keyReviewState.js';
@@ -25,26 +25,30 @@ import { handleReviewItemMutationRoute } from './reviewItemRoutes.js';
 import { handleReviewComponentMutationRoute } from './reviewComponentMutationRoutes.js';
 import { handleReviewEnumMutationRoute } from './reviewEnumMutationRoutes.js';
 import { buildLlmMetrics } from '../publish/publishingPipeline.js';
+import { buildSearchHints, buildAnchorsSuggestions, buildKnownValuesSuggestions } from '../learning/learningSuggestionEmitter.js';
 import { SpecDb } from '../db/specDb.js';
 import { findProductsReferencingComponent, cascadeComponentChange, cascadeEnumChange } from '../review/componentImpact.js';
 import { componentReviewPath } from '../engine/curationSuggestions.js';
 import { runComponentReviewBatch } from '../pipeline/componentReviewBatch.js';
 import { invalidateFieldRulesCache } from '../field-rules/loader.js';
-import { introspectWorkbook, loadWorkbookMap, saveWorkbookMap, validateWorkbookMap, extractWorkbookContext } from '../ingest/categoryCompile.js';
+import { loadWorkbookMap, saveWorkbookMap, validateWorkbookMap } from '../ingest/categoryCompile.js';
 import { llmRoutingSnapshot } from '../llm/routing.js';
 import { buildTrafficLight } from '../validator/trafficLight.js';
+import { buildRoundSummaryFromEvents } from './roundSummary.js';
+import { buildEvidenceSearchPayload } from './evidenceSearch.js';
 import { slugify as canonicalSlugify } from '../catalog/slugify.js';
 import { cleanVariant as canonicalCleanVariant } from '../catalog/identityDedup.js';
 import { buildComponentIdentifier } from '../utils/componentIdentifier.js';
 import {
   buildComponentReviewSyntheticCandidateId
 } from '../utils/candidateIdentifier.js';
-import { generateTestSourceResults, buildDeterministicSourceResults, buildSeedComponentDB, TEST_CASES, analyzeContract, buildTestProducts, getScenarioDefs, buildValidationChecks } from '../testing/testDataProvider.js';
+import { generateTestSourceResults, buildDeterministicSourceResults, buildSeedComponentDB, TEST_CASES, analyzeContract, buildTestProducts, getScenarioDefs, buildValidationChecks, loadComponentIdentityPoolsFromWorkbook } from '../testing/testDataProvider.js';
 import { runTestProduct } from '../testing/testRunner.js';
 import {
   loadBrandRegistry,
   saveBrandRegistry,
   addBrand,
+  addBrandsBulk,
   updateBrand,
   removeBrand,
   getBrandsForCategory,
@@ -56,6 +60,7 @@ import {
   listProducts,
   loadProductCatalog,
   addProduct as catalogAddProduct,
+  addProductsBulk as catalogAddProductsBulk,
   updateProduct as catalogUpdateProduct,
   removeProduct as catalogRemoveProduct,
   seedFromWorkbook as catalogSeedFromWorkbook
@@ -1741,7 +1746,18 @@ async function readIndexLabRunEvidenceIndex(runId, { query = '', limit = 40 } = 
       limit: requestedLimit,
       count: searchRows.length,
       rows: searchRows
-    }
+    },
+    dedupe_stream: await (async () => {
+      try {
+        const events = await readIndexLabRunEvents(context.resolvedRunId, 8000);
+        const DEDUPE_EVENT_NAMES = new Set(['indexed_new', 'dedupe_hit', 'dedupe_updated']);
+        const dedupeEvents = events.filter((e) => DEDUPE_EVENT_NAMES.has(e?.event));
+        const payload = buildEvidenceSearchPayload({ dedupeEvents, query: requestedQuery });
+        return payload.dedupe_stream;
+      } catch {
+        return { total: 0, new_count: 0, reused_count: 0, updated_count: 0, total_chunks_indexed: 0 };
+      }
+    })()
   };
 }
 
@@ -3383,6 +3399,18 @@ const OUTPUT_ROOT = path.resolve(config.localOutputRoot || 'out');
 const HELPER_ROOT = path.resolve(config.helperFilesRoot || 'helper_files');
 const INDEXLAB_ROOT = path.resolve(argVal('indexlab-root', 'artifacts/indexlab'));
 
+async function loadDraftFieldOrder(category) {
+  const draftPath = path.join(HELPER_ROOT, category, '_control_plane', 'field_rules_draft.json');
+  const draft = await safeReadJson(draftPath);
+  return Array.isArray(draft?.fieldOrder) ? draft.fieldOrder : null;
+}
+
+async function loadDraftFieldRules(category) {
+  const draftPath = path.join(HELPER_ROOT, category, '_control_plane', 'field_rules_draft.json');
+  const draft = await safeReadJson(draftPath);
+  return draft?.fields && typeof draft.fields === 'object' ? draft.fields : null;
+}
+
 function normalizeCategoryToken(value) {
   return String(value || '')
     .trim()
@@ -3714,6 +3742,135 @@ function resetTestModeSharedReviewState(specDb, category) {
   return deleteKeyReviewStateRows(specDb, ids);
 }
 
+function purgeTestModeCategoryState(specDb, category) {
+  const cat = String(category || '').trim();
+  if (!specDb || !cat || !cat.startsWith('_test_')) {
+    return {
+      clearedKeyReview: 0,
+      clearedSources: 0,
+      clearedCandidates: 0,
+      clearedFieldState: 0,
+      clearedComponentData: 0,
+      clearedEnumData: 0,
+      clearedCatalogState: 0,
+      clearedArtifacts: 0,
+    };
+  }
+
+  let clearedKeyReview = 0;
+  let clearedSources = 0;
+  let clearedCandidates = 0;
+  let clearedFieldState = 0;
+  let clearedComponentData = 0;
+  let clearedEnumData = 0;
+  let clearedCatalogState = 0;
+  let clearedArtifacts = 0;
+
+  const tx = specDb.db.transaction(() => {
+    const keyReviewIds = specDb.db.prepare(`
+      SELECT id
+      FROM key_review_state
+      WHERE category = ?
+    `).all(cat).map((row) => row.id);
+    clearedKeyReview = deleteKeyReviewStateRows(specDb, keyReviewIds);
+
+    const sourceIds = specDb.db.prepare(`
+      SELECT source_id
+      FROM source_registry
+      WHERE category = ?
+    `).all(cat).map((row) => String(row.source_id || '').trim()).filter(Boolean);
+
+    if (sourceIds.length > 0) {
+      const placeholders = sourceIds.map(() => '?').join(',');
+      specDb.db.prepare(`
+        DELETE FROM key_review_run_sources
+        WHERE assertion_id IN (
+          SELECT assertion_id
+          FROM source_assertions
+          WHERE source_id IN (${placeholders})
+        )
+      `).run(...sourceIds);
+      specDb.db.prepare(`
+        DELETE FROM source_evidence_refs
+        WHERE assertion_id IN (
+          SELECT assertion_id
+          FROM source_assertions
+          WHERE source_id IN (${placeholders})
+        )
+      `).run(...sourceIds);
+      clearedSources += specDb.db.prepare(`
+        DELETE FROM source_assertions
+        WHERE source_id IN (${placeholders})
+      `).run(...sourceIds).changes;
+      specDb.db.prepare(`
+        DELETE FROM source_artifacts
+        WHERE source_id IN (${placeholders})
+      `).run(...sourceIds);
+      clearedSources += specDb.db.prepare(`
+        DELETE FROM source_registry
+        WHERE source_id IN (${placeholders})
+      `).run(...sourceIds).changes;
+    }
+
+    specDb.db.prepare(`
+      DELETE FROM candidate_reviews
+      WHERE candidate_id IN (
+        SELECT candidate_id
+        FROM candidates
+        WHERE category = ?
+      )
+    `).run(cat);
+
+    specDb.db.prepare('DELETE FROM item_list_links WHERE category = ?').run(cat);
+    specDb.db.prepare('DELETE FROM item_component_links WHERE category = ?').run(cat);
+    clearedCandidates = specDb.db.prepare('DELETE FROM candidates WHERE category = ?').run(cat).changes;
+    clearedFieldState = specDb.db.prepare('DELETE FROM item_field_state WHERE category = ?').run(cat).changes;
+
+    specDb.db.prepare(`
+      DELETE FROM component_aliases
+      WHERE component_id IN (
+        SELECT id
+        FROM component_identity
+        WHERE category = ?
+      )
+    `).run(cat);
+    clearedComponentData += specDb.db.prepare('DELETE FROM component_values WHERE category = ?').run(cat).changes;
+    clearedComponentData += specDb.db.prepare('DELETE FROM component_identity WHERE category = ?').run(cat).changes;
+    clearedEnumData += specDb.db.prepare('DELETE FROM list_values WHERE category = ?').run(cat).changes;
+    clearedEnumData += specDb.db.prepare('DELETE FROM enum_lists WHERE category = ?').run(cat).changes;
+
+    clearedCatalogState += specDb.db.prepare('DELETE FROM products WHERE category = ?').run(cat).changes;
+    clearedCatalogState += specDb.db.prepare('DELETE FROM product_queue WHERE category = ?').run(cat).changes;
+    clearedCatalogState += specDb.db.prepare('DELETE FROM product_runs WHERE category = ?').run(cat).changes;
+    clearedCatalogState += specDb.db.prepare('DELETE FROM curation_suggestions WHERE category = ?').run(cat).changes;
+    clearedCatalogState += specDb.db.prepare('DELETE FROM component_review_queue WHERE category = ?').run(cat).changes;
+    clearedCatalogState += specDb.db.prepare('DELETE FROM llm_route_matrix WHERE category = ?').run(cat).changes;
+
+    clearedArtifacts += specDb.db.prepare('DELETE FROM artifacts WHERE category = ?').run(cat).changes;
+    clearedArtifacts += specDb.db.prepare('DELETE FROM audit_log WHERE category = ?').run(cat).changes;
+    // Phase 12+ auxiliary tables may not exist in every DB build.
+    try { clearedArtifacts += specDb.db.prepare('DELETE FROM category_brain WHERE category = ?').run(cat).changes; } catch { /* ignore */ }
+    try { clearedArtifacts += specDb.db.prepare('DELETE FROM source_corpus WHERE category = ?').run(cat).changes; } catch { /* ignore */ }
+    try { clearedArtifacts += specDb.db.prepare('DELETE FROM runtime_events WHERE category = ?').run(cat).changes; } catch { /* ignore */ }
+    try { clearedArtifacts += specDb.db.prepare('DELETE FROM source_intel_domains WHERE category = ?').run(cat).changes; } catch { /* ignore */ }
+    try { clearedArtifacts += specDb.db.prepare('DELETE FROM source_intel_field_rewards WHERE category = ?').run(cat).changes; } catch { /* ignore */ }
+    try { clearedArtifacts += specDb.db.prepare('DELETE FROM source_intel_brands WHERE category = ?').run(cat).changes; } catch { /* ignore */ }
+    try { clearedArtifacts += specDb.db.prepare('DELETE FROM source_intel_paths WHERE category = ?').run(cat).changes; } catch { /* ignore */ }
+  });
+  tx();
+
+  return {
+    clearedKeyReview,
+    clearedSources,
+    clearedCandidates,
+    clearedFieldState,
+    clearedComponentData,
+    clearedEnumData,
+    clearedCatalogState,
+    clearedArtifacts,
+  };
+}
+
 function resetTestModeProductReviewState(specDb, category, productId) {
   const pid = String(productId || '').trim();
   if (!specDb || !category || !pid) return {
@@ -3887,7 +4044,9 @@ async function getReviewFieldRow(category, fieldKey) {
     return cached.rowsByKey.get(fieldKey) || null;
   }
   try {
-    const layout = await buildReviewLayout({ storage, config, category });
+    const fieldOrderOverride = await loadDraftFieldOrder(category);
+    const fieldsOverride = await loadDraftFieldRules(category);
+    const layout = await buildReviewLayout({ storage, config, category, fieldOrderOverride, fieldsOverride });
     const rowsByKey = new Map((layout.rows || []).map((row) => [String(row.key || ''), row]));
     reviewLayoutByCategory.set(category, { rowsByKey, loadedAt: Date.now() });
     return rowsByKey.get(fieldKey) || null;
@@ -3948,11 +4107,15 @@ function makerTokensFromReviewItem(reviewItem, componentType) {
   return [...new Set(tokens)];
 }
 
-function reviewItemMatchesMakerLane(reviewItem, { componentType, componentMaker }) {
+function reviewItemMatchesMakerLane(reviewItem, {
+  componentType,
+  componentMaker,
+  allowMakerlessForNamedLane = false,
+}) {
   const laneMaker = normalizeLower(componentMaker || '');
   const makerTokens = makerTokensFromReviewItem(reviewItem, componentType);
   if (!laneMaker) return makerTokens.length === 0;
-  if (!makerTokens.length) return false;
+  if (!makerTokens.length) return Boolean(allowMakerlessForNamedLane);
   return makerTokens.includes(laneMaker);
 }
 
@@ -4031,6 +4194,7 @@ async function collectComponentReviewPropertyCandidateRows({
   componentType,
   componentName,
   componentMaker,
+  allowMakerlessForNamedLane = false,
   propertyKey,
 }) {
   const normalizedComponentName = normalizeLower(componentName);
@@ -4055,7 +4219,7 @@ async function collectComponentReviewPropertyCandidateRows({
       ? matchedName === normalizedComponentName
       : rawName === normalizedComponentName;
     if (!isSameComponent) continue;
-    if (!reviewItemMatchesMakerLane(item, { componentType, componentMaker })) continue;
+    if (!reviewItemMatchesMakerLane(item, { componentType, componentMaker, allowMakerlessForNamedLane })) continue;
 
     const attrs = parseReviewItemAttributes(item);
     const matchedEntry = Object.entries(attrs).find(([attrKey]) => (
@@ -4174,11 +4338,21 @@ async function getPendingComponentSharedCandidateIdsAsync(specDb, {
   ) || [];
   const reviewRows = specDb.getReviewsForContext('component', String(componentValueId)) || [];
   const reviewLookup = buildCandidateReviewLookup(reviewRows);
+  const ambiguousMakerRows = specDb.db.prepare(`
+    SELECT COUNT(DISTINCT LOWER(TRIM(COALESCE(maker, '')))) AS maker_count
+    FROM component_identity
+    WHERE category = ?
+      AND component_type = ?
+      AND LOWER(TRIM(canonical_name)) = LOWER(TRIM(?))
+  `).get(specDb.category, componentType, componentName);
+  const allowMakerlessForNamedLane = Boolean(String(componentMaker || '').trim())
+    && Number(ambiguousMakerRows?.maker_count || 0) <= 1;
   const syntheticRows = await collectComponentReviewPropertyCandidateRows({
     category,
     componentType,
     componentName,
     componentMaker,
+    allowMakerlessForNamedLane,
     propertyKey,
   });
   return collectPendingCandidateIds({
@@ -4838,6 +5012,12 @@ function startProcess(cmd, cliArgs, envOverrides = {}) {
     if (childProc === child) {
       childProc = null;
     }
+    if (resolvedExitCode === 0) {
+      const catIdx = cliArgs.indexOf('--category');
+      if (catIdx >= 0 && cliArgs[catIdx + 1]) {
+        broadcastWs('data-change', { type: 'process-completed', category: cliArgs[catIdx + 1] });
+      }
+    }
   });
   childProc = child;
   return processStatus();
@@ -5255,6 +5435,24 @@ async function handleApi(req, res) {
       return jsonRes(res, 200, result);
     }
 
+    // POST /api/v1/catalog/{cat}/products/bulk  { brand, rows:[{ model, variant? }] }
+    if (parts[3] === 'bulk' && method === 'POST') {
+      const body = await readJsonBody(req).catch(() => ({}));
+      const rows = Array.isArray(body.rows) ? body.rows : [];
+      if (rows.length > 5000) {
+        return jsonRes(res, 400, { ok: false, error: 'too_many_rows', max_rows: 5000 });
+      }
+      const result = await catalogAddProductsBulk({
+        config,
+        category,
+        brand: body.brand || '',
+        rows,
+        storage,
+        upsertQueue: upsertQueueProduct
+      });
+      return jsonRes(res, result.ok ? 200 : 400, result);
+    }
+
     // GET /api/v1/catalog/{cat}/products
     if (!parts[3] && method === 'GET') {
       const products = await listProducts(config, category);
@@ -5336,7 +5534,9 @@ async function handleApi(req, res) {
       if (!normalized.identity.id) normalized.identity.id = catEntry.id || 0;
       if (!normalized.identity.identifier) normalized.identity.identifier = catEntry.identifier || '';
     }
-    return jsonRes(res, 200, { summary, normalized, provenance, trafficLight });
+    const rawDraftFieldOrder = await loadDraftFieldOrder(category);
+    const draftFieldOrder = Array.isArray(rawDraftFieldOrder) ? rawDraftFieldOrder.filter((k) => !String(k).startsWith('__grp::')) : rawDraftFieldOrder;
+    return jsonRes(res, 200, { summary, normalized, provenance, trafficLight, fieldOrder: draftFieldOrder });
   }
 
   // Events
@@ -5524,6 +5724,60 @@ async function handleApi(req, res) {
       return jsonRes(res, 404, { error: 'evidence_index_not_found', run_id: runId });
     }
     return jsonRes(res, 200, payload);
+  }
+
+  if (parts[0] === 'indexlab' && parts[1] === 'run' && parts[2] && parts[3] === 'rounds' && method === 'GET') {
+    const runId = String(parts[2] || '').trim();
+    const events = await readIndexLabRunEvents(runId, 8000);
+    const summary = buildRoundSummaryFromEvents(events);
+    return jsonRes(res, 200, {
+      run_id: runId,
+      ...summary
+    });
+  }
+
+  if (parts[0] === 'indexlab' && parts[1] === 'run' && parts[2] && parts[3] === 'learning' && method === 'GET') {
+    const runId = String(parts[2] || '').trim();
+    const events = await readIndexLabRunEvents(runId, 8000);
+    const learningEvents = events.filter((e) =>
+      e.event === 'learning_update' || e.event === 'learning_gate_result'
+      || (e.stage === 'learning')
+    );
+    const updates = learningEvents.map((e) => ({
+      field: String(e.payload?.field || ''),
+      value: String(e.payload?.value || ''),
+      confidence: toFloat(e.payload?.confidence, 0),
+      refs_found: toInt(e.payload?.refs_found, 0),
+      tier_history: Array.isArray(e.payload?.tier_history) ? e.payload.tier_history : [],
+      accepted: Boolean(e.payload?.accepted),
+      reason: e.payload?.reason || null,
+      source_run_id: String(e.payload?.source_run_id || runId)
+    }));
+    const accepted = updates.filter((u) => u.accepted).length;
+    const rejected = updates.filter((u) => !u.accepted).length;
+    const rejectionReasons = {};
+    for (const u of updates) {
+      if (!u.accepted && u.reason) {
+        rejectionReasons[u.reason] = (rejectionReasons[u.reason] || 0) + 1;
+      }
+    }
+    const acceptedUpdates = updates.filter((u) => u.accepted).map((u) => ({
+      field: u.field,
+      value: u.value,
+      evidenceRefs: u.tier_history.map((tier, i) => ({ url: '', tier })),
+      acceptanceStats: { confirmations: u.refs_found, approved: u.refs_found },
+      sourceRunId: u.source_run_id
+    }));
+    return jsonRes(res, 200, {
+      run_id: runId,
+      updates,
+      suggestions: {
+        search_hints: buildSearchHints(acceptedUpdates),
+        anchors: buildAnchorsSuggestions(acceptedUpdates),
+        known_values: buildKnownValuesSuggestions(acceptedUpdates)
+      },
+      gate_summary: { total: updates.length, accepted, rejected, rejection_reasons: rejectionReasons }
+    });
   }
 
   if (parts[0] === 'indexing' && parts[1] === 'llm-config' && method === 'GET') {
@@ -5813,14 +6067,55 @@ async function handleApi(req, res) {
     return jsonRes(res, 200, artifacts);
   }
 
+  if (parts[0] === 'field-labels' && parts[1] && !parts[2] && method === 'GET') {
+    const category = parts[1];
+    const catConfig = await loadCategoryConfig(category, { storage, config }).catch(() => ({}));
+    const draftFields = await loadDraftFieldRules(category);
+    const draftFieldOrder = await loadDraftFieldOrder(category);
+    if (draftFields || draftFieldOrder) {
+      const compiledFields = catConfig.fieldRules?.fields || {};
+      const mergedFields = draftFields
+        ? Object.fromEntries(Object.keys({ ...compiledFields, ...draftFields }).map((k) => {
+            const compiled = compiledFields[k] && typeof compiledFields[k] === 'object' ? compiledFields[k] : {};
+            const draft = draftFields[k] && typeof draftFields[k] === 'object' ? draftFields[k] : {};
+            const compiledUi = compiled.ui && typeof compiled.ui === 'object' ? compiled.ui : {};
+            const draftUi = draft.ui && typeof draft.ui === 'object' ? draft.ui : {};
+            return [k, { ...compiled, ...draft, ui: { ...compiledUi, ...draftUi } }];
+          }))
+        : compiledFields;
+      const mergedOrder = Array.isArray(draftFieldOrder)
+        ? draftFieldOrder.filter((k) => !String(k).startsWith('__grp::'))
+        : (catConfig.fieldOrder || Object.keys(mergedFields));
+      const labels = buildFieldLabelsMap({ fieldRules: { fields: mergedFields }, fieldOrder: mergedOrder });
+      return jsonRes(res, 200, { category, labels });
+    }
+    const labels = buildFieldLabelsMap(catConfig);
+    return jsonRes(res, 200, { category, labels });
+  }
+
   // Studio
   if (parts[0] === 'studio' && parts[1] && parts[2] === 'payload' && method === 'GET') {
     const category = parts[1];
     const catConfig = await loadCategoryConfig(category, { storage, config }).catch(() => ({}));
+    const draftPath = path.join(HELPER_ROOT, category, '_control_plane', 'field_rules_draft.json');
+    const draftPayload = await safeReadJson(draftPath);
+    const draftFieldOrder = Array.isArray(draftPayload?.fieldOrder) ? draftPayload.fieldOrder : null;
+    const compiledOrder = catConfig.fieldOrder || Object.keys(catConfig.fieldRules?.fields || {});
+    const compiledFields = catConfig.fieldRules?.fields || {};
+    const draftFields = draftPayload?.fields && typeof draftPayload.fields === 'object' ? draftPayload.fields : null;
+    const mergedFields = draftFields
+      ? Object.fromEntries(Object.keys({ ...compiledFields, ...draftFields }).map((k) => {
+          const compiled = compiledFields[k] && typeof compiledFields[k] === 'object' ? compiledFields[k] : {};
+          const draft = draftFields[k] && typeof draftFields[k] === 'object' ? draftFields[k] : {};
+          const compiledUi = compiled.ui && typeof compiled.ui === 'object' ? compiled.ui : {};
+          const draftUi = draft.ui && typeof draft.ui === 'object' ? draft.ui : {};
+          return [k, { ...compiled, ...draft, ui: { ...compiledUi, ...draftUi } }];
+        }))
+      : compiledFields;
     return jsonRes(res, 200, {
       category,
-      fieldRules: catConfig.fieldRules?.fields || {},
-      fieldOrder: catConfig.fieldOrder || Object.keys(catConfig.fieldRules?.fields || {}),
+      fieldRules: mergedFields,
+      fieldOrder: draftFieldOrder || compiledOrder,
       uiFieldCatalog: catConfig.uiFieldCatalog || null,
       guardrails: catConfig.guardrails || null,
     });
@@ -5848,86 +6143,6 @@ async function handleApi(req, res) {
     return jsonRes(res, 200, { products, brands: [...brandSet].sort() });
   }
 
-  // GET /workbook/:category/context
-  if (parts[0] === 'workbook' && parts[1] && parts[2] === 'context' && method === 'GET') {
-    const category = parts[1];
-    const mapResult = await loadWorkbookMap({ category, config }).catch(() => null);
-    if (!mapResult?.map?.workbook_path) {
-      return jsonRes(res, 200, { mapSummary: null, keys: [], products: [], enums: {}, componentSummary: {}, error: 'no_workbook_path' });
-    }
-    try {
-      const result = await extractWorkbookContext({ workbookPath: mapResult.map.workbook_path, workbookMap: mapResult.map, category });
-
-      // Enrich products with productId, catalog presence, output presence
-      const catCatalog = await loadProductCatalog(config, category);
-      const catalogSet = new Set();
-      const catalogLookup = new Map();
-      for (const [cpid, centry] of Object.entries(catCatalog.products || {})) {
-        const b = normText(centry.brand), m = normText(centry.model), v = cleanVariant(centry.variant);
-        if (b && m) {
-          catalogSet.add(catalogKey(b, m, v));
-          catalogLookup.set(catalogKey(b, m, v), centry);
-        }
-      }
-      const finalDir = path.join(OUTPUT_ROOT, 'final', category);
-      let outputDirEntries = [];
-      try { outputDirEntries = await fs.readdir(finalDir); } catch {}
-      const outputSet = new Set(outputDirEntries.map((d) => d.toLowerCase()));
-      result.products = (result.products || []).map((p) => {
-        const pid = buildProductIdFromParts(category, p.brand, p.model, p.variant);
-        const pVariant = cleanVariant(p.variant);
-        const catKey1 = catalogKey(normText(p.brand), normText(p.model), pVariant);
-        const catKey2 = pVariant ? catalogKey(normText(p.brand), normText(p.model), '') : null;
-        const inCat = catalogSet.has(catKey1) || (catKey2 && catalogSet.has(catKey2));
-        const catEntry = catalogLookup.get(catKey1) || (catKey2 ? catalogLookup.get(catKey2) : null);
-        return {
-          ...p,
-          id: p.id || (catEntry?.id || 0),
-          identifier: p.identifier || (catEntry?.identifier || ''),
-          productId: pid,
-          inCatalog: inCat,
-          hasOutput: outputSet.has(pid.toLowerCase())
-        };
-      });
-
-      // Enrich enums: load known_values (observed) + field_rules_draft (manual additions)
-      const kvPath = path.join(HELPER_ROOT, category, '_generated', 'known_values.json');
-      const kvData = await safeReadJson(kvPath);
-      const observedValues = kvData?.fields || {};
-      const draftPath = path.join(HELPER_ROOT, category, '_control_plane', 'field_rules_draft.json');
-      const draftData = await safeReadJson(draftPath);
-      const draftFields = draftData?.fields || {};
-      const draftEnumAdditions = {};
-      for (const [field, rule] of Object.entries(draftFields)) {
-        if (rule?.enum_values && Array.isArray(rule.enum_values)) {
-          draftEnumAdditions[field] = rule.enum_values;
-        }
-      }
-      result.observedValues = observedValues;
-      result.draftEnumAdditions = draftEnumAdditions;
-
-      // Enrich keys: load generated field_rules for mismatch detection
-      const frPath = path.join(HELPER_ROOT, category, '_generated', 'field_rules.json');
-      const frData = await safeReadJson(frPath);
-      const generatedFieldKeys = frData?.fields ? Object.keys(frData.fields) : [];
-      result.generatedFieldKeys = generatedFieldKeys;
-
-      return jsonRes(res, 200, result);
-    } catch (err) {
-      return jsonRes(res, 200, { mapSummary: null, keys: [], products: [], enums: {}, componentSummary: {}, error: err.message });
-    }
-  }
-
-  // Workbook map
-  if (parts[0] === 'workbook' && parts[1] && parts[2] === 'map' && method === 'GET') {
-    const category = parts[1];
-    // Try control plane first, then fixtures fallback
-    let data = await safeReadJson(path.join(HELPER_ROOT, category, '_control_plane', 'workbook_map.json'));
-    if (!data) {
-      data = await safeReadJson(path.join('fixtures', 'category_compile', `${category}.workbook_map.json`));
-    }
-    return jsonRes(res, 200, data || {});
-  }
 
   // Studio compile
   if (parts[0] === 'studio' && parts[1] && parts[2] === 'compile' && method === 'POST') {
@@ -5985,23 +6200,6 @@ async function handleApi(req, res) {
     return jsonRes(res, 200, result);
   }
 
-  // Studio introspect workbook
-  if (parts[0] === 'studio' && parts[1] && parts[2] === 'introspect' && method === 'GET') {
-    const category = parts[1];
-    const catRoot = path.join(HELPER_ROOT, category);
-    // Load workbook map to find workbook path
-    const mapData = await safeReadJson(path.join(catRoot, '_control_plane', 'workbook_map.json'));
-    const wbPath = mapData?.workbook_path || '';
-    if (!wbPath) {
-      return jsonRes(res, 200, { sheets: [], suggestedMap: null, error: 'no_workbook_path_configured' });
-    }
-    try {
-      const result = await introspectWorkbook({ workbookPath: wbPath, previewRows: 10, previewCols: 50 });
-      return jsonRes(res, 200, result);
-    } catch (err) {
-      return jsonRes(res, 200, { sheets: [], suggestedMap: null, error: err.message });
-    }
-  }
 
   // Studio workbook-map GET (using full loadWorkbookMap with normalization)
   if (parts[0] === 'studio' && parts[1] && parts[2] === 'workbook-map' && method === 'GET') {
@@ -6073,11 +6271,23 @@ async function handleApi(req, res) {
     const controlPlane = path.join(catRoot, '_control_plane');
     await fs.mkdir(controlPlane, { recursive: true });
     if (body.fieldRulesDraft) {
-      await fs.writeFile(path.join(controlPlane, 'field_rules_draft.json'), JSON.stringify(body.fieldRulesDraft, null, 2));
+      const draftFile = path.join(controlPlane, 'field_rules_draft.json');
+      const existing = (await safeReadJson(draftFile)) || {};
+      const merged = { ...existing, ...body.fieldRulesDraft };
+      await fs.writeFile(draftFile, JSON.stringify(merged, null, 2));
     }
     if (body.uiFieldCatalogDraft) {
       await fs.writeFile(path.join(controlPlane, 'ui_field_catalog_draft.json'), JSON.stringify(body.uiFieldCatalogDraft, null, 2));
     }
+    if (body.renames && typeof body.renames === 'object' && Object.keys(body.renames).length > 0) {
+      const renamesPath = path.join(controlPlane, 'pending_renames.json');
+      const existing = (await safeReadJson(renamesPath)) || { renames: {} };
+      if (!existing.renames || typeof existing.renames !== 'object') existing.renames = {};
+      Object.assign(existing.renames, body.renames);
+      existing.timestamp = new Date().toISOString();
+      await fs.writeFile(renamesPath, JSON.stringify(existing, null, 2));
+    }
+    broadcastWs('data-change', { type: 'studio-drafts-saved', category });
     return jsonRes(res, 200, { ok: true });
   }
 
@@ -6108,7 +6318,9 @@ async function handleApi(req, res) {
   // Review layout
   if (parts[0] === 'review' && parts[1] && parts[2] === 'layout' && method === 'GET') {
     const category = parts[1];
-    const layout = await buildReviewLayout({ storage, config, category });
+    const fieldOrderOverride = await loadDraftFieldOrder(category);
+    const fieldsOverride = await loadDraftFieldRules(category);
+    const layout = await buildReviewLayout({ storage, config, category, fieldOrderOverride, fieldsOverride });
     return jsonRes(res, 200, layout);
   }
 
@@ -6121,7 +6333,10 @@ async function handleApi(req, res) {
     if (catalogPids.size > 0 && !catalogPids.has(productId)) {
       return jsonRes(res, 404, { error: 'not_in_catalog', message: `Product ${productId} is not in the product catalog` });
     }
-    const payload = await buildProductReviewPayload({ storage, config, category, productId, specDb });
+    const fieldOrderOverrideProd = await loadDraftFieldOrder(category);
+    const fieldsOverrideProd = await loadDraftFieldRules(category);
+    const draftLayout = await buildReviewLayout({ storage, config, category, fieldOrderOverride: fieldOrderOverrideProd, fieldsOverride: fieldsOverrideProd });
+    const payload = await buildProductReviewPayload({ storage, config, category, productId, layout: draftLayout, specDb });
     // Enrich identity with catalog id/identifier (normalized.json may predate the backfill)
     const catEntry = catalog.products?.[productId] || {};
     if (payload?.identity) {
@@ -6160,10 +6375,13 @@ async function handleApi(req, res) {
     productIds = productIds.filter(pid => catalogPids.has(pid));
     // Brand filter â€” if brands param is provided, only include matching products
     const brandsFilter = brandsParam ? new Set(brandsParam.split(',').map(b => b.trim().toLowerCase()).filter(Boolean)) : null;
+    const batchFieldOrder = await loadDraftFieldOrder(category);
+    const batchFieldsOverride = await loadDraftFieldRules(category);
+    const batchLayout = await buildReviewLayout({ storage, config, category, fieldOrderOverride: batchFieldOrder, fieldsOverride: batchFieldsOverride });
     const payloads = [];
     for (const pid of productIds) {
       try {
-        const payload = await buildProductReviewPayload({ storage, config, category, productId: pid, includeCandidates: wantCandidates, specDb });
+        const payload = await buildProductReviewPayload({ storage, config, category, productId: pid, layout: batchLayout, includeCandidates: wantCandidates, specDb });
         if (payload?.identity) {
           const ce = catalog.products?.[pid] || {};
           if (!payload.identity.id) payload.identity.id = ce.id || 0;
@@ -6358,12 +6576,13 @@ async function handleApi(req, res) {
       || sourceTokenRaw === 'workbook'
       || sourceTokenRaw === 'component_db'
       || sourceTokenRaw === 'known_values'
-      ? 'workbook'
+      || sourceTokenRaw === 'reference'
+      ? 'reference'
       : (sourceTokenRaw.startsWith('pipeline')
           ? 'pipeline'
           : (sourceTokenRaw === 'manual' || sourceTokenRaw === 'user' ? 'user' : sourceTokenRaw));
-    const sourceLabel = sourceId === 'workbook'
-      ? 'Excel Import'
+    const sourceLabel = sourceId === 'reference'
+      ? 'Reference'
       : (sourceId === 'pipeline'
           ? 'Pipeline'
           : (String(fieldState?.source || '').trim() || sourceId || 'Pipeline'));
@@ -6503,7 +6722,9 @@ async function handleApi(req, res) {
     if (!specDb || !specDb.isSeeded()) {
       return jsonRes(res, 503, { error: 'specdb_not_ready', message: `SpecDb not ready for ${category}` });
     }
-    const payload = await buildComponentReviewPayloads({ config, category, componentType, specDb });
+    const rawFieldOrder = await loadDraftFieldOrder(category);
+    const fieldOrderOverride = Array.isArray(rawFieldOrder) ? rawFieldOrder.filter((k) => !String(k).startsWith('__grp::')) : rawFieldOrder;
+    const payload = await buildComponentReviewPayloads({ config, category, componentType, specDb, fieldOrderOverride });
     return jsonRes(res, 200, payload);
   }
 
@@ -6514,7 +6735,9 @@ async function handleApi(req, res) {
     if (!specDb || !specDb.isSeeded()) {
       return jsonRes(res, 503, { error: 'specdb_not_ready', message: `SpecDb not ready for ${category}` });
     }
-    const payload = await buildEnumReviewPayloads({ config, category, specDb });
+    const rawFieldOrder = await loadDraftFieldOrder(category);
+    const fieldOrderOverride = Array.isArray(rawFieldOrder) ? rawFieldOrder.filter((k) => !String(k).startsWith('__grp::')) : rawFieldOrder;
+    const payload = await buildEnumReviewPayloads({ config, category, specDb, fieldOrderOverride });
     return jsonRes(res, 200, payload);
   }
 
@@ -7102,6 +7325,22 @@ async function handleApi(req, res) {
     return jsonRes(res, 200, result);
   }
 
+  // POST /api/v1/brands/bulk  { category, names:[string] }
+  // (must come before generic POST /brands)
+  if (parts[0] === 'brands' && parts[1] === 'bulk' && method === 'POST') {
+    const body = await readJsonBody(req).catch(() => ({}));
+    const names = Array.isArray(body.names) ? body.names : [];
+    if (names.length > 5000) {
+      return jsonRes(res, 400, { ok: false, error: 'too_many_rows', max_rows: 5000 });
+    }
+    const result = await addBrandsBulk({
+      config,
+      category: body.category || '',
+      names
+    });
+    return jsonRes(res, result.ok ? 200 : 400, result);
+  }
+
   // GET /api/v1/brands/{slug}/impact â€” impact analysis for rename/delete
   if (parts[0] === 'brands' && parts[1] && parts[2] === 'impact' && method === 'GET') {
     const result = await getBrandImpactAnalysis({ config, slug: parts[1] });
@@ -7185,7 +7424,19 @@ async function handleApi(req, res) {
     const sourceStat = await safeStat(sourceDir);
     if (!sourceStat) return jsonRes(res, 400, { ok: false, error: 'source_category_not_found', sourceCategory });
 
+    try {
+      const runtimeSpecDb = await getSpecDbReady(testCategory);
+      purgeTestModeCategoryState(runtimeSpecDb, testCategory);
+    } catch { /* non-fatal */ }
+
     const testDir = path.join(HELPER_ROOT, testCategory);
+    const fixturesCategoryDir = path.join('fixtures', 's3', 'specs', 'inputs', testCategory);
+    const outputsCategoryDir = path.join(OUTPUT_ROOT, 'specs', 'outputs', testCategory);
+    await Promise.all([
+      fs.rm(testDir, { recursive: true, force: true }),
+      fs.rm(fixturesCategoryDir, { recursive: true, force: true }),
+      fs.rm(outputsCategoryDir, { recursive: true, force: true }),
+    ]);
     const genDir = path.join(testDir, '_generated');
     const compDbDir = path.join(genDir, 'component_db');
     await fs.mkdir(genDir, { recursive: true });
@@ -7208,31 +7459,23 @@ async function handleApi(req, res) {
     }
     broadcastWs('test-import-progress', { step: 'field_rules', status: 'done', detail: `${copiedRules} rule files` });
 
-    // Build seed component DBs from source contract analysis (5 deterministic items per type)
-    let sourceAnalysis = null;
-    try {
-      sourceAnalysis = await analyzeContract(HELPER_ROOT, sourceCategory);
-    } catch { /* non-fatal */ }
-
-    if (sourceAnalysis) {
-      const seedDBs = buildSeedComponentDB(sourceAnalysis, testCategory);
-      for (const [dbFile, db] of Object.entries(seedDBs)) {
-        broadcastWs('test-import-progress', { step: `component_db/${dbFile}`, status: 'copying', file: `${dbFile}.json` });
-        await fs.writeFile(path.join(compDbDir, `${dbFile}.json`), JSON.stringify(db, null, 2));
-        broadcastWs('test-import-progress', { step: `component_db/${dbFile}`, status: 'done', detail: `${db.items.length} seed items` });
-      }
-    } else {
-      // Fallback: copy production component_db files if source analysis failed
-      const sourceCompDb = path.join(sourceDir, 'component_db');
-      const compFiles = await listFiles(sourceCompDb, '.json');
-      for (const f of compFiles) {
-        const compType = f.replace('.json', '');
-        broadcastWs('test-import-progress', { step: `component_db/${compType}`, status: 'copying', file: f });
-        await fs.copyFile(path.join(sourceCompDb, f), path.join(compDbDir, f));
-        const compData = await safeReadJson(path.join(compDbDir, f));
-        const itemCount = (compData?.items || compData?.entities || []).length;
-        broadcastWs('test-import-progress', { step: `component_db/${compType}`, status: 'done', detail: `${itemCount} items` });
-      }
+    // Build seed component DBs from source contract analysis (strict pool-driven; no fallback copy path).
+    const sourceAnalysis = await analyzeContract(HELPER_ROOT, sourceCategory);
+    const componentTypes = (sourceAnalysis?.summary?.componentTypes || [])
+      .map((row) => String(row?.type || '').trim())
+      .filter(Boolean);
+    const identityPoolsByType = await loadComponentIdentityPoolsFromWorkbook({
+      componentTypes,
+      strict: true,
+    });
+    const seedDBs = buildSeedComponentDB(sourceAnalysis, testCategory, {
+      identityPoolsByType,
+      strictIdentityPools: true,
+    });
+    for (const [dbFile, db] of Object.entries(seedDBs)) {
+      broadcastWs('test-import-progress', { step: `component_db/${dbFile}`, status: 'copying', file: `${dbFile}.json` });
+      await fs.writeFile(path.join(compDbDir, `${dbFile}.json`), JSON.stringify(db, null, 2));
+      broadcastWs('test-import-progress', { step: `component_db/${dbFile}`, status: 'done', detail: `${db.items.length} seed items` });
     }
 
     // Create products directory in fixtures
@@ -7258,6 +7501,47 @@ async function handleApi(req, res) {
     } catch { /* non-fatal */ }
 
     return jsonRes(res, 200, { ok: true, category: testCategory, contractSummary });
+  }
+
+  // ── Source Strategy API ────────────────────────────────────────────
+
+  // GET /api/v1/source-strategy
+  if (parts[0] === 'source-strategy' && method === 'GET' && !parts[1]) {
+    const category = resolveCategoryAlias(params.get('category') || '');
+    const db = getSpecDb(category || 'mouse');
+    return jsonRes(res, 200, db.listSourceStrategies());
+  }
+
+  // POST /api/v1/source-strategy
+  if (parts[0] === 'source-strategy' && method === 'POST' && !parts[1]) {
+    const body = await readJsonBody(req).catch(() => ({}));
+    if (!body.host) return jsonRes(res, 400, { error: 'host_required' });
+    const category = resolveCategoryAlias(params.get('category') || '');
+    const db = getSpecDb(category || 'mouse');
+    const result = db.insertSourceStrategy(body);
+    return jsonRes(res, 201, { ok: true, id: result.id });
+  }
+
+  // PUT /api/v1/source-strategy/:id
+  if (parts[0] === 'source-strategy' && parts[1] && method === 'PUT') {
+    const id = Number.parseInt(parts[1], 10);
+    if (!Number.isFinite(id)) return jsonRes(res, 400, { error: 'invalid_id' });
+    const body = await readJsonBody(req).catch(() => ({}));
+    const category = resolveCategoryAlias(params.get('category') || '');
+    const db = getSpecDb(category || 'mouse');
+    const updated = db.updateSourceStrategy(id, body);
+    if (!updated) return jsonRes(res, 404, { error: 'not_found' });
+    return jsonRes(res, 200, updated);
+  }
+
+  // DELETE /api/v1/source-strategy/:id
+  if (parts[0] === 'source-strategy' && parts[1] && method === 'DELETE') {
+    const id = Number.parseInt(parts[1], 10);
+    if (!Number.isFinite(id)) return jsonRes(res, 400, { error: 'invalid_id' });
+    const category = resolveCategoryAlias(params.get('category') || '');
+    const db = getSpecDb(category || 'mouse');
+    db.deleteSourceStrategy(id);
+    return jsonRes(res, 200, { ok: true });
   }
 
   // GET /api/v1/test-mode/contract-summary?category=_test_mouse
@@ -7344,7 +7628,17 @@ async function handleApi(req, res) {
     }
 
     const productsDir = path.join('fixtures', 's3', 'specs', 'inputs', category, 'products');
+    await fs.rm(productsDir, { recursive: true, force: true });
     await fs.mkdir(productsDir, { recursive: true });
+    const outputsCategoryDir = path.join(OUTPUT_ROOT, 'specs', 'outputs', category);
+    await fs.rm(outputsCategoryDir, { recursive: true, force: true });
+    const suggestionsDir = path.join(HELPER_ROOT, category, '_suggestions');
+    await fs.mkdir(suggestionsDir, { recursive: true });
+    await Promise.all([
+      fs.rm(path.join(suggestionsDir, 'enums.json'), { force: true }),
+      fs.rm(path.join(suggestionsDir, 'components.json'), { force: true }),
+      fs.rm(path.join(suggestionsDir, 'component_review.json'), { force: true }),
+    ]);
 
     // Build contract analysis to get dynamic scenario defs
     let contractAnalysis = null;
@@ -7395,9 +7689,9 @@ async function handleApi(req, res) {
       JSON.stringify({ _doc: 'Test mode product catalog', _version: 1, products: catalogProducts }, null, 2)
     );
 
-    // Seed brands into the global brand registry so the Brands sub-tab shows data
-    // Also add "TestNewBrand" used by new_* component scenarios
-    testBrands.add('TestNewBrand');
+    // Seed brands into the global brand registry so the Brands sub-tab shows data.
+    // Also add one deterministic "unknown component" brand used by new_* scenarios.
+    testBrands.add('NovaForge Labs');
     for (const brandName of testBrands) {
       const result = await addBrand({ config, name: brandName, aliases: [], categories: [category] });
       if (result.ok === false && result.error === 'brand_already_exists') {
@@ -7512,6 +7806,9 @@ async function handleApi(req, res) {
     const resyncSpecDb = body?.resyncSpecDb !== false;
     if (runtimeSpecDb && resyncSpecDb) {
       try {
+        if (!body.productId) {
+          purgeTestModeCategoryState(runtimeSpecDb, category);
+        }
         const { loadFieldRules } = await import('../field-rules/loader.js');
         const { seedSpecDb } = await import('../db/seed.js');
         const seedFieldRules = await loadFieldRules(category, { config });
@@ -7598,6 +7895,11 @@ async function handleApi(req, res) {
       return jsonRes(res, 400, { ok: false, error: 'can_only_delete_test_categories' });
     }
 
+    try {
+      const runtimeSpecDb = await getSpecDbReady(category);
+      purgeTestModeCategoryState(runtimeSpecDb, category);
+    } catch { /* non-fatal */ }
+
     // Path traversal protection: verify resolved paths stay within expected roots
     const fixturesRoot = path.resolve('fixtures', 's3', 'specs', 'inputs');
     const dirs = [
@@ -7622,7 +7924,10 @@ async function handleApi(req, res) {
         const idx = brand.categories.indexOf(catLower);
         if (idx >= 0) {
           brand.categories.splice(idx, 1);
-          if (brand.categories.length === 0 && (brand.canonical_name === 'TestCo' || brand.canonical_name === 'TestNewBrand')) {
+          if (
+            brand.categories.length === 0
+            && (brand.canonical_name === 'TestCo' || brand.canonical_name === 'TestNewBrand' || brand.canonical_name === 'NovaForge Labs')
+          ) {
             delete registry.brands[slug];
           }
         }
@@ -7631,6 +7936,73 @@ async function handleApi(req, res) {
     } catch { /* non-fatal */ }
 
     return jsonRes(res, 200, { ok: true, deleted: category });
+  }
+
+  // GET /api/v1/convergence-settings
+  if (parts[0] === 'convergence-settings' && method === 'GET') {
+    const CONVERGENCE_KEYS = [
+      'convergenceMaxRounds', 'convergenceNoProgressLimit', 'convergenceMaxLowQualityRounds',
+      'convergenceLowQualityConfidence', 'convergenceMaxDispatchQueries', 'convergenceMaxTargetFields',
+      'needsetEvidenceDecayDays', 'needsetEvidenceDecayFloor',
+      'needsetCapIdentityLocked', 'needsetCapIdentityProvisional', 'needsetCapIdentityConflict',
+      'needsetCapIdentityUnlocked',
+      'consensusLlmWeightTier1', 'consensusLlmWeightTier2', 'consensusLlmWeightTier3', 'consensusLlmWeightTier4',
+      'consensusTier1Weight', 'consensusTier2Weight', 'consensusTier3Weight', 'consensusTier4Weight',
+      'serpTriageMinScore', 'serpTriageMaxUrls', 'serpTriageEnabled',
+      'retrievalMaxHitsPerField', 'retrievalMaxPrimeSources', 'retrievalIdentityFilterEnabled'
+    ];
+    const settings = {};
+    for (const key of CONVERGENCE_KEYS) {
+      settings[key] = config[key];
+    }
+    return jsonRes(res, 200, settings);
+  }
+
+  // PUT /api/v1/convergence-settings
+  if (parts[0] === 'convergence-settings' && method === 'PUT') {
+    const body = await readJsonBody(req).catch(() => ({}));
+    const INT_KEYS = new Set([
+      'convergenceMaxRounds', 'convergenceNoProgressLimit', 'convergenceMaxLowQualityRounds',
+      'convergenceMaxDispatchQueries', 'convergenceMaxTargetFields',
+      'needsetEvidenceDecayDays',
+      'serpTriageMinScore', 'serpTriageMaxUrls',
+      'retrievalMaxHitsPerField', 'retrievalMaxPrimeSources'
+    ]);
+    const FLOAT_KEYS = new Set([
+      'convergenceLowQualityConfidence', 'needsetEvidenceDecayFloor',
+      'needsetCapIdentityLocked', 'needsetCapIdentityProvisional', 'needsetCapIdentityConflict',
+      'needsetCapIdentityUnlocked',
+      'consensusLlmWeightTier1', 'consensusLlmWeightTier2', 'consensusLlmWeightTier3', 'consensusLlmWeightTier4',
+      'consensusTier1Weight', 'consensusTier2Weight', 'consensusTier3Weight', 'consensusTier4Weight'
+    ]);
+    const BOOL_KEYS = new Set([
+      'serpTriageEnabled', 'retrievalIdentityFilterEnabled'
+    ]);
+    const ALL_KEYS = new Set([...INT_KEYS, ...FLOAT_KEYS, ...BOOL_KEYS]);
+    const applied = {};
+    const rejected = {};
+    for (const [key, value] of Object.entries(body || {})) {
+      if (!ALL_KEYS.has(key)) continue;
+      if (INT_KEYS.has(key)) {
+        const n = Number.parseInt(String(value ?? ''), 10);
+        if (!Number.isFinite(n)) { rejected[key] = 'invalid_integer'; continue; }
+        const clamped = Math.max(0, n);
+        config[key] = clamped;
+        applied[key] = clamped;
+      } else if (FLOAT_KEYS.has(key)) {
+        const n = Number.parseFloat(String(value ?? ''));
+        if (!Number.isFinite(n)) { rejected[key] = 'invalid_float'; continue; }
+        const clamped = Math.max(0, Math.min(1, n));
+        config[key] = clamped;
+        applied[key] = clamped;
+      } else if (BOOL_KEYS.has(key)) {
+        const b = value === true || value === 'true' || value === 1;
+        config[key] = b;
+        applied[key] = b;
+      }
+    }
+    broadcastWs('data-change', { type: 'convergence-settings-updated', applied });
+    return jsonRes(res, 200, { ok: true, applied, ...(Object.keys(rejected).length > 0 ? { rejected } : {}) });
   }
 
   return null; // not handled
@@ -7874,6 +8246,3 @@ server.listen(PORT, '0.0.0.0', () => {
     execCb(cmd);
   }
 });
-
-
-

@@ -12,14 +12,6 @@ export const GROUPS = [
   'general', 'connectivity', 'construction', 'controls', 'dimensions',
   'electronics', 'encoder', 'ergonomics', 'sensor_performance', 'switches',
 ];
-export const ENUM_SOURCES = [
-  'yes_no',
-  'data_lists.coating', 'data_lists.connection', 'data_lists.connectivity',
-  'data_lists.feet_material', 'data_lists.form_factor', 'data_lists.front_flare',
-  'data_lists.hump', 'data_lists.lighting', 'data_lists.mcu',
-  'data_lists.sensor_type', 'data_lists.shape', 'data_lists.switch_type',
-  'component_db.encoder', 'component_db.material', 'component_db.sensor', 'component_db.switch',
-];
 export const COMPONENT_TYPES = ['sensor', 'switch', 'encoder', 'material'];
 export const NORMALIZE_MODES = [
   { value: 'lower_trim', label: 'Lowercase + Trim' },
@@ -39,8 +31,6 @@ export const CONTENT_TYPE_SUGGESTIONS = [
 export const UNIT_ACCEPTS_SUGGESTIONS = [
   'g', 'grams', 'gram', 'gr', 'mm', 'millimeters', 'Hz', 'hertz', 'dpi', 'ips', 'ms', 'milliseconds', 'h', 'hours',
 ];
-export const AZ_COLUMNS = Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i));
-
 // ── Tier definitions for TierPicker ─────────────────────────────────
 export const TIER_DEFS = [
   { id: 'tier1', label: 'Tier 1 \u2013 Manufacturer (OEM specs)' },
@@ -53,54 +43,27 @@ export const TIER_DEFS = [
 // ── Tooltip text for every studio input ─────────────────────────────
 export const STUDIO_TIPS: Record<string, string> = {
   // Tab 1: Mapping Studio
-  workbook_file: 'Path to the Excel workbook (.xlsx/.xlsm) containing your product spec data. Relative to the helper_files directory.',
-  key_sheet: 'Worksheet containing field key names in a single column. These become the spec attributes the pipeline extracts.',
-  key_column: 'Column letter in the key sheet that lists field key names.',
-  first_key_row: 'Row number where the first field key appears. Rows above are headers.',
-  last_key_row: 'Last row with a field key. Set to 0 to auto-detect (stops at first blank cell).',
-  sampling_sheet: 'Worksheet with product data columns. In matrix layout, each column is one product.',
-  layout: 'How product data is arranged. Matrix: one product per column. Row Table: one product per row. None: no product table.',
-  value_start_column: 'First column containing product data values (after the key column).',
-  brand_row: 'Row number containing brand names for product identification.',
-  model_row: 'Row number containing model names. Used with brand to identify products.',
-  variant_row: 'Row for variant identifiers (color, size). Set to 0 if no variants.',
-  id_row: 'Row containing numeric product IDs (sequential integers). Set to 0 if not present. In scratch mode, auto-set to row 2.',
-  identifier_row: 'Row containing unique product identifiers (8-char hex strings). Set to 0 if not present. In scratch mode, auto-set to row 3.',
-  value_end_column: 'Last column with product data. Leave empty to auto-detect.',
   tooltip_bank_file: 'Path to a JS/JSON/MD file with tooltip text for field keys. Auto-discovered if matching hbs_tooltips*.',
-  scratch_mode: 'Scratch mode: building a component source from scratch (no workbook loaded). Header row is locked to 1, data row to 2. All role columns are visible. Columns auto-assign A, B, C, etc.',
   component_type: 'Type of component this sheet describes (sensor, switch, encoder, material). Used as the component reference key.',
-  comp_sheet: 'Worksheet containing this component\'s data table.',
-  header_row: 'Row number with column headers for the component table.',
-  first_data_row: 'First row of actual component data (row after headers).',
-  stop_after_blank_primary: 'Number of consecutive blank rows in the primary column before the reader stops. Prevents reading past the end of data.',
-  primary_identifier: 'Column with the unique name for each component (e.g. sensor model name). Required.',
-  auto_derive_aliases: 'Automatically generate name variants from the primary identifier (acronyms, shortened forms).',
-  maker_column: 'Column with the manufacturer/brand for each component.',
-  aliases_columns: 'Columns with alternative names for components. Each column provides one name variant.',
-  reference_url_columns: 'Columns with URLs to datasheets, spec pages, or documentation.',
-  // Component Attribute Mapping
   comp_field_key: 'Select a field key to bind this component attribute to. Type, unit, parse template, and evidence rules are inherited from the field key definition.',
-  comp_column: 'Excel column containing this attribute\'s values. In Auto mode, the system matches the field key name against sheet headers.',
   comp_variance_policy: 'How the component DB value relates to the product spec value.\n\n'
     + 'authoritative \u2014 Component value IS the product value (default).\n'
     + 'upper_bound \u2014 Component gives the maximum possible value.\n'
     + 'lower_bound \u2014 Component gives the minimum value.\n'
-    + 'range \u2014 Component provides reference range (\u00b1tolerance).\n'
-    + 'override_allowed \u2014 Component is default, product can override.',
+    + 'range \u2014 Component provides reference range (\u00b1tolerance).',
+  comp_override_allowed: 'When checked, products are allowed to have different values for this property without triggering review flags.\n\n'
+    + 'Matching: Property comparison still runs during component identification but with reduced confidence (0.60 vs 0.85).\n'
+    + 'Review Grid: Variance enforcement is skipped entirely \u2014 no violation flags, no review needed.\n'
+    + 'Cascade: When this component property changes, propagation to linked products is lowest priority.\n\n'
+    + 'Use this for properties that can legitimately vary per product implementation, '
+    + 'e.g. a sensor supports 30K DPI but the product firmware limits it to 26K.',
   comp_tolerance: 'Numeric tolerance for upper_bound/lower_bound policies. E.g. tolerance=5 means \u00b15 from the component value.',
   comp_constraints: 'Cross-field validation rules. E.g. "component_release_date <= product_release_date" ensures the component existed before the product.',
-  comp_mode: 'Auto: system matches field key to sheet header automatically (99% path).\nManual: create a new header + choose output column placement.',
 
-  // Data Lists
+  // Enums
   data_list_field: 'Enum bucket name (e.g. "form_factor"). Becomes the data_lists.{name} reference used by enum sources.',
-  data_list_mode: 'Workbook: import values from an Excel column. Scratch: define values manually without a workbook column.',
-  data_list_sheet: 'Worksheet containing the enum values in a column.',
-  data_list_column: 'Column letter containing the enum values.',
-  data_list_normalize: 'How to normalize values read from the workbook. Lowercase + Trim is recommended.',
-  data_list_delimiter: 'Optional delimiter to split cell values (e.g. "," or ";"). Leave empty if each cell contains one value.',
-  data_list_manual_values: 'Manually defined values. In workbook mode, these are merged with workbook values during compile.',
-  data_list_compiled_values: 'Values from the last compile. Blue = from workbook/canonical source. Green = manual additions. Compile to refresh.',
+  data_list_normalize: 'How to normalize enum values. Lowercase + Trim is recommended.',
+  data_list_manual_values: 'Enum values for this field. Used during extraction and validation.',
 
   // Tab 2: Key Navigator - Contract
   data_type: 'Fundamental data type. string: text, number: decimal, integer: whole, boolean: yes/no, date, url, enum: from a fixed set, component_ref: links to component DB.',
@@ -120,7 +83,7 @@ export const STUDIO_TIPS: Record<string, string> = {
   block_publish_when_unk: 'If checked, products with this field set to the unknown token cannot be published.',
 
   // Tab 2: Key Navigator - Parse
-  parse_template: 'Parse Template defines the output type/shape (boolean/number/list/url/component). This controls which Enum options are valid. Boolean templates lock enums to Yes/No. Number/URL/date templates disable enums. Text/token_list templates enable full enum configuration. Component_reference templates enable the Component DB tab.',
+  parse_template: 'Parse Template defines the output type/shape (boolean/number/list/url/component). Boolean templates auto-lock enums to Yes/No. Component_reference templates auto-set alias matching. All other templates leave enum fully configurable.',
   parse_unit: 'Default unit assumed when source text has no explicit unit. E.g. \'g\' so \'80\' becomes \'80 g\'. Only shown for number-based templates.',
   unit_accepts: 'Unit variations the parser recognizes. E.g. for grams: g, grams, gram, gr. Only shown for number-based templates.',
   allow_unitless: 'Accept numbers without a unit. The Parse Unit is assumed.',
@@ -128,16 +91,15 @@ export const STUDIO_TIPS: Record<string, string> = {
   strict_unit_required: 'Values MUST include a unit suffix. Rejects bare numbers. Overrides Allow unitless.',
 
   // Tab 2: Key Navigator - Enum
-  enum_policy: 'Enum Policy controls vocabulary matching after parsing. closed: requires a known list, rejects unknowns. open_prefer_known: prefers known values but accepts new evidence-backed values and queues them as suggestions. open: accepts any value. For boolean fields, this is locked to yes/no. For number/url/date fields, enums are disabled.',
-  enum_source: 'Enum value list source. Use data_lists.{name} for workbook-defined lists (e.g. data_lists.shape), component_db.{type} for component names (e.g. component_db.sensor), or yes_no for boolean enums.',
+  enum_policy: 'Enum Policy controls vocabulary matching after parsing. closed: requires a known list, rejects unknowns. open_prefer_known: prefers known values but accepts new evidence-backed values and queues them as suggestions. open: accepts any value (valid for all field types including number, url, date). For boolean fields, this is auto-locked to closed/yes_no.',
+  enum_source: 'Enum value list source. Use data_lists.{name} for enum lists (e.g. data_lists.shape), component_db.{type} for component names (e.g. component_db.sensor), or yes_no for boolean enums.',
   match_strategy: 'alias: match known aliases and name variants. exact: exact string match only. fuzzy: similarity scoring with configurable threshold.',
   fuzzy_threshold: 'Similarity score (0.0-1.0) for fuzzy matching. 0.92 = 92% similar required. Higher = stricter.',
 
   // Tab 2: Key Navigator - Enum (expanded)
-  enum_value_source: 'Where enum values come from. Workbook Sheet: pull values from an Excel column header. Manual: type values directly (enabled when policy is open/open_prefer_known). Component DB: use entity names from the component database (sensor, switch, encoder, material).',
-  enum_detected_values: 'Values currently in the known_values list for this field. Blue = from workbook/canonical source. Amber = discovered during pipeline runs (not yet in canonical list).',
+  enum_value_source: 'Where enum values come from. Manual: type values directly. Enum: link to an existing enum list from the Mapping Studio (data_lists.*).',
+  enum_detected_values: 'Values currently in the known_values list for this field. Blue = from canonical source. Amber = discovered during pipeline runs (not yet in canonical list).',
   enum_add_values: 'Manually add known values. Only available when Enum Policy is open or open_prefer_known, or when editing the canonical allowlist in closed mode. New values found by the pipeline appear separately and can be promoted.',
-  enum_observed_values: 'Values observed during pipeline runs that are NOT in the canonical list. These can be promoted to manual values or mapped as aliases.',
   enum_component_values: 'Entity names from the component database. Shows all components of this type with their maker and aliases.',
 
   // Tab 2: Key Navigator - Evidence
@@ -165,6 +127,14 @@ export const STUDIO_TIPS: Record<string, string> = {
 
   // Tab 2: Key Navigator - Component
   component_db: 'Links this field to a component database (sensor, switch, encoder, material). Pipeline looks up component data alongside product data.',
+  comp_match_fuzzy_threshold: 'Minimum string similarity (0-1) for a component name to be considered a fuzzy match candidate. Default 0.75 means 75% character similarity required. Lower = more candidates but more false matches.',
+  comp_match_name_weight: 'How much the name similarity score counts in the combined matching score (0-1). Default 0.4 = 40% from name. The rest comes from property_weight. Higher = name matters more than property comparison.',
+  comp_match_property_weight: 'How much property value comparison counts in the combined matching score (0-1). Default 0.6 = 60% from properties. Uses the property_keys list to compare extracted product values against known component DB values.',
+  comp_match_auto_accept_score: 'Combined score threshold (0-1) for auto-accepting a component match without human review. Default 0.95. Matches above this are confirmed automatically. Lower = more auto-accepts but higher risk of wrong matches.',
+  comp_match_flag_review_score: 'Combined score threshold (0-1) for flagging a match for human/AI review. Default 0.65. Between this and auto_accept_score = provisional match queued for review. Below this = rejected (or new component if allow_new_components is on).',
+  comp_match_property_keys: 'Which product field keys to compare against component DB properties during matching. E.g. for a sensor: dpi, ips, acceleration. The engine compares extracted values against known component values using variance-aware numeric comparison.',
+  comp_allow_new: 'If enabled, the pipeline can suggest new components not in the database when no fuzzy match meets the flag_review_score threshold. Suggestions are flagged for review. If disabled, unmatched values are rejected.',
+  comp_require_identity_evidence: 'If enabled, component identity matching requires supporting evidence from at least one source. Prevents phantom component assignments from noisy extraction.',
 
   // Tab 2: Key Navigator - AI Assist
   ai_mode: 'Controls how aggressively the LLM extracts this field.\n\n'
@@ -198,18 +168,8 @@ export const STUDIO_TIPS: Record<string, string> = {
 
   // Tab 3: Field Rules Workbench
   field_contract_table: 'Read-only overview of all field contracts. Edit fields in the Key Navigator tab.',
-  workbench_preset: 'Column presets show different subsets of the ~30 field properties. Use Minimal for a quick overview, or All to see everything.',
-  workbench_inline_edit: 'Click a Required Level, Parse Template, or Enum Policy cell to edit inline. Publish Gate toggles on click.',
-  workbench_bulk_edit: 'Select multiple rows with checkboxes, then use the floating bar to apply changes to all selected fields at once.',
-  workbench_compile_status: 'Green = no issues. Yellow = warnings. Red = errors. Hover for details. Run Compile to refresh.',
 
-  // Tab 4: Workbook Context
-  workbook_map_config: 'Current workbook mapping. Edit in Mapping Studio tab.',
-  sheet_previews: 'Live sheet data from the configured workbook.',
-  product_catalog: 'Products from the workbook product table.',
-  ui_field_catalog: 'Generated UI configuration from field rules.',
-
-  // Tab 5: Compile & Reports
+  // Tab 4: Compile & Reports
   run_compile: 'Generates all pipeline artifacts from current configuration. Check Indexing Lab process output for progress.',
   compile_errors: 'Fatal issues preventing artifact generation. Must be resolved.',
   compile_warnings: 'Non-fatal issues. Review and fix when possible.',

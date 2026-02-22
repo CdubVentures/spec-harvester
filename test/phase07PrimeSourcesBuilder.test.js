@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildPhase07PrimeSources } from '../src/retrieve/primeSourcesBuilder.js';
+import { buildTierAwareFieldRetrieval } from '../src/retrieve/tierAwareRetriever.js';
 
 test('phase07 builder enforces min refs + distinct source policy for critical field', () => {
   const payload = buildPhase07PrimeSources({
@@ -193,4 +194,194 @@ test('phase07 builder falls back to sourceResults evidence packs when provenance
   assert.equal(Number(payload.summary?.fields_with_hits || 0) >= 1, true);
   assert.equal(payload.fields.length, 1);
   assert.equal(payload.fields[0].hits.length >= 1, true);
+});
+
+test('tier_preference [2] scores a tier-2 hit higher than a tier-1 hit', () => {
+  const pool = [
+    {
+      origin_field: 'sensor',
+      url: 'https://mfg.com/spec',
+      host: 'mfg.com',
+      tier: 1,
+      method: 'table',
+      quote: 'Sensor: Focus Pro 35K',
+      snippet_id: 'sn_tier1'
+    },
+    {
+      origin_field: 'sensor',
+      url: 'https://rtings.com/review',
+      host: 'rtings.com',
+      tier: 2,
+      method: 'table',
+      quote: 'Sensor: Focus Pro 35K',
+      snippet_id: 'sn_tier2'
+    }
+  ];
+
+  const result = buildTierAwareFieldRetrieval({
+    fieldKey: 'sensor',
+    needRow: { field_key: 'sensor', tier_preference: [2], need_score: 10, required_level: 'required' },
+    fieldRule: { search_hints: { query_terms: ['sensor'] } },
+    evidencePool: pool,
+    identity: { brand: 'Razer', model: 'Viper V3 Pro' }
+  });
+
+  assert.ok(result.hits.length >= 2);
+  const tier2Hit = result.hits.find((h) => h.tier === 2);
+  const tier1Hit = result.hits.find((h) => h.tier === 1);
+  assert.ok(tier2Hit);
+  assert.ok(tier1Hit);
+  assert.ok(tier2Hit.score > tier1Hit.score, 'tier-2 hit should score higher when tier_preference is [2]');
+});
+
+test('default tier_preference [1,2,3] scores tier-1 highest', () => {
+  const pool = [
+    {
+      origin_field: 'dpi',
+      url: 'https://mfg.com/spec',
+      host: 'mfg.com',
+      tier: 1,
+      method: 'table',
+      quote: 'DPI: 30000',
+      snippet_id: 'sn_t1'
+    },
+    {
+      origin_field: 'dpi',
+      url: 'https://rtings.com/review',
+      host: 'rtings.com',
+      tier: 2,
+      method: 'table',
+      quote: 'DPI: 30000',
+      snippet_id: 'sn_t2'
+    },
+    {
+      origin_field: 'dpi',
+      url: 'https://amazon.com/product',
+      host: 'amazon.com',
+      tier: 3,
+      method: 'table',
+      quote: 'DPI: 30000',
+      snippet_id: 'sn_t3'
+    }
+  ];
+
+  const result = buildTierAwareFieldRetrieval({
+    fieldKey: 'dpi',
+    needRow: { field_key: 'dpi', need_score: 10, required_level: 'required' },
+    fieldRule: { search_hints: { query_terms: ['dpi', 'cpi'] } },
+    evidencePool: pool,
+    identity: { brand: 'Razer', model: 'Test' }
+  });
+
+  assert.ok(result.hits.length >= 3);
+  assert.equal(result.tier_preference[0], 1);
+  assert.ok(result.hits[0].tier === 1, 'tier-1 hit should rank first with default preference');
+});
+
+test('E2E: two fields with different tier_preferences produce different top hits', () => {
+  const payload = buildPhase07PrimeSources({
+    runId: 'run-phase07-tier-pref',
+    category: 'mouse',
+    productId: 'mouse-test',
+    needSet: {
+      needs: [
+        {
+          field_key: 'sensor',
+          required_level: 'required',
+          need_score: 10,
+          min_refs: 1,
+          tier_preference: [2]
+        },
+        {
+          field_key: 'weight',
+          required_level: 'required',
+          need_score: 10,
+          min_refs: 1,
+          tier_preference: [1]
+        }
+      ]
+    },
+    provenance: {
+      sensor: {
+        value: 'unk',
+        evidence: [
+          { url: 'https://mfg.com/spec', host: 'mfg.com', tier: 1, method: 'table', quote: 'Sensor: Focus Pro 35K' },
+          { url: 'https://rtings.com/review', host: 'rtings.com', tier: 2, method: 'table', quote: 'Sensor: Focus Pro 35K latency test' }
+        ]
+      },
+      weight: {
+        value: 'unk',
+        evidence: [
+          { url: 'https://mfg.com/spec', host: 'mfg.com', tier: 1, method: 'table', quote: 'Weight: 54 grams' },
+          { url: 'https://rtings.com/review', host: 'rtings.com', tier: 2, method: 'table', quote: 'Weight: 54 g measured' }
+        ]
+      }
+    },
+    fieldRules: {
+      fields: {
+        sensor: { search_hints: { query_terms: ['sensor'] } },
+        weight: { search_hints: { query_terms: ['weight', 'grams'] }, unit: 'g' }
+      }
+    },
+    identity: { brand: 'Razer', model: 'Viper V3 Pro' }
+  });
+
+  assert.equal(payload.fields.length, 2);
+  const sensorField = payload.fields.find((f) => f.field_key === 'sensor');
+  const weightField = payload.fields.find((f) => f.field_key === 'weight');
+  assert.ok(sensorField);
+  assert.ok(weightField);
+  assert.deepEqual(sensorField.tier_preference, [2]);
+  assert.deepEqual(weightField.tier_preference, [1]);
+  assert.ok(sensorField.hits.length > 0);
+  assert.ok(weightField.hits.length > 0);
+  assert.equal(sensorField.hits[0].tier, 2, 'sensor top hit should be tier-2 with preference [2]');
+  assert.equal(weightField.hits[0].tier, 1, 'weight top hit should be tier-1 with preference [1]');
+});
+
+test('phase07 builder uses default maxHitsPerField=24 and maxPrimeSourcesPerField=8', () => {
+  const evidence = Array.from({ length: 30 }, (_, i) => ({
+    url: `https://source-${i}.com/specs`,
+    host: `source-${i}.com`,
+    tier: (i % 3) + 1,
+    method: 'table',
+    quote: `Weight is ${50 + i}g`
+  }));
+  const payload = buildPhase07PrimeSources({
+    runId: 'run-defaults-test',
+    category: 'mouse',
+    productId: 'mouse-defaults',
+    needSet: { needs: [{ field_key: 'weight', required_level: 'required', need_score: 20, min_refs: 1, tier_preference: [1, 2, 3] }] },
+    provenance: { weight: { value: '50', evidence } },
+    fieldRules: { fields: { weight: { required_level: 'required', unit: 'g' } } },
+    identity: { brand: 'Test', model: 'Default' }
+  });
+  const field = payload.fields[0];
+  assert.ok(field);
+  assert.ok(field.hits.length <= 24, `hits should be capped at 24 (default), got ${field.hits.length}`);
+  assert.ok(field.prime_sources.length <= 8, `prime_sources should be capped at 8 (default), got ${field.prime_sources.length}`);
+});
+
+test('phase07 builder respects custom maxHitsPerField and maxPrimeSourcesPerField options', () => {
+  const evidence = Array.from({ length: 30 }, (_, i) => ({
+    url: `https://source-${i}.com/specs`,
+    host: `source-${i}.com`,
+    tier: (i % 3) + 1,
+    method: 'table',
+    quote: `Weight is ${50 + i}g`
+  }));
+  const payload = buildPhase07PrimeSources({
+    runId: 'run-custom-limits',
+    category: 'mouse',
+    productId: 'mouse-custom',
+    needSet: { needs: [{ field_key: 'weight', required_level: 'required', need_score: 20, min_refs: 1, tier_preference: [1, 2, 3] }] },
+    provenance: { weight: { value: '50', evidence } },
+    fieldRules: { fields: { weight: { required_level: 'required', unit: 'g' } } },
+    identity: { brand: 'Test', model: 'Custom' },
+    options: { maxHitsPerField: 10, maxPrimeSourcesPerField: 4 }
+  });
+  const field = payload.fields[0];
+  assert.ok(field);
+  assert.ok(field.hits.length <= 10, `hits should be capped at 10, got ${field.hits.length}`);
+  assert.ok(field.prime_sources.length <= 4, `prime_sources should be capped at 4, got ${field.prime_sources.length}`);
 });

@@ -206,6 +206,28 @@ function normalizeComponentEntry(rawEntry = {}, fallbackName = '') {
   };
 }
 
+function componentEntryStorageKey(entry, fallbackKey, existingEntries) {
+  const canonicalName = String(entry?.canonical_name || '').trim();
+  const maker = String(entry?.maker || '').trim();
+  const base = `${canonicalName || String(fallbackKey || '').trim()}::${maker}`;
+  const seed = base || canonicalName || String(fallbackKey || '').trim() || 'component_entry';
+  let key = seed;
+  let ordinal = 1;
+  while (Object.prototype.hasOwnProperty.call(existingEntries, key)) {
+    key = `${seed}::${ordinal}`;
+    ordinal += 1;
+  }
+  return key;
+}
+
+function appendIndexToken(index, indexAll, tokenRaw, entry) {
+  const token = normalizeToken(tokenRaw);
+  if (!token) return;
+  if (!index.has(token)) index.set(token, entry);
+  if (!indexAll.has(token)) indexAll.set(token, []);
+  indexAll.get(token).push(entry);
+}
+
 function normalizeComponentDbPayload(rawPayload = {}, fallbackName = '') {
   const dbName = String(rawPayload.db_name || fallbackName).trim() || fallbackName;
   const entries = {};
@@ -216,7 +238,7 @@ function normalizeComponentDbPayload(rawPayload = {}, fallbackName = '') {
         continue;
       }
       const entry = normalizeComponentEntry(rawEntry, rawKey);
-      const key = entry.canonical_name || rawKey;
+      const key = componentEntryStorageKey(entry, rawKey, entries);
       if (!key) {
         continue;
       }
@@ -231,25 +253,27 @@ function normalizeComponentDbPayload(rawPayload = {}, fallbackName = '') {
       if (!entry.canonical_name) {
         continue;
       }
-      entries[entry.canonical_name] = entry;
+      const key = componentEntryStorageKey(entry, entry.canonical_name, entries);
+      entries[key] = entry;
     }
   }
 
   const index = new Map();
+  const indexAll = new Map();
   // Build a lightweight lookup index so runtime component matching stays O(1).
   for (const entry of Object.values(entries)) {
     const canonicalToken = normalizeToken(entry.canonical_name);
     if (canonicalToken) {
-      index.set(canonicalToken, entry);
-      index.set(canonicalToken.replace(/\s+/g, ''), entry);
+      appendIndexToken(index, indexAll, canonicalToken, entry);
+      appendIndexToken(index, indexAll, canonicalToken.replace(/\s+/g, ''), entry);
     }
     for (const alias of entry.aliases || []) {
       const aliasToken = normalizeToken(alias);
       if (!aliasToken) {
         continue;
       }
-      index.set(aliasToken, entry);
-      index.set(aliasToken.replace(/\s+/g, ''), entry);
+      appendIndexToken(index, indexAll, aliasToken, entry);
+      appendIndexToken(index, indexAll, aliasToken.replace(/\s+/g, ''), entry);
     }
   }
 
@@ -257,7 +281,8 @@ function normalizeComponentDbPayload(rawPayload = {}, fallbackName = '') {
     ...rawPayload,
     db_name: dbName,
     entries,
-    __index: index
+    __index: index,
+    __indexAll: indexAll
   };
 }
 

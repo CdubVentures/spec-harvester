@@ -8,6 +8,7 @@ import { Tip } from '../../components/common/Tip';
 import type { ProcessStatus } from '../../types/events';
 import type { CatalogRow } from '../../types/product';
 import type { IndexLabEvent } from '../../stores/indexlabStore';
+import type { LearningFeedResponse } from '../../types/learning';
 
 interface IndexLabRunSummary {
   run_id: string;
@@ -636,6 +637,13 @@ interface IndexLabEvidenceIndexResponse {
     rows?: IndexLabEvidenceIndexSearchRow[];
     note?: string;
   };
+  dedupe_stream?: {
+    total?: number;
+    new_count?: number;
+    reused_count?: number;
+    updated_count?: number;
+    total_chunks_indexed?: number;
+  };
 }
 
 interface IndexLabPhase07HitRow {
@@ -822,10 +830,28 @@ interface IndexLabDynamicFetchDashboardResponse {
   latest_key?: string | null;
 }
 
-type PanelKey = 'overview' | 'runtime' | 'picker' | 'searchProfile' | 'serpExplorer' | 'phase5' | 'phase6b' | 'phase6' | 'phase7' | 'phase8' | 'urlHealth' | 'llmOutput' | 'llmMetrics' | 'eventStream' | 'needset';
+interface RoundSummaryRow {
+  round: number;
+  needset_size: number;
+  missing_required_count: number;
+  critical_count: number;
+  confidence: number;
+  validated: boolean;
+  improved: boolean;
+  improvement_reasons: string[];
+}
+
+interface RoundSummaryResponse {
+  run_id?: string;
+  rounds: RoundSummaryRow[];
+  stop_reason: string | null;
+  round_count: number;
+}
+
+type PanelKey = 'overview' | 'runtime' | 'picker' | 'searchProfile' | 'serpExplorer' | 'phase5' | 'phase6b' | 'phase6' | 'phase7' | 'phase8' | 'phase9' | 'learning' | 'urlHealth' | 'llmOutput' | 'llmMetrics' | 'eventStream' | 'needset';
 type PanelStateToken = 'live' | 'ready' | 'waiting';
 
-const PANEL_KEYS: PanelKey[] = ['overview', 'runtime', 'picker', 'searchProfile', 'serpExplorer', 'phase5', 'phase6b', 'phase6', 'phase7', 'phase8', 'urlHealth', 'llmOutput', 'llmMetrics', 'eventStream', 'needset'];
+const PANEL_KEYS: PanelKey[] = ['overview', 'runtime', 'picker', 'searchProfile', 'serpExplorer', 'phase5', 'phase6b', 'phase6', 'phase7', 'phase8', 'phase9', 'learning', 'urlHealth', 'llmOutput', 'llmMetrics', 'eventStream', 'needset'];
 
 const DEFAULT_PANEL_COLLAPSED: Record<PanelKey, boolean> = {
   overview: false,
@@ -838,6 +864,8 @@ const DEFAULT_PANEL_COLLAPSED: Record<PanelKey, boolean> = {
   phase6: true,
   phase7: true,
   phase8: true,
+  phase9: true,
+  learning: true,
   urlHealth: true,
   llmOutput: true,
   llmMetrics: true,
@@ -847,6 +875,16 @@ const DEFAULT_PANEL_COLLAPSED: Record<PanelKey, boolean> = {
 
 function normalizeToken(value: unknown) {
   return String(value || '').trim().toLowerCase();
+}
+
+function getRefetchInterval(
+  isRunning: boolean,
+  isCollapsed: boolean,
+  activeMs = 2000,
+  idleMs = 10000
+): number | false {
+  if (isCollapsed) return false;
+  return isRunning ? activeMs : idleMs;
 }
 
 function truthyFlag(value: unknown) {
@@ -1391,6 +1429,7 @@ export function IndexingPage() {
     queryFn: () => api.get<ProcessStatus>('/process/status'),
     refetchInterval: 1500
   });
+  const isProcessRunning = Boolean(processStatus?.running);
 
   const { data: searxngStatus, error: searxngStatusError } = useQuery({
     queryKey: ['searxng', 'status'],
@@ -1412,6 +1451,101 @@ export function IndexingPage() {
     refetchInterval: 15_000
   });
 
+  type ConvergenceSettings = Record<string, number | boolean>;
+  const CONVERGENCE_KNOB_GROUPS = [
+    {
+      label: 'Convergence Loop',
+      knobs: [
+        { key: 'convergenceMaxRounds', label: 'Max Rounds', tip: 'Maximum convergence rounds before stopping. Higher values give more chances to fill missing fields but cost more LLM calls.', type: 'int' as const, min: 1, max: 12 },
+        { key: 'convergenceNoProgressLimit', label: 'No-Progress Streak Limit', tip: 'Stop after this many consecutive rounds with no improvement. Lower values save budget; higher values tolerate slow-burn discovery.', type: 'int' as const, min: 1, max: 6 },
+        { key: 'convergenceMaxLowQualityRounds', label: 'Max Low-Quality Rounds', tip: 'Stop after this many rounds where no identity-matched sources were found or confidence stayed below threshold.', type: 'int' as const, min: 1, max: 6 },
+        { key: 'convergenceLowQualityConfidence', label: 'Low Quality Confidence Threshold', tip: 'Confidence below this value counts the round as low-quality. Raise to be stricter about what counts as progress.', type: 'float' as const, min: 0, max: 1, step: 0.05 },
+        { key: 'convergenceMaxDispatchQueries', label: 'Max Dispatch Queries/Round', tip: 'Cap on search queries dispatched per convergence round from NeedSet deficits. Higher values widen discovery but increase API cost.', type: 'int' as const, min: 5, max: 50 },
+        { key: 'convergenceMaxTargetFields', label: 'Max Target Fields/Round', tip: 'Cap on LLM target fields per round. Higher values attempt more fields per extraction pass.', type: 'int' as const, min: 5, max: 80 },
+      ],
+    },
+    {
+      label: 'NeedSet Identity Caps',
+      knobs: [
+        { key: 'needsetCapIdentityLocked', label: 'Locked', tip: 'Max effective confidence when product identity is locked (fully confirmed). Normally 1.0.', type: 'float' as const, min: 0.5, max: 1, step: 0.05 },
+        { key: 'needsetCapIdentityProvisional', label: 'Provisional', tip: 'Max effective confidence when identity is provisional (likely correct but not fully confirmed).', type: 'float' as const, min: 0.5, max: 0.9, step: 0.01 },
+        { key: 'needsetCapIdentityConflict', label: 'Conflict', tip: 'Max effective confidence when identity has conflicting signals. Lower values force more re-verification.', type: 'float' as const, min: 0.2, max: 0.6, step: 0.01 },
+        { key: 'needsetCapIdentityUnlocked', label: 'Unlocked', tip: 'Max effective confidence when identity is not yet confirmed. Lower values keep NeedSet scores conservative until identity resolves.', type: 'float' as const, min: 0.3, max: 0.8, step: 0.01 },
+      ],
+    },
+    {
+      label: 'NeedSet Freshness Decay',
+      knobs: [
+        { key: 'needsetEvidenceDecayDays', label: 'Decay Half-Life (days)', tip: 'Number of days until evidence confidence is halved. Lower values penalize stale evidence more aggressively, higher values trust older evidence longer.', type: 'int' as const, min: 1, max: 90 },
+        { key: 'needsetEvidenceDecayFloor', label: 'Decay Floor', tip: 'Minimum decay multiplier — even very old evidence retains at least this fraction of its confidence. Set to 0 to allow full decay.', type: 'float' as const, min: 0, max: 0.9, step: 0.05 },
+      ],
+    },
+    {
+      label: 'Consensus — LLM Weights',
+      knobs: [
+        { key: 'consensusLlmWeightTier1', label: 'LLM Tier 1 (Manufacturer)', tip: 'Weight applied to LLM-extracted candidates from tier-1 (manufacturer) sources in consensus scoring.', type: 'float' as const, min: 0.3, max: 0.9, step: 0.05 },
+        { key: 'consensusLlmWeightTier2', label: 'LLM Tier 2 (Lab Review)', tip: 'Weight applied to LLM-extracted candidates from tier-2 (lab review) sources.', type: 'float' as const, min: 0.2, max: 0.7, step: 0.05 },
+        { key: 'consensusLlmWeightTier3', label: 'LLM Tier 3 (Retail)', tip: 'Weight applied to LLM-extracted candidates from tier-3 (retail) sources.', type: 'float' as const, min: 0.1, max: 0.4, step: 0.05 },
+        { key: 'consensusLlmWeightTier4', label: 'LLM Tier 4 (Unverified)', tip: 'Weight applied to LLM-extracted candidates from tier-4 (unverified) sources. Keep low to prevent unreliable data from winning consensus.', type: 'float' as const, min: 0.05, max: 0.3, step: 0.05 },
+      ],
+    },
+    {
+      label: 'Consensus — Tier Weights',
+      knobs: [
+        { key: 'consensusTier1Weight', label: 'Tier 1 Weight', tip: 'Base scoring weight for all tier-1 (manufacturer) evidence rows in consensus. Higher values strongly prefer official sources.', type: 'float' as const, min: 0.8, max: 1, step: 0.05 },
+        { key: 'consensusTier2Weight', label: 'Tier 2 Weight', tip: 'Base scoring weight for tier-2 (lab review) evidence rows.', type: 'float' as const, min: 0.5, max: 0.9, step: 0.05 },
+        { key: 'consensusTier3Weight', label: 'Tier 3 Weight', tip: 'Base scoring weight for tier-3 (retail) evidence rows.', type: 'float' as const, min: 0.2, max: 0.6, step: 0.05 },
+        { key: 'consensusTier4Weight', label: 'Tier 4 Weight', tip: 'Base scoring weight for tier-4 (unverified) evidence rows. Lower values reduce influence of unverified sources.', type: 'float' as const, min: 0.1, max: 0.4, step: 0.05 },
+      ],
+    },
+    {
+      label: 'SERP Triage',
+      knobs: [
+        { key: 'serpTriageMinScore', label: 'Min Score Threshold', tip: 'Minimum LLM triage score (1-10) for a SERP result to pass. Higher values filter more aggressively.', type: 'int' as const, min: 1, max: 10 },
+        { key: 'serpTriageMaxUrls', label: 'Max URLs After Triage', tip: 'Maximum number of URLs kept after triage scoring. Lower values reduce fetch volume; higher values increase coverage.', type: 'int' as const, min: 5, max: 30 },
+        { key: 'serpTriageEnabled', label: 'Triage Enabled', tip: 'Enable LLM-powered SERP triage. When off, all search results pass through unfiltered.', type: 'bool' as const },
+      ],
+    },
+    {
+      label: 'Retrieval',
+      knobs: [
+        { key: 'retrievalMaxHitsPerField', label: 'Max Hits Per Field', tip: 'Maximum evidence rows retrieved per field during tier-aware retrieval. Higher values increase recall but slow scoring.', type: 'int' as const, min: 5, max: 50 },
+        { key: 'retrievalMaxPrimeSources', label: 'Max Prime Sources', tip: 'Maximum prime sources selected per field for extraction context. Higher values provide more evidence to LLM but increase token usage.', type: 'int' as const, min: 3, max: 20 },
+        { key: 'retrievalIdentityFilterEnabled', label: 'Identity Filter Enabled', tip: 'Filter retrieval results by product identity match. Disable to include all sources regardless of identity confidence.', type: 'bool' as const },
+      ],
+    },
+  ];
+
+  const [convergenceSettings, setConvergenceSettings] = useState<ConvergenceSettings>({});
+  const [convergenceDirty, setConvergenceDirty] = useState(false);
+
+  const { data: convergenceData, refetch: refetchConvergence } = useQuery({
+    queryKey: ['convergence-settings'],
+    queryFn: () => api.get<ConvergenceSettings>('/convergence-settings'),
+    refetchInterval: 30_000,
+  });
+
+  useEffect(() => {
+    if (convergenceData) {
+      setConvergenceSettings(convergenceData);
+      setConvergenceDirty(false);
+    }
+  }, [convergenceData]);
+
+  const saveConvergenceMut = useMutation({
+    mutationFn: (payload: ConvergenceSettings) =>
+      api.put<{ ok: boolean; applied: ConvergenceSettings }>('/convergence-settings', payload),
+    onSuccess: () => {
+      setConvergenceDirty(false);
+      refetchConvergence();
+    },
+  });
+
+  const updateConvergenceKnob = (key: string, value: number | boolean) => {
+    setConvergenceSettings((prev) => ({ ...prev, [key]: value }));
+    setConvergenceDirty(true);
+  };
+
   const { data: indexingLlmMetrics } = useQuery({
     queryKey: ['indexing', 'llm-metrics', category],
     queryFn: () => {
@@ -1421,7 +1555,7 @@ export function IndexingPage() {
       if (!isAll && category) qp.set('category', category);
       return api.get<IndexingLlmMetricsResponse>(`/indexing/llm-metrics?${qp.toString()}`);
     },
-    refetchInterval: 2_000
+    refetchInterval: getRefetchInterval(isProcessRunning, panelCollapsed.llmMetrics)
   });
 
   const { data: catalog = [] } = useQuery({
@@ -1434,7 +1568,7 @@ export function IndexingPage() {
   const { data: indexlabRunsResp } = useQuery({
     queryKey: ['indexlab', 'runs'],
     queryFn: () => api.get<IndexLabRunsResponse>('/indexlab/runs?limit=80'),
-    refetchInterval: 2000
+    refetchInterval: getRefetchInterval(isProcessRunning, panelCollapsed.picker)
   });
 
   const indexlabRuns = useMemo(() => {
@@ -1495,7 +1629,7 @@ export function IndexingPage() {
         `/indexlab/run/${encodeURIComponent(selectedIndexLabRunId)}/events?limit=3000`
       ),
     enabled: Boolean(selectedIndexLabRunId) && !runViewCleared,
-    refetchInterval: 2000
+    refetchInterval: getRefetchInterval(isProcessRunning, panelCollapsed.eventStream)
   });
 
   const { data: indexlabNeedsetResp } = useQuery({
@@ -1505,7 +1639,7 @@ export function IndexingPage() {
         `/indexlab/run/${encodeURIComponent(selectedIndexLabRunId)}/needset`
       ),
     enabled: Boolean(selectedIndexLabRunId) && !runViewCleared,
-    refetchInterval: 2000
+    refetchInterval: getRefetchInterval(isProcessRunning, panelCollapsed.needset)
   });
   const { data: indexlabSearchProfileResp } = useQuery({
     queryKey: ['indexlab', 'run', selectedIndexLabRunId, 'search-profile'],
@@ -1514,7 +1648,7 @@ export function IndexingPage() {
         `/indexlab/run/${encodeURIComponent(selectedIndexLabRunId)}/search-profile`
       ),
     enabled: Boolean(selectedIndexLabRunId) && !runViewCleared,
-    refetchInterval: 2000
+    refetchInterval: getRefetchInterval(isProcessRunning, panelCollapsed.searchProfile)
   });
   const { data: indexlabSerpExplorerResp } = useQuery({
     queryKey: ['indexlab', 'run', selectedIndexLabRunId, 'serp'],
@@ -1523,7 +1657,7 @@ export function IndexingPage() {
         `/indexlab/run/${encodeURIComponent(selectedIndexLabRunId)}/serp`
       ),
     enabled: Boolean(selectedIndexLabRunId) && !runViewCleared,
-    refetchInterval: 2000
+    refetchInterval: getRefetchInterval(isProcessRunning, panelCollapsed.serpExplorer)
   });
   const { data: indexlabLlmTracesResp } = useQuery({
     queryKey: ['indexlab', 'run', selectedIndexLabRunId, 'llm-traces'],
@@ -1532,7 +1666,7 @@ export function IndexingPage() {
         `/indexlab/run/${encodeURIComponent(selectedIndexLabRunId)}/llm-traces?limit=120`
       ),
     enabled: Boolean(selectedIndexLabRunId) && !runViewCleared,
-    refetchInterval: 2000
+    refetchInterval: getRefetchInterval(isProcessRunning, panelCollapsed.llmOutput)
   });
   const { data: indexlabAutomationQueueResp } = useQuery({
     queryKey: ['indexlab', 'run', selectedIndexLabRunId, 'automation-queue'],
@@ -1541,7 +1675,7 @@ export function IndexingPage() {
         `/indexlab/run/${encodeURIComponent(selectedIndexLabRunId)}/automation-queue`
       ),
     enabled: Boolean(selectedIndexLabRunId) && !runViewCleared,
-    refetchInterval: 2000
+    refetchInterval: getRefetchInterval(isProcessRunning, panelCollapsed.phase6b)
   });
   const normalizedPhase6SearchQuery = String(phase6SearchQuery || '').trim();
   const { data: indexlabEvidenceIndexResp } = useQuery({
@@ -1555,7 +1689,7 @@ export function IndexingPage() {
       );
     },
     enabled: Boolean(selectedIndexLabRunId) && !runViewCleared,
-    refetchInterval: 2000
+    refetchInterval: getRefetchInterval(isProcessRunning, panelCollapsed.phase6)
   });
   const { data: indexlabPhase07Resp } = useQuery({
     queryKey: ['indexlab', 'run', selectedIndexLabRunId, 'phase07-retrieval'],
@@ -1564,7 +1698,7 @@ export function IndexingPage() {
         `/indexlab/run/${encodeURIComponent(selectedIndexLabRunId)}/phase07-retrieval`
       ),
     enabled: Boolean(selectedIndexLabRunId) && !runViewCleared,
-    refetchInterval: 2000
+    refetchInterval: getRefetchInterval(isProcessRunning, panelCollapsed.phase7)
   });
   const { data: indexlabPhase08Resp } = useQuery({
     queryKey: ['indexlab', 'run', selectedIndexLabRunId, 'phase08-extraction'],
@@ -1573,7 +1707,25 @@ export function IndexingPage() {
         `/indexlab/run/${encodeURIComponent(selectedIndexLabRunId)}/phase08-extraction`
       ),
     enabled: Boolean(selectedIndexLabRunId) && !runViewCleared,
-    refetchInterval: 2000
+    refetchInterval: getRefetchInterval(isProcessRunning, panelCollapsed.phase8)
+  });
+  const { data: roundSummaryResp } = useQuery({
+    queryKey: ['indexlab', 'run', selectedIndexLabRunId, 'rounds'],
+    queryFn: () =>
+      api.get<RoundSummaryResponse>(
+        `/indexlab/run/${encodeURIComponent(selectedIndexLabRunId)}/rounds`
+      ),
+    enabled: Boolean(selectedIndexLabRunId) && !runViewCleared && !panelCollapsed.phase9,
+    refetchInterval: getRefetchInterval(isProcessRunning, panelCollapsed.phase9)
+  });
+  const { data: learningFeedResp } = useQuery({
+    queryKey: ['indexlab', 'run', selectedIndexLabRunId, 'learning'],
+    queryFn: () =>
+      api.get<LearningFeedResponse>(
+        `/indexlab/run/${encodeURIComponent(selectedIndexLabRunId)}/learning`
+      ),
+    enabled: Boolean(selectedIndexLabRunId) && !runViewCleared && !panelCollapsed.learning,
+    refetchInterval: getRefetchInterval(isProcessRunning, panelCollapsed.learning)
   });
   const { data: indexlabDynamicFetchDashboardResp } = useQuery({
     queryKey: ['indexlab', 'run', selectedIndexLabRunId, 'dynamic-fetch-dashboard'],
@@ -1582,7 +1734,7 @@ export function IndexingPage() {
         `/indexlab/run/${encodeURIComponent(selectedIndexLabRunId)}/dynamic-fetch-dashboard`
       ),
     enabled: Boolean(selectedIndexLabRunId) && !runViewCleared,
-    refetchInterval: 2000
+    refetchInterval: getRefetchInterval(isProcessRunning, panelCollapsed.phase5)
   });
   const { data: indexingDomainChecklistResp } = useQuery({
     queryKey: [
@@ -1607,7 +1759,7 @@ export function IndexingPage() {
       && !runViewCleared
       && (selectedIndexLabRunId || selectedRunForChecklist?.product_id)
     ),
-    refetchInterval: 2000
+    refetchInterval: getRefetchInterval(isProcessRunning, panelCollapsed.runtime)
   });
 
   const catalogRows = useMemo(() => {
@@ -2166,7 +2318,7 @@ export function IndexingPage() {
     || selectedIndexLabRun?.product_id
     || ''
   ).trim();
-  const processRunning = Boolean(processStatus?.running);
+  const processRunning = isProcessRunning;
 
   const runtimeActivity = useMemo(
     () => computeActivityStats(timedIndexlabEvents, activityNowMs, () => true),
@@ -3541,6 +3693,20 @@ export function IndexingPage() {
     let scannedPdfOcrErrors = 0;
     let scannedPdfOcrConfidenceSum = 0;
     let scannedPdfOcrConfidenceCount = 0;
+    let schedulerFallbackStarted = 0;
+    let schedulerFallbackSucceeded = 0;
+    let schedulerFallbackExhausted = 0;
+    let schedulerHostWaits = 0;
+    let schedulerTicks = 0;
+    const schedulerFallbackFeed: Array<{
+      ts: string;
+      url: string;
+      kind: string;
+      from_mode: string;
+      to_mode: string;
+      outcome: string;
+      attempt: number;
+    }> = [];
     const articleScores: number[] = [];
     const articleChars: number[] = [];
     const structuredSnippetRows: Array<{
@@ -3623,6 +3789,47 @@ export function IndexingPage() {
         if (skipReason === 'cooldown') skippedCooldown += 1;
         else if (skipReason === 'blocked_budget') skippedBlockedBudget += 1;
         else if (skipReason === 'retry_later') skippedRetryLater += 1;
+        continue;
+      }
+
+      const isSchedulerEvent = stageName === 'fetch' && eventName.startsWith('scheduler_');
+      if (isSchedulerEvent) {
+        if (eventName === 'scheduler_tick') schedulerTicks += 1;
+        else if (eventName === 'scheduler_host_wait') schedulerHostWaits += 1;
+        else if (eventName === 'scheduler_fallback_started') {
+          schedulerFallbackStarted += 1;
+          schedulerFallbackFeed.push({
+            ts: String(evt.ts || '').trim(),
+            url,
+            kind: 'started',
+            from_mode: String(payload.from_mode || '').trim(),
+            to_mode: String(payload.to_mode || '').trim(),
+            outcome: String(payload.outcome || '').trim(),
+            attempt: Number(payload.attempt || 0) || 0
+          });
+        } else if (eventName === 'scheduler_fallback_succeeded') {
+          schedulerFallbackSucceeded += 1;
+          schedulerFallbackFeed.push({
+            ts: String(evt.ts || '').trim(),
+            url,
+            kind: 'succeeded',
+            from_mode: String(payload.from_mode || '').trim(),
+            to_mode: String(payload.mode || payload.to_mode || '').trim(),
+            outcome: '',
+            attempt: Number(payload.attempt || 0) || 0
+          });
+        } else if (eventName === 'scheduler_fallback_exhausted') {
+          schedulerFallbackExhausted += 1;
+          schedulerFallbackFeed.push({
+            ts: String(evt.ts || '').trim(),
+            url,
+            kind: 'exhausted',
+            from_mode: '',
+            to_mode: '',
+            outcome: String(payload.final_outcome || '').trim(),
+            attempt: 0
+          });
+        }
         continue;
       }
 
@@ -3774,6 +3981,15 @@ export function IndexingPage() {
         : 0,
       fetchP95Ms: percentileMs(fetchDurationsMs, 95),
       parseP95Ms: percentileMs(parseDurationsMs, 95),
+      schedulerFallbackStarted,
+      schedulerFallbackSucceeded,
+      schedulerFallbackExhausted,
+      schedulerHostWaits,
+      schedulerTicks,
+      schedulerFallbackFeed: schedulerFallbackFeed
+        .slice(-60)
+        .sort((a, b) => Date.parse(b.ts || '') - Date.parse(a.ts || ''))
+        .slice(0, 30),
       hostsActive
     };
   }, [indexlabEvents]);
@@ -4066,6 +4282,16 @@ export function IndexingPage() {
       assertions: Number(summary.assertions || 0),
       evidenceRefs: Number(summary.evidence_refs || 0),
       fieldsCovered: Number(summary.fields_covered || 0)
+    };
+  }, [indexlabEvidenceIndexResp]);
+  const phase6DedupeStream = useMemo(() => {
+    const ds = indexlabEvidenceIndexResp?.dedupe_stream || {};
+    return {
+      total: Number(ds.total || 0),
+      newCount: Number(ds.new_count || 0),
+      reusedCount: Number(ds.reused_count || 0),
+      updatedCount: Number(ds.updated_count || 0),
+      totalChunksIndexed: Number(ds.total_chunks_indexed || 0)
     };
   }, [indexlabEvidenceIndexResp]);
   const phase6EvidenceDocuments = useMemo<IndexLabEvidenceIndexDocumentRow[]>(
@@ -4679,7 +4905,8 @@ export function IndexingPage() {
         queryClient.invalidateQueries({ queryKey: ['indexlab', 'run', selectedIndexLabRunId, 'phase07-retrieval'], exact: true }),
         queryClient.invalidateQueries({ queryKey: ['indexlab', 'run', selectedIndexLabRunId, 'phase08-extraction'], exact: true }),
         queryClient.invalidateQueries({ queryKey: ['indexlab', 'run', selectedIndexLabRunId, 'dynamic-fetch-dashboard'], exact: true }),
-        queryClient.invalidateQueries({ queryKey: ['indexlab', 'run', selectedIndexLabRunId, 'evidence-index'] })
+        queryClient.invalidateQueries({ queryKey: ['indexlab', 'run', selectedIndexLabRunId, 'evidence-index'] }),
+        queryClient.invalidateQueries({ queryKey: ['indexlab', 'run', selectedIndexLabRunId, 'rounds'], exact: true })
       );
     }
     await Promise.allSettled(refreshes);
@@ -4706,6 +4933,7 @@ export function IndexingPage() {
     queryClient.removeQueries({ queryKey: ['indexlab', 'run', runId, 'phase07-retrieval'], exact: true });
     queryClient.removeQueries({ queryKey: ['indexlab', 'run', runId, 'phase08-extraction'], exact: true });
     queryClient.removeQueries({ queryKey: ['indexlab', 'run', runId, 'dynamic-fetch-dashboard'], exact: true });
+    queryClient.removeQueries({ queryKey: ['indexlab', 'run', runId, 'rounds'], exact: true });
     queryClient.removeQueries({ queryKey: ['indexing', 'domain-checklist'] });
     setClearedRunViewId(runId);
     setSelectedLlmTraceId('');
@@ -4726,6 +4954,7 @@ export function IndexingPage() {
         queryClient.invalidateQueries({ queryKey: ['indexlab', 'run', runId, 'phase07-retrieval'], exact: true }),
         queryClient.invalidateQueries({ queryKey: ['indexlab', 'run', runId, 'phase08-extraction'], exact: true }),
         queryClient.invalidateQueries({ queryKey: ['indexlab', 'run', runId, 'dynamic-fetch-dashboard'], exact: true }),
+        queryClient.invalidateQueries({ queryKey: ['indexlab', 'run', runId, 'rounds'], exact: true }),
         queryClient.invalidateQueries({ queryKey: ['indexing', 'domain-checklist'] })
       ]);
       await queryClient.refetchQueries({
@@ -5983,6 +6212,105 @@ export function IndexingPage() {
                 </tbody>
               </table>
             </div>
+            <div className="rounded border border-gray-200 dark:border-gray-700 p-2 space-y-2">
+              <div className="text-xs font-semibold text-gray-800 dark:text-gray-200 flex items-center">
+                Scheduler & Fallback
+                <Tip text="Concurrent fetch scheduler activity. Shows fallback attempts when a fetcher mode (crawlee/playwright/http) fails and the scheduler tries an alternate mode. Only active when FETCH_SCHEDULER_ENABLED=true." />
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
+                <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                  <div className="text-gray-500 dark:text-gray-400 flex items-center">fallback started<Tip text="Fetcher mode fallback attempts initiated after a fetch error (403, timeout, 5xx, network error)." /></div>
+                  <div className="font-semibold">{formatNumber(phase5Runtime.schedulerFallbackStarted)}</div>
+                </div>
+                <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                  <div className="text-gray-500 dark:text-gray-400 flex items-center">fallback ok<Tip text="Fallback attempts that succeeded with an alternate fetcher mode." /></div>
+                  <div className="font-semibold text-green-600 dark:text-green-400">{formatNumber(phase5Runtime.schedulerFallbackSucceeded)}</div>
+                </div>
+                <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                  <div className="text-gray-500 dark:text-gray-400 flex items-center">fallback exhausted<Tip text="URLs where all fetcher modes were tried and none succeeded. The URL is marked as failed." /></div>
+                  <div className="font-semibold text-red-600 dark:text-red-400">{formatNumber(phase5Runtime.schedulerFallbackExhausted)}</div>
+                </div>
+                <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                  <div className="text-gray-500 dark:text-gray-400 flex items-center">host waits<Tip text="Times the scheduler paused before fetching to respect per-host minimum delay (prevents rate-limiting)." /></div>
+                  <div className="font-semibold">{formatNumber(phase5Runtime.schedulerHostWaits)}</div>
+                </div>
+                <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                  <div className="text-gray-500 dark:text-gray-400 flex items-center">ticks<Tip text="Scheduler processing ticks (one per completed fetch slot). Higher values = more concurrent throughput." /></div>
+                  <div className="font-semibold">{formatNumber(phase5Runtime.schedulerTicks)}</div>
+                </div>
+              </div>
+              <table className="mt-1 min-w-full text-xs">
+                <thead>
+                  <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        time
+                        <Tip text="Timestamp when the scheduler fallback event was emitted." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        status
+                        <Tip text="Fallback lifecycle stage: started (attempting alternate mode), succeeded (alternate mode worked), exhausted (all modes failed)." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        from
+                        <Tip text="Fetcher mode that failed and triggered the fallback (crawlee, playwright, or http)." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        to
+                        <Tip text="Alternate fetcher mode attempted as fallback." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        outcome
+                        <Tip text="Error classification that triggered the fallback (e.g. blocked, server_error, network_timeout)." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        attempt
+                        <Tip text="Retry attempt number for this URL (1 = first fallback, 2 = second fallback after first alternate also failed)." />
+                      </span>
+                    </th>
+                    <th className="py-1 pr-3">
+                      <span className="inline-flex items-center gap-1">
+                        url
+                        <Tip text="URL being fetched when the fallback was triggered." />
+                      </span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {phase5Runtime.schedulerFallbackFeed.length === 0 ? (
+                    <tr>
+                      <td className="py-2 text-gray-500 dark:text-gray-400" colSpan={7}>no scheduler fallback events yet</td>
+                    </tr>
+                  ) : (
+                    phase5Runtime.schedulerFallbackFeed.map((row, idx) => (
+                      <tr key={`sched-fb:${row.ts}:${row.kind}:${idx}`} className="border-b border-gray-100 dark:border-gray-800">
+                        <td className="py-1 pr-3">{formatDateTime(row.ts)}</td>
+                        <td className={`py-1 pr-3 font-semibold ${
+                          row.kind === 'succeeded' ? 'text-green-600 dark:text-green-400'
+                            : row.kind === 'exhausted' ? 'text-red-600 dark:text-red-400'
+                            : ''
+                        }`}>{row.kind}</td>
+                        <td className="py-1 pr-3 font-mono">{row.from_mode || '-'}</td>
+                        <td className="py-1 pr-3 font-mono">{row.to_mode || '-'}</td>
+                        <td className="py-1 pr-3">{row.outcome || '-'}</td>
+                        <td className="py-1 pr-3">{row.attempt || '-'}</td>
+                        <td className="py-1 pr-3 font-mono truncate max-w-[28rem]" title={row.url || ''}>{row.url || '-'}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
             <div className="rounded border border-gray-200 dark:border-gray-700 p-2 overflow-x-auto">
               <div className="text-xs font-semibold text-gray-800 dark:text-gray-200 flex items-center">
                 Dynamic Fetch Dashboard ({formatNumber(dynamicFetchDashboardSummary.hostCount)} hosts)
@@ -6584,6 +6912,30 @@ export function IndexingPage() {
                 </div>
               </div>
             </div>
+            {phase6DedupeStream.total > 0 && (
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
+                <div className="rounded border border-blue-200 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/20 px-2 py-1">
+                  <div className="text-gray-500 dark:text-gray-400 flex items-center">index events<Tip text="Total evidence_index_result events captured from the NDJSON stream for this run." /></div>
+                  <div className="font-semibold">{formatNumber(phase6DedupeStream.total)}</div>
+                </div>
+                <div className="rounded border border-emerald-200 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-1">
+                  <div className="text-gray-500 dark:text-gray-400 flex items-center">new docs<Tip text="Documents indexed for the first time (new content hash)." /></div>
+                  <div className="font-semibold">{formatNumber(phase6DedupeStream.newCount)}</div>
+                </div>
+                <div className="rounded border border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 px-2 py-1">
+                  <div className="text-gray-500 dark:text-gray-400 flex items-center">dedupe reused<Tip text="Documents skipped because an identical content hash was already indexed." /></div>
+                  <div className="font-semibold">{formatNumber(phase6DedupeStream.reusedCount)}</div>
+                </div>
+                <div className="rounded border border-purple-200 dark:border-purple-700 bg-purple-50 dark:bg-purple-900/20 px-2 py-1">
+                  <div className="text-gray-500 dark:text-gray-400 flex items-center">updated<Tip text="Documents re-indexed with updated content (different parser version or content change)." /></div>
+                  <div className="font-semibold">{formatNumber(phase6DedupeStream.updatedCount)}</div>
+                </div>
+                <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                  <div className="text-gray-500 dark:text-gray-400 flex items-center">chunks indexed<Tip text="Total evidence chunks written to the index across all new and updated documents." /></div>
+                  <div className="font-semibold">{formatNumber(phase6DedupeStream.totalChunksIndexed)}</div>
+                </div>
+              </div>
+            )}
             <div className="rounded border border-gray-200 dark:border-gray-700 p-2 overflow-x-auto">
               <div className="text-xs font-semibold text-gray-800 dark:text-gray-200 flex items-center">
                 Repeated Content Hashes ({formatNumber(phase6Runtime.repeatedHashes.length)} shown)
@@ -7186,6 +7538,242 @@ export function IndexingPage() {
             </div>
           </>
         ) : null}
+      </div>
+
+      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 space-y-3" style={{ order: 54 }}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center text-sm font-semibold text-gray-900 dark:text-gray-100">
+            <button
+              onClick={() => togglePanel('phase9')}
+              className="inline-flex items-center justify-center w-5 h-5 mr-1 text-[10px] rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
+              title={panelCollapsed.phase9 ? 'Open panel' : 'Close panel'}
+            >
+              {panelCollapsed.phase9 ? '+' : '-'}
+            </button>
+            <span>Convergence Round Summary (Phase 09)</span>
+            <Tip text="Per-round convergence progress: NeedSet size, missing required fields, confidence progression, improvement tracking, and stop reason. Works with single-pass runs (synthesized round 0) and multi-round convergence loops." />
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <div className="text-xs text-gray-500 dark:text-gray-400">
+              run {selectedIndexLabRunId || '-'} | {roundSummaryResp?.round_count ?? 0} round{(roundSummaryResp?.round_count ?? 0) !== 1 ? 's' : ''}
+            </div>
+          </div>
+        </div>
+        {!panelCollapsed.phase9 ? (() => {
+          const rounds = roundSummaryResp?.rounds ?? [];
+          const stopReason = roundSummaryResp?.stop_reason ?? null;
+          return (
+            <>
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                  <div className="text-gray-500 dark:text-gray-400">rounds</div>
+                  <div className="font-semibold">{rounds.length}</div>
+                </div>
+                <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                  <div className="text-gray-500 dark:text-gray-400">stop reason</div>
+                  <div className="font-semibold">
+                    {stopReason ? (
+                      <span className={`px-1.5 py-0.5 rounded ${
+                        stopReason === 'complete'
+                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                          : stopReason === 'max_rounds_reached'
+                            ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                            : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300'
+                      }`}>
+                        {stopReason}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400 dark:text-gray-500">-</span>
+                    )}
+                  </div>
+                </div>
+                {rounds.length > 0 && (
+                  <>
+                    <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                      <div className="text-gray-500 dark:text-gray-400">final confidence</div>
+                      <div className="font-semibold">{(rounds[rounds.length - 1].confidence * 100).toFixed(1)}%</div>
+                    </div>
+                    <div className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1">
+                      <div className="text-gray-500 dark:text-gray-400">validated</div>
+                      <div className="font-semibold">
+                        {rounds[rounds.length - 1].validated ? (
+                          <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">yes</span>
+                        ) : (
+                          <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200">no</span>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+              <div className="rounded border border-gray-200 dark:border-gray-700 p-2 overflow-x-auto">
+                <table className="min-w-full text-xs">
+                  <thead>
+                    <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                      <th className="py-1 pr-3">round</th>
+                      <th className="py-1 pr-3">NeedSet size</th>
+                      <th className="py-1 pr-3">missing req</th>
+                      <th className="py-1 pr-3">critical</th>
+                      <th className="py-1 pr-3">confidence</th>
+                      <th className="py-1 pr-3">improved</th>
+                      <th className="py-1 pr-3">reasons</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rounds.length === 0 ? (
+                      <tr>
+                        <td className="py-2 text-gray-500 dark:text-gray-400" colSpan={7}>no round data yet</td>
+                      </tr>
+                    ) : (
+                      rounds.map((row, idx) => {
+                        const prevConf = idx > 0 ? rounds[idx - 1].confidence : null;
+                        const confDelta = prevConf !== null ? row.confidence - prevConf : null;
+                        const prevNeedset = idx > 0 ? rounds[idx - 1].needset_size : null;
+                        const needsetDelta = prevNeedset !== null ? row.needset_size - prevNeedset : null;
+                        return (
+                          <tr key={`phase9-round:${row.round}`} className="border-b border-gray-100 dark:border-gray-800">
+                            <td className="py-1 pr-3 font-mono">{row.round}</td>
+                            <td className="py-1 pr-3">
+                              {row.needset_size}
+                              {needsetDelta !== null && needsetDelta !== 0 && (
+                                <span className={`ml-1 ${needsetDelta < 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                                  {needsetDelta > 0 ? '+' : ''}{needsetDelta}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-1 pr-3">{row.missing_required_count}</td>
+                            <td className="py-1 pr-3">{row.critical_count}</td>
+                            <td className="py-1 pr-3">
+                              <div className="flex items-center gap-1">
+                                <div className="w-16 h-2 bg-gray-200 dark:bg-gray-700 rounded overflow-hidden">
+                                  <div
+                                    className={`h-full rounded ${row.confidence >= 0.8 ? 'bg-emerald-500' : row.confidence >= 0.5 ? 'bg-amber-500' : 'bg-rose-500'}`}
+                                    style={{ width: `${Math.min(100, row.confidence * 100)}%` }}
+                                  />
+                                </div>
+                                <span>{(row.confidence * 100).toFixed(1)}%</span>
+                                {confDelta !== null && confDelta !== 0 && (
+                                  <span className={`${confDelta > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                                    {confDelta > 0 ? '+' : ''}{(confDelta * 100).toFixed(1)}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="py-1 pr-3">
+                              {row.improved ? (
+                                <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">yes</span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200">no</span>
+                              )}
+                            </td>
+                            <td className="py-1 pr-3 font-mono text-[10px]">
+                              {(row.improvement_reasons || []).join(', ') || '-'}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          );
+        })() : null}
+      </div>
+
+      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 space-y-3" style={{ order: 55 }}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center text-sm font-semibold text-gray-900 dark:text-gray-100">
+            <button
+              onClick={() => togglePanel('learning')}
+              className="inline-flex items-center justify-center w-5 h-5 mr-1 text-[10px] rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
+              title={panelCollapsed.learning ? 'Open panel' : 'Close panel'}
+            >
+              {panelCollapsed.learning ? '+' : '-'}
+            </button>
+            <span>Learning Feed (Phase 10)</span>
+            <Tip text="Acceptance-gated learning updates: which field values passed confidence, evidence, and tier gates for compounding into future runs." />
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <div className="text-xs text-gray-500 dark:text-gray-400">
+              run {selectedIndexLabRunId || '-'} | {learningFeedResp?.gate_summary?.total ?? 0} evaluated | {learningFeedResp?.gate_summary?.accepted ?? 0} accepted
+            </div>
+          </div>
+        </div>
+        {!panelCollapsed.learning ? (() => {
+          const updates = learningFeedResp?.updates ?? [];
+          const summary = learningFeedResp?.gate_summary;
+          const rejReasons = summary?.rejection_reasons ?? {};
+          if (!updates.length) {
+            return (
+              <div className="text-xs text-gray-500 dark:text-gray-400 italic py-4 text-center">
+                No learning gate results yet for this run.
+              </div>
+            );
+          }
+          return (
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-2">
+                <div className="px-2 py-1 rounded text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+                  Total: {summary?.total ?? 0}
+                </div>
+                <div className="px-2 py-1 rounded text-xs font-medium bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-300">
+                  Accepted: {summary?.accepted ?? 0}
+                </div>
+                <div className="px-2 py-1 rounded text-xs font-medium bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-300">
+                  Rejected: {summary?.rejected ?? 0}
+                </div>
+                {Object.entries(rejReasons).map(([reason, count]) => (
+                  <div key={reason} className="px-2 py-1 rounded text-xs bg-yellow-100 dark:bg-yellow-900/40 text-yellow-800 dark:text-yellow-300">
+                    {reason}: {count as number}
+                  </div>
+                ))}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-gray-200 dark:border-gray-700 text-left text-gray-500 dark:text-gray-400">
+                      <th className="py-1 pr-3 font-medium">Field</th>
+                      <th className="py-1 pr-3 font-medium">Value</th>
+                      <th className="py-1 pr-3 font-medium">Confidence</th>
+                      <th className="py-1 pr-3 font-medium">Refs</th>
+                      <th className="py-1 pr-3 font-medium">Tiers</th>
+                      <th className="py-1 pr-3 font-medium">Status</th>
+                      <th className="py-1 pr-3 font-medium">Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {updates.map((u, i) => (
+                      <tr key={`${u.field}-${i}`} className="border-b border-gray-100 dark:border-gray-800">
+                        <td className="py-1 pr-3 font-mono text-gray-800 dark:text-gray-200">{u.field}</td>
+                        <td className="py-1 pr-3 text-gray-700 dark:text-gray-300 max-w-[200px] truncate" title={u.value}>{u.value}</td>
+                        <td className="py-1 pr-3">
+                          <div className="flex items-center gap-1">
+                            <div className="w-16 h-2 rounded bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                              <div
+                                className={`h-full rounded ${u.confidence >= 0.85 ? 'bg-green-500' : u.confidence >= 0.6 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                                style={{ width: `${Math.round(u.confidence * 100)}%` }}
+                              />
+                            </div>
+                            <span className="text-gray-600 dark:text-gray-400">{(u.confidence * 100).toFixed(0)}%</span>
+                          </div>
+                        </td>
+                        <td className="py-1 pr-3 text-gray-600 dark:text-gray-400">{u.refs_found}</td>
+                        <td className="py-1 pr-3 text-gray-600 dark:text-gray-400">{(u.tier_history || []).join(', ') || '-'}</td>
+                        <td className="py-1 pr-3">
+                          <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${u.accepted ? 'bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-300' : 'bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-300'}`}>
+                            {u.accepted ? 'accepted' : 'rejected'}
+                          </span>
+                        </td>
+                        <td className="py-1 pr-3 text-gray-500 dark:text-gray-400">{u.reason || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })() : null}
       </div>
 
       <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 space-y-3" style={{ order: 48 }}>
@@ -8421,6 +9009,88 @@ export function IndexingPage() {
               this refreshes stale indexed sources; it does not control search triage behavior.
             </div>
           </div>
+            </div>
+          </details>
+          <details className="group md:col-span-2 rounded border border-slate-200 dark:border-slate-600">
+            <summary className="flex w-full cursor-pointer list-none items-center rounded bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:bg-slate-700/40 dark:text-slate-200 [&::-webkit-details-marker]:hidden">
+              <span className="inline-flex items-center">
+                <span className="mr-1 inline-flex h-4 w-4 items-center justify-center rounded border border-slate-300 text-[10px] leading-none text-slate-600 dark:border-slate-500 dark:text-slate-200">
+                  <span className="group-open:hidden">+</span>
+                  <span className="hidden group-open:inline">-</span>
+                </span>
+                <span>Convergence Tuning</span>
+                <Tip text="Pipeline convergence knobs: loop limits, NeedSet identity caps, consensus scoring weights, SERP triage, and retrieval settings. Changes apply to subsequent runs." />
+              </span>
+              {convergenceDirty && <span className="ml-2 text-[10px] text-amber-600 dark:text-amber-400">unsaved</span>}
+            </summary>
+            <div className="mt-2 px-2 pb-2 space-y-3">
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  onClick={() => refetchConvergence()}
+                  className="px-2 py-1 text-[11px] border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200"
+                >
+                  Reload
+                </button>
+                <button
+                  onClick={() => saveConvergenceMut.mutate(convergenceSettings)}
+                  disabled={!convergenceDirty || saveConvergenceMut.isPending}
+                  className="px-2 py-1 text-[11px] bg-accent text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {saveConvergenceMut.isPending ? 'Saving...' : 'Save'}
+                </button>
+              </div>
+              {CONVERGENCE_KNOB_GROUPS.map((group) => (
+                <div key={group.label} className="rounded border border-gray-200 dark:border-gray-700 p-2">
+                  <div className="text-[11px] font-semibold text-gray-700 dark:text-gray-200 mb-2">{group.label}</div>
+                  <div className="space-y-2">
+                    {group.knobs.map((knob) => {
+                      if (knob.type === 'bool') {
+                        return (
+                          <label key={knob.key} className="flex items-center gap-2 text-[11px] text-gray-700 dark:text-gray-200">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(convergenceSettings[knob.key])}
+                              onChange={(e) => updateConvergenceKnob(knob.key, e.target.checked)}
+                            />
+                            {knob.label}
+                            {'tip' in knob && knob.tip ? <Tip text={knob.tip} /> : null}
+                          </label>
+                        );
+                      }
+                      const numValue = typeof convergenceSettings[knob.key] === 'number' ? (convergenceSettings[knob.key] as number) : 0;
+                      const step = 'step' in knob ? knob.step : 1;
+                      return (
+                        <div key={knob.key}>
+                          <div className="flex items-center justify-between mb-0.5">
+                            <span className="text-[11px] text-gray-500 dark:text-gray-400 inline-flex items-center">{knob.label}{'tip' in knob && knob.tip ? <Tip text={knob.tip} /> : null}</span>
+                            <span className="text-[11px] font-mono text-gray-700 dark:text-gray-300">
+                              {knob.type === 'float' ? numValue.toFixed(2) : numValue}
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            className="w-full"
+                            min={knob.min}
+                            max={knob.max}
+                            step={step}
+                            value={numValue}
+                            onChange={(e) => {
+                              const parsed = knob.type === 'float'
+                                ? Number.parseFloat(e.target.value)
+                                : Number.parseInt(e.target.value, 10);
+                              updateConvergenceKnob(knob.key, Number.isFinite(parsed) ? parsed : 0);
+                            }}
+                          />
+                          <div className="flex justify-between text-[10px] text-gray-400 mt-0">
+                            <span>{knob.min}</span>
+                            <span>{knob.max}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
           </details>
         </div>

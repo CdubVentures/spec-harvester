@@ -157,6 +157,172 @@ export async function addProduct({
 }
 
 /**
+ * Bulk add products under a brand.
+ * Accepts rows in the shape [{ model, variant?, brand?, seedUrls? }].
+ * Returns per-row statuses so callers can safely retry.
+ */
+export async function addProductsBulk({
+  config,
+  category,
+  brand = '',
+  rows = [],
+  storage = null,
+  upsertQueue = null
+}) {
+  const cat = String(category ?? '').trim().toLowerCase();
+  const defaultBrand = String(brand ?? '').trim();
+  const inputRows = Array.isArray(rows) ? rows : [];
+
+  if (!cat) return { ok: false, error: 'category_required' };
+  if (!defaultBrand) return { ok: false, error: 'brand_required' };
+  if (inputRows.length === 0) {
+    const catalog = await loadProductCatalog(config, cat);
+    return {
+      ok: true,
+      total: 0,
+      created: 0,
+      skipped_existing: 0,
+      skipped_duplicate: 0,
+      invalid: 0,
+      failed: 0,
+      total_catalog: Object.keys(catalog.products || {}).length,
+      results: []
+    };
+  }
+
+  const catalog = await loadProductCatalog(config, cat);
+  const seenInRequest = new Set();
+  const results = [];
+
+  let created = 0;
+  let skippedExisting = 0;
+  let skippedDuplicate = 0;
+  let invalid = 0;
+  let failed = 0;
+
+  for (let i = 0; i < inputRows.length; i += 1) {
+    const row = inputRows[i] && typeof inputRows[i] === 'object' ? inputRows[i] : {};
+    const rowBrand = String(row.brand ?? defaultBrand).trim();
+    const rowModel = String(row.model ?? '').trim();
+    const rowVariant = String(row.variant ?? '').trim();
+    const seedUrls = Array.isArray(row.seedUrls) ? row.seedUrls.filter(Boolean) : [];
+    const baseResult = {
+      index: i,
+      brand: rowBrand,
+      model: rowModel,
+      variant: rowVariant
+    };
+
+    if (!rowBrand) {
+      invalid += 1;
+      results.push({ ...baseResult, status: 'invalid', reason: 'brand_required' });
+      continue;
+    }
+    if (!rowModel) {
+      invalid += 1;
+      results.push({ ...baseResult, status: 'invalid', reason: 'model_required' });
+      continue;
+    }
+
+    const identity = normalizeProductIdentity(cat, rowBrand, rowModel, rowVariant);
+    const pid = identity.productId;
+    const normalizedResult = {
+      ...baseResult,
+      brand: identity.brand,
+      model: identity.model,
+      variant: identity.variant,
+      productId: pid
+    };
+
+    if (seenInRequest.has(pid)) {
+      skippedDuplicate += 1;
+      results.push({ ...normalizedResult, status: 'skipped_duplicate', reason: 'duplicate_in_request' });
+      continue;
+    }
+    seenInRequest.add(pid);
+
+    if (catalog.products[pid]) {
+      skippedExisting += 1;
+      results.push({ ...normalizedResult, status: 'skipped_existing', reason: 'already_exists' });
+      continue;
+    }
+
+    const product = {
+      id: nextAvailableId(catalog),
+      identifier: generateIdentifier(),
+      brand: identity.brand,
+      model: identity.model,
+      variant: identity.variant,
+      status: 'active',
+      seed_urls: seedUrls,
+      added_at: nowIso(),
+      added_by: 'gui_bulk'
+    };
+
+    let inputWritten = false;
+    const inputKey = `specs/inputs/${cat}/products/${pid}.json`;
+    try {
+      catalog.products[pid] = product;
+
+      if (storage) {
+        const inputFile = buildInputFile({
+          productId: pid,
+          category: cat,
+          brand: identity.brand,
+          model: identity.model,
+          variant: identity.variant,
+          id: product.id,
+          identifier: product.identifier,
+          seedUrls
+        });
+        await storage.writeObject(inputKey, Buffer.from(JSON.stringify(inputFile, null, 2)));
+        inputWritten = true;
+      }
+
+      if (upsertQueue) {
+        await upsertQueue({
+          storage,
+          category: cat,
+          productId: pid,
+          s3key: inputKey,
+          patch: { status: 'pending', next_action_hint: 'fast_pass' }
+        });
+      }
+
+      created += 1;
+      results.push({ ...normalizedResult, status: 'created' });
+    } catch (error) {
+      failed += 1;
+      delete catalog.products[pid];
+      if (inputWritten && storage) {
+        try { await storage.deleteObject(inputKey); } catch {}
+      }
+      results.push({
+        ...normalizedResult,
+        status: 'failed',
+        reason: String(error?.message || error || 'bulk_add_failed')
+      });
+    }
+  }
+
+  if (created > 0) {
+    await saveProductCatalog(config, cat, catalog);
+  }
+
+  return {
+    ok: true,
+    total: inputRows.length,
+    created,
+    skipped_existing: skippedExisting,
+    skipped_duplicate: skippedDuplicate,
+    invalid,
+    failed,
+    total_catalog: Object.keys(catalog.products || {}).length,
+    results
+  };
+}
+
+/**
  * Update a product. Patches provided fields.
  * If brand/model/variant change, the productId changes → old files removed, new files created.
  */

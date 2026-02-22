@@ -3,6 +3,7 @@ import { normalizeWhitespace } from '../utils/common.js';
 import { filterReadableHtml } from '../extract/readabilityFilter.js';
 import { extractMainArticle } from '../extract/articleExtractor.js';
 import { resolveArticleExtractionPolicy } from '../extract/articleExtractorPolicy.js';
+import { generateStableSnippetId } from '../index/evidenceIndexDb.js';
 
 function toText(value, maxChars = 5000) {
   const text = typeof value === 'string' ? value : JSON.stringify(value || {});
@@ -102,21 +103,21 @@ function fieldHintsFromText(text, targetFields = []) {
   return hints.slice(0, 8);
 }
 
-function stripHtml(html) {
+const BLOCK_TAG_RE = /<(script|style|noscript)[\s\S]*?<\/\1>/gi;
+const COMMENT_RE = /<!--[\s\S]*?-->/g;
+const TAG_RE = /<[^>]+>/g;
+const ENTITY_MAP = { '&nbsp;': ' ', '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'" };
+const ENTITY_RE = /&(?:nbsp|amp|lt|gt|quot|#39);/gi;
+const WS_RE = /\s+/g;
+
+export function stripHtml(html) {
   const readable = filterReadableHtml(html);
   return String(readable || '')
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
-    .replace(/<!--([\s\S]*?)-->/g, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/\s+/g, ' ')
+    .replace(BLOCK_TAG_RE, ' ')
+    .replace(COMMENT_RE, ' ')
+    .replace(TAG_RE, ' ')
+    .replace(ENTITY_RE, (m) => ENTITY_MAP[m.toLowerCase()] || m)
+    .replace(WS_RE, ' ')
     .trim();
 }
 
@@ -350,7 +351,6 @@ function pushReference(state, item, targetFields = []) {
   if (!text) {
     return;
   }
-  const serializedLength = item.id.length + item.type.length + item.url.length + text.length;
   const remaining = state.maxChars - state.usedChars;
   if (remaining <= 0) {
     return;
@@ -361,10 +361,14 @@ function pushReference(state, item, targetFields = []) {
     return;
   }
 
-  let id = String(item.id || '').trim();
-  if (!id) {
-    return;
-  }
+  const normalized = normalizeText(safeText);
+  const snippetHash = sha256(normalized);
+  const chunkIndex = state.snippets.length;
+  let id = generateStableSnippetId({
+    contentHash: snippetHash,
+    parserVersion: 'v1',
+    chunkIndex
+  });
   if (state.usedIds.has(id)) {
     let suffix = 1;
     while (state.usedIds.has(`${id}_${suffix}`)) {
@@ -373,9 +377,8 @@ function pushReference(state, item, targetFields = []) {
     id = `${id}_${suffix}`;
   }
   state.usedIds.add(id);
+  const serializedLength = id.length + (item.type || '').length + (item.url || '').length + text.length;
 
-  const normalized = normalizeText(safeText);
-  const snippetHash = sha256(normalized);
   const extractedMethod = String(item.extractionMethod || extractionMethodForType(item.type) || '').trim();
   const fileUri = String(item.fileUri || item.file_uri || item.storage_uri || '').trim();
   const mimeType = String(item.mimeType || item.mime_type || '').trim();
@@ -440,6 +443,7 @@ function pushReference(state, item, targetFields = []) {
 
   state.sources[state.sourceId].snippets.push(id);
   state.usedChars += Math.min(serializedLength, safeText.length + 80);
+  return id;
 }
 
 export function buildEvidencePackV2({
@@ -616,9 +620,7 @@ export function buildEvidencePackV2({
       `bytes=${screenshotByteCount > 0 ? screenshotByteCount : 'unk'}`,
       screenshotUri ? `uri=${screenshotUri}` : ''
     ].filter(Boolean).join(' | ');
-    const screenshotId = toStableId('i', 0);
-    pushReference(state, {
-      id: screenshotId,
+    const screenshotId = pushReference(state, {
       url: normalizedUrl || source.url,
       type: 'screenshot_capture',
       content: screenshotDescriptor,
@@ -630,7 +632,7 @@ export function buildEvidencePackV2({
       sizeBytes: screenshotByteCount > 0 ? screenshotByteCount : null,
       contentHash: screenshotHash || null,
       surface: 'screenshot_capture'
-    }, targetFields);
+    }, targetFields) || 'sn_screenshot';
     visualAssets.push({
       id: `img_${sha256(`${state.sourceId}|${screenshotId}|${screenshotUri || 'inline'}`).slice(7, 19)}`,
       source_id: state.sourceId,
@@ -915,7 +917,6 @@ export function buildEvidencePackV2({
     candidateSeen.add(fingerprint);
 
     candidateIndex += 1;
-    const snippetId = toStableId('c', candidateIndex - 1);
     const field = String(candidate?.field || '').trim();
     const quote = field ? `${field}: ${value}` : value;
     const methodToken = String(candidate?.method || '').toLowerCase();
@@ -947,8 +948,7 @@ export function buildEvidencePackV2({
                         ? 'pdf'
                         : 'spec_table_match';
 
-    pushReference(state, {
-      id: snippetId,
+    const generatedId = pushReference(state, {
       url: normalizedUrl || source.url,
       type: 'deterministic_candidate',
       content: quote,
@@ -958,12 +958,13 @@ export function buildEvidencePackV2({
       candidateFingerprint: fingerprint
     }, targetFields);
 
-    state.candidateBindings[fingerprint] = snippetId;
+    if (generatedId) {
+      state.candidateBindings[fingerprint] = generatedId;
+    }
   }
 
   if (state.references.length === 0) {
     pushReference(state, {
-      id: 's00',
       url: normalizedUrl || source.url,
       type: 'text',
       content: stripHtml(pageData?.html || '').slice(0, 3000)
@@ -979,6 +980,20 @@ export function buildEvidencePackV2({
     ? adapterExtra.pdfStats
     : {};
 
+  const chunkData = state.snippets.map((snippet, index) => ({
+    contentHash: String(snippet.snippet_hash || ''),
+    normalizedText: String(snippet.normalized_text || ''),
+    text: String(snippet.text || ''),
+    type: String(snippet.type || ''),
+    keyPath: String(snippet.key_path || ''),
+    fieldHints: Array.isArray(snippet.field_hints) ? snippet.field_hints : [],
+    extractionMethod: String(snippet.extraction_method || ''),
+    chunkIndex: index,
+    snippetId: String(snippet.id || ''),
+    url: String(snippet.url || ''),
+    surface: String(snippet.surface || '')
+  }));
+
   return {
     product_id: String(source?.productId || ''),
     category: String(source?.category || ''),
@@ -993,6 +1008,7 @@ export function buildEvidencePackV2({
     snippets_by_id: state.snippetsById,
     candidate_bindings: state.candidateBindings,
     visual_assets: visualAssets,
+    chunk_data: chunkData,
     meta: {
       source_id: sourceId,
       host,

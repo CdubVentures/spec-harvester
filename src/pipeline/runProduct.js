@@ -1,6 +1,22 @@
 import crypto from 'node:crypto';
 import { buildRunId, normalizeWhitespace, wait } from '../utils/common.js';
 import { runWithRetry } from './pipelineSharedHelpers.js';
+import { createFetchScheduler } from '../concurrency/fetchScheduler.js';
+import {
+  normalizeHostToken,
+  hostFromHttpUrl,
+  compactQueryText,
+  buildRepairSearchQuery,
+  classifyFetchOutcome,
+  FETCH_OUTCOME_KEYS,
+  createFetchOutcomeCounters,
+  createHostBudgetRow,
+  ensureHostBudgetRow,
+  noteHostRetryTs,
+  bumpHostOutcome,
+  applyHostBudgetBackoff,
+  resolveHostBudgetState
+} from './fetchParseWorker.js';
 import { loadCategoryConfig } from '../categories/loader.js';
 import { loadProductCatalog } from '../catalog/productCatalog.js';
 import { SourcePlanner, buildSourceSummary } from '../planner/sourcePlanner.js';
@@ -21,6 +37,37 @@ import {
 import { evaluateValidationGate } from '../validator/qualityGate.js';
 import { runConsensusEngine, applySelectionPolicyReducers } from '../scoring/consensusEngine.js';
 import { applyListUnionReducers } from '../scoring/listUnionReducer.js';
+import { executeConsensusPhase } from './consensusPhase.js';
+import { runLearningExportPhase } from './learningExportPhase.js';
+import { evaluateFieldLearningGates, emitLearningGateEvents, populateLearningStores } from './learningGatePhase.js';
+import {
+  UrlMemoryStore,
+  DomainFieldYieldStore,
+  FieldAnchorsStore,
+  ComponentLexiconStore
+} from '../learning/learningStores.js';
+import { sha256, sha256Buffer, stableHash, screenshotMimeType, screenshotExtension } from './helpers/cryptoHelpers.js';
+import {
+  isDiscoveryOnlySourceUrl, isRobotsTxtUrl, isSitemapUrl, hasSitemapXmlSignals,
+  isLikelyIndexableEndpointUrl, isSafeManufacturerFollowupUrl,
+  isHelperSyntheticUrl, isHelperSyntheticSource
+} from './helpers/urlHelpers.js';
+import {
+  createEmptyProvenance, ensureProvenanceField, mergePhase08Rows,
+  buildPhase08SummaryFromBatches, tsvRowFromFields
+} from './helpers/provenanceHelpers.js';
+import {
+  METHOD_PRIORITY, parseFirstNumber, hasKnownFieldValue,
+  candidateScore, plausibilityBoost, buildCandidateFieldMap,
+  dedupeCandidates, collectContributionFields
+} from './helpers/candidateHelpers.js';
+import {
+  selectAggressiveEvidencePack, selectAggressiveDomHtml, buildDomSnippetArtifact,
+  normalizedSnippetRows, enrichFieldCandidatesWithEvidenceRefs, buildTopEvidenceReferences
+} from './helpers/evidenceHelpers.js';
+import {
+  buildFieldReasoning, emitFieldDecisionEvents, buildProvisionalHypothesisQueue
+} from './helpers/reasoningHelpers.js';
 import { buildIdentityObject, buildAbortedNormalized, buildValidatedNormalized } from '../normalizer/mouseNormalizer.js';
 import { exportRunArtifacts } from '../exporter/exporter.js';
 import { writeFinalOutputs } from '../exporter/finalExporter.js';
@@ -103,6 +150,9 @@ import { computeNeedSet } from '../indexlab/needsetEngine.js';
 import { buildIndexingSchemaPackets } from '../indexlab/indexingSchemaPackets.js';
 import { validateIndexingSchemaPackets } from '../indexlab/indexingSchemaPacketsValidator.js';
 import { buildPhase07PrimeSources } from '../retrieve/primeSourcesBuilder.js';
+import { indexDocument } from '../index/evidenceIndexDb.js';
+import { applyIdentityGateToCandidates } from './identityGateExtraction.js';
+import { buildDedupeOutcomeEvent } from './dedupeOutcomeEvent.js';
 import {
   normalizeHttpUrlList,
   shouldQueueLlmRetry,
@@ -336,36 +386,6 @@ function bestIdentityFromSources(sourceResults, identityLock = {}) {
   return sorted[0]?.identityCandidates || {};
 }
 
-const METHOD_PRIORITY = {
-  network_json: 5,
-  adapter_api: 5,
-  spec_table_match: 5,
-  parse_template: 4.5,
-  json_ld: 4,
-  embedded_state: 4,
-  ldjson: 3,
-  pdf_table: 3,
-  pdf: 3,
-  dom: 2,
-  component_db_inference: 2,
-  llm_extract: 1
-};
-
-function parseFirstNumber(value) {
-  const text = String(value || '');
-  const match = text.match(/-?\d+(\.\d+)?/);
-  if (!match) {
-    return null;
-  }
-  const num = Number.parseFloat(match[0]);
-  return Number.isFinite(num) ? num : null;
-}
-
-function hasKnownFieldValue(value) {
-  const token = String(value || '').trim().toLowerCase();
-  return token !== '' && token !== 'unk' && token !== 'null' && token !== 'undefined' && token !== 'n/a';
-}
-
 const PASS_TARGET_EXEMPT_FIELDS = new Set(['id', 'brand', 'model', 'base_model', 'category', 'sku']);
 const RUN_DEDUPE_MODE = 'serp_url+content_hash';
 
@@ -387,215 +407,7 @@ function toBool(value, fallback = false) {
   return token === '1' || token === 'true' || token === 'yes' || token === 'on';
 }
 
-function normalizeHostToken(value = '') {
-  return String(value || '').trim().toLowerCase().replace(/^www\./, '');
-}
 
-function hostFromHttpUrl(value = '') {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  try {
-    return normalizeHostToken(new URL(raw).hostname);
-  } catch {
-    return '';
-  }
-}
-
-function compactQueryText(value = '') {
-  return normalizeWhitespace(String(value || '').replace(/\s+/g, ' ').trim());
-}
-
-function buildRepairSearchQuery({
-  domain = '',
-  brand = '',
-  model = '',
-  variant = ''
-} = {}) {
-  const host = normalizeHostToken(domain);
-  if (!host) return '';
-  const identity = compactQueryText([brand, model, variant].map((row) => String(row || '').trim()).filter(Boolean).join(' '));
-  const identitySegment = identity ? `"${identity}"` : '';
-  return compactQueryText(`site:${host} ${identitySegment} (spec OR manual OR pdf OR "user guide")`);
-}
-
-function classifyFetchOutcome({
-  status = 0,
-  message = '',
-  contentType = '',
-  html = ''
-} = {}) {
-  const code = toInt(status, 0);
-  const msg = String(message || '').toLowerCase();
-  const contentTypeToken = String(contentType || '').toLowerCase();
-  const htmlSize = String(html || '').trim().length;
-
-  const looksBotChallenge = /(captcha|cloudflare|cf-ray|bot.?challenge|are you human|human verification|robot check)/.test(msg);
-  const looksRateLimited = /(429|rate.?limit|too many requests|throttl)/.test(msg);
-  const looksLoginWall = /(401|sign[ -]?in|login|authenticate|account required|subscription required)/.test(msg);
-  const looksBlocked = /(403|forbidden|blocked|access denied|denied)/.test(msg);
-  const looksTimeout = /(timeout|timed out|etimedout|econnreset|econnrefused|socket hang up|network error|dns)/.test(msg);
-  const looksBadContent = /(parse|json|xml|cheerio|dom|extract|malformed|invalid content|unsupported content)/.test(msg);
-
-  if (code >= 200 && code < 400) {
-    if (contentTypeToken.includes('application/octet-stream') && htmlSize === 0) {
-      return 'bad_content';
-    }
-    return 'ok';
-  }
-  if (code === 404 || code === 410) return 'not_found';
-  if (code === 429) return 'rate_limited';
-  if (code === 401 || code === 407) return 'login_wall';
-  if (code === 403) {
-    if (looksBotChallenge) return 'bot_challenge';
-    if (looksLoginWall) return 'login_wall';
-    return 'blocked';
-  }
-  if (code >= 500) return 'server_error';
-  if (code >= 400) return 'blocked';
-  if (looksBotChallenge) return 'bot_challenge';
-  if (looksRateLimited) return 'rate_limited';
-  if (looksLoginWall) return 'login_wall';
-  if (looksBlocked) return 'blocked';
-  if (looksBadContent) return 'bad_content';
-  if (looksTimeout) return 'network_timeout';
-  return 'fetch_error';
-}
-
-const FETCH_OUTCOME_KEYS = [
-  'ok',
-  'not_found',
-  'blocked',
-  'rate_limited',
-  'login_wall',
-  'bot_challenge',
-  'bad_content',
-  'server_error',
-  'network_timeout',
-  'fetch_error'
-];
-
-function createFetchOutcomeCounters() {
-  return FETCH_OUTCOME_KEYS.reduce((acc, key) => {
-    acc[key] = 0;
-    return acc;
-  }, {});
-}
-
-function createHostBudgetRow() {
-  return {
-    started_count: 0,
-    completed_count: 0,
-    dedupe_hits: 0,
-    evidence_used: 0,
-    parse_fail_count: 0,
-    next_retry_ts: '',
-    outcome_counts: createFetchOutcomeCounters()
-  };
-}
-
-function ensureHostBudgetRow(mapRef, host = '') {
-  const token = String(host || '').trim().toLowerCase() || '__unknown__';
-  if (!mapRef.has(token)) {
-    mapRef.set(token, createHostBudgetRow());
-  }
-  return mapRef.get(token);
-}
-
-function noteHostRetryTs(hostRow, retryTs = '') {
-  if (!hostRow) return;
-  const token = String(retryTs || '').trim();
-  if (!token) return;
-  const retryMs = Date.parse(token);
-  if (!Number.isFinite(retryMs)) return;
-  const currentMs = Date.parse(String(hostRow.next_retry_ts || ''));
-  if (!Number.isFinite(currentMs) || retryMs > currentMs) {
-    hostRow.next_retry_ts = new Date(retryMs).toISOString();
-  }
-}
-
-function bumpHostOutcome(hostRow, outcome = '') {
-  if (!hostRow) return;
-  const token = String(outcome || '').trim().toLowerCase();
-  if (!token) return;
-  if (!Object.prototype.hasOwnProperty.call(hostRow.outcome_counts, token)) {
-    hostRow.outcome_counts[token] = 0;
-  }
-  hostRow.outcome_counts[token] += 1;
-}
-
-function applyHostBudgetBackoff(hostRow, { status = 0, outcome = '', config = {}, nowMs = Date.now() } = {}) {
-  if (!hostRow) return;
-  const code = toInt(status, 0);
-  const token = String(outcome || '').trim().toLowerCase();
-  let seconds = 0;
-  if (code === 429 || token === 'rate_limited') {
-    seconds = Math.max(60, toInt(config.frontierCooldown429BaseSeconds, 15 * 60));
-  } else if (code === 403 || token === 'blocked' || token === 'login_wall' || token === 'bot_challenge') {
-    seconds = Math.max(60, toInt(config.frontierCooldown403BaseSeconds, 30 * 60));
-  } else if (token === 'network_timeout' || token === 'fetch_error' || token === 'server_error') {
-    seconds = Math.max(60, toInt(config.frontierCooldownTimeoutSeconds, 6 * 60 * 60));
-  }
-  if (seconds > 0) {
-    noteHostRetryTs(hostRow, new Date(nowMs + (seconds * 1000)).toISOString());
-  }
-}
-
-function resolveHostBudgetState(hostRow, nowMs = Date.now()) {
-  const row = hostRow || createHostBudgetRow();
-  const outcomes = row.outcome_counts || createFetchOutcomeCounters();
-  const started = toInt(row.started_count, 0);
-  const completed = toInt(row.completed_count, 0);
-  const inFlight = Math.max(0, started - completed);
-
-  let score = 100;
-  score -= toInt(outcomes.not_found, 0) * 6;
-  score -= toInt(outcomes.blocked, 0) * 8;
-  score -= toInt(outcomes.rate_limited, 0) * 12;
-  score -= toInt(outcomes.login_wall, 0) * 10;
-  score -= toInt(outcomes.bot_challenge, 0) * 14;
-  score -= toInt(outcomes.bad_content, 0) * 8;
-  score -= toInt(outcomes.server_error, 0) * 6;
-  score -= toInt(outcomes.network_timeout, 0) * 5;
-  score -= toInt(outcomes.fetch_error, 0) * 4;
-  score -= toInt(row.dedupe_hits, 0);
-  score += Math.min(12, toInt(outcomes.ok, 0) * 2);
-  score += Math.min(10, toInt(row.evidence_used, 0) * 2);
-  score = Math.max(0, Math.min(100, score));
-
-  const nextRetryMs = Date.parse(String(row.next_retry_ts || ''));
-  const cooldownSeconds = Number.isFinite(nextRetryMs)
-    ? Math.max(0, Math.ceil((nextRetryMs - nowMs) / 1000))
-    : 0;
-
-  const blockedSignals = (
-    toInt(outcomes.blocked, 0)
-    + toInt(outcomes.rate_limited, 0)
-    + toInt(outcomes.login_wall, 0)
-    + toInt(outcomes.bot_challenge, 0)
-  );
-
-  let state = 'open';
-  if (cooldownSeconds > 0 && (score <= 30 || blockedSignals >= 2)) {
-    state = 'blocked';
-  } else if (cooldownSeconds > 0) {
-    state = 'backoff';
-  } else if (score < 55 || toInt(outcomes.bad_content, 0) > 0 || toInt(row.parse_fail_count, 0) > 0) {
-    state = 'degraded';
-  } else if (inFlight > 0) {
-    state = 'active';
-  }
-
-  return {
-    score: Number(score.toFixed(3)),
-    state,
-    cooldown_seconds: cooldownSeconds,
-    next_retry_ts: cooldownSeconds > 0 ? String(row.next_retry_ts || '').trim() || null : null
-  };
-}
-
-function sha256(value = '') {
-  return crypto.createHash('sha256').update(String(value || ''), 'utf8').digest('hex');
-}
 
 function resolveRuntimeControlKey(storage, config = {}) {
   const raw = String(config.runtimeControlFile || '_runtime/control/runtime_overrides.json').trim();
@@ -661,122 +473,6 @@ function applyRuntimeOverridesToPlanner(planner, overrides = {}) {
   }
 }
 
-function stableHash(value) {
-  let hash = 0;
-  const input = String(value || '');
-  for (let i = 0; i < input.length; i += 1) {
-    hash = ((hash << 5) - hash + input.charCodeAt(i)) | 0;
-  }
-  return Math.abs(hash);
-}
-
-function collectContributionFields({
-  fieldOrder,
-  normalized,
-  provenance
-}) {
-  const llmFields = [];
-  const componentFields = [];
-  for (const field of fieldOrder || []) {
-    if (!hasKnownFieldValue(normalized?.fields?.[field])) {
-      continue;
-    }
-    const evidence = Array.isArray(provenance?.[field]?.evidence)
-      ? provenance[field].evidence
-      : [];
-    if (evidence.some((row) => String(row?.method || '').toLowerCase().includes('llm'))) {
-      llmFields.push(field);
-    }
-    if (evidence.some((row) => String(row?.method || '').toLowerCase() === 'component_db')) {
-      componentFields.push(field);
-    }
-  }
-  return {
-    llmFields: [...new Set(llmFields)],
-    componentFields: [...new Set(componentFields)]
-  };
-}
-
-function plausibilityBoost(field, value) {
-  const num = parseFirstNumber(value);
-  if (num === null) {
-    return 0;
-  }
-
-  if (field === 'weight') {
-    return num >= 20 && num <= 250 ? 2 : -6;
-  }
-  if (field === 'lngth' || field === 'width' || field === 'height') {
-    return num >= 20 && num <= 200 ? 2 : -6;
-  }
-  if (field === 'dpi') {
-    return num >= 100 && num <= 100000 ? 2 : -6;
-  }
-  if (field === 'polling_rate') {
-    return num >= 125 && num <= 10000 ? 2 : -6;
-  }
-  if (field === 'ips') {
-    return num >= 50 && num <= 1000 ? 2 : -4;
-  }
-  if (field === 'acceleration') {
-    return num >= 10 && num <= 200 ? 2 : -4;
-  }
-
-  return 0;
-}
-
-function candidateScore(candidate) {
-  const methodScore = METHOD_PRIORITY[candidate.method] || 0;
-  const keyPath = String(candidate.keyPath || '').toLowerCase();
-  const field = String(candidate.field || '');
-  const numeric = parseFirstNumber(candidate.value);
-  let score = methodScore * 10;
-  if (field && keyPath.includes(field.toLowerCase())) {
-    score += 2;
-  }
-  if (numeric !== null) {
-    if (field === 'dpi') {
-      score += Math.min(6, numeric / 8000);
-    } else if (field === 'polling_rate') {
-      score += Math.min(6, numeric / 1000);
-    } else if (field === 'ips' || field === 'acceleration') {
-      score += Math.min(3, numeric / 300);
-    }
-  }
-  score += plausibilityBoost(field, candidate.value);
-  return score;
-}
-
-function buildCandidateFieldMap(fieldCandidates) {
-  const map = {};
-  const scoreByField = {};
-  for (const row of fieldCandidates || []) {
-    if (String(row.value || '').trim().toLowerCase() === 'unk') {
-      continue;
-    }
-    const score = candidateScore(row);
-    if (!Object.prototype.hasOwnProperty.call(scoreByField, row.field) || score > scoreByField[row.field]) {
-      scoreByField[row.field] = score;
-      map[row.field] = row.value;
-    }
-  }
-  return map;
-}
-
-function dedupeCandidates(candidates) {
-  const seen = new Set();
-  const out = [];
-  for (const candidate of candidates || []) {
-    const key = `${candidate.field}|${candidate.value}|${candidate.method}|${candidate.keyPath}`;
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    out.push(candidate);
-  }
-  return out;
-}
-
 function markSatisfiedLlmFields(fieldSet, fields = [], anchors = {}) {
   if (!(fieldSet instanceof Set)) {
     return;
@@ -823,163 +519,6 @@ function refreshFieldsBelowPassTarget({
   };
 }
 
-function selectAggressiveEvidencePack(sourceResults = []) {
-  const ranked = (sourceResults || [])
-    .filter((row) => row?.llmEvidencePack)
-    .sort((a, b) => {
-      const aIdentity = a.identity?.match ? 1 : 0;
-      const bIdentity = b.identity?.match ? 1 : 0;
-      if (bIdentity !== aIdentity) {
-        return bIdentity - aIdentity;
-      }
-      const aAnchor = (a.anchorCheck?.majorConflicts || []).length;
-      const bAnchor = (b.anchorCheck?.majorConflicts || []).length;
-      if (aAnchor !== bAnchor) {
-        return aAnchor - bAnchor;
-      }
-      const aSnippets = Number(a.llmEvidencePack?.meta?.snippet_count || 0);
-      const bSnippets = Number(b.llmEvidencePack?.meta?.snippet_count || 0);
-      if (bSnippets !== aSnippets) {
-        return bSnippets - aSnippets;
-      }
-      return Number(a.tier || 99) - Number(b.tier || 99);
-    });
-  return ranked[0]?.llmEvidencePack || null;
-}
-
-function selectAggressiveDomHtml(artifactsByHost = {}) {
-  let best = '';
-  for (const row of Object.values(artifactsByHost || {})) {
-    const html = String(row?.html || '');
-    if (html.length > best.length) {
-      best = html;
-    }
-  }
-  return best;
-}
-
-function buildDomSnippetArtifact(html = '', maxChars = 3_600) {
-  const pageHtml = String(html || '');
-  if (!pageHtml) return null;
-  const cap = Math.max(600, Math.min(20_000, Number(maxChars || 3_600)));
-  const candidates = [
-    { kind: 'table', pattern: /<table[\s\S]*?<\/table>/i },
-    { kind: 'definition_list', pattern: /<dl[\s\S]*?<\/dl>/i },
-    { kind: 'spec_section', pattern: /<(section|div)[^>]*(?:spec|technical|feature|performance)[^>]*>[\s\S]*?<\/\1>/i }
-  ];
-  for (const candidate of candidates) {
-    const match = pageHtml.match(candidate.pattern);
-    if (match?.[0]) {
-      const snippetHtml = String(match[0]).slice(0, cap);
-      return {
-        kind: candidate.kind,
-        html: snippetHtml,
-        char_count: snippetHtml.length
-      };
-    }
-  }
-  const lower = pageHtml.toLowerCase();
-  const pivot = Math.max(0, lower.search(/spec|technical|feature|performance|dimension|polling|sensor|weight/));
-  const start = Math.max(0, pivot > 0 ? pivot - Math.floor(cap * 0.25) : 0);
-  const end = Math.min(pageHtml.length, start + cap);
-  const snippetHtml = pageHtml.slice(start, end);
-  if (!snippetHtml.trim()) return null;
-  return {
-    kind: 'html_window',
-    html: snippetHtml,
-    char_count: snippetHtml.length
-  };
-}
-
-function screenshotMimeType(format = '') {
-  const token = String(format || '').trim().toLowerCase();
-  return token === 'png' ? 'image/png' : 'image/jpeg';
-}
-
-function screenshotExtension(format = '') {
-  const token = String(format || '').trim().toLowerCase();
-  return token === 'png' ? 'png' : 'jpg';
-}
-
-function sha256Buffer(value) {
-  if (!Buffer.isBuffer(value) || value.length === 0) {
-    return '';
-  }
-  return `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
-}
-
-function normalizedSnippetRows(evidencePack) {
-  if (!evidencePack) {
-    return [];
-  }
-  if (Array.isArray(evidencePack.snippets)) {
-    return evidencePack.snippets
-      .map((row) => ({
-        id: String(row?.id || '').trim(),
-        text: normalizeWhitespace(String(row?.normalized_text || row?.text || '')).toLowerCase()
-      }))
-      .filter((row) => row.id && row.text);
-  }
-  if (evidencePack.snippets && typeof evidencePack.snippets === 'object') {
-    return Object.entries(evidencePack.snippets)
-      .map(([id, row]) => ({
-        id: String(id || '').trim(),
-        text: normalizeWhitespace(String(row?.normalized_text || row?.text || '')).toLowerCase()
-      }))
-      .filter((row) => row.id && row.text);
-  }
-  return [];
-}
-
-function enrichFieldCandidatesWithEvidenceRefs(fieldCandidates = [], evidencePack = null) {
-  const deterministicBindings = evidencePack?.candidate_bindings && typeof evidencePack.candidate_bindings === 'object'
-    ? evidencePack.candidate_bindings
-    : {};
-  const snippetRows = normalizedSnippetRows(evidencePack);
-  if (!snippetRows.length && !Object.keys(deterministicBindings).length) {
-    return fieldCandidates;
-  }
-
-  return (fieldCandidates || []).map((candidate) => {
-    const existingRefs = Array.isArray(candidate?.evidenceRefs)
-      ? candidate.evidenceRefs.map((id) => String(id || '').trim()).filter(Boolean)
-      : [];
-    if (existingRefs.length > 0) {
-      return candidate;
-    }
-
-    const deterministicFingerprint = buildEvidenceCandidateFingerprint(candidate);
-    const deterministicSnippetId = deterministicBindings[deterministicFingerprint];
-    if (deterministicSnippetId) {
-      return {
-        ...candidate,
-        evidenceRefs: [deterministicSnippetId],
-        evidenceRefOrigin: 'deterministic_binding'
-      };
-    }
-
-    const value = normalizeWhitespace(String(candidate?.value || '')).toLowerCase();
-    if (!value || value === 'unk') {
-      return candidate;
-    }
-    const fieldToken = String(candidate?.field || '').replace(/_/g, ' ').toLowerCase().trim();
-
-    let match = snippetRows.find((row) => row.text.includes(value) && (!fieldToken || row.text.includes(fieldToken)));
-    if (!match) {
-      match = snippetRows.find((row) => row.text.includes(value));
-    }
-    if (!match) {
-      return candidate;
-    }
-
-    return {
-      ...candidate,
-      evidenceRefs: [match.id],
-      evidenceRefOrigin: 'heuristic_snippet_match'
-    };
-  });
-}
-
 function isAnchorLocked(field, anchors) {
   const value = anchors?.[field];
   return String(value || '').trim() !== '';
@@ -987,92 +526,6 @@ function isAnchorLocked(field, anchors) {
 
 function isIdentityLockedField(field) {
   return ['id', 'brand', 'model', 'base_model', 'category', 'sku'].includes(field);
-}
-
-function createEmptyProvenance(fieldOrder, fields) {
-  const output = {};
-  for (const key of fieldOrder) {
-    output[key] = {
-      value: fields[key],
-      confirmations: 0,
-      approved_confirmations: 0,
-      pass_target: 0,
-      meets_pass_target: false,
-      confidence: 0,
-      evidence: []
-    };
-  }
-  return output;
-}
-
-function ensureProvenanceField(provenance, field, fallbackValue = 'unk') {
-  if (!provenance[field]) {
-    provenance[field] = {
-      value: fallbackValue,
-      confirmations: 0,
-      approved_confirmations: 0,
-      pass_target: 1,
-      meets_pass_target: false,
-      confidence: 0,
-      evidence: []
-    };
-  }
-  return provenance[field];
-}
-
-function mergePhase08Rows(existing = [], incoming = [], maxRows = 400) {
-  const out = [...(existing || [])];
-  const seen = new Set(
-    out.map((row) => `${row?.field_key || ''}|${row?.snippet_id || ''}|${row?.url || ''}`)
-  );
-  for (const row of incoming || []) {
-    const key = `${row?.field_key || ''}|${row?.snippet_id || ''}|${row?.url || ''}`;
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    out.push(row);
-    if (out.length >= Math.max(1, Number.parseInt(String(maxRows || 400), 10) || 400)) {
-      break;
-    }
-  }
-  return out;
-}
-
-function buildPhase08SummaryFromBatches(batchRows = []) {
-  const rows = Array.isArray(batchRows) ? batchRows : [];
-  const batchCount = rows.length;
-  const batchErrors = rows.filter((row) => String(row?.status || '').trim().toLowerCase() === 'failed').length;
-  const rawCandidateCount = rows.reduce((sum, row) => sum + Number(row?.raw_candidate_count || 0), 0);
-  const acceptedCandidateCount = rows.reduce((sum, row) => sum + Number(row?.accepted_candidate_count || 0), 0);
-  const danglingRefCount = rows.reduce((sum, row) => sum + Number(row?.dropped_invalid_refs || 0), 0);
-  const policyViolationCount = rows.reduce(
-    (sum, row) => sum
-      + Number(row?.dropped_missing_refs || 0)
-      + Number(row?.dropped_invalid_refs || 0)
-      + Number(row?.dropped_evidence_verifier || 0),
-    0
-  );
-  const minRefsSatisfiedCount = rows.reduce((sum, row) => sum + Number(row?.min_refs_satisfied_count || 0), 0);
-  const minRefsTotal = rows.reduce((sum, row) => sum + Number(row?.min_refs_total || 0), 0);
-  return {
-    batch_count: batchCount,
-    batch_error_count: batchErrors,
-    schema_fail_rate: batchCount > 0 ? Number((batchErrors / batchCount).toFixed(6)) : 0,
-    raw_candidate_count: rawCandidateCount,
-    accepted_candidate_count: acceptedCandidateCount,
-    dangling_snippet_ref_count: danglingRefCount,
-    dangling_snippet_ref_rate: rawCandidateCount > 0 ? Number((danglingRefCount / rawCandidateCount).toFixed(6)) : 0,
-    evidence_policy_violation_count: policyViolationCount,
-    evidence_policy_violation_rate: rawCandidateCount > 0 ? Number((policyViolationCount / rawCandidateCount).toFixed(6)) : 0,
-    min_refs_satisfied_count: minRefsSatisfiedCount,
-    min_refs_total: minRefsTotal,
-    min_refs_satisfied_rate: minRefsTotal > 0 ? Number((minRefsSatisfiedCount / minRefsTotal).toFixed(6)) : 0
-  };
-}
-
-function tsvRowFromFields(fieldOrder, fields) {
-  return fieldOrder.map((field) => fields[field] ?? 'unk').join('\t');
 }
 
 function resolveTargets(job, categoryConfig) {
@@ -1100,275 +553,6 @@ function resolveLlmTargetFields(job, categoryConfig) {
     fieldOrder: categoryConfig.fieldOrder || []
   });
   return [...new Set(base)];
-}
-
-function isDiscoveryOnlySourceUrl(url) {
-  try {
-    const parsed = new URL(url);
-    const path = parsed.pathname.toLowerCase();
-    const query = parsed.search.toLowerCase();
-    if (path.endsWith('/robots.txt')) {
-      return true;
-    }
-    if (path.includes('sitemap') || path.endsWith('.xml')) {
-      return true;
-    }
-    if (path.includes('/search')) {
-      return true;
-    }
-    if (path.includes('/catalogsearch') || path.includes('/find')) {
-      return true;
-    }
-    if ((query.includes('q=') || query.includes('query=')) && path.length <= 16) {
-      return true;
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-function isRobotsTxtUrl(url) {
-  try {
-    const parsed = new URL(url);
-    return parsed.pathname.toLowerCase().endsWith('/robots.txt');
-  } catch {
-    return false;
-  }
-}
-
-function isSitemapUrl(url) {
-  try {
-    const parsed = new URL(url);
-    const pathname = parsed.pathname.toLowerCase();
-    return pathname.includes('sitemap') || pathname.endsWith('.xml');
-  } catch {
-    return false;
-  }
-}
-
-function hasSitemapXmlSignals(body) {
-  const text = String(body || '').toLowerCase();
-  return text.includes('<urlset') || text.includes('<sitemapindex') || text.includes('<loc>');
-}
-
-function isLikelyIndexableEndpointUrl(url) {
-  try {
-    const parsed = new URL(url);
-    const path = parsed.pathname.toLowerCase();
-    if (path.endsWith('.json') || path.endsWith('.js')) {
-      return false;
-    }
-    if (path.includes('/api/') || path.includes('/graphql')) {
-      return false;
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function isSafeManufacturerFollowupUrl(source, url) {
-  try {
-    const parsed = new URL(url);
-    const sourceRootDomain = String(source?.rootDomain || source?.host || '').toLowerCase();
-    if (!sourceRootDomain) {
-      return false;
-    }
-    const host = String(parsed.hostname || '').toLowerCase().replace(/^www\./, '');
-    if (!host || (!host.endsWith(sourceRootDomain) && sourceRootDomain !== host)) {
-      return false;
-    }
-
-    const path = parsed.pathname.toLowerCase();
-    const signal = [
-      '/support',
-      '/manual',
-      '/spec',
-      '/product',
-      '/products',
-      '/download',
-      '/sitemap'
-    ];
-    return signal.some((token) => path.includes(token));
-  } catch {
-    return false;
-  }
-}
-
-function isHelperSyntheticUrl(url) {
-  const token = String(url || '').trim().toLowerCase();
-  return token.startsWith('helper_files://');
-}
-
-function isHelperSyntheticSource(source) {
-  if (!source) {
-    return false;
-  }
-  if (source.helperSource) {
-    return true;
-  }
-  if (String(source.host || '').trim().toLowerCase() === 'helper-files.local') {
-    return true;
-  }
-  return isHelperSyntheticUrl(source.url) || isHelperSyntheticUrl(source.finalUrl);
-}
-
-function buildFieldReasoning({
-  fieldOrder,
-  provenance,
-  fieldsBelowPassTarget,
-  criticalFieldsBelowPassTarget,
-  missingRequiredFields,
-  constraintAnalysis,
-  identityGateValidated,
-  llmBudgetBlockedReason,
-  sourceResults,
-  fieldAvailabilityModel = {},
-  fieldYieldArtifact = {},
-  searchAttemptCount = 0
-}) {
-  const fieldsBelowSet = new Set(fieldsBelowPassTarget || []);
-  const criticalBelowSet = new Set(criticalFieldsBelowPassTarget || []);
-  const missingRequiredSet = new Set(missingRequiredFields || []);
-  const contradictionsByField = {};
-  const blockedStatuses = new Set([401, 403, 429]);
-  const blockedSourceCount = (sourceResults || []).filter((source) =>
-    blockedStatuses.has(Number.parseInt(String(source.status || 0), 10))
-  ).length;
-  const robotsOnlySourceCount = (sourceResults || []).filter((source) =>
-    isDiscoveryOnlySourceUrl(source.finalUrl || source.url || '')
-  ).length;
-  const blockedByRobotsOrTos =
-    (sourceResults || []).length > 0 &&
-    (blockedSourceCount + robotsOnlySourceCount) >= Math.max(1, Math.ceil((sourceResults || []).length * 0.7));
-  const budgetExhausted = String(llmBudgetBlockedReason || '').includes('budget');
-
-  function highYieldDomainCountForField(field) {
-    let count = 0;
-    for (const row of Object.values(fieldYieldArtifact?.by_domain || {})) {
-      const bucket = row?.fields?.[field];
-      if (!bucket) {
-        continue;
-      }
-      const seen = Number.parseInt(String(bucket.seen || 0), 10) || 0;
-      const yieldValue = Number.parseFloat(String(bucket.yield || 0)) || 0;
-      if (seen >= 4 && yieldValue >= 0.5) {
-        count += 1;
-      }
-    }
-    return count;
-  }
-
-  for (const contradiction of constraintAnalysis?.contradictions || []) {
-    for (const field of contradiction.fields || []) {
-      if (!contradictionsByField[field]) {
-        contradictionsByField[field] = [];
-      }
-      contradictionsByField[field].push({
-        code: contradiction.code,
-        severity: contradiction.severity,
-        message: contradiction.message
-      });
-    }
-  }
-
-  const output = {};
-  for (const field of fieldOrder || []) {
-    const row = provenance?.[field] || {};
-    const reasons = [];
-    if (fieldsBelowSet.has(field)) {
-      reasons.push('below_pass_target');
-    }
-    if (criticalBelowSet.has(field)) {
-      reasons.push('critical_field_below_pass_target');
-    }
-    if (missingRequiredSet.has(field)) {
-      reasons.push('missing_required_field');
-    }
-    if (row.value === 'unk') {
-      reasons.push('no_accepted_value');
-    }
-    if ((contradictionsByField[field] || []).length > 0) {
-      reasons.push('constraint_conflict');
-    }
-
-    output[field] = {
-      value: row.value ?? 'unk',
-      confidence: row.confidence ?? 0,
-      meets_pass_target: row.meets_pass_target ?? false,
-      approved_confirmations: row.approved_confirmations ?? 0,
-      pass_target: row.pass_target ?? 0,
-      reasons: [...new Set(reasons)],
-      contradictions: contradictionsByField[field] || []
-    };
-
-    if (String(output[field].value || '').toLowerCase() === 'unk') {
-      let unknownReason = 'not_found_after_search';
-      const normalizedField = toRawFieldKey(field, { fieldOrder });
-      const availabilityClass = availabilityClassForField(fieldAvailabilityModel, normalizedField);
-      const highYieldDomainCount = highYieldDomainCountForField(normalizedField);
-      const undisclosedThreshold = undisclosedThresholdForField({
-        field: normalizedField,
-        artifact: fieldAvailabilityModel,
-        highYieldDomainCount
-      });
-      const searchQueryThreshold = availabilityClass === 'expected'
-        ? 10
-        : availabilityClass === 'rare'
-          ? 4
-          : 6;
-
-      if (!identityGateValidated) {
-        unknownReason = 'identity_ambiguous';
-      } else if (budgetExhausted) {
-        unknownReason = 'budget_exhausted';
-      } else if ((contradictionsByField[field] || []).length > 0) {
-        unknownReason = 'conflicting_sources_unresolved';
-      } else if (blockedByRobotsOrTos) {
-        unknownReason = 'blocked_by_robots_or_tos';
-      } else if ((row.confirmations || 0) > 0 && (row.approved_confirmations || 0) === 0) {
-        unknownReason = 'parse_failure';
-      } else if (
-        (sourceResults || []).length >= undisclosedThreshold ||
-        Number(searchAttemptCount || 0) >= searchQueryThreshold
-      ) {
-        unknownReason = 'not_publicly_disclosed';
-      }
-      output[field].unknown_reason = unknownReason;
-    } else {
-      output[field].unknown_reason = null;
-    }
-  }
-
-  return output;
-}
-
-function buildTopEvidenceReferences(provenance, limit = 60) {
-  const rows = [];
-  const seen = new Set();
-  for (const [field, row] of Object.entries(provenance || {})) {
-    for (const evidence of row?.evidence || []) {
-      const key = `${field}|${evidence.url}|${evidence.keyPath}`;
-      if (seen.has(key)) {
-        continue;
-      }
-      seen.add(key);
-      rows.push({
-        field,
-        url: evidence.url,
-        host: evidence.host,
-        method: evidence.method,
-        keyPath: evidence.keyPath,
-        tier: evidence.tier,
-        tier_name: evidence.tierName
-      });
-      if (rows.length >= limit) {
-        return rows;
-      }
-    }
-  }
-  return rows;
 }
 
 function helperSupportsProvisionalFill(helperContext, identityLock = {}) {
@@ -1410,7 +594,7 @@ function deriveNeedSetIdentityState({
   identityGate = {},
   identityConfidence = 0
 } = {}) {
-  if (identityGate?.validated && Number(identityConfidence || 0) >= 0.99) {
+  if (identityGate?.validated && Number(identityConfidence || 0) >= 0.95) {
     return 'locked';
   }
   const reasonCodes = Array.isArray(identityGate?.reasonCodes) ? identityGate.reasonCodes : [];
@@ -1421,7 +605,7 @@ function deriveNeedSetIdentityState({
   if (hasConflictCode || identityGate?.status === 'IDENTITY_CONFLICT') {
     return 'conflict';
   }
-  if (Number(identityConfidence || 0) >= 0.9) {
+  if (Number(identityConfidence || 0) >= 0.70) {
     return 'provisional';
   }
   return 'unlocked';
@@ -1472,88 +656,6 @@ function buildNeedSetIdentityAuditRows(identityReport = {}, limit = 24) {
 
 function isIndexingHelperFlowEnabled(config = {}) {
   return Boolean(config?.helperFilesEnabled && config?.indexingHelperFilesEnabled);
-}
-
-function emitFieldDecisionEvents({
-  logger,
-  fieldOrder,
-  normalized,
-  provenance,
-  fieldReasoning,
-  trafficLight
-}) {
-  for (const field of fieldOrder || []) {
-    const value = String(normalized?.fields?.[field] ?? 'unk');
-    const reasoning = fieldReasoning?.[field] || {};
-    const traffic = trafficLight?.by_field?.[field] || {};
-    const row = provenance?.[field] || {};
-
-    logger.info('field_decision', {
-      field,
-      value,
-      decision: value.toLowerCase() === 'unk' ? 'unknown' : 'accepted',
-      unknown_reason: reasoning.unknown_reason || null,
-      reasons: reasoning.reasons || [],
-      confidence: row.confidence || 0,
-      evidence_count: (row.evidence || []).length,
-      traffic_color: traffic.color || null,
-      traffic_reason: traffic.reason || null
-    });
-  }
-}
-
-function buildProvisionalHypothesisQueue({
-  sourceResults,
-  categoryConfig,
-  fieldOrder,
-  anchors,
-  identityLock,
-  productId,
-  category,
-  config,
-  requiredFields,
-  sourceIntelDomains,
-  brand
-}) {
-  const consensus = runConsensusEngine({
-    sourceResults,
-    categoryConfig,
-    fieldOrder,
-    anchors,
-    identityLock,
-    productId,
-    category,
-    config
-  });
-
-  const provisionalFields = {};
-  for (const field of fieldOrder || []) {
-    provisionalFields[field] = consensus.fields?.[field] ?? 'unk';
-  }
-
-  const provisionalNormalized = {
-    fields: provisionalFields
-  };
-
-  const completenessStats = computeCompletenessRequired(provisionalNormalized, requiredFields);
-  const criticalFieldsBelowPassTarget = consensus.criticalFieldsBelowPassTarget || [];
-
-  const hypothesisQueue = buildHypothesisQueue({
-    criticalFieldsBelowPassTarget,
-    missingRequiredFields: completenessStats.missingRequiredFields,
-    provenance: consensus.provenance || {},
-    sourceResults,
-    sourceIntelDomains,
-    brand: brand || '',
-    criticalFieldSet: categoryConfig.criticalFieldSet,
-    maxItems: Math.max(1, Number(config.maxHypothesisItems || 50))
-  });
-
-  return {
-    hypothesisQueue,
-    missingRequiredFields: completenessStats.missingRequiredFields,
-    criticalFieldsBelowPassTarget
-  };
 }
 
 export async function runProduct({ storage, config, s3Key, jobOverride = null, roundContext = null }) {
@@ -2996,6 +2098,11 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         job.identityLock || {}
       );
 
+      const identityGatedCandidates = applyIdentityGateToCandidates(
+        mergedFieldCandidatesWithEvidence,
+        identity
+      );
+
       const anchorStatus =
         anchorCheck.majorConflicts.length > 0
           ? 'failed_major_conflict'
@@ -3061,7 +2168,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         discoveryOnlySource,
         sourceUrl,
         mergedIdentityCandidates,
-        mergedFieldCandidatesWithEvidence,
+        mergedFieldCandidatesWithEvidence: identityGatedCandidates,
         anchorCheck,
         anchorStatus,
         endpointIntel,
@@ -3195,6 +2302,52 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
         fingerprint,
         parserHealth
       });
+
+      if (config.evidenceIndexDb && evidencePack?.chunk_data) {
+        try {
+          const chunkData = evidencePack.chunk_data;
+          const pageContentHash = String(evidencePack?.meta?.page_content_hash || '');
+          const indexResult = indexDocument({
+            db: config.evidenceIndexDb,
+            document: {
+              contentHash: pageContentHash,
+              parserVersion: String(evidencePack?.evidence_pack_version || 'v1'),
+              url: String(pageData.finalUrl || source.url || ''),
+              host: String(source.host || ''),
+              tier: Number(source.tier || 99),
+              role: String(source.role || ''),
+              category,
+              productId
+            },
+            chunks: chunkData.map((chunk) => ({
+              chunkIndex: chunk.chunkIndex,
+              chunkType: chunk.type,
+              text: chunk.text,
+              normalizedText: chunk.normalizedText,
+              snippetHash: chunk.contentHash,
+              extractionMethod: chunk.extractionMethod,
+              fieldHints: chunk.fieldHints
+            })),
+            facts: []
+          });
+          if (indexResult) {
+            const dedupePayload = buildDedupeOutcomeEvent({
+              indexResult,
+              url: String(pageData.finalUrl || source.url || ''),
+              host: String(source.host || '')
+            });
+            if (dedupePayload) {
+              logger.info('evidence_index_result', dedupePayload);
+            }
+          }
+        } catch (err) {
+          logger.warn('evidence_index_write_failed', {
+            url: source.url,
+            error: String(err?.message || err || 'unknown')
+          });
+        }
+      }
+
       if (!discoveryOnlySource && sourceStatusCode >= 200 && sourceStatusCode < 400) {
         successfulSourceMetaByUrl.set(sourceUrl, {
           last_success_at: new Date().toISOString(),
@@ -3335,7 +2488,8 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       }
 
       hostBudgetRow.completed_count += 1;
-      bumpHostOutcome(hostBudgetRow, sourceFetchOutcome);
+      const isRobotsBlock = Boolean(pageData.blockedByRobots);
+      bumpHostOutcome(hostBudgetRow, isRobotsBlock ? 'not_found' : sourceFetchOutcome);
       if (sourceFetchOutcome === 'bad_content') {
         hostBudgetRow.parse_fail_count += 1;
       }
@@ -3347,7 +2501,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       ).trim();
       if (hostCooldownUntil) {
         noteHostRetryTs(hostBudgetRow, hostCooldownUntil);
-      } else {
+      } else if (!isRobotsBlock) {
         applyHostBudgetBackoff(hostBudgetRow, {
           status: sourceStatusCode,
           outcome: sourceFetchOutcome,
@@ -3453,33 +2607,98 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       };
     };
 
-    while (planner.hasNext()) {
-      const preflight = await prepareNextPlannerSource();
-      if (preflight.mode === 'stop') {
-        break;
-      }
-      if (preflight.mode !== 'process') {
-        continue;
-      }
-      const { source, sourceHost, hostBudgetRow } = preflight;
-      if (shouldSkipSourceBeforeFetch({ source, sourceHost, hostBudgetRow })) {
-        continue;
-      }
+    if (config.fetchSchedulerEnabled) {
+      const schedulerAdapter = {
+        hasNext() { return planner.hasNext(); },
+        next() {
+          const result = prepareNextPlannerSourceSync
+            ? prepareNextPlannerSourceSync()
+            : null;
+          return result;
+        }
+      };
+      const prefetchQueue = [];
+      const drainPrefetch = async () => {
+        while (planner.hasNext()) {
+          const preflight = await prepareNextPlannerSource();
+          if (preflight.mode === 'stop') break;
+          if (preflight.mode !== 'process') continue;
+          prefetchQueue.push(preflight);
+        }
+      };
+      await drainPrefetch();
 
-      const sourceFetch = await fetchSourcePageData({
-        source,
-        sourceHost,
-        hostBudgetRow
-      });
-      if (!sourceFetch.ok) {
-        continue;
-      }
-      await processFetchedSource({
-        source,
-        hostBudgetRow,
-        sourceFetch
+      const scheduler = createFetchScheduler({
+        concurrency: config.concurrency,
+        perHostDelayMs: config.perHostMinDelayMs,
+        maxRetries: config.fetchSchedulerMaxRetries
       });
 
+      await scheduler.drainQueue({
+        sources: {
+          hasNext() { return prefetchQueue.length > 0; },
+          next() { return prefetchQueue.shift(); }
+        },
+        fetchFn: async (preflight) => {
+          const { source, sourceHost, hostBudgetRow } = preflight;
+          const sourceFetch = await fetchSourcePageData({ source, sourceHost, hostBudgetRow });
+          if (!sourceFetch.ok) return { ok: false };
+          await processFetchedSource({ source, hostBudgetRow, sourceFetch });
+          return { ok: true };
+        },
+        shouldSkip: (preflight) => {
+          const { source, sourceHost, hostBudgetRow } = preflight;
+          return shouldSkipSourceBeforeFetch({ source, sourceHost, hostBudgetRow });
+        },
+        shouldStop: () => {
+          const elapsedSeconds = (Date.now() - startMs) / 1000;
+          return elapsedSeconds >= config.maxRunSeconds;
+        },
+        onFetchResult: () => {},
+        onFetchError: (preflight, error) => {
+          logger.error('scheduler_fetch_error', {
+            url: preflight?.source?.url || '',
+            message: String(error?.message || '')
+          });
+        },
+        onSkipped: (preflight) => {
+          logger.info('scheduler_source_skipped', {
+            url: preflight?.source?.url || ''
+          });
+        },
+        emitEvent: (name, payload) => {
+          logger.info(name, payload);
+        }
+      });
+    } else {
+      while (planner.hasNext()) {
+        const preflight = await prepareNextPlannerSource();
+        if (preflight.mode === 'stop') {
+          break;
+        }
+        if (preflight.mode !== 'process') {
+          continue;
+        }
+        const { source, sourceHost, hostBudgetRow } = preflight;
+        if (shouldSkipSourceBeforeFetch({ source, sourceHost, hostBudgetRow })) {
+          continue;
+        }
+
+        const sourceFetch = await fetchSourcePageData({
+          source,
+          sourceHost,
+          hostBudgetRow
+        });
+        if (!sourceFetch.ok) {
+          continue;
+        }
+        await processFetchedSource({
+          source,
+          hostBudgetRow,
+          sourceFetch
+        });
+
+      }
     }
   };
 
@@ -3683,7 +2902,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
   const allAnchorConflicts = mergeAnchorConflictLists(sourceResults.map((s) => s.anchorCheck));
   const anchorMajorConflictsCount = allAnchorConflicts.filter((item) => item.severity === 'MAJOR').length;
 
-  const consensus = runConsensusEngine({
+  const consensus = executeConsensusPhase({
     sourceResults,
     categoryConfig,
     fieldOrder,
@@ -3695,26 +2914,6 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     fieldRulesEngine: runtimeFieldRulesEngine
   });
 
-  // Post-consensus: apply object-form selection_policy reducers (list → scalar)
-  if (runtimeFieldRulesEngine) {
-    const reduced = applySelectionPolicyReducers({
-      fields: consensus.fields,
-      candidates: consensus.candidates,
-      fieldRulesEngine: runtimeFieldRulesEngine
-    });
-    Object.assign(consensus.fields, reduced.fields);
-  }
-
-  // Post-consensus: apply item_union list merge (set_union / ordered_union)
-  if (runtimeFieldRulesEngine) {
-    const unionResult = applyListUnionReducers({
-      fields: consensus.fields,
-      candidates: consensus.candidates,
-      fieldRulesEngine: runtimeFieldRulesEngine
-    });
-    Object.assign(consensus.fields, unionResult.fields);
-  }
-
   let normalized;
   let provenance;
   let candidates;
@@ -3724,7 +2923,13 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
   const allowHelperProvisionalFill =
     indexingHelperFlowEnabled && helperSupportsProvisionalFill(helperContext, job.identityLock || {});
 
-  if (!identityGate.validated || identityConfidence < 0.99) {
+  const identityPublishThreshold = Number(config.identityGatePublishThreshold) || 0.70;
+  const identityProvisionalFloor = 0.50;
+  const identityAbort = identityConfidence < identityProvisionalFloor;
+  const identityProvisional = !identityAbort && identityConfidence < identityPublishThreshold;
+  const identityFull = !identityAbort && !identityProvisional;
+
+  if (identityAbort) {
     normalized = buildAbortedNormalized({
       productId,
       runId,
@@ -3734,8 +2939,8 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       notes: [
         'MODEL_AMBIGUITY_ALERT',
         allowHelperProvisionalFill
-          ? 'Identity certainty below 99%: helper-assisted provisional fields allowed.'
-          : 'Identity certainty below 99%: spec fields withheld.'
+          ? `Identity certainty ${(identityConfidence * 100).toFixed(0)}% below ${(identityProvisionalFloor * 100).toFixed(0)}%: helper-assisted provisional fields allowed.`
+          : `Identity certainty ${(identityConfidence * 100).toFixed(0)}% below ${(identityProvisionalFloor * 100).toFixed(0)}%: spec fields withheld.`
       ],
       confidence: identityConfidence,
       completenessRequired: 0,
@@ -3780,9 +2985,17 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     fieldsBelowPassTarget = consensus.fieldsBelowPassTarget;
     criticalFieldsBelowPassTarget = consensus.criticalFieldsBelowPassTarget;
     newValuesProposed = consensus.newValuesProposed;
+
+    if (identityProvisional) {
+      normalized.quality.notes = [
+        ...(normalized.quality.notes || []),
+        `Identity provisional (${(identityConfidence * 100).toFixed(0)}%): field confidence capped at 0.70`
+      ];
+      normalized.identity_provisional = true;
+    }
   }
 
-  if (indexingHelperFlowEnabled && config.helperSupportiveFillMissing && (identityGate.validated || allowHelperProvisionalFill)) {
+  if (indexingHelperFlowEnabled && config.helperSupportiveFillMissing && (identityGate.validated || identityProvisional || allowHelperProvisionalFill)) {
     const helperFill = applySupportiveFillToResult({
       helperContext,
       normalized,
@@ -3864,7 +3077,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     (
       (criticDecisions.reject || []).length > 0 ||
       (criticalFieldsBelowPassTarget || []).length > 0 ||
-      identityConfidence < 0.995
+      identityProvisional
     );
   if (shouldRunLlmValidator) {
     llmValidatorDecisions = await validateCandidatesLLM({
@@ -4209,8 +3422,8 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
   gate.coverageOverallPercent = Number.parseFloat((coverageStats.coverageOverall * 100).toFixed(2));
   const publishable =
     gate.validated &&
-    identityGate.validated &&
-    identityConfidence >= 0.99 &&
+    identityFull &&
+    identityConfidence >= identityPublishThreshold &&
     !identityGate.needsReview;
   const publishBlockers = [...new Set([
     ...(gate.validated ? [] : (gate.reasons || [])),
@@ -4306,7 +3519,11 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     fieldRules: categoryConfig.fieldRules,
     fieldReasoning,
     constraintAnalysis,
-    identityContext: needSetIdentityContext
+    identityContext: needSetIdentityContext,
+    decayConfig: {
+      decayDays: config.needsetEvidenceDecayDays,
+      decayFloor: config.needsetEvidenceDecayFloor
+    }
   });
   const phase07PrimeSources = buildPhase07PrimeSources({
     runId,
@@ -4323,8 +3540,8 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       sku: job.identityLock?.sku || identity.sku || ''
     },
     options: {
-      maxHitsPerField: 24,
-      maxPrimeSourcesPerField: 8
+      maxHitsPerField: config.retrievalMaxHitsPerField || 24,
+      maxPrimeSourcesPerField: config.retrievalMaxPrimeSources || 8
     }
   });
   const phase08SummaryFromBatches = buildPhase08SummaryFromBatches(phase08BatchRows);
@@ -5092,95 +4309,85 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
   });
   summary.component_library = componentUpdate;
 
-  let learning = null;
-  if (config.selfImproveEnabled) {
-    learning = await persistLearningProfile({
-      storage,
-      config,
-      category,
-      job,
-      sourceResults,
-      summary,
-      learningProfile,
-      discoveryResult,
-      runBase,
-      runId
-    });
+  const learningGateResult = evaluateFieldLearningGates({
+    fieldOrder,
+    fields: normalized.fields,
+    provenance,
+    category,
+    runId,
+    fieldRulesEngine: runtimeFieldRulesEngine,
+    config
+  });
+
+  emitLearningGateEvents({
+    gateResults: learningGateResult.gateResults,
+    logger,
+    runId
+  });
+
+  if (config.selfImproveEnabled && learningGateResult.acceptedUpdates.length > 0) {
+    let learningDb = null;
+    try {
+      const { SpecDb } = await import('../db/specDb.js');
+      const categoryToken = String(category || '').trim().toLowerCase();
+      const dbPath = `${String(config.specDbDir || '.specfactory_tmp').replace(/[\\\/]+$/, '')}/${categoryToken}/spec.sqlite`;
+      learningDb = new SpecDb({ dbPath, category: categoryToken });
+      const learningStores = {
+        urlMemory: new UrlMemoryStore(learningDb.db),
+        domainFieldYield: new DomainFieldYieldStore(learningDb.db),
+        fieldAnchors: new FieldAnchorsStore(learningDb.db),
+        componentLexicon: new ComponentLexiconStore(learningDb.db)
+      };
+      populateLearningStores({
+        gateResults: learningGateResult.gateResults,
+        acceptedUpdates: learningGateResult.acceptedUpdates,
+        provenance,
+        category,
+        runId,
+        stores: learningStores,
+        fieldRulesEngine: runtimeFieldRulesEngine
+      });
+    } catch (learningStoreErr) {
+      logger.warn('learning_store_populate_failed', {
+        category,
+        runId,
+        message: learningStoreErr?.message || 'unknown_error'
+      });
+    } finally {
+      try { learningDb?.close?.(); } catch { /* best effort */ }
+    }
   }
 
-  if (learning) {
-    summary.learning = {
-      profile_key: learning.profileKey,
-      run_log_key: learning.learningRunKey
-    };
-  }
-
-  const exportInfo = await exportRunArtifacts({
+  const { exportInfo, finalExport, learning } = await runLearningExportPhase({
+    config,
     storage,
     category,
     productId,
     runId,
+    job,
+    sourceResults,
+    summary,
+    learningProfile,
+    discoveryResult,
+    runBase,
     artifactsByHost,
     adapterArtifacts,
     normalized,
     provenance,
     candidates,
-    summary,
-    events: logger.events,
+    logger,
     markdownSummary,
     rowTsv,
-    writeMarkdownSummary: config.writeMarkdownSummary
-  });
-  const finalExport = await writeFinalOutputs({
-    storage,
-    category,
-    productId,
-    runId,
-    normalized,
-    summary,
-    provenance,
+    runtimeFieldRulesEngine,
+    fieldOrder,
+    runtimeEvidencePack,
     trafficLight,
-    sourceResults,
-    runtimeEngine: runtimeFieldRulesEngine,
-    runtimeFieldOrder: fieldOrder,
-    runtimeEnforceEvidence: Boolean(config.fieldRulesEngineEnforceEvidence),
-    runtimeEvidencePack: runtimeEvidencePack || null
+    persistLearningProfile,
+    exportRunArtifacts,
+    writeFinalOutputs,
+    writeProductReviewArtifacts,
+    writeCategoryReviewArtifacts
   });
-  summary.final_export = finalExport;
-
-  try {
-    const reviewProduct = await writeProductReviewArtifacts({
-      storage,
-      config,
-      category,
-      productId
-    });
-    const reviewCategory = await writeCategoryReviewArtifacts({
-      storage,
-      config,
-      category,
-      status: 'needs_review',
-      limit: 500
-    });
-    summary.review_artifacts = {
-      product_review_candidates_key: reviewProduct.keys.candidatesKey,
-      product_review_queue_key: reviewProduct.keys.reviewQueueKey,
-      category_review_queue_key: reviewCategory.key,
-      candidate_count: reviewProduct.candidate_count,
-      review_field_count: reviewProduct.review_field_count,
-      queue_count: reviewCategory.count
-    };
-  } catch (error) {
-    summary.review_artifacts = {
-      error: error.message
-    };
-    logger.warn('review_artifacts_write_failed', {
-      category,
-      productId,
-      runId,
-      message: error.message
-    });
-  }
   emitFieldDecisionEvents({
     logger,
     fieldOrder,
@@ -5205,6 +4412,7 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     exportInfo,
     finalExport,
     learning,
+    learningGateResult,
     categoryBrain
   };
 }

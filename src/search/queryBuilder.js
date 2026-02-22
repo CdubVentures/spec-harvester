@@ -51,8 +51,16 @@ const BRAND_HOST_HINTS = {
   logitech: ['logitech', 'logitechg', 'logi'],
   razer: ['razer'],
   steelseries: ['steelseries'],
+  alienware: ['alienware', 'dell'],
+  dell: ['dell', 'alienware'],
+  asus: ['asus', 'rog'],
   zowie: ['zowie', 'benq'],
   benq: ['benq', 'zowie'],
+  hp: ['hp', 'hyperx'],
+  hyperx: ['hyperx', 'hp'],
+  lenovo: ['lenovo', 'legion'],
+  msi: ['msi'],
+  acer: ['acer', 'predator'],
   finalmouse: ['finalmouse'],
   lamzu: ['lamzu'],
   pulsar: ['pulsar'],
@@ -398,7 +406,8 @@ function buildQueryRows({
   learnedQueries = {},
   identityAliases = [],
   maxRows = 72,
-  rejectLog = []
+  rejectLog = [],
+  brandResolutionHints = []
 }) {
   const brand = clean(job?.identityLock?.brand || '');
   const model = clean(job?.identityLock?.model || '');
@@ -506,7 +515,7 @@ function buildQueryRows({
     ])].slice(0, 12);
     const preferredContent = contentTypeSuffixes(fieldRule);
     const ruleDomainHints = domainHintsForField(fieldRule);
-    const manufacturerHosts = selectManufacturerHosts(categoryConfig, brand, ruleDomainHints);
+    const manufacturerHosts = selectManufacturerHosts(categoryConfig, brand, [...ruleDomainHints, ...brandResolutionHints]);
     const hosts = [...new Set([...manufacturerHosts, ...ruleDomainHints])].slice(0, 8);
 
     for (const term of terms) {
@@ -605,7 +614,8 @@ export function buildSearchProfile({
   tooltipHints = {},
   lexicon = {},
   learnedQueries = {},
-  maxQueries = 24
+  maxQueries = 24,
+  brandResolution = null
 }) {
   const brand = clean(job?.identityLock?.brand || '');
   const model = clean(job?.identityLock?.model || '');
@@ -623,6 +633,15 @@ export function buildSearchProfile({
   const focusFields = normalizeFieldList(toArray(missingFields), {
     fieldOrder: categoryConfig?.fieldOrder || []
   }).filter(Boolean);
+  const brandResolutionHints = toArray(brandResolution?.aliases)
+    .map((a) => String(a || '').trim().toLowerCase())
+    .filter(Boolean);
+  if (brandResolution?.officialDomain) {
+    const official = String(brandResolution.officialDomain).trim().toLowerCase();
+    if (official && !brandResolutionHints.includes(official)) {
+      brandResolutionHints.unshift(official);
+    }
+  }
   const queryRows = buildQueryRows({
     job,
     categoryConfig,
@@ -632,7 +651,8 @@ export function buildSearchProfile({
     learnedQueries,
     identityAliases,
     maxRows: Math.max(24, Number(maxQueries || 24) * 3),
-    rejectLog: queryRejectLog
+    rejectLog: queryRejectLog,
+    brandResolutionHints
   });
 
   const querySet = new Set();

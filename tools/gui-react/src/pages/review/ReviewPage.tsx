@@ -12,7 +12,8 @@ import { BrandFilterBar } from './BrandFilterBar';
 import { MetricRow } from '../../components/common/MetricRow';
 import { Spinner } from '../../components/common/Spinner';
 import { pct } from '../../utils/formatting';
-import { hasKnownValue, humanizeField } from '../../utils/fieldNormalize';
+import { hasKnownValue } from '../../utils/fieldNormalize';
+import { useFieldLabels } from '../../hooks/useFieldLabels';
 import { useDebouncedCallback } from '../../hooks/useDebounce';
 import type { ReviewLayout, ProductReviewPayload, ProductsIndexResponse, CandidateResponse, ReviewCandidate } from '../../types/review';
 import type { CatalogRow } from '../../types/product';
@@ -39,7 +40,7 @@ function candidateSourceLabel(candidate: ReviewCandidate | null | undefined): st
   if (explicitSource) return explicitSource;
   const sourceId = String(candidate.source_id || '').trim().toLowerCase();
   if (sourceId === 'pipeline') return 'Pipeline';
-  if (sourceId === 'workbook') return 'Excel Import';
+  if (sourceId === 'workbook' || sourceId === 'reference') return 'Reference';
   if (sourceId === 'user') return 'user';
   if (sourceId) return sourceId;
   const evidenceUrl = String(candidate.evidence?.url || '').trim();
@@ -55,6 +56,7 @@ function toPositiveId(value: unknown): number | null {
 
 export function ReviewPage() {
   const category = useUiStore((s) => s.category);
+  const { getLabel } = useFieldLabels(category);
   const {
     activeCell, drawerOpen, openDrawer, closeDrawer,
     setFlaggedCells, nextFlagged, prevFlagged,
@@ -750,6 +752,7 @@ export function ReviewPage() {
               Boolean(activeFieldState.accepted_candidate_id)
               || String(kr?.userAcceptPrimary || '').trim().toLowerCase() === 'accepted'
               || activeFieldState.source === 'workbook'
+              || activeFieldState.source === 'reference'
               || activeFieldState.source === 'manual'
               || activeFieldState.source === 'user'
             );
@@ -775,7 +778,7 @@ export function ReviewPage() {
 
           return (
             <CellDrawer
-              title={humanizeField(selectedField)}
+              title={getLabel(selectedField)}
               subtitle={`${activeProduct.identity.brand} ${activeProduct.identity.model}${activeProduct.identity.id ? ` #${activeProduct.identity.id}` : ''}`}
               onClose={closeDrawer}
               currentValue={{

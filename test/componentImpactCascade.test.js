@@ -433,6 +433,213 @@ test('item enum field writes stay ID-linked via item_list_links and list deletes
   }
 });
 
+test('cascadeComponentChange override_allowed does not push values and does not evaluate variance', async () => {
+  const h = await createHarness();
+  try {
+    h.specDb.upsertItemComponentLink({
+      productId: 'mouse-override-a',
+      fieldKey: 'sensor',
+      componentType: 'sensor',
+      componentName: 'PAW3950',
+      componentMaker: 'PixArt',
+      matchType: 'exact',
+      matchScore: 1,
+    });
+    h.specDb.upsertItemComponentLink({
+      productId: 'mouse-override-b',
+      fieldKey: 'sensor',
+      componentType: 'sensor',
+      componentName: 'PAW3950',
+      componentMaker: 'PixArt',
+      matchType: 'exact',
+      matchScore: 1,
+    });
+
+    upsertQueueRow(h.specDb, 'mouse-override-a', 'complete');
+    upsertQueueRow(h.specDb, 'mouse-override-b', 'complete');
+
+    h.specDb.upsertItemFieldState({
+      productId: 'mouse-override-a',
+      fieldKey: 'max_dpi',
+      value: '26000',
+      confidence: 0.8,
+      source: 'pipeline',
+      acceptedCandidateId: null,
+      overridden: false,
+      needsAiReview: false,
+      aiReviewComplete: false,
+    });
+    h.specDb.upsertItemFieldState({
+      productId: 'mouse-override-b',
+      fieldKey: 'max_dpi',
+      value: '30000',
+      confidence: 0.8,
+      source: 'pipeline',
+      acceptedCandidateId: null,
+      overridden: false,
+      needsAiReview: false,
+      aiReviewComplete: false,
+    });
+
+    const result = await cascadeComponentChange({
+      storage: h.storage,
+      outputRoot: h.outputRoot,
+      category: h.category,
+      componentType: 'sensor',
+      componentName: 'PAW3950',
+      componentMaker: 'PixArt',
+      changedProperty: 'max_dpi',
+      newValue: '35000',
+      variancePolicy: 'override_allowed',
+      constraints: [],
+      loadQueueState,
+      saveQueueState,
+      specDb: h.specDb,
+    });
+
+    assert.equal(result.propagation?.action, 'stale_only',
+      'override_allowed must NOT push values or evaluate variance — action stays stale_only');
+    assert.deepEqual(result.propagation?.updated, [],
+      'no values should be pushed');
+    assert.deepEqual(result.propagation?.violations, [],
+      'no violations should be flagged');
+
+    const stateA = h.specDb.getItemFieldState('mouse-override-a').find((row) => row.field_key === 'max_dpi');
+    const stateB = h.specDb.getItemFieldState('mouse-override-b').find((row) => row.field_key === 'max_dpi');
+    assert.equal(stateA?.value, '26000',
+      'product A value must NOT be overwritten by override_allowed cascade');
+    assert.equal(stateB?.value, '30000',
+      'product B value must NOT be overwritten by override_allowed cascade');
+
+    const queueA = h.specDb.getQueueProduct('mouse-override-a');
+    const queueB = h.specDb.getQueueProduct('mouse-override-b');
+    assert.equal(queueA?.status, 'stale',
+      'queue entry should still be marked stale');
+    assert.equal(queueB?.status, 'stale',
+      'queue entry should still be marked stale');
+  } finally {
+    await cleanupHarness(h);
+  }
+});
+
+test('cascadeComponentChange override_allowed uses priority 3 (lowest)', async () => {
+  const h = await createHarness();
+  try {
+    h.specDb.upsertItemComponentLink({
+      productId: 'mouse-pri',
+      fieldKey: 'sensor',
+      componentType: 'sensor',
+      componentName: 'PAW3950',
+      componentMaker: 'PixArt',
+      matchType: 'exact',
+      matchScore: 1,
+    });
+
+    upsertQueueRow(h.specDb, 'mouse-pri', 'complete');
+
+    h.specDb.upsertItemFieldState({
+      productId: 'mouse-pri',
+      fieldKey: 'max_dpi',
+      value: '26000',
+      confidence: 0.8,
+      source: 'pipeline',
+      acceptedCandidateId: null,
+      overridden: false,
+      needsAiReview: false,
+      aiReviewComplete: false,
+    });
+
+    await cascadeComponentChange({
+      storage: h.storage,
+      outputRoot: h.outputRoot,
+      category: h.category,
+      componentType: 'sensor',
+      componentName: 'PAW3950',
+      componentMaker: 'PixArt',
+      changedProperty: 'max_dpi',
+      newValue: '35000',
+      variancePolicy: 'override_allowed',
+      constraints: [],
+      loadQueueState,
+      saveQueueState,
+      specDb: h.specDb,
+    });
+
+    const queue = h.specDb.getQueueProduct('mouse-pri');
+    assert.equal(queue?.priority, 3,
+      'override_allowed cascade must use priority 3 (lowest)');
+  } finally {
+    await cleanupHarness(h);
+  }
+});
+
+test('cascadeComponentChange override_allowed with constraints still evaluates constraints', async () => {
+  const h = await createHarness();
+  try {
+    h.specDb.upsertItemComponentLink({
+      productId: 'mouse-oc',
+      fieldKey: 'sensor',
+      componentType: 'sensor',
+      componentName: 'PAW3950',
+      componentMaker: 'PixArt',
+      matchType: 'exact',
+      matchScore: 1,
+    });
+
+    upsertQueueRow(h.specDb, 'mouse-oc', 'complete');
+
+    h.specDb.upsertComponentValue({
+      componentType: 'sensor',
+      componentName: 'PAW3950',
+      componentMaker: 'PixArt',
+      propertyKey: 'max_dpi',
+      value: '35000',
+      confidence: 1,
+      variancePolicy: 'override_allowed',
+      source: 'component_db',
+      acceptedCandidateId: null,
+      needsReview: false,
+      overridden: false,
+      constraints: [],
+    });
+
+    h.specDb.upsertItemFieldState({
+      productId: 'mouse-oc',
+      fieldKey: 'dpi',
+      value: '40000',
+      confidence: 0.8,
+      source: 'pipeline',
+      acceptedCandidateId: null,
+      overridden: false,
+      needsAiReview: false,
+      aiReviewComplete: false,
+    });
+
+    const result = await cascadeComponentChange({
+      storage: h.storage,
+      outputRoot: h.outputRoot,
+      category: h.category,
+      componentType: 'sensor',
+      componentName: 'PAW3950',
+      componentMaker: 'PixArt',
+      changedProperty: 'max_dpi',
+      newValue: '35000',
+      variancePolicy: 'override_allowed',
+      constraints: ['dpi <= max_dpi'],
+      loadQueueState,
+      saveQueueState,
+      specDb: h.specDb,
+    });
+
+    assert.equal(result.propagation?.action, 'stale_only',
+      'override_allowed does not change action even with constraints');
+    assert.equal(Array.isArray(result.propagation?.constraint_violations), true,
+      'constraint_violations should be populated');
+  } finally {
+    await cleanupHarness(h);
+  }
+});
+
 test('enum list value ID helpers rename and delete through slot identifiers', async () => {
   const h = await createHarness();
   try {

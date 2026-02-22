@@ -11,15 +11,18 @@ import { Tip } from '../../components/common/Tip';
 import { ComboSelect } from '../../components/common/ComboSelect';
 import { TagPicker } from '../../components/common/TagPicker';
 import { TierPicker } from '../../components/common/TierPicker';
-import { ColumnPicker } from '../../components/common/ColumnPicker';
+
 import { EnumConfigurator } from '../../components/common/EnumConfigurator';
 import { humanizeField } from '../../utils/fieldNormalize';
 import { FieldRulesWorkbench } from './workbench/FieldRulesWorkbench';
-import { WorkbookContextTab } from './WorkbookContextTab';
+import { useFieldRulesStore } from './useFieldRulesStore';
+import { validateNewKeyTs, rewriteConstraintsTs, constraintRefsKey, reorderFieldOrder, deriveGroupsTs, validateNewGroupTs, validateBulkRows, type BulkKeyRow } from './keyUtils';
+import DraggableKeyList from './DraggableKeyList';
+import BulkPasteGrid, { type BulkGridRow } from '../../components/common/BulkPasteGrid';
 import {
   selectCls, inputCls, labelCls,
   UNITS, UNKNOWN_TOKENS, GROUPS, COMPONENT_TYPES,
-  PREFIXES, SUFFIXES, AZ_COLUMNS,
+  PREFIXES, SUFFIXES,
   DOMAIN_HINT_SUGGESTIONS, CONTENT_TYPE_SUGGESTIONS, UNIT_ACCEPTS_SUGGESTIONS,
   STUDIO_TIPS, NORMALIZE_MODES,
 } from './studioConstants';
@@ -27,23 +30,44 @@ import type {
   FieldRule,
   StudioPayload,
   WorkbookMapResponse,
-  WorkbookMap,
-  IntrospectResult,
-  SheetPreview,
+  StudioConfig,
   TooltipBankResponse,
   DraftsResponse,
   ArtifactEntry,
   ComponentSource,
-  WorkbookContextResponse,
+  ComponentSourceProperty,
   KnownValuesResponse,
-  EnumListEntry,
-  DataListEntry,
+  EnumEntry,
   ComponentDbResponse,
   PriorityProfile,
   AiAssistConfig,
 } from '../../types/studio';
 import type { ProcessStatus } from '../../types/events';
 import type { ColumnDef } from '@tanstack/react-table';
+
+interface DataListEntry {
+  field: string;
+  normalize: string;
+  delimiter: string;
+  manual_values: string[];
+  priority?: PriorityProfile;
+  ai_assist?: AiAssistConfig;
+}
+
+interface ComponentSourceRoles {
+  maker?: string;
+  aliases?: string[];
+  links?: string[];
+  properties?: Array<Record<string, unknown>>;
+  [k: string]: unknown;
+}
+
+// ── Display label resolution: label > humanized key ─────────────────
+function displayLabel(key: string, rule?: Record<string, unknown> | null): string {
+  if (!rule) return humanizeField(key);
+  const ui = (rule.ui || {}) as Record<string, unknown>;
+  return String(ui.label || rule.label || humanizeField(key));
+}
 
 // ── Shared styles ───────────────────────────────────────────────────
 const btnPrimary = 'px-4 py-2 text-sm bg-accent text-white rounded hover:bg-blue-600 disabled:opacity-50';
@@ -63,7 +87,7 @@ interface FieldRuleRow {
 }
 
 const fieldRuleColumns: ColumnDef<FieldRuleRow, unknown>[] = [
-  { accessorKey: 'key', header: 'Field', cell: ({ getValue }) => humanizeField(getValue() as string), size: 180 },
+  { accessorKey: 'key', header: 'Field', cell: ({ row }) => row.original.label, size: 180 },
   { accessorKey: 'group', header: 'Group', size: 120 },
   { accessorKey: 'type', header: 'Type', size: 80 },
   { accessorKey: 'required', header: 'Required', size: 80 },
@@ -84,20 +108,8 @@ type RoleId = typeof ROLE_DEFS[number]['id'];
 // ── Property row type ───────────────────────────────────────────────
 interface PropertyMapping {
   field_key: string;
-  column: string;
-  column_header: string;
-  mode: 'auto' | 'manual';
   variance_policy: 'authoritative' | 'upper_bound' | 'lower_bound' | 'range' | 'override_allowed';
   tolerance: number | null;
-  constraints: string[];
-  // Legacy (migration only):
-  key?: string;
-  type?: string;
-  unit?: string;
-  // Manual mode overrides:
-  manual_header?: string;
-  manual_type?: string;
-  manual_unit?: string;
 }
 
 const VARIANCE_POLICIES = [
@@ -105,15 +117,6 @@ const VARIANCE_POLICIES = [
   { value: 'upper_bound', label: 'Upper Bound' },
   { value: 'lower_bound', label: 'Lower Bound' },
   { value: 'range', label: 'Range (±tolerance)' },
-  { value: 'override_allowed', label: 'Override Allowed' },
-] as const;
-
-const PROPERTY_TYPES = [
-  { value: 'string', label: 'string' },
-  { value: 'number', label: 'number' },
-  { value: 'boolean_yes_no_unk', label: 'boolean (yes/no/unk)' },
-  { value: 'date_field', label: 'date' },
-  { value: 'url_field', label: 'url' },
 ] as const;
 
 // Legacy property key → product field key mapping (used during migration)
@@ -308,142 +311,27 @@ function migrateProperty(p: Record<string, unknown>, _rules: Record<string, Fiel
   const fieldKey = String(p.field_key || LEGACY_PROPERTY_MAP[legacyKey] || legacyKey);
   return {
     field_key: fieldKey,
-    column: String(p.column || ''),
-    column_header: String(p.column_header || ''),
-    mode: (p.mode === 'manual' ? 'manual' : 'auto') as 'auto' | 'manual',
     variance_policy: (['authoritative', 'upper_bound', 'lower_bound', 'range', 'override_allowed'].includes(String(p.variance_policy || ''))
       ? String(p.variance_policy)
       : 'authoritative') as PropertyMapping['variance_policy'],
     tolerance: p.tolerance != null ? Number(p.tolerance) : null,
-    constraints: Array.isArray(p.constraints) ? p.constraints.map(String) : [],
-    key: legacyKey || undefined,
-    type: p.type ? String(p.type) : undefined,
-    unit: p.unit ? String(p.unit) : undefined,
   };
 }
 
-function autoMatchColumn(
-  fieldKey: string,
-  rule: FieldRule,
-  headerOptions: { col: string; header: string }[]
-): { col: string; header: string; score: number } | null {
-  const ui = rule.ui || {};
-  const aliases = Array.isArray(ui.aliases) ? ui.aliases.map(String) : [];
-  const candidates = [
-    fieldKey,
-    fieldKey.replace(/_/g, ' '),
-    ui.label ? String(ui.label) : '',
-    ...aliases,
-  ].filter(Boolean).map((s) => s.toLowerCase());
-
-  let best: { col: string; header: string; score: number } | null = null;
-  for (const { col, header } of headerOptions) {
-    const hNorm = header.toLowerCase().replace(/[^a-z0-9]+/g, '_');
-    const hText = header.toLowerCase();
-    for (const candidate of candidates) {
-      const cNorm = candidate.replace(/[^a-z0-9]+/g, '_');
-      if (cNorm === hNorm || candidate === hText) {
-        return { col, header, score: 1.0 };
-      }
-      if (hNorm.includes(cNorm) || cNorm.includes(hNorm)) {
-        const score = Math.min(cNorm.length, hNorm.length) / Math.max(cNorm.length, hNorm.length);
-        if (!best || score > best.score) best = { col, header, score };
-      }
-    }
-  }
-  return best && best.score >= 0.5 ? best : null;
-}
-
-// Excel column letter → numeric index (A=1, B=2, ..., Z=26, AA=27, ...)
-function colToIdx(c: string): number {
-  let n = 0;
-  for (let i = 0; i < c.length; i++) n = n * 26 + (c.charCodeAt(i) - 64);
-  return n;
-}
-
-// Build header map from sheet preview: { col: 'B', header: 'Brand' }[]
-function buildHeaderOptions(sheets: SheetPreview[], sheetName: string, headerRow = 1) {
-  const sheet = sheets.find((s) => s.name === sheetName);
-  if (!sheet?.preview?.rows) return [];
-  const hRow = sheet.preview.rows.find((r) => r.row === headerRow);
-  if (!hRow?.cells) return [];
-  return Object.entries(hRow.cells)
-    .filter(([, v]) => v != null && String(v).trim() !== '')
-    .map(([col, header]) => ({ col, header: String(header) }))
-    .sort((a, b) => colToIdx(a.col) - colToIdx(b.col));
-}
-
-// Header-aware column select: shows "C — Sensor" instead of just "C"
-function HeaderColumnSelect({
-  value,
-  onChange,
-  headerOptions,
-  placeholder = '(select)',
-  allowEmpty = false,
-}: {
-  value: string;
-  onChange: (col: string) => void;
-  headerOptions: { col: string; header: string }[];
-  placeholder?: string;
-  allowEmpty?: boolean;
-}) {
-  return (
-    <select
-      className={`${selectCls} w-full`}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-    >
-      {allowEmpty ? <option value="">{placeholder}</option> : null}
-      {headerOptions.map(({ col, header }) => (
-        <option key={col} value={col}>
-          {col} — {header}
-        </option>
-      ))}
-    </select>
-  );
-}
 
 // ── Tabs ────────────────────────────────────────────────────────────
 const subTabs = [
   { id: 'mapping', label: '1) Mapping Studio' },
   { id: 'keys', label: '2) Key Navigator' },
   { id: 'contract', label: '3) Field Contract' },
-  { id: 'context', label: '4) Workbook Context' },
-  { id: 'reports', label: '5) Compile & Reports' },
+  { id: 'reports', label: '4) Compile & Reports' },
 ];
 
-// ── Default empty component source ──────────────────────────────────
 function emptyComponentSource(): ComponentSource {
   return {
-    sheet: '',
     component_type: '',
-    header_row: 1,
-    first_data_row: 2,
-    stop_after_blank_primary: 10,
-    auto_derive_aliases: true,
     roles: {
-      primary_identifier: 'A',
-      maker: '',
-      aliases: [],
-      links: [],
-      properties: [],
-    },
-    priority: { ...DEFAULT_PRIORITY_PROFILE },
-    ai_assist: normalizeAiAssistConfig(undefined),
-  };
-}
-
-function emptyComponentSourceForScratch(): ComponentSource {
-  return {
-    sheet: '',
-    component_type: '',
-    header_row: 1,
-    first_data_row: 2,
-    stop_after_blank_primary: 10,
-    auto_derive_aliases: true,
-    roles: {
-      primary_identifier: 'A',
-      maker: 'B',
+      maker: 'yes',
       aliases: [],
       links: [],
       properties: [],
@@ -468,14 +356,8 @@ export function StudioPage() {
   });
 
   const { data: wbMapRes } = useQuery({
-    queryKey: ['studio-workbook-map', category],
+    queryKey: ['studio-config', category],
     queryFn: () => api.get<WorkbookMapResponse>(`/studio/${category}/workbook-map`),
-  });
-
-  const { data: introspect } = useQuery({
-    queryKey: ['studio-introspect', category],
-    queryFn: () => api.get<IntrospectResult>(`/studio/${category}/introspect`),
-    enabled: activeTab === 'mapping' || activeTab === 'context' || activeTab === 'keys',
   });
 
   const { data: tooltipBank } = useQuery({
@@ -494,12 +376,6 @@ export function StudioPage() {
     queryKey: ['studio-artifacts', category],
     queryFn: () => api.get<ArtifactEntry[]>(`/studio/${category}/artifacts`),
     enabled: activeTab === 'reports',
-  });
-
-  const { data: contextData, isLoading: contextLoading } = useQuery({
-    queryKey: ['workbook-context', category],
-    queryFn: () => api.get<WorkbookContextResponse>(`/workbook/${category}/context`),
-    enabled: activeTab === 'context',
   });
 
   const { data: knownValuesRes } = useQuery({
@@ -523,7 +399,6 @@ export function StudioPage() {
       queryClient.invalidateQueries({ queryKey: ['studio-known-values', category] });
       queryClient.invalidateQueries({ queryKey: ['studio-component-db', category] });
       queryClient.invalidateQueries({ queryKey: ['studio-artifacts', category] });
-      queryClient.invalidateQueries({ queryKey: ['studio-introspect', category] });
       // Downstream views that depend on compiled rules
       queryClient.invalidateQueries({ queryKey: ['catalog', category] });
       queryClient.invalidateQueries({ queryKey: ['reviewProductsIndex', category] });
@@ -532,6 +407,7 @@ export function StudioPage() {
       queryClient.invalidateQueries({ queryKey: ['componentReviewLayout', category] });
       queryClient.invalidateQueries({ queryKey: ['enumReviewData', category] });
       queryClient.invalidateQueries({ queryKey: ['product', category] });
+      queryClient.invalidateQueries({ queryKey: ['fieldLabels', category] });
     }
   }, [processStatus.running, processStatus.exitCode, category]);
 
@@ -547,24 +423,62 @@ export function StudioPage() {
   });
 
   const saveMapMut = useMutation({
-    mutationFn: (body: WorkbookMap) => api.put<unknown>(`/studio/${category}/workbook-map`, body),
+    mutationFn: (body: StudioConfig) => api.put<unknown>(`/studio/${category}/workbook-map`, body),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['studio-workbook-map', category] });
-      queryClient.invalidateQueries({ queryKey: ['studio-introspect', category] });
+      queryClient.invalidateQueries({ queryKey: ['studio-config', category] });
     },
   });
 
   const saveDraftsMut = useMutation({
     mutationFn: (body: Record<string, unknown>) => api.post<unknown>(`/studio/${category}/save-drafts`, body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['studio-drafts', category] }),
+    onSuccess: () => {
+      fieldRulesStore.clearRenames();
+      queryClient.invalidateQueries({ queryKey: ['studio-drafts', category] });
+      queryClient.invalidateQueries({ queryKey: ['studio', category] });
+      queryClient.invalidateQueries({ queryKey: ['reviewLayout', category] });
+      queryClient.invalidateQueries({ queryKey: ['product', category] });
+      queryClient.invalidateQueries({ queryKey: ['componentReview', category] });
+      queryClient.invalidateQueries({ queryKey: ['enumReview', category] });
+      queryClient.invalidateQueries({ queryKey: ['fieldLabels', category] });
+    },
   });
 
   // ── Derived data ────────────────────────────────────────────────
   const rules = studio?.fieldRules || {};
   const fieldOrder = studio?.fieldOrder || Object.keys(rules);
-  const wbMap = wbMapRes?.map || ({} as WorkbookMap);
-  const sheets = introspect?.sheets || [];
-  const sheetNames = sheets.map((s) => s.name);
+  const wbMap = wbMapRes?.map || ({} as StudioConfig);
+
+  const enumListsWithValues: EnumEntry[] = (Array.isArray(wbMap.data_lists) && wbMap.data_lists.length > 0
+    ? wbMap.data_lists
+    : Array.isArray(wbMap.enum_lists) ? wbMap.enum_lists : []
+  ).map((dl: Record<string, unknown>) => ({
+    field: String(dl.field || ''),
+    normalize: String(dl.normalize || 'lower_trim'),
+    values: Array.isArray(dl.manual_values) ? dl.manual_values.map(String) : (Array.isArray(dl.values) ? dl.values.map(String) : []),
+  }));
+
+  // ── Field Rules Store: centralized editable state ──────────────
+  const fieldRulesStore = useFieldRulesStore();
+
+  useEffect(() => {
+    if (Object.keys(rules).length > 0 && !fieldRulesStore.initialized) {
+      fieldRulesStore.hydrate(rules, fieldOrder);
+    }
+  }, [rules, fieldOrder, fieldRulesStore.initialized]);
+
+  const storeRules = fieldRulesStore.initialized ? fieldRulesStore.editedRules : rules;
+  const storeFieldOrder = fieldRulesStore.initialized ? fieldRulesStore.editedFieldOrder : fieldOrder;
+
+  const saveFromStore = useCallback(() => {
+    const snap = useFieldRulesStore.getState().getSnapshot();
+    saveDraftsMut.mutate({
+      fieldRulesDraft: {
+        ...(Object.keys(snap.rules).length > 0 ? { fields: snap.rules } : {}),
+        ...(snap.fieldOrder.length > 0 ? { fieldOrder: snap.fieldOrder } : {}),
+      },
+      ...(Object.keys(snap.renames).length > 0 ? { renames: snap.renames } : {}),
+    });
+  }, [saveDraftsMut]);
 
   const fieldRows: FieldRuleRow[] = useMemo(
     () =>
@@ -572,7 +486,7 @@ export function StudioPage() {
         const rule = rules[key] || {};
         return {
           key,
-          label: rule.label || key,
+          label: displayLabel(key, rule as Record<string, unknown>),
           group: rule.group || '',
           type: rule.contract?.type || 'string',
           required: rule.required_level || '',
@@ -676,17 +590,14 @@ export function StudioPage() {
       {activeTab === 'mapping' ? (
         <MappingStudioTab
           wbMap={wbMap}
-          sheets={sheets}
-          sheetNames={sheetNames}
           tooltipCount={tooltipCount}
           tooltipCoverage={tooltipCoverage}
           tooltipFiles={tooltipBank?.files || []}
           onSaveMap={(map) => saveMapMut.mutate(map)}
           saving={saveMapMut.isPending}
           saveSuccess={saveMapMut.isSuccess}
-          introspectError={introspect?.error}
-          rules={rules}
-          fieldOrder={fieldOrder}
+          rules={storeRules}
+          fieldOrder={storeFieldOrder}
           knownValues={knownValuesRes?.fields || {}}
         />
       ) : null}
@@ -695,17 +606,15 @@ export function StudioPage() {
       {activeTab === 'keys' ? (
         <KeyNavigatorTab
           category={category}
-          fieldOrder={fieldOrder}
-          rules={rules}
           selectedKey={selectedKey}
           onSelectKey={setSelectedKey}
-          onSaveRules={(updatedRules) => saveDraftsMut.mutate({ fieldRulesDraft: { fields: updatedRules } })}
+          onSave={saveFromStore}
           saving={saveDraftsMut.isPending}
           saveSuccess={saveDraftsMut.isSuccess}
           knownValues={knownValuesRes?.fields || {}}
-          enumLists={(wbMap.enum_lists || []) as EnumListEntry[]}
-          sheets={sheets}
+          enumLists={enumListsWithValues}
           componentDb={componentDbRes || {}}
+          componentSources={(wbMap.component_sources || []) as ComponentSource[]}
         />
       ) : null}
 
@@ -713,35 +622,20 @@ export function StudioPage() {
       {activeTab === 'contract' ? (
         <FieldRulesWorkbench
           category={category}
-          fieldOrder={fieldOrder}
-          rules={rules}
           knownValues={knownValuesRes?.fields || {}}
-          enumLists={(wbMap.enum_lists || []) as EnumListEntry[]}
-          sheets={sheets}
+          enumLists={enumListsWithValues}
           componentDb={componentDbRes || {}}
+          componentSources={(wbMap.component_sources || []) as ComponentSource[]}
           wbMap={wbMap}
           guardrails={studio?.guardrails as Record<string, unknown> | undefined}
-          onSaveRules={(updatedRules) => saveDraftsMut.mutate({ fieldRulesDraft: { fields: updatedRules } })}
+          onSave={saveFromStore}
           saving={saveDraftsMut.isPending}
           saveSuccess={saveDraftsMut.isSuccess}
           compileMut={compileMut}
         />
       ) : null}
 
-      {/* ── Tab 4: Workbook Context ──────────────────────────────── */}
-      {activeTab === 'context' ? (
-        <WorkbookContextTab
-          contextData={contextData}
-          isLoading={contextLoading}
-          fieldRulesKeys={fieldOrder}
-          knownValues={knownValuesRes?.fields || {}}
-          componentDb={componentDbRes || {}}
-          wbMap={wbMap}
-          onEditMapping={() => setActiveTab('mapping')}
-        />
-      ) : null}
-
-      {/* ── Tab 5: Compile & Reports ─────────────────────────────── */}
+      {/* ── Tab 4: Compile & Reports ─────────────────────────────── */}
       {activeTab === 'reports' ? (
         <CompileReportsTab
           artifacts={artifacts || []}
@@ -765,80 +659,37 @@ export function StudioPage() {
 // ── Mapping Studio ──────────────────────────────────────────────────
 function MappingStudioTab({
   wbMap,
-  sheets,
-  sheetNames,
   tooltipCount,
   tooltipCoverage,
   tooltipFiles,
   onSaveMap,
   saving,
   saveSuccess,
-  introspectError,
   rules,
   fieldOrder,
   knownValues,
 }: {
-  wbMap: WorkbookMap;
-  sheets: SheetPreview[];
-  sheetNames: string[];
+  wbMap: StudioConfig;
   tooltipCount: number;
   tooltipCoverage: number;
   tooltipFiles: string[];
-  onSaveMap: (map: WorkbookMap) => void;
+  onSaveMap: (map: StudioConfig) => void;
   saving: boolean;
   saveSuccess: boolean;
-  introspectError?: string;
   rules: Record<string, FieldRule>;
   fieldOrder: string[];
   knownValues: Record<string, string[]>;
 }) {
-  // ── Local editable state, seeded from server data ──────────────
-  const [workbookPath, setWorkbookPath] = useState('');
-  const [keySheet, setKeySheet] = useState('');
-  const [keyColumn, setKeyColumn] = useState('B');
-  const [keyRowStart, setKeyRowStart] = useState(9);
-  const [keyRowEnd, setKeyRowEnd] = useState(83);
-  const [prodSheet, setProdSheet] = useState('');
-  const [prodLayout, setProdLayout] = useState('matrix');
-  const [valueColStart, setValueColStart] = useState('C');
-  const [valueColEnd, setValueColEnd] = useState('');
-  const [brandRow, setBrandRow] = useState(3);
-  const [modelRow, setModelRow] = useState(4);
-  const [variantRow, setVariantRow] = useState(5);
-  const [idRow, setIdRow] = useState(0);
-  const [identifierRow, setIdentifierRow] = useState(0);
   const [tooltipPath, setTooltipPath] = useState('');
   const [compSources, setCompSources] = useState<ComponentSource[]>([]);
   const [dataLists, setDataLists] = useState<DataListEntry[]>([]);
   const [seededVersion, setSeededVersion] = useState('');
 
-  // Scratch mode: no workbook loaded (no sheets detected)
-  const isScratch = sheets.length === 0;
-
-  // Seed from server data once loaded — use workbook_path as version key
-  // to detect when real data has arrived (empty map has no workbook_path)
-  const mapVersion = wbMap.workbook_path || '';
+  const mapVersion = String(wbMap.version || '');
   useEffect(() => {
-    // Only seed when we have actual data (workbook_path exists) and haven't seeded this version
     if (!mapVersion || seededVersion === mapVersion) return;
-    const kl = wbMap.key_list || {};
-    const pt = wbMap.product_table || {};
-    setWorkbookPath(wbMap.workbook_path || '');
-    setKeySheet(kl.sheet || '');
-    setKeyColumn(kl.column || 'B');
-    setKeyRowStart(kl.row_start || 9);
-    setKeyRowEnd(kl.row_end || 83);
-    setProdSheet(pt.sheet || '');
-    setProdLayout(pt.layout || 'matrix');
-    setValueColStart(pt.value_col_start || 'C');
-    setValueColEnd(pt.value_col_end || '');
-    setBrandRow(pt.brand_row || 3);
-    setModelRow(pt.model_row || 4);
-    setVariantRow(pt.variant_row || 5);
-    setIdRow(pt.id_row || 0);
-    setIdentifierRow(pt.identifier_row || 0);
     setTooltipPath(wbMap.tooltip_source?.path || '');
-    const sources = wbMap.component_sources || wbMap.component_sheets || [];
+    const sources = wbMap.component_sources || [];
     const normalizedCompSources = (Array.isArray(sources) ? sources : []).map((src) => {
       const source = (src || {}) as ComponentSource;
       const inferredPriority = deriveComponentSourcePriority(source, rules);
@@ -851,114 +702,45 @@ function MappingStudioTab({
       } as ComponentSource;
     });
     setCompSources(normalizedCompSources);
-    // Seed data lists: prefer data_lists when available, otherwise derive from enum_lists + manual_enum_values.
-    const rawDataLists = Array.isArray((wbMap as Record<string, unknown>).data_lists)
-      ? ((wbMap as Record<string, unknown>).data_lists as DataListEntry[])
-      : [];
-    if (rawDataLists.length > 0) {
-      setDataLists(rawDataLists.map((dl) => ({
-        field: dl.field || '',
-        mode: dl.mode === 'scratch' ? 'scratch' : 'workbook',
-        sheet: dl.sheet || '',
-        value_column: dl.value_column || '',
-        header_row: dl.header_row || 0,
-        row_start: dl.row_start || 2,
-        row_end: dl.row_end || 0,
-        normalize: dl.normalize || 'lower_trim',
-        delimiter: dl.delimiter || '',
-        manual_values: Array.isArray(dl.manual_values) ? dl.manual_values : [],
-        priority: hasExplicitPriority(dl.priority)
-          ? normalizePriorityProfile(dl.priority)
-          : deriveListPriority(dl.field || '', rules),
-        ai_assist: normalizeAiAssistConfig(dl.ai_assist),
-      })));
-    } else {
-      const rawEnumLists = Array.isArray(wbMap.enum_lists) ? wbMap.enum_lists as EnumListEntry[] : [];
-      const manualEnumValues = (wbMap as Record<string, unknown>).manual_enum_values as Record<string, string[]> | undefined;
-      const manualMap = manualEnumValues && typeof manualEnumValues === 'object' ? manualEnumValues : {};
-      const seenFields = new Set<string>();
-      const seededLists: DataListEntry[] = [];
-      for (const el of rawEnumLists) {
-        seenFields.add(el.field);
+    const rawEnumLists = (Array.isArray(wbMap.data_lists) && wbMap.data_lists.length > 0
+      ? wbMap.data_lists
+      : Array.isArray(wbMap.enum_lists) ? wbMap.enum_lists : []) as EnumEntry[];
+    const manualEnumValues = wbMap.manual_enum_values;
+    const manualMap = manualEnumValues && typeof manualEnumValues === 'object' ? manualEnumValues : {} as Record<string, string[]>;
+    const seenFields = new Set<string>();
+    const seededLists: DataListEntry[] = [];
+    for (const el of rawEnumLists) {
+      seenFields.add(el.field);
+      seededLists.push({
+        field: el.field,
+        normalize: el.normalize || 'lower_trim',
+        delimiter: el.delimiter || '',
+        manual_values: Array.isArray(el.values) ? el.values : (Array.isArray(el.manual_values) ? el.manual_values : (Array.isArray(manualMap[el.field]) ? manualMap[el.field] : [])),
+        priority: hasExplicitPriority(el.priority)
+          ? normalizePriorityProfile(el.priority)
+          : deriveListPriority(el.field, rules),
+        ai_assist: normalizeAiAssistConfig(el.ai_assist),
+      });
+    }
+    for (const [field, values] of Object.entries(manualMap)) {
+      if (!seenFields.has(field) && Array.isArray(values) && values.length > 0) {
         seededLists.push({
-          field: el.field,
-          mode: 'workbook',
-          sheet: el.sheet || '',
-          value_column: el.value_column || '',
-          header_row: el.header_row || 0,
-          row_start: el.row_start || 2,
-          row_end: el.row_end || 0,
-          normalize: el.normalize || 'lower_trim',
-          delimiter: el.delimiter || '',
-          manual_values: Array.isArray(manualMap[el.field]) ? manualMap[el.field] : [],
-          priority: hasExplicitPriority(el.priority)
-            ? normalizePriorityProfile(el.priority)
-            : deriveListPriority(el.field, rules),
-          ai_assist: normalizeAiAssistConfig(el.ai_assist),
+          field,
+          normalize: 'lower_trim',
+          delimiter: '',
+          manual_values: values,
+          priority: { ...DEFAULT_PRIORITY_PROFILE },
+          ai_assist: normalizeAiAssistConfig(undefined),
         });
       }
-      for (const [field, values] of Object.entries(manualMap)) {
-        if (!seenFields.has(field) && Array.isArray(values) && values.length > 0) {
-          seededLists.push({
-            field,
-            mode: 'scratch',
-            sheet: '',
-            value_column: '',
-            header_row: 0,
-            row_start: 2,
-            row_end: 0,
-            normalize: 'lower_trim',
-            delimiter: '',
-            manual_values: values,
-            priority: { ...DEFAULT_PRIORITY_PROFILE },
-            ai_assist: normalizeAiAssistConfig(undefined),
-          });
-        }
-      }
-      setDataLists(seededLists);
     }
+    setDataLists(seededLists);
     setSeededVersion(mapVersion);
   }, [wbMap, mapVersion, seededVersion, rules]);
 
-  // Combine sheet names: from introspection + from existing map
-  const allSheetNames = useMemo(() => {
-    const set = new Set<string>(sheetNames);
-    if (keySheet) set.add(keySheet);
-    if (prodSheet) set.add(prodSheet);
-    for (const cs of compSources) {
-      if (cs.sheet) set.add(cs.sheet);
-    }
-    return [...set].sort();
-  }, [sheetNames, keySheet, prodSheet, compSources]);
-
-  // ── Assemble workbook map for saving ──────────────────────────
-  const assembleMap = useCallback((): WorkbookMap => {
-    const scratchKeyRowStart = 7;
-    const scratchKeyRowEnd = fieldOrder.length > 0 ? 6 + fieldOrder.length : 0;
+  const assembleMap = useCallback((): StudioConfig => {
     return {
       ...wbMap,
-      workbook_path: workbookPath,
-      key_list: {
-        ...(wbMap.key_list || {}),
-        sheet: keySheet,
-        column: isScratch ? 'A' : keyColumn,
-        row_start: isScratch ? scratchKeyRowStart : keyRowStart,
-        row_end: isScratch ? scratchKeyRowEnd : keyRowEnd,
-        source: 'column_range',
-      },
-      product_table: {
-        ...(wbMap.product_table || {}),
-        sheet: prodSheet,
-        layout: isScratch ? 'matrix' : prodLayout,
-        value_col_start: isScratch ? 'B' : valueColStart,
-        value_col_end: isScratch ? undefined : (valueColEnd || undefined),
-        id_row: isScratch ? 2 : idRow,
-        identifier_row: isScratch ? 3 : identifierRow,
-        brand_row: isScratch ? 4 : brandRow,
-        model_row: isScratch ? 5 : modelRow,
-        variant_row: isScratch ? 6 : variantRow,
-        key_column: isScratch ? 'A' : keyColumn,
-      },
       tooltip_source: {
         path: tooltipPath,
       },
@@ -967,33 +749,15 @@ function MappingStudioTab({
         priority: normalizePriorityProfile(src.priority),
         ai_assist: normalizeAiAssistConfig(src.ai_assist),
       })),
-      component_sheets: [],
-      data_lists: dataLists.map((dl) => ({
-        ...dl,
+      enum_lists: dataLists.map(dl => ({
+        field: dl.field,
+        normalize: dl.normalize,
+        values: dl.manual_values,
         priority: normalizePriorityProfile(dl.priority),
         ai_assist: normalizeAiAssistConfig(dl.ai_assist),
       })),
-      enum_lists: dataLists
-        .filter(dl => dl.mode === 'workbook' && dl.field && dl.sheet && dl.value_column)
-        .map(dl => ({
-          field: dl.field,
-          sheet: dl.sheet,
-          value_column: dl.value_column,
-          header_row: dl.header_row,
-          row_start: dl.row_start,
-          row_end: dl.row_end,
-          normalize: dl.normalize,
-          delimiter: dl.delimiter,
-          priority: normalizePriorityProfile(dl.priority),
-          ai_assist: normalizeAiAssistConfig(dl.ai_assist),
-        })),
-      manual_enum_values: Object.fromEntries(
-        dataLists
-          .filter(dl => dl.field && dl.manual_values.length > 0)
-          .map(dl => [dl.field, dl.manual_values])
-      ),
     };
-  }, [wbMap, workbookPath, keySheet, keyColumn, keyRowStart, keyRowEnd, prodSheet, prodLayout, valueColStart, valueColEnd, idRow, identifierRow, brandRow, modelRow, variantRow, tooltipPath, compSources, dataLists, isScratch, fieldOrder]);
+  }, [wbMap, tooltipPath, compSources, dataLists]);
 
   function handleSave() {
     onSaveMap(assembleMap());
@@ -1001,8 +765,7 @@ function MappingStudioTab({
 
   // ── Component source handlers ─────────────────────────────────
   function addComponentSource() {
-    const isScratch = sheets.length === 0;
-    setCompSources((prev) => [...prev, isScratch ? emptyComponentSourceForScratch() : emptyComponentSource()]);
+    setCompSources((prev) => [...prev, emptyComponentSource()]);
   }
 
   function removeComponentSource(idx: number) {
@@ -1019,12 +782,6 @@ function MappingStudioTab({
   function addDataList() {
     setDataLists((prev) => [...prev, {
       field: '',
-      mode: sheets.length > 0 ? 'workbook' : 'scratch',
-      sheet: '',
-      value_column: '',
-      header_row: 0,
-      row_start: 2,
-      row_end: 0,
       normalize: 'lower_trim',
       delimiter: '',
       manual_values: [],
@@ -1055,264 +812,8 @@ function MappingStudioTab({
   return (
     <div className="space-y-6">
       <p className="text-sm text-gray-500">
-        Configure workbook key source, product sampling, tooltip source, and component mappings. All changes are local until you click "Save Mapping".
+        Configure tooltip source, component mappings, and enum lists. All changes are local until you click "Save Mapping".
       </p>
-
-      {introspectError ? (
-        <div className="text-sm bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-300 p-3 rounded border border-yellow-200 dark:border-yellow-700">
-          Workbook introspection: {introspectError}
-        </div>
-      ) : null}
-
-      {/* Workbook path */}
-      <div className={sectionCls}>
-        <h3 className="text-sm font-semibold mb-3">Workbook File<Tip text={STUDIO_TIPS.workbook_file} /></h3>
-        <div className="flex items-center gap-3">
-          <input
-            type="text"
-            value={workbookPath}
-            onChange={(e) => setWorkbookPath(e.target.value)}
-            className={`${inputCls} flex-1 font-mono text-xs`}
-            placeholder="helper_files/{category}/_source/workbook.xlsx"
-          />
-          {sheets.length > 0 ? (
-            <span className="text-xs text-green-600">{sheets.length} sheets detected</span>
-          ) : null}
-        </div>
-      </div>
-
-      {/* Key Source */}
-      <div className={sectionCls}>
-        <h3 className="text-sm font-semibold mb-3">
-          Key Source Configuration
-          {isScratch && <span className="ml-2 text-[10px] font-normal bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded">scratch</span>}
-        </h3>
-        {isScratch ? (
-          <div className="grid grid-cols-4 gap-3">
-            {/* Unified sheet name (shared with product sampling) */}
-            <div className="col-span-2">
-              <div className={labelCls}>Sheet Name</div>
-              <ComboSelect
-                value={keySheet}
-                onChange={(v: string) => { setKeySheet(v); setProdSheet(v); }}
-                options={allSheetNames}
-                placeholder="e.g. dataEntry"
-              />
-              <div className="text-[10px] text-gray-400 mt-0.5">Keys and products share the same sheet</div>
-            </div>
-            {/* Key Column — locked to A */}
-            <div>
-              <div className={labelCls}>Key Column</div>
-              <div className={`${inputCls} w-full bg-gray-100 dark:bg-gray-700 cursor-not-allowed`}>
-                A <span className="text-[10px] text-gray-400">(locked)</span>
-              </div>
-            </div>
-            {/* First Key Row — auto-computed */}
-            <div>
-              <div className={labelCls}>First Key Row</div>
-              <div className={`${inputCls} w-full bg-gray-100 dark:bg-gray-700 cursor-not-allowed`}>
-                7 <span className="text-[10px] text-gray-400">(after metadata)</span>
-              </div>
-            </div>
-            {/* Last Key Row — auto-computed */}
-            <div className="col-span-2">
-              <div className={labelCls}>Last Key Row</div>
-              <div className={`${inputCls} w-full bg-gray-100 dark:bg-gray-700 cursor-not-allowed`}>
-                {fieldOrder.length > 0 ? 6 + fieldOrder.length : '(auto)'}
-                <span className="text-[10px] text-gray-400 ml-1">{fieldOrder.length} keys</span>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="grid grid-cols-4 gap-3">
-            <div>
-              <div className={labelCls}>Key Sheet<Tip text={STUDIO_TIPS.key_sheet} /></div>
-              <select
-                className={`${selectCls} w-full`}
-                value={keySheet}
-                onChange={(e) => setKeySheet(e.target.value)}
-              >
-                <option value="">(not set)</option>
-                {allSheetNames.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-            <div>
-              <div className={labelCls}>Key Column<Tip text={STUDIO_TIPS.key_column} /></div>
-              <ColumnPicker value={keyColumn} onChange={setKeyColumn} />
-            </div>
-            <div>
-              <div className={labelCls}>First Key Row<Tip text={STUDIO_TIPS.first_key_row} /></div>
-              <input
-                className={`${inputCls} w-full`}
-                type="number"
-                min={1}
-                value={keyRowStart}
-                onChange={(e) => setKeyRowStart(parseInt(e.target.value, 10) || 1)}
-              />
-            </div>
-            <div>
-              <div className={labelCls}>Last Key Row<Tip text={STUDIO_TIPS.last_key_row} /></div>
-              <input
-                className={`${inputCls} w-full`}
-                type="number"
-                min={0}
-                value={keyRowEnd}
-                onChange={(e) => setKeyRowEnd(parseInt(e.target.value, 10) || 0)}
-                title="0 = auto-detect until blank"
-              />
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Product Table */}
-      <div className={sectionCls}>
-        <h3 className="text-sm font-semibold mb-3">
-          Product Sampling Configuration
-          {isScratch && <span className="ml-2 text-[10px] font-normal bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded">scratch</span>}
-        </h3>
-        {isScratch ? (
-          <div className="grid grid-cols-2 gap-4">
-            {/* Locked field summary */}
-            <div className="space-y-2">
-              <div>
-                <div className={labelCls}>Layout</div>
-                <div className={`${inputCls} w-full bg-gray-100 dark:bg-gray-700 cursor-not-allowed`}>
-                  matrix <span className="text-[10px] text-gray-400">(locked)</span>
-                </div>
-              </div>
-              <div>
-                <div className={labelCls}>Key Column</div>
-                <div className={`${inputCls} w-full bg-gray-100 dark:bg-gray-700 cursor-not-allowed`}>
-                  A <span className="text-[10px] text-gray-400">(matches key source)</span>
-                </div>
-              </div>
-              <div>
-                <div className={labelCls}>Value Start Column</div>
-                <div className={`${inputCls} w-full bg-gray-100 dark:bg-gray-700 cursor-not-allowed`}>
-                  B <span className="text-[10px] text-gray-400">(locked)</span>
-                </div>
-              </div>
-              <div>
-                <div className={labelCls}>Value End Column</div>
-                <div className={`${inputCls} w-full bg-gray-100 dark:bg-gray-700 cursor-not-allowed`}>
-                  (auto-detect) <span className="text-[10px] text-gray-400">(locked)</span>
-                </div>
-              </div>
-            </div>
-            {/* Visual metadata row map */}
-            <div className="bg-gray-50 dark:bg-gray-900/30 rounded p-3 text-xs font-mono space-y-0.5">
-              <div className="text-gray-400 mb-1 font-sans font-medium">Sheet Row Layout</div>
-              <div>Row 1: <span className="text-gray-600 dark:text-gray-300">Header</span></div>
-              <div>Row 2: <span className="text-blue-600 dark:text-blue-400">ID#</span></div>
-              <div>Row 3: <span className="text-blue-600 dark:text-blue-400">Identifier</span></div>
-              <div>Row 4: <span className="text-green-600 dark:text-green-400">Brand</span></div>
-              <div>Row 5: <span className="text-green-600 dark:text-green-400">Model</span></div>
-              <div>Row 6: <span className="text-green-600 dark:text-green-400">Variant</span></div>
-              <div>Row 7+: <span className="text-purple-600 dark:text-purple-400">Field Keys ({fieldOrder.length})</span></div>
-            </div>
-          </div>
-        ) : (
-          <>
-            <div className="grid grid-cols-4 gap-3">
-              <div>
-                <div className={labelCls}>Sampling Sheet<Tip text={STUDIO_TIPS.sampling_sheet} /></div>
-                <select
-                  className={`${selectCls} w-full`}
-                  value={prodSheet}
-                  onChange={(e) => setProdSheet(e.target.value)}
-                >
-                  <option value="">(not set)</option>
-                  {allSheetNames.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
-              <div>
-                <div className={labelCls}>Layout<Tip text={STUDIO_TIPS.layout} /></div>
-                <select
-                  className={`${selectCls} w-full`}
-                  value={prodLayout}
-                  onChange={(e) => setProdLayout(e.target.value)}
-                >
-                  <option value="matrix">Matrix</option>
-                  <option value="row_table">Row Table</option>
-                  <option value="none">None</option>
-                </select>
-              </div>
-              <div>
-                <div className={labelCls}>Value Start Column<Tip text={STUDIO_TIPS.value_start_column} /></div>
-                <ColumnPicker value={valueColStart} onChange={setValueColStart} />
-              </div>
-              <div>
-                <div className={labelCls}>Brand Row<Tip text={STUDIO_TIPS.brand_row} /></div>
-                <input
-                  className={`${inputCls} w-full`}
-                  type="number"
-                  min={1}
-                  value={brandRow}
-                  onChange={(e) => setBrandRow(parseInt(e.target.value, 10) || 1)}
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-4 gap-3 mt-3">
-              <div>
-                <div className={labelCls}>Model Row<Tip text={STUDIO_TIPS.model_row} /></div>
-                <input
-                  className={`${inputCls} w-full`}
-                  type="number"
-                  min={1}
-                  value={modelRow}
-                  onChange={(e) => setModelRow(parseInt(e.target.value, 10) || 1)}
-                />
-              </div>
-              <div>
-                <div className={labelCls}>Variant Row<Tip text={STUDIO_TIPS.variant_row} /></div>
-                <input
-                  className={`${inputCls} w-full`}
-                  type="number"
-                  min={0}
-                  value={variantRow}
-                  onChange={(e) => setVariantRow(parseInt(e.target.value, 10) || 0)}
-                  title="0 = no variant row"
-                />
-              </div>
-              <div>
-                <div className={labelCls}>Value End Column<Tip text={STUDIO_TIPS.value_end_column} /></div>
-                <ColumnPicker value={valueColEnd} onChange={setValueColEnd} />
-              </div>
-              <div className="flex items-end">
-                <span className="text-xs text-gray-400">Leave end column empty for auto-detect to last populated column.</span>
-              </div>
-            </div>
-            <div className="grid grid-cols-4 gap-3 mt-3">
-              <div>
-                <div className={labelCls}>ID# Row</div>
-                <input
-                  className={`${inputCls} w-full`}
-                  type="number"
-                  min={0}
-                  value={idRow}
-                  onChange={(e) => setIdRow(parseInt(e.target.value, 10) || 0)}
-                  title="0 = not present"
-                />
-              </div>
-              <div>
-                <div className={labelCls}>Identifier Row</div>
-                <input
-                  className={`${inputCls} w-full`}
-                  type="number"
-                  min={0}
-                  value={identifierRow}
-                  onChange={(e) => setIdentifierRow(parseInt(e.target.value, 10) || 0)}
-                  title="0 = not present"
-                />
-              </div>
-              <div className="col-span-2 flex items-end">
-                <span className="text-xs text-gray-400">Set to 0 if the workbook does not have ID/Identifier rows.</span>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
 
       {/* Tooltip Bank */}
       <div className={sectionCls}>
@@ -1372,12 +873,11 @@ function MappingStudioTab({
                 key={idx}
                 index={idx}
                 source={src}
-                sheetNames={allSheetNames}
-                sheets={sheets}
                 onUpdate={(updates) => updateComponentSource(idx, updates)}
                 onRemove={() => removeComponentSource(idx)}
                 rules={rules}
                 fieldOrder={fieldOrder}
+                knownValues={knownValues}
               />
             ))}
           </div>
@@ -1388,17 +888,17 @@ function MappingStudioTab({
         )}
       </div>
 
-      {/* Data Lists (Enum Value Lists) */}
+      {/* Enum Value Lists */}
       <div className={sectionCls}>
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h3 className="text-sm font-semibold">Data Lists</h3>
+            <h3 className="text-sm font-semibold">Enums</h3>
             <p className="text-xs text-gray-500 mt-1">
-              Define allowed values for enum fields. Import from workbook columns or create from scratch.
+              Define allowed values for enum fields.
             </p>
           </div>
           <button onClick={addDataList} className={btnSecondary}>
-            + Add List
+            + Add Enum
           </button>
         </div>
 
@@ -1409,9 +909,6 @@ function MappingStudioTab({
                 key={idx}
                 entry={dl}
                 index={idx}
-                sheetNames={allSheetNames}
-                sheets={sheets}
-                knownValues={knownValues}
                 isDuplicate={duplicateDataListFields.has(dl.field)}
                 onUpdate={(updates) => updateDataList(idx, updates)}
                 onRemove={() => removeDataList(idx)}
@@ -1420,7 +917,7 @@ function MappingStudioTab({
           </div>
         ) : (
           <div className="text-sm text-gray-400 text-center py-4">
-            No data lists configured. Click "+ Add List" to define enum value lists.
+            No enums configured. Click "+ Add Enum" to define enum value lists.
           </div>
         )}
       </div>
@@ -1434,26 +931,41 @@ function MappingStudioTab({
         >
           {saving ? 'Saving...' : 'Save Mapping'}
         </button>
-        {saveSuccess ? <span className="text-sm text-green-600">Mapping saved to _control_plane/workbook_map.json</span> : null}
+        {saveSuccess ? <span className="text-sm text-green-600">Mapping saved</span> : null}
       </div>
 
-      {/* Sheet Introspection Preview */}
-      {sheets.length > 0 ? (
-        <div className={sectionCls}>
-          <h3 className="text-sm font-semibold mb-3">Detected Sheets</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {sheets.map((sheet) => (
-              <SheetCard key={sheet.name} sheet={sheet} />
-            ))}
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
 
 // ── Constraint Editor ────────────────────────────────────────────────
-const CONSTRAINT_OPS = ['<=', '>=', '<', '>', '==', '!='] as const;
+const CONSTRAINT_OPS = ['<=', '>=', '<', '>', '==', '!=', 'requires'] as const;
+
+type FieldTypeGroup = 'numeric' | 'date' | 'boolean' | 'string';
+
+function deriveTypeGroup(rule: Record<string, unknown>): FieldTypeGroup {
+  const contract = (rule.contract || {}) as Record<string, unknown>;
+  const parse = (rule.parse || {}) as Record<string, unknown>;
+  const ct = String(contract.type || '').trim().toLowerCase();
+  const pt = String(parse.template || '').trim().toLowerCase();
+  if (ct === 'integer' || ct === 'number') return 'numeric';
+  if (pt === 'date_field') return 'date';
+  if (pt === 'boolean_yes_no_unk') return 'boolean';
+  return 'string';
+}
+
+const TYPE_GROUP_OPS: Record<FieldTypeGroup, Set<string>> = {
+  numeric: new Set(['<=', '>=', '<', '>', '==', '!=', 'requires']),
+  date: new Set(['<=', '>=', '<', '>', '==', '!=', 'requires']),
+  boolean: new Set(['==', '!=', 'requires']),
+  string: new Set(['==', '!=', 'requires']),
+};
+
+function areTypesCompatible(a: FieldTypeGroup, b: FieldTypeGroup): boolean {
+  if (a === b) return true;
+  if (a === 'numeric' && b === 'numeric') return true;
+  return false;
+}
 
 function ConstraintEditor({
   constraints,
@@ -1490,18 +1002,14 @@ function ConstraintEditor({
   // Left side: component property keys from this source
   const componentOptions = useMemo(() => {
     return componentPropertyKeys.map((key) => {
-      const rule = rules[key] || {};
-      const ui = rule.ui || {};
-      return { value: key, label: String(ui.label || rule.label || key) };
+      return { value: key, label: displayLabel(key, rules[key] as Record<string, unknown>) };
     });
   }, [componentPropertyKeys, rules]);
 
   // Right side: product field keys
   const productOptions = useMemo(() => {
-    return fieldOrder.map((key) => {
-      const rule = rules[key] || {};
-      const ui = rule.ui || {};
-      return { value: key, label: String(ui.label || rule.label || key) };
+    return fieldOrder.filter((k) => !k.startsWith('__grp::')).map((key) => {
+      return { value: key, label: displayLabel(key, rules[key] as Record<string, unknown>) };
     });
   }, [fieldOrder, rules]);
 
@@ -1509,6 +1017,9 @@ function ConstraintEditor({
     <div className="px-3 py-1.5 border-t border-gray-200 dark:border-gray-700 text-[11px]">
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-gray-500">Constraints<Tip text={STUDIO_TIPS.comp_constraints} /></span>
+        {constraints.length > 0 ? (
+          <span className="text-[9px] bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded font-medium">Migrate to Key Navigator</span>
+        ) : null}
         {constraints.map((c, ci) => (
           <span key={ci} className="inline-flex items-center gap-1 bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 px-1.5 py-0.5 rounded text-[10px]">
             {c}
@@ -1572,64 +1083,364 @@ function ConstraintEditor({
   );
 }
 
-// ── Editable Data List ───────────────────────────────────────────────
+// ── Range constraint pill grouping ─────────────────────────────────────
+const RANGE_LOWER_OPS = new Set(['>=', '>']);
+const RANGE_UPPER_OPS = new Set(['<=', '<']);
+
+interface RangePair { lowerIdx: number; upperIdx: number; lower: string; upper: string; display: string }
+
+function groupRangeConstraints(constraints: string[], currentKey: string): { ranges: RangePair[]; singles: Array<{ idx: number; expr: string }> } {
+  const parsed = constraints.map((expr, idx) => {
+    const m = expr.match(/^(\S+)\s+(<=?|>=?|==|!=|requires)\s+(.+)$/);
+    if (!m || m[1] !== currentKey) return { idx, expr, field: '', op: '', value: '' };
+    return { idx, expr, field: m[1], op: m[2], value: m[3].trim() };
+  });
+
+  const lowers = parsed.filter((p) => p.field === currentKey && RANGE_LOWER_OPS.has(p.op));
+  const uppers = parsed.filter((p) => p.field === currentKey && RANGE_UPPER_OPS.has(p.op));
+  const pairedLower = new Set<number>();
+  const pairedUpper = new Set<number>();
+  const ranges: RangePair[] = [];
+
+  for (const lo of lowers) {
+    for (const up of uppers) {
+      if (pairedUpper.has(up.idx)) continue;
+      const loNum = Number(lo.value);
+      const upNum = Number(up.value);
+      if (!isNaN(loNum) && !isNaN(upNum) && loNum < upNum) {
+        ranges.push({
+          lowerIdx: lo.idx,
+          upperIdx: up.idx,
+          lower: lo.expr,
+          upper: up.expr,
+          display: `${lo.value} ${lo.op === '>=' ? '\u2264' : '<'} ${currentKey} ${up.op === '<=' ? '\u2264' : '<'} ${up.value}`,
+        });
+        pairedLower.add(lo.idx);
+        pairedUpper.add(up.idx);
+        break;
+      }
+    }
+  }
+
+  const allPaired = new Set([...pairedLower, ...pairedUpper]);
+  const singles = parsed.filter((p) => !allPaired.has(p.idx)).map((p) => ({ idx: p.idx, expr: p.expr }));
+  return { ranges, singles };
+}
+
+// ── Key Constraint Editor (Key Navigator) ─────────────────────────────
+function KeyConstraintEditor({
+  currentKey,
+  constraints,
+  onChange,
+  fieldOrder,
+  rules,
+}: {
+  currentKey: string;
+  constraints: string[];
+  onChange: (next: string[]) => void;
+  fieldOrder: string[];
+  rules: Record<string, Record<string, unknown>>;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [op, setOp] = useState<string>('<=');
+  const [rightMode, setRightMode] = useState<'field' | 'value' | 'range'>('field');
+  const [rightField, setRightField] = useState('');
+  const [rightLiteral, setRightLiteral] = useState('');
+  const [rangeMin, setRangeMin] = useState('');
+  const [rangeMax, setRangeMax] = useState('');
+  const [rangeLowerOp, setRangeLowerOp] = useState<string>('<=');
+  const [rangeUpperOp, setRangeUpperOp] = useState<string>('<=');
+
+  const currentRule = rules[currentKey] || {};
+  const currentTypeGroup = deriveTypeGroup(currentRule);
+  const allowedOps = TYPE_GROUP_OPS[currentTypeGroup];
+  const supportsRange = currentTypeGroup === 'numeric' || currentTypeGroup === 'date';
+
+  function resetState() {
+    setOp('<=');
+    setRightField('');
+    setRightLiteral('');
+    setRightMode('field');
+    setRangeMin('');
+    setRangeMax('');
+    setRangeLowerOp('<=');
+    setRangeUpperOp('<=');
+    setAdding(false);
+  }
+
+  function addConstraint() {
+    if (rightMode === 'range') {
+      const exprs: string[] = [];
+      const min = rangeMin.trim();
+      const max = rangeMax.trim();
+      if (min) {
+        const lowerOp = rangeLowerOp === '<=' ? '>=' : '>';
+        exprs.push(`${currentKey} ${lowerOp} ${min}`);
+      }
+      if (max) {
+        exprs.push(`${currentKey} ${rangeUpperOp} ${max}`);
+      }
+      if (exprs.length === 0) return;
+      onChange([...constraints, ...exprs]);
+      resetState();
+      return;
+    }
+    const rightValue = rightMode === 'field' ? rightField : rightLiteral.trim();
+    if (!rightValue) return;
+    const expr = `${currentKey} ${op} ${rightValue}`;
+    onChange([...constraints, expr]);
+    resetState();
+  }
+
+  function removeConstraint(idx: number) {
+    onChange(constraints.filter((_, i) => i !== idx));
+  }
+
+  function removeRangePair(lowerIdx: number, upperIdx: number) {
+    onChange(constraints.filter((_, i) => i !== lowerIdx && i !== upperIdx));
+  }
+
+  const { compatible, incompatible } = useMemo(() => {
+    const comp: Array<{ value: string; label: string }> = [];
+    const incompat: Array<{ value: string; label: string }> = [];
+    for (const key of fieldOrder) {
+      if (key.startsWith('__grp::') || key === currentKey) continue;
+      const rule = rules[key] || {};
+      const targetGroup = deriveTypeGroup(rule);
+      const entry = { value: key, label: key };
+      if (op === 'requires' || areTypesCompatible(currentTypeGroup, targetGroup)) {
+        comp.push(entry);
+      } else {
+        incompat.push(entry);
+      }
+    }
+    return { compatible: comp, incompatible: incompat };
+  }, [fieldOrder, currentKey, rules, currentTypeGroup, op]);
+
+  const { ranges, singles } = useMemo(
+    () => groupRangeConstraints(constraints, currentKey),
+    [constraints, currentKey]
+  );
+
+  const literalPlaceholder = currentTypeGroup === 'numeric' ? '100' :
+    currentTypeGroup === 'date' ? '2024-01-15' :
+    currentTypeGroup === 'boolean' ? 'yes' : "'wireless'";
+  const rangePlaceholder = currentTypeGroup === 'date' ? '2024-01-01' : '0';
+
+  const isRequires = op === 'requires';
+  const canAddField = rightMode === 'field' && rightField !== '';
+  const canAddLiteral = rightMode === 'value' && rightLiteral.trim() !== '';
+  const canAddRange = rightMode === 'range' && (rangeMin.trim() !== '' || rangeMax.trim() !== '');
+  const canAdd = isRequires ? rightField !== '' : (canAddField || canAddLiteral || canAddRange);
+
+  const fieldBadgesFor = useCallback((key: string): Array<{ text: string; cls: string }> => {
+    const r = rules[key] || {};
+    const badges: Array<{ text: string; cls: string }> = [];
+    const tg = deriveTypeGroup(r);
+    badges.push({ text: tg, cls: 'bg-gray-100 dark:bg-gray-700 text-gray-500' });
+    const contract = (r.contract || {}) as Record<string, unknown>;
+    const unit = String(contract.unit || '').trim();
+    if (unit) badges.push({ text: unit, cls: 'bg-sky-100 dark:bg-sky-900/40 text-sky-600 dark:text-sky-300' });
+    const shape = String(contract.shape || '').trim();
+    if (shape && shape !== 'scalar') badges.push({ text: shape, cls: 'bg-teal-100 dark:bg-teal-900/40 text-teal-600 dark:text-teal-300' });
+    return badges;
+  }, [rules]);
+
+  const currentBadges = useMemo(() => fieldBadgesFor(currentKey), [fieldBadgesFor, currentKey]);
+  const rightBadges = useMemo(() => rightField ? fieldBadgesFor(rightField) : [], [fieldBadgesFor, rightField]);
+
+  const pillCls = 'inline-flex items-center gap-1 bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 px-1.5 py-0.5 rounded text-[10px]';
+  const removeBtnCls = 'text-orange-400 hover:text-orange-600 ml-0.5';
+  const modeBtnBase = 'px-1.5 py-0.5';
+  const modeBtnActive = 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 font-medium';
+  const modeBtnInactive = 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700';
+  const badgeCls = 'text-[9px] px-1 py-0 rounded';
+
+  return (
+    <div className="text-[11px]">
+      <div className="flex items-center gap-2 flex-wrap">
+        {ranges.map((rp) => (
+          <span key={`rp-${rp.lowerIdx}-${rp.upperIdx}`} className={`${pillCls} bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300`}>
+            {rp.display}
+            <button
+              onClick={() => removeRangePair(rp.lowerIdx, rp.upperIdx)}
+              className="text-purple-400 hover:text-purple-600 ml-0.5"
+              title="Remove range"
+            >&#10005;</button>
+          </span>
+        ))}
+        {singles.map((s) => (
+          <span key={s.idx} className={pillCls}>
+            {s.expr}
+            <button
+              onClick={() => removeConstraint(s.idx)}
+              className={removeBtnCls}
+              title="Remove constraint"
+            >&#10005;</button>
+          </span>
+        ))}
+        {!adding ? (
+          <button
+            onClick={() => setAdding(true)}
+            className="text-[10px] text-blue-500 hover:text-blue-700"
+          >+ Add constraint</button>
+        ) : null}
+      </div>
+      {adding ? (
+        <div className="mt-1.5 space-y-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="font-mono text-[10px] text-gray-500 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded">{currentKey}</span>
+            {currentBadges.map((b, i) => (
+              <span key={i} className={`${badgeCls} ${b.cls}`}>{b.text}</span>
+            ))}
+            {!isRequires ? (
+              <span className="inline-flex rounded border border-gray-300 dark:border-gray-600 overflow-hidden text-[9px]">
+                <button
+                  onClick={() => setRightMode('field')}
+                  className={`${modeBtnBase} ${rightMode === 'field' ? modeBtnActive : modeBtnInactive}`}
+                >Field</button>
+                <button
+                  onClick={() => setRightMode('value')}
+                  className={`${modeBtnBase} ${rightMode === 'value' ? modeBtnActive : modeBtnInactive}`}
+                >Value</button>
+                {supportsRange ? (
+                  <button
+                    onClick={() => setRightMode('range')}
+                    className={`${modeBtnBase} ${rightMode === 'range' ? modeBtnActive : modeBtnInactive}`}
+                  >Range</button>
+                ) : null}
+              </span>
+            ) : null}
+          </div>
+          {rightMode === 'range' ? (
+            <div className="flex items-center gap-1 flex-wrap">
+              <input
+                type="text"
+                className={`${inputCls} text-[11px] py-0.5 w-20`}
+                placeholder={rangePlaceholder}
+                value={rangeMin}
+                onChange={(e) => setRangeMin(e.target.value)}
+              />
+              <select
+                className={`${selectCls} text-[11px] py-0.5 w-10`}
+                value={rangeLowerOp}
+                onChange={(e) => setRangeLowerOp(e.target.value)}
+              >
+                <option value="<=">{'\u2264'}</option>
+                <option value="<">{'<'}</option>
+              </select>
+              <span className="font-mono text-[10px] text-gray-500 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded">{currentKey}</span>
+              <select
+                className={`${selectCls} text-[11px] py-0.5 w-10`}
+                value={rangeUpperOp}
+                onChange={(e) => setRangeUpperOp(e.target.value)}
+              >
+                <option value="<=">{'\u2264'}</option>
+                <option value="<">{'<'}</option>
+              </select>
+              <input
+                type="text"
+                className={`${inputCls} text-[11px] py-0.5 w-20`}
+                placeholder={currentTypeGroup === 'date' ? '2025-12-31' : '30000'}
+                value={rangeMax}
+                onChange={(e) => setRangeMax(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') addConstraint(); }}
+              />
+              <button
+                onClick={addConstraint}
+                disabled={!canAddRange}
+                className="text-[10px] text-green-600 hover:text-green-800 disabled:opacity-40 font-medium"
+              >Add</button>
+              <button
+                onClick={resetState}
+                className="text-[10px] text-gray-400 hover:text-gray-600"
+              >Cancel</button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <select
+                className={`${selectCls} text-[11px] py-0.5 w-[4.5rem]`}
+                value={op}
+                onChange={(e) => {
+                  setOp(e.target.value);
+                  if (e.target.value === 'requires') setRightMode('field');
+                }}
+              >
+                {CONSTRAINT_OPS.map((o) => (
+                  <option key={o} value={o} disabled={!allowedOps.has(o)}>{o}</option>
+                ))}
+              </select>
+              {(isRequires || rightMode === 'field') ? (
+                <select
+                  className={`${selectCls} text-[11px] py-0.5 min-w-0`}
+                  value={rightField}
+                  onChange={(e) => setRightField(e.target.value)}
+                >
+                  <option value="">Select field...</option>
+                  {compatible.length > 0 ? (
+                    <optgroup label="Compatible">
+                      {compatible.map((f) => (
+                        <option key={f.value} value={f.value}>{f.label}</option>
+                      ))}
+                    </optgroup>
+                  ) : null}
+                  {incompatible.length > 0 ? (
+                    <optgroup label="Incompatible type">
+                      {incompatible.map((f) => (
+                        <option key={f.value} value={f.value} disabled>{f.label}</option>
+                      ))}
+                    </optgroup>
+                  ) : null}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  className={`${inputCls} text-[11px] py-0.5 w-28`}
+                  placeholder={literalPlaceholder}
+                  value={rightLiteral}
+                  onChange={(e) => setRightLiteral(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') addConstraint(); }}
+                />
+              )}
+              {rightBadges.length > 0 ? (
+                rightBadges.map((b, i) => (
+                  <span key={i} className={`${badgeCls} ${b.cls}`}>{b.text}</span>
+                ))
+              ) : null}
+              <button
+                onClick={addConstraint}
+                disabled={!canAdd}
+                className="text-[10px] text-green-600 hover:text-green-800 disabled:opacity-40 font-medium"
+              >Add</button>
+              <button
+                onClick={resetState}
+                className="text-[10px] text-gray-400 hover:text-gray-600"
+              >Cancel</button>
+            </div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ── Editable Enum List ───────────────────────────────────────────────
 function EditableDataList({
   entry,
   index,
-  sheetNames,
-  sheets,
-  knownValues,
   isDuplicate,
   onUpdate,
   onRemove,
 }: {
   entry: DataListEntry;
   index: number;
-  sheetNames: string[];
-  sheets: SheetPreview[];
-  knownValues: Record<string, string[]>;
   isDuplicate: boolean;
   onUpdate: (updates: Partial<DataListEntry>) => void;
   onRemove: () => void;
 }) {
   const [expanded, setExpanded] = useState(!entry.field);
 
-  // Build header options for column picker in workbook mode
-  const headerOptions = useMemo(
-    () => buildHeaderOptions(sheets, entry.sheet, entry.header_row || 1),
-    [sheets, entry.sheet, entry.header_row],
-  );
-
-  // Preview values from sheet column
-  const previewValues = useMemo(() => {
-    if (entry.mode !== 'workbook' || !entry.sheet || !entry.value_column) return [];
-    const sheet = sheets.find(s => s.name === entry.sheet);
-    if (!sheet?.preview?.rows) return [];
-    const start = entry.row_start || 2;
-    const end = entry.row_end || 9999;
-    const vals: string[] = [];
-    for (const row of sheet.preview.rows) {
-      if (row.row < start || row.row > end) continue;
-      const cell = row.cells[entry.value_column];
-      if (cell != null && String(cell).trim()) {
-        if (entry.delimiter) {
-          for (const part of String(cell).split(entry.delimiter)) {
-            const t = part.trim();
-            if (t && !vals.includes(t)) vals.push(t);
-          }
-        } else {
-          const t = String(cell).trim();
-          if (!vals.includes(t)) vals.push(t);
-        }
-      }
-    }
-    return vals;
-  }, [sheets, entry.sheet, entry.value_column, entry.row_start, entry.row_end, entry.delimiter, entry.mode]);
-
-  const compiledValues = knownValues[entry.field] || [];
-  const valueCount = entry.mode === 'workbook'
-    ? compiledValues.length || previewValues.length
-    : entry.manual_values.length;
+  const valueCount = entry.manual_values.length;
   const listPriority = normalizePriorityProfile(entry.priority);
   const listAiAssist = normalizeAiAssistConfig(entry.ai_assist);
   function updatePriority(updates: Partial<PriorityProfile>) {
@@ -1644,9 +1455,6 @@ function EditableDataList({
     return (
       <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-750 rounded border border-gray-200 dark:border-gray-600">
         <span className="text-sm font-medium flex-1 min-w-0 truncate">{entry.field || <span className="italic text-gray-400">unnamed</span>}</span>
-        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${entry.mode === 'workbook' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300'}`}>
-          {entry.mode === 'workbook' ? 'Workbook' : 'Scratch'}
-        </span>
         {valueCount > 0 && <span className="text-xs text-gray-500">{valueCount} values</span>}
         {isDuplicate && <span className="text-xs text-red-500 font-medium">Duplicate!</span>}
         <button onClick={() => setExpanded(true)} className="text-xs text-accent hover:underline">expand</button>
@@ -1659,7 +1467,7 @@ function EditableDataList({
     <div className="border border-gray-200 dark:border-gray-600 rounded p-3 space-y-3 bg-gray-50 dark:bg-gray-750">
       {/* Header row */}
       <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-gray-500 uppercase">Data List #{index + 1}</span>
+        <span className="text-xs font-semibold text-gray-500 uppercase">Enum #{index + 1}</span>
         <div className="flex gap-2">
           <button onClick={() => setExpanded(false)} className="text-xs text-accent hover:underline">collapse</button>
           <button onClick={onRemove} className={btnDanger + ' text-xs !px-2 !py-0.5'}>Remove</button>
@@ -1672,7 +1480,7 @@ function EditableDataList({
         </div>
       )}
 
-      {/* Identity row: field name + mode toggle */}
+      {/* Identity row: field name + normalize */}
       <div className="grid grid-cols-[1fr_auto] gap-3 items-end">
         <div>
           <label className={labelCls}>
@@ -1687,137 +1495,17 @@ function EditableDataList({
         </div>
         <div>
           <label className={labelCls}>
-            Mode <Tip text={STUDIO_TIPS.data_list_mode} />
+            Normalize <Tip text={STUDIO_TIPS.data_list_normalize} />
           </label>
-          <div className="flex rounded overflow-hidden border border-gray-300 dark:border-gray-600">
-            <button
-              className={`px-3 py-1.5 text-xs font-medium ${entry.mode === 'workbook' ? 'bg-accent text-white' : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600'}`}
-              onClick={() => onUpdate({ mode: 'workbook' })}
-            >
-              Workbook
-            </button>
-            <button
-              className={`px-3 py-1.5 text-xs font-medium ${entry.mode === 'scratch' ? 'bg-accent text-white' : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600'}`}
-              onClick={() => onUpdate({ mode: 'scratch' })}
-            >
-              Scratch
-            </button>
-          </div>
+          <select
+            className={selectCls + ' w-full'}
+            value={entry.normalize}
+            onChange={(e) => onUpdate({ normalize: e.target.value })}
+          >
+            {NORMALIZE_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+          </select>
         </div>
       </div>
-
-      {/* Workbook mode panel */}
-      {entry.mode === 'workbook' && (
-        <div className="space-y-2 pl-2 border-l-2 border-blue-300 dark:border-blue-700">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-            <div>
-              <label className={labelCls}>Sheet <Tip text={STUDIO_TIPS.data_list_sheet} /></label>
-              <select
-                className={selectCls + ' w-full'}
-                value={entry.sheet}
-                onChange={(e) => onUpdate({ sheet: e.target.value })}
-              >
-                <option value="">Select sheet...</option>
-                {sheetNames.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className={labelCls}>Header Row</label>
-              <input
-                type="number"
-                className={inputCls + ' w-full'}
-                value={entry.header_row}
-                onChange={(e) => onUpdate({ header_row: parseInt(e.target.value) || 0 })}
-                min={0}
-              />
-            </div>
-            <div>
-              <label className={labelCls}>Column <Tip text={STUDIO_TIPS.data_list_column} /></label>
-              {headerOptions.length > 0 ? (
-                <select
-                  className={selectCls + ' w-full'}
-                  value={entry.value_column}
-                  onChange={(e) => onUpdate({ value_column: e.target.value })}
-                >
-                  <option value="">Select column...</option>
-                  {headerOptions.map(h => (
-                    <option key={h.col} value={h.col}>{h.col} &mdash; {h.header}</option>
-                  ))}
-                </select>
-              ) : (
-                <select
-                  className={selectCls + ' w-full'}
-                  value={entry.value_column}
-                  onChange={(e) => onUpdate({ value_column: e.target.value })}
-                >
-                  <option value="">Column...</option>
-                  {AZ_COLUMNS.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              )}
-            </div>
-            <div>
-              <label className={labelCls}>Normalize <Tip text={STUDIO_TIPS.data_list_normalize} /></label>
-              <select
-                className={selectCls + ' w-full'}
-                value={entry.normalize}
-                onChange={(e) => onUpdate({ normalize: e.target.value })}
-              >
-                {NORMALIZE_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-              </select>
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            <div>
-              <label className={labelCls}>Row Start</label>
-              <input
-                type="number"
-                className={inputCls + ' w-full'}
-                value={entry.row_start}
-                onChange={(e) => onUpdate({ row_start: parseInt(e.target.value) || 2 })}
-                min={1}
-              />
-            </div>
-            <div>
-              <label className={labelCls}>Row End <span className="text-gray-400">(0 = auto)</span></label>
-              <input
-                type="number"
-                className={inputCls + ' w-full'}
-                value={entry.row_end}
-                onChange={(e) => onUpdate({ row_end: parseInt(e.target.value) || 0 })}
-                min={0}
-              />
-            </div>
-            <div>
-              <label className={labelCls}>Delimiter <Tip text={STUDIO_TIPS.data_list_delimiter} /></label>
-              <input
-                className={inputCls + ' w-full'}
-                value={entry.delimiter}
-                onChange={(e) => onUpdate({ delimiter: e.target.value })}
-                placeholder="e.g. , or ;"
-              />
-            </div>
-          </div>
-          {/* Preview values from sheet */}
-          {previewValues.length > 0 && (
-            <div>
-              <label className={labelCls}>Sheet Preview ({previewValues.length} values)</label>
-              <div className="flex flex-wrap gap-1">
-                {previewValues.slice(0, 30).map(v => (
-                  <span key={v} className="text-[11px] px-1.5 py-0.5 bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 rounded">{v}</span>
-                ))}
-                {previewValues.length > 30 && <span className="text-[11px] text-gray-400">+{previewValues.length - 30} more</span>}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Scratch mode note */}
-      {entry.mode === 'scratch' && (
-        <p className="text-xs text-gray-500 italic pl-2 border-l-2 border-purple-300 dark:border-purple-700">
-          Define values manually without a workbook column.
-        </p>
-      )}
 
       {/* List review priority / effort */}
       <div className="border border-gray-200 dark:border-gray-600 rounded p-2.5 bg-white dark:bg-gray-800/40">
@@ -2014,14 +1702,11 @@ function EditableDataList({
         );
       })()}
 
-      {/* Manual values (shown in both modes) */}
+      {/* Manual values */}
       <div>
         <label className={labelCls}>
-          {entry.mode === 'workbook' ? 'Additional Values' : 'Values'} <Tip text={STUDIO_TIPS.data_list_manual_values} />
+          Values <Tip text={STUDIO_TIPS.data_list_manual_values} />
         </label>
-        {entry.mode === 'workbook' && (
-          <p className="text-[10px] text-gray-400 mb-1">Merged with workbook values during compile</p>
-        )}
         <TagPicker
           values={entry.manual_values}
           onChange={(v) => onUpdate({ manual_values: v })}
@@ -2029,29 +1714,6 @@ function EditableDataList({
         />
       </div>
 
-      {/* Compiled values display */}
-      {compiledValues.length > 0 && (
-        <div>
-          <label className={labelCls}>
-            Compiled Values ({compiledValues.length}) <Tip text={STUDIO_TIPS.data_list_compiled_values} />
-          </label>
-          <div className="flex flex-wrap gap-1">
-            {compiledValues.map(v => (
-              <span
-                key={v}
-                className={`text-[11px] px-1.5 py-0.5 rounded ${
-                  entry.manual_values.includes(v)
-                    ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300'
-                    : 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
-                }`}
-              >
-                {v}
-              </span>
-            ))}
-          </div>
-          <p className="text-[10px] text-gray-400 mt-1">Preview only — compile to refresh</p>
-        </div>
-      )}
     </div>
   );
 }
@@ -2060,30 +1722,27 @@ function EditableDataList({
 function EditableComponentSource({
   index,
   source,
-  sheetNames,
-  sheets,
   onUpdate,
   onRemove,
   rules,
   fieldOrder,
+  knownValues,
 }: {
   index: number;
   source: ComponentSource;
-  sheetNames: string[];
-  sheets: SheetPreview[];
   onUpdate: (updates: Partial<ComponentSource>) => void;
   onRemove: () => void;
   rules: Record<string, FieldRule>;
   fieldOrder: string[];
+  knownValues: Record<string, string[]>;
 }) {
-  const roles = source.roles || { primary_identifier: 'A', maker: '', aliases: [], links: [], properties: [] };
+  const roles = source.roles || { maker: '', aliases: [], links: [], properties: [] };
   const sourcePriority = normalizePriorityProfile(source.priority);
   const sourceAiAssist = normalizeAiAssistConfig(source.ai_assist);
   const [activeRoles, setActiveRoles] = useState<Set<RoleId>>(() => {
     const set = new Set<RoleId>();
     if (roles.maker) set.add('maker');
     if (Array.isArray(roles.aliases) && roles.aliases.length > 0) set.add('aliases');
-    if (source.auto_derive_aliases) set.add('aliases');
     if (Array.isArray(roles.links) && roles.links.length > 0) set.add('links');
     if (Array.isArray(roles.properties) && roles.properties.length > 0) set.add('properties');
     return set;
@@ -2093,44 +1752,14 @@ function EditableComponentSource({
     if (!Array.isArray(roles.properties)) return [];
     return (roles.properties as unknown as typeof roles.properties).map((p) => migrateProperty(p, rules));
   });
-
-  // Build header options from sheet preview data for this source's sheet
-  const headerOptions = useMemo(
-    () => buildHeaderOptions(sheets, source.sheet || '', source.header_row || 1),
-    [sheets, source.sheet, source.header_row],
-  );
-
-  // Build header→column lookup for quick auto-fill
-  const headerToCol = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const { col, header } of headerOptions) {
-      map.set(header.toLowerCase(), col);
-    }
-    return map;
-  }, [headerOptions]);
-
-  // Columns already used by primary/maker/aliases/links/properties
-  const usedColumns = useMemo(() => {
-    const set = new Set<string>();
-    if (roles.primary_identifier) set.add(roles.primary_identifier);
-    if (roles.maker) set.add(roles.maker);
-    for (const a of (Array.isArray(roles.aliases) ? roles.aliases : [])) set.add(a);
-    for (const l of (Array.isArray(roles.links) ? roles.links : [])) set.add(l);
-    return set;
-  }, [roles]);
-
-  // Available header options for property key selection (exclude already-used role columns)
-  const availablePropertyHeaders = useMemo(
-    () => headerOptions.filter(({ col }) => !usedColumns.has(col)),
-    [headerOptions, usedColumns],
-  );
+  const [pendingFieldKey, setPendingFieldKey] = useState('');
 
   // Group field keys by ui.group for the field key picker
   const fieldKeyGroups = useMemo(() => {
     const groups: Record<string, { key: string; label: string; type: string }[]> = {};
     const usedKeys = new Set(propertyRows.map((r) => r.field_key));
     for (const key of fieldOrder) {
-      if (usedKeys.has(key)) continue;
+      if (key.startsWith('__grp::') || usedKeys.has(key)) continue;
       const rule = rules[key] || {};
       const ui = rule.ui || {};
       const contract = rule.contract || {};
@@ -2138,41 +1767,38 @@ function EditableComponentSource({
       if (!groups[group]) groups[group] = [];
       groups[group].push({
         key,
-        label: String(ui.label || rule.label || key),
+        label: displayLabel(key, rule as Record<string, unknown>),
         type: String(contract.type || 'string'),
       });
     }
     return groups;
   }, [fieldOrder, rules, propertyRows]);
 
-  // Get preview values for a column from the sheet data
-  function getColumnPreview(col: string, maxValues = 5): string[] {
-    if (!col) return [];
-    const sheet = sheets.find((s) => s.name === source.sheet);
-    if (!sheet?.preview?.rows) return [];
-    const dataRows = sheet.preview.rows.filter((r) => r.row >= (source.first_data_row || 2));
-    const values: string[] = [];
-    for (const row of dataRows) {
-      const val = row.cells[col];
-      if (val != null && String(val).trim() !== '') {
-        values.push(String(val).trim());
-        if (values.length >= maxValues) break;
-      }
-    }
-    return values;
-  }
-
   // Get inherited info from field rules for a field key
-  function getInheritedInfo(fieldKey: string): { type: string; unit: string; template: string; evidenceRefs: number } {
+  function getInheritedInfo(fieldKey: string): { type: string; unit: string; template: string; evidenceRefs: number; constraints: string[]; enumPolicy: string; enumSource: string; isBool: boolean; fieldValues: string[] } {
     const rule = rules[fieldKey] || {};
     const contract = rule.contract || {};
     const parse = (rule as Record<string, unknown>).parse as Record<string, unknown> | undefined;
     const evidence = (rule as Record<string, unknown>).evidence as Record<string, unknown> | undefined;
+    const ruleAny = rule as Record<string, unknown>;
+    const constraints = Array.isArray(ruleAny.constraints) ? ruleAny.constraints.map(String) : [];
+    const contractAny = contract as Record<string, unknown>;
+    const enumObj = ruleAny.enum as Record<string, unknown> | undefined;
+    const enumPolicy = String(enumObj?.policy || contractAny.enum_policy || contractAny.list_policy || '');
+    const enumSource = String(enumObj?.source || contractAny.enum_source || contractAny.list_source || contractAny.data_list || '');
+    const contractType = String(contract.type || 'string');
+    const isBool = contractType === 'boolean';
+    const fieldValues = knownValues[fieldKey] || [];
     return {
-      type: String(contract.type || 'string'),
+      type: contractType,
       unit: String(contract.unit || ''),
       template: String(parse?.template || parse?.parse_template || ''),
       evidenceRefs: Number(evidence?.min_refs || evidence?.min_evidence_refs || 0),
+      constraints,
+      enumPolicy,
+      enumSource,
+      isBool,
+      fieldValues,
     };
   }
 
@@ -2185,49 +1811,6 @@ function EditableComponentSource({
   }
   function updateAiAssist(updates: Partial<AiAssistConfig>) {
     onUpdate({ ai_assist: { ...sourceAiAssist, ...updates } });
-  }
-
-  // Derive a header title from a field key: use UI label from rules, else humanize the key
-  function deriveHeader(fieldKey: string): string {
-    if (!fieldKey) return '';
-    const rule = rules[fieldKey];
-    if (rule?.ui?.label) return String(rule.ui.label);
-    if (rule?.label) return String(rule.label);
-    return fieldKey.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-  }
-
-  function toggleRole(roleId: RoleId) {
-    const next = new Set(activeRoles);
-    if (next.has(roleId)) {
-      next.delete(roleId);
-      if (roleId === 'maker') updateRoles({ maker: '' });
-      if (roleId === 'aliases') {
-        updateRoles({ aliases: [] });
-        onUpdate({ auto_derive_aliases: false });
-      }
-      if (roleId === 'links') updateRoles({ links: [] });
-      if (roleId === 'properties') {
-        updateRoles({ properties: [] });
-        setPropertyRows([]);
-      }
-    } else {
-      next.add(roleId);
-    }
-    setActiveRoles(next);
-  }
-
-  function addPropertyRow() {
-    const next: PropertyMapping[] = [...propertyRows, {
-      field_key: '',
-      column: buildMode === 'scratch' ? nextAvailableColumn() : '',
-      column_header: '',
-      mode: 'manual',
-      variance_policy: 'authoritative',
-      tolerance: null,
-      constraints: [],
-    }];
-    setPropertyRows(next);
-    updateRoles({ properties: next as unknown as typeof roles.properties });
   }
 
   function removePropertyRow(pidx: number) {
@@ -2244,37 +1827,16 @@ function EditableComponentSource({
     updateRoles({ properties: next as unknown as typeof roles.properties });
   }
 
-  // Select a field key → auto-match column
   function selectFieldKey(pidx: number, fieldKey: string) {
-    const rule = rules[fieldKey] || {};
-    const match = autoMatchColumn(fieldKey, rule, headerOptions);
-    const updates: Partial<PropertyMapping> = {
-      field_key: fieldKey,
-      mode: 'auto',
-    };
-    if (match) {
-      updates.column = match.col;
-      updates.column_header = match.header;
-    } else {
-      // No sheet match — derive header from the field key
-      updates.column_header = deriveHeader(fieldKey);
-    }
-    updatePropertyField(pidx, updates);
+    updatePropertyField(pidx, { field_key: fieldKey });
   }
 
-  // Add property from field key picker
   function addPropertyFromFieldKey(fieldKey: string) {
     if (propertyRows.some((r) => r.field_key === fieldKey)) return;
-    const rule = rules[fieldKey] || {};
-    const match = autoMatchColumn(fieldKey, rule, headerOptions);
     const newRow: PropertyMapping = {
       field_key: fieldKey,
-      column: match?.col || (buildMode === 'scratch' ? nextAvailableColumn() : ''),
-      column_header: match?.header || deriveHeader(fieldKey),
-      mode: 'auto',
       variance_policy: 'authoritative',
       tolerance: null,
-      constraints: [],
     };
     const next = [...propertyRows, newRow];
     setPropertyRows(next);
@@ -2282,104 +1844,25 @@ function EditableComponentSource({
   }
 
   const compType = source.component_type || source.type || '';
-  const hasHeaders = headerOptions.length > 0;
-  const buildMode: 'existing' | 'scratch' = hasHeaders ? 'existing' : 'scratch';
-
-  // All columns in use across roles + properties (for collision detection & auto-assign)
-  const allUsedColumns = useMemo(() => {
-    const set = new Set<string>();
-    if (roles.primary_identifier) set.add(roles.primary_identifier);
-    if (roles.maker) set.add(roles.maker);
-    for (const a of (Array.isArray(roles.aliases) ? roles.aliases : [])) set.add(a);
-    for (const l of (Array.isArray(roles.links) ? roles.links : [])) set.add(l);
-    for (const p of propertyRows) if (p.column) set.add(p.column);
-    return set;
-  }, [roles, propertyRows]);
-
-  function nextAvailableColumn(): string {
-    for (const col of AZ_COLUMNS) {
-      if (!allUsedColumns.has(col)) return col;
-    }
-    return '';
-  }
-
-  // Find header text for a column letter
-  const colHeader = (col: string) => {
-    const h = headerOptions.find((o) => o.col === col);
-    return h ? `${col} — ${h.header}` : col;
-  };
 
   return (
     <div className="border border-gray-200 dark:border-gray-700 rounded p-4 relative">
       <div className="flex items-center justify-between mb-3">
         <h4 className="text-sm font-semibold font-mono">
           {compType || `source_${index + 1}`}
-          {buildMode === 'scratch' ? (
-            <span className="ml-2 text-[10px] font-normal bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded">scratch</span>
-          ) : null}
         </h4>
         <button onClick={onRemove} className="text-xs text-red-500 hover:text-red-700">Remove</button>
       </div>
 
       {/* Basic fields */}
-      <div className="grid grid-cols-4 gap-3 mb-3">
-        <div>
-          <div className={labelCls}>Component Type<Tip text={STUDIO_TIPS.component_type} /></div>
-          <ComboSelect
-            value={compType}
-            onChange={(v) => onUpdate({ component_type: v, type: v })}
-            options={COMPONENT_TYPES}
-            placeholder="e.g. sensor"
-          />
-        </div>
-        <div>
-          <div className={labelCls}>Sheet<Tip text={STUDIO_TIPS.comp_sheet} /></div>
-          {buildMode === 'scratch' ? (
-            <ComboSelect
-              value={source.sheet || ''}
-              onChange={(v) => onUpdate({ sheet: v })}
-              options={sheetNames}
-              placeholder="Type sheet name, e.g. sensors"
-            />
-          ) : (
-            <select
-              className={`${selectCls} w-full`}
-              value={source.sheet || ''}
-              onChange={(e) => onUpdate({ sheet: e.target.value })}
-            >
-              <option value="">(select sheet)</option>
-              {sheetNames.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-          )}
-        </div>
-        <div>
-          <div className={labelCls}>Header Row<Tip text={STUDIO_TIPS.header_row} /></div>
-          {buildMode === 'scratch' ? (
-            <div className={`${inputCls} w-full bg-gray-100 dark:bg-gray-700 cursor-not-allowed`}>1 <span className="text-[10px] text-gray-400">(locked)</span></div>
-          ) : (
-            <input
-              className={`${inputCls} w-full`}
-              type="number"
-              min={1}
-              value={source.header_row || 1}
-              onChange={(e) => onUpdate({ header_row: parseInt(e.target.value, 10) || 1 })}
-            />
-          )}
-        </div>
-        <div>
-          <div className={labelCls}>First Data Row<Tip text={STUDIO_TIPS.first_data_row} /></div>
-          {buildMode === 'scratch' ? (
-            <div className={`${inputCls} w-full bg-gray-100 dark:bg-gray-700 cursor-not-allowed`}>2 <span className="text-[10px] text-gray-400">(locked)</span></div>
-          ) : (
-            <input
-              className={`${inputCls} w-full`}
-              type="number"
-              min={1}
-              value={source.first_data_row || 2}
-              onChange={(e) => onUpdate({ first_data_row: parseInt(e.target.value, 10) || 2 })}
-            />
-          )}
-        </div>
+      <div className="mb-3">
+        <div className={labelCls}>Component Type<Tip text={STUDIO_TIPS.component_type} /></div>
+        <ComboSelect
+          value={compType}
+          onChange={(v) => onUpdate({ component_type: v, type: v })}
+          options={COMPONENT_TYPES}
+          placeholder="e.g. sensor"
+        />
       </div>
 
       {/* Component-level full review priority/effort */}
@@ -2577,576 +2060,307 @@ function EditableComponentSource({
         );
       })()}
 
-      {buildMode === 'scratch' ? (
-        <>
-          <div className="grid grid-cols-4 gap-3 mb-4">
-            <div>
-              <div className={labelCls}>Primary Identifier Column<Tip text={STUDIO_TIPS.primary_identifier} /></div>
-              <ColumnPicker
-                value={roles.primary_identifier || 'A'}
-                onChange={(v) => updateRoles({ primary_identifier: v || 'A' })}
-              />
-              <span className="inline-block mt-1 px-1.5 py-0.5 text-[9px] font-medium text-gray-400 bg-gray-100 dark:bg-gray-800 rounded">Variance: Authoritative</span>
+      {/* Tracked Roles */}
+      <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
+        <div className="text-xs font-medium text-gray-500 mb-2">Tracked Roles</div>
+        <div className="flex flex-wrap gap-2 mb-2">
+          {([
+            { id: 'name' as const, label: 'Name', alwaysOn: true },
+            { id: 'maker' as const, label: 'Maker (Brand)', alwaysOn: false },
+            { id: 'aliases' as const, label: 'Aliases', alwaysOn: false },
+            { id: 'links' as const, label: 'Links (URLs)', alwaysOn: false },
+          ] as const).map((role) => {
+            const isOn = role.alwaysOn || (role.id === 'maker' ? activeRoles.has('maker') : role.id === 'aliases' ? activeRoles.has('aliases') : activeRoles.has('links'));
+            return (
+              <button
+                key={role.id}
+                disabled={role.alwaysOn}
+                className={`px-3 py-1.5 text-xs font-medium rounded border transition-colors ${
+                  isOn
+                    ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 border-green-400 dark:border-green-700'
+                    : 'bg-gray-100 dark:bg-gray-800 text-gray-500 border-gray-300 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-gray-700'
+                } ${role.alwaysOn ? 'cursor-default opacity-80' : ''}`}
+                onClick={() => {
+                  if (role.alwaysOn) return;
+                  const next = new Set(activeRoles);
+                  if (role.id === 'maker') {
+                    if (next.has('maker')) { next.delete('maker'); updateRoles({ maker: '' }); }
+                    else { next.add('maker'); updateRoles({ maker: 'yes' }); }
+                  } else if (role.id === 'aliases') {
+                    if (next.has('aliases')) { next.delete('aliases'); updateRoles({ aliases: [] }); }
+                    else { next.add('aliases'); }
+                  } else if (role.id === 'links') {
+                    if (next.has('links')) { next.delete('links'); updateRoles({ links: [] }); }
+                    else { next.add('links'); }
+                  }
+                  setActiveRoles(next);
+                }}
+              >
+                {role.label}
+              </button>
+            );
+          })}
+        </div>
+        <div className="text-[10px] text-gray-400 mb-3">
+          All tracked roles use <span className="font-semibold text-gray-500">Authoritative</span> variance policy
+        </div>
+
+        {/* Alias values — shown when aliases role is active */}
+        {activeRoles.has('aliases') ? (
+          <div className="mb-4 border border-gray-200 dark:border-gray-700 rounded p-3 bg-gray-50 dark:bg-gray-900/20">
+            <div className="flex items-center gap-2 mb-2">
+              <div className={labelCls}>Alias Values</div>
             </div>
-            <div className="col-span-3 flex items-end gap-2">
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={!!source.auto_derive_aliases}
-                  onChange={(e) => onUpdate({ auto_derive_aliases: e.target.checked })}
-                  className="rounded border-gray-300"
-                />
-                <span className="text-xs text-gray-500">Auto-derive aliases<Tip text={STUDIO_TIPS.auto_derive_aliases} /></span>
-              </label>
-            </div>
-          </div>
-          <details className="mt-3 mb-4 text-xs">
-            <summary className="cursor-pointer text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 select-none">
-              Advanced Settings
-            </summary>
-            <div className="grid grid-cols-4 gap-3 mt-2 p-2 bg-gray-50 dark:bg-gray-900/30 rounded">
-              <div>
-                <div className={labelCls}>Stop After Blank Primary<Tip text={STUDIO_TIPS.stop_after_blank_primary} /></div>
-                <input
-                  className={`${inputCls} w-full`}
-                  type="number"
-                  min={1}
-                  max={200}
-                  value={source.stop_after_blank_primary || 10}
-                  onChange={(e) => onUpdate({ stop_after_blank_primary: parseInt(e.target.value, 10) || 10 })}
-                />
-              </div>
-            </div>
-          </details>
-        </>
-      ) : (
-        <div className="grid grid-cols-4 gap-3 mb-4">
-          <div>
-            <div className={labelCls}>Stop After Blank Primary<Tip text={STUDIO_TIPS.stop_after_blank_primary} /></div>
-            <input
-              className={`${inputCls} w-full`}
-              type="number"
-              min={1}
-              max={200}
-              value={source.stop_after_blank_primary || 10}
-              onChange={(e) => onUpdate({ stop_after_blank_primary: parseInt(e.target.value, 10) || 10 })}
+            <TagPicker
+              values={Array.isArray(roles.aliases) ? roles.aliases.filter((a) => a.length > 1 || !/^[A-Z]$/.test(a)) : []}
+              onChange={(v) => updateRoles({ aliases: v })}
+              placeholder="Type an alias and press Enter..."
             />
           </div>
-          <div>
-            <div className={labelCls}>Primary Identifier Column<Tip text={STUDIO_TIPS.primary_identifier} /></div>
-            {hasHeaders ? (
-              <HeaderColumnSelect
-                value={roles.primary_identifier || 'A'}
-                onChange={(v) => updateRoles({ primary_identifier: v || 'A' })}
-                headerOptions={headerOptions}
-              />
-            ) : (
-              <ColumnPicker
-                value={roles.primary_identifier || 'A'}
-                onChange={(v) => updateRoles({ primary_identifier: v || 'A' })}
-              />
-            )}
-            <span className="inline-block mt-1 px-1.5 py-0.5 text-[9px] font-medium text-gray-400 bg-gray-100 dark:bg-gray-800 rounded">Variance: Authoritative</span>
-          </div>
-          <div className="col-span-2 flex items-end gap-2">
-            <label className="flex items-center gap-2 text-sm cursor-pointer">
-              <input
-                type="checkbox"
-                checked={!!source.auto_derive_aliases}
-                onChange={(e) => onUpdate({ auto_derive_aliases: e.target.checked })}
-                className="rounded border-gray-300"
-              />
-              <span className="text-xs text-gray-500">Auto-derive aliases<Tip text={STUDIO_TIPS.auto_derive_aliases} /></span>
-            </label>
-          </div>
-        </div>
-      )}
+        ) : null}
 
-      {/* Role Management */}
-      <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
-        {buildMode === 'scratch' ? (
-          <>
-            {/* Scratch mode: all roles visible in a grid, no toggles */}
-            <div className="text-xs font-medium text-gray-500 mb-2">Column Roles<Tip text={STUDIO_TIPS.scratch_mode} /></div>
-            <div className="grid grid-cols-4 gap-3 mb-3">
-              <div>
-                <div className={labelCls}>Name (Primary)*</div>
-                <ColumnPicker
-                  value={roles.primary_identifier || 'A'}
-                  onChange={(v) => updateRoles({ primary_identifier: v || 'A' })}
-                />
-                <div className="text-[10px] text-gray-400 mt-0.5">Header: &quot;Name&quot;</div>
-                <span className="inline-block mt-1 px-1.5 py-0.5 text-[9px] font-medium text-gray-400 bg-gray-100 dark:bg-gray-800 rounded">Variance: Authoritative</span>
-              </div>
-              <div>
-                <div className={labelCls}>Maker (Brand)</div>
-                <ColumnPicker
-                  value={roles.maker || ''}
-                  onChange={(v) => {
-                    updateRoles({ maker: v });
-                    const next = new Set(activeRoles);
-                    if (v) next.add('maker'); else next.delete('maker');
-                    setActiveRoles(next);
-                  }}
-                />
-                {roles.maker ? <div className="text-[10px] text-gray-400 mt-0.5">Header: &quot;Maker&quot;</div> : null}
-                <span className="inline-block mt-1 px-1.5 py-0.5 text-[9px] font-medium text-gray-400 bg-gray-100 dark:bg-gray-800 rounded">Variance: Authoritative</span>
-              </div>
-              <div>
-                <div className={labelCls}>Aliases</div>
-                <TagPicker
-                  values={Array.isArray(roles.aliases) ? roles.aliases : []}
-                  onChange={(v) => {
-                    updateRoles({ aliases: v });
-                    const next = new Set(activeRoles);
-                    if (v.length > 0) next.add('aliases'); else next.delete('aliases');
-                    setActiveRoles(next);
-                  }}
-                  suggestions={AZ_COLUMNS}
-                  placeholder="Add column..."
-                />
-              </div>
-              <div>
-                <div className={labelCls}>Links (URLs)</div>
-                <TagPicker
-                  values={Array.isArray(roles.links) ? roles.links : []}
-                  onChange={(v) => {
-                    updateRoles({ links: v });
-                    const next = new Set(activeRoles);
-                    if (v.length > 0) next.add('links'); else next.delete('links');
-                    setActiveRoles(next);
-                  }}
-                  suggestions={AZ_COLUMNS}
-                  placeholder="Add column..."
-                />
-                <span className="inline-block mt-1 px-1.5 py-0.5 text-[9px] font-medium text-gray-400 bg-gray-100 dark:bg-gray-800 rounded">Variance: Authoritative</span>
-              </div>
-            </div>
-          </>
-        ) : (
-          <>
-            {/* Existing mode: toggle-based roles */}
-            <div className="flex items-center gap-3 mb-3">
-              <span className="text-xs font-medium text-gray-500">Optional Roles:</span>
-              {ROLE_DEFS.map((rd) => (
-                <button
-                  key={rd.id}
-                  onClick={() => toggleRole(rd.id)}
-                  className={`text-xs px-2 py-1 rounded border ${
-                    activeRoles.has(rd.id)
-                      ? 'bg-accent/10 border-accent text-accent'
-                      : 'border-gray-300 dark:border-gray-600 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700'
-                  }`}
+        {/* Attributes (Properties) */}
+        <div className="mt-3">
+          <div className="flex items-center justify-between mb-2">
+            <div className={labelCls}>Attributes ({propertyRows.length})<Tip text={STUDIO_TIPS.comp_field_key} /></div>
+            {fieldOrder.length > 0 ? (
+              <div className="flex items-center gap-2">
+                <select
+                  className={`${selectCls} text-xs min-w-[180px]`}
+                  value={pendingFieldKey}
+                  onChange={(e) => setPendingFieldKey(e.target.value)}
                 >
-                  {activeRoles.has(rd.id) ? '- ' : '+ '}{rd.label}
+                  <option value="">Select field key...</option>
+                  {Object.entries(fieldKeyGroups).flatMap(([, keys]) =>
+                    keys.map((k) => (
+                      <option key={k.key} value={k.key}>{k.label} ({k.type})</option>
+                    ))
+                  )}
+                </select>
+                <button
+                  className="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-40"
+                  disabled={!pendingFieldKey}
+                  onClick={() => {
+                    if (pendingFieldKey) {
+                      addPropertyFromFieldKey(pendingFieldKey);
+                      setPendingFieldKey('');
+                    }
+                  }}
+                >
+                  + Add
                 </button>
-              ))}
-            </div>
-
-            {/* Role column assignments */}
-            <div className="grid grid-cols-2 gap-3">
-              {activeRoles.has('maker') ? (
-                <div>
-                  <div className={labelCls}>Maker Column<Tip text={STUDIO_TIPS.maker_column} /></div>
-                  {hasHeaders ? (
-                    <HeaderColumnSelect
-                      value={roles.maker || ''}
-                      onChange={(v) => updateRoles({ maker: v })}
-                      headerOptions={headerOptions}
-                      allowEmpty
-                      placeholder="(none)"
-                    />
-                  ) : (
-                    <ColumnPicker
-                      value={roles.maker || ''}
-                      onChange={(v) => updateRoles({ maker: v })}
-                    />
-                  )}
-                  <span className="inline-block mt-1 px-1.5 py-0.5 text-[9px] font-medium text-gray-400 bg-gray-100 dark:bg-gray-800 rounded">Variance: Authoritative</span>
-                </div>
-              ) : null}
-              {activeRoles.has('aliases') ? (
-                <div>
-                  <div className={labelCls}>Aliases Columns<Tip text={STUDIO_TIPS.aliases_columns} /></div>
-                  {hasHeaders ? (
-                    <TagPicker
-                      values={Array.isArray(roles.aliases) ? roles.aliases : []}
-                      onChange={(v) => updateRoles({ aliases: v })}
-                      suggestions={headerOptions.map(({ col, header }) => `${col} — ${header}`)}
-                      placeholder="Add column..."
-                      normalize={(v) => v.split(' — ')[0] || v}
-                    />
-                  ) : (
-                    <TagPicker
-                      values={Array.isArray(roles.aliases) ? roles.aliases : []}
-                      onChange={(v) => updateRoles({ aliases: v })}
-                      suggestions={AZ_COLUMNS}
-                      placeholder="Add column..."
-                    />
-                  )}
-                </div>
-              ) : null}
-              {activeRoles.has('links') ? (
-                <div>
-                  <div className={labelCls}>Reference URL Columns<Tip text={STUDIO_TIPS.reference_url_columns} /></div>
-                  {hasHeaders ? (
-                    <TagPicker
-                      values={Array.isArray(roles.links) ? roles.links : []}
-                      onChange={(v) => updateRoles({ links: v })}
-                      suggestions={headerOptions.map(({ col, header }) => `${col} — ${header}`)}
-                      placeholder="Add column..."
-                      normalize={(v) => v.split(' — ')[0] || v}
-                    />
-                  ) : (
-                    <TagPicker
-                      values={Array.isArray(roles.links) ? roles.links : []}
-                      onChange={(v) => updateRoles({ links: v })}
-                      suggestions={AZ_COLUMNS}
-                      placeholder="Add column..."
-                    />
-                  )}
-                  <span className="inline-block mt-1 px-1.5 py-0.5 text-[9px] font-medium text-gray-400 bg-gray-100 dark:bg-gray-800 rounded">Variance: Authoritative</span>
-                </div>
-              ) : null}
-            </div>
-          </>
-        )}
-
-        {/* Properties (Redesigned) */}
-        {(buildMode === 'scratch' || activeRoles.has('properties')) ? (
-          <div className="mt-4">
-            <div className="flex items-center justify-between mb-2">
-              <div className={labelCls}>Attributes (Properties)<Tip text={STUDIO_TIPS.comp_field_key} /></div>
-              <div className="flex gap-2">
-                {/* Add from field keys */}
-                {fieldOrder.length > 0 ? (
-                  <select
-                    className={`${selectCls} text-xs`}
-                    value=""
-                    onChange={(e) => {
-                      if (!e.target.value) return;
-                      addPropertyFromFieldKey(e.target.value);
-                    }}
-                  >
-                    <option value="">+ Add from field keys...</option>
-                    {Object.entries(fieldKeyGroups).sort(([a], [b]) => a.localeCompare(b)).map(([group, keys]) => (
-                      <optgroup key={group} label={group}>
-                        {keys.map((k) => (
-                          <option key={k.key} value={k.key}>{k.label} ({k.type})</option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
-                ) : null}
-                <button onClick={addPropertyRow} className={btnSecondary}>+ Manual</button>
               </div>
-            </div>
-            {propertyRows.length > 0 ? (
-              <div className="space-y-3">
-                {propertyRows.map((prop, pidx) => {
-                  const inherited = prop.field_key ? getInheritedInfo(prop.field_key) : null;
-                  const preview = getColumnPreview(prop.column);
-                  const isAutoMatched = prop.mode === 'auto' && prop.column && prop.column_header;
-                  const isManual = prop.mode === 'manual';
-                  return (
-                    <div key={pidx} className="border border-gray-200 dark:border-gray-600 rounded overflow-hidden">
-                      {/* Top row: Field Key, Column, Variance, Remove */}
-                      <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 items-end p-3 pb-2">
-                        <div>
-                          <div className="text-[10px] text-gray-400 mb-0.5">
-                            {isManual ? 'Key (manual)' : 'Field Key'}<Tip text={STUDIO_TIPS.comp_field_key} />
-                            {!isManual && prop.field_key ? (
-                              <button
-                                onClick={() => updatePropertyField(pidx, { mode: 'manual' })}
-                                className="ml-2 text-[10px] text-blue-500 hover:text-blue-700"
-                              >Manual</button>
-                            ) : null}
-                            {isManual ? (
-                              <button
-                                onClick={() => {
-                                  if (prop.field_key && rules[prop.field_key]) {
-                                    updatePropertyField(pidx, { mode: 'auto' });
-                                  }
-                                }}
-                                className="ml-2 text-[10px] text-blue-500 hover:text-blue-700"
-                              >Auto</button>
-                            ) : null}
-                          </div>
-                          {isManual ? (
-                            <input
-                              className={`${inputCls} w-full`}
-                              value={prop.field_key}
-                              onChange={(e) => {
-                                const key = e.target.value;
-                                updatePropertyField(pidx, {
-                                  field_key: key,
-                                  column_header: deriveHeader(key),
-                                });
-                              }}
-                              placeholder="e.g. max_dpi"
-                            />
-                          ) : (
-                            <select
-                              className={`${selectCls} w-full`}
-                              value={prop.field_key}
-                              onChange={(e) => selectFieldKey(pidx, e.target.value)}
-                            >
-                              <option value="">(select field key)</option>
-                              {/* Include the currently selected key so the select shows its value */}
-                              {prop.field_key && rules[prop.field_key] ? (() => {
-                                const r = rules[prop.field_key];
-                                const ui = r.ui || {};
-                                const ct = r.contract || {};
-                                return <option key={prop.field_key} value={prop.field_key}>{String(ui.label || r.label || prop.field_key)} ({String(ct.type || 'string')}) &#10003;</option>;
-                              })() : prop.field_key ? (
-                                <option key={prop.field_key} value={prop.field_key}>{prop.field_key} &#10003;</option>
-                              ) : null}
-                              {Object.entries(fieldKeyGroups).sort(([a], [b]) => a.localeCompare(b)).map(([group, keys]) => (
-                                <optgroup key={group} label={group}>
-                                  {keys.map((k) => (
-                                    <option key={k.key} value={k.key}>{k.label} ({k.type})</option>
-                                  ))}
-                                </optgroup>
-                              ))}
-                            </select>
-                          )}
+            ) : null}
+          </div>
+          {propertyRows.length > 0 ? (
+            <div className="space-y-2">
+              {propertyRows.map((prop, pidx) => {
+                const inherited = prop.field_key ? getInheritedInfo(prop.field_key) : null;
+                const hasEnumSource = inherited ? !!inherited.enumSource : false;
+                const isComponentDbEnum = hasEnumSource && inherited!.enumSource.startsWith('component_db');
+                const isExternalEnum = hasEnumSource && !isComponentDbEnum;
+                const varianceLocked = inherited ? (inherited.type !== 'number' || inherited.isBool || hasEnumSource) : false;
+                const lockReason = inherited
+                  ? inherited.isBool
+                    ? 'Boolean field — variance locked to authoritative (yes/no only)'
+                    : isComponentDbEnum
+                      ? `enum.db (${inherited.enumSource.replace(/^component_db\./, '')}) — variance locked to authoritative`
+                      : isExternalEnum
+                        ? `Enum (${inherited.enumSource.replace(/^(known_values|data_lists)\./, '')}) — variance locked to authoritative`
+                        : inherited.type !== 'number' && inherited.fieldValues.length > 0
+                          ? `Manual values (${inherited.fieldValues.length}) — variance locked to authoritative`
+                          : inherited.type !== 'number'
+                            ? 'String property — variance locked to authoritative (only number fields without enums support variance)'
+                            : ''
+                  : '';
+                return (
+                  <div key={pidx} className="border border-gray-200 dark:border-gray-600 rounded overflow-hidden">
+                    <div className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end p-3 pb-2">
+                      <div>
+                        <div className="text-[10px] text-gray-400 mb-0.5">
+                          Field Key<Tip text={STUDIO_TIPS.comp_field_key} />
                         </div>
-                        <div>
-                          <div className="text-[10px] text-gray-400 mb-0.5">
-                            Column<Tip text={STUDIO_TIPS.comp_column} />
-                            {isAutoMatched ? (
-                              <span className="ml-1 text-green-600" title="Auto-matched">&#10003;</span>
-                            ) : prop.mode === 'auto' && prop.field_key && !prop.column ? (
-                              <span className="ml-1 text-yellow-500" title="No auto-match found">&#9888;</span>
-                            ) : null}
-                          </div>
-                          {hasHeaders ? (
-                            <HeaderColumnSelect
-                              value={prop.column}
-                              onChange={(v) => {
-                                const hdr = headerOptions.find((h) => h.col === v);
-                                updatePropertyField(pidx, { column: v, column_header: hdr?.header || '' });
-                              }}
-                              headerOptions={headerOptions}
-                              allowEmpty
-                              placeholder="(pick)"
-                            />
-                          ) : (
-                            <ColumnPicker
-                              value={prop.column}
-                              onChange={(v) => updatePropertyField(pidx, { column: v, column_header: prop.column_header || deriveHeader(prop.field_key) })}
-                            />
+                        <select
+                          className={`${selectCls} w-full`}
+                          value={prop.field_key}
+                          onChange={(e) => {
+                            const newKey = e.target.value;
+                            selectFieldKey(pidx, newKey);
+                            if (newKey) {
+                              const info = getInheritedInfo(newKey);
+                              const shouldLock = info.type !== 'number' || info.isBool || !!info.enumSource;
+                              if (shouldLock) {
+                                updatePropertyField(pidx, { field_key: newKey, variance_policy: 'authoritative', tolerance: null });
+                              }
+                            }
+                          }}
+                        >
+                          <option value="">(select field key)</option>
+                          {prop.field_key && rules[prop.field_key] ? (() => {
+                            const r = rules[prop.field_key];
+                            const ct = r.contract || {};
+                            return <option key={prop.field_key} value={prop.field_key}>{displayLabel(prop.field_key, r as Record<string, unknown>)} ({String(ct.type || 'string')}) &#10003;</option>;
+                          })() : prop.field_key ? (
+                            <option key={prop.field_key} value={prop.field_key}>{prop.field_key} &#10003;</option>
+                          ) : null}
+                          {Object.entries(fieldKeyGroups).flatMap(([, keys]) =>
+                            keys.map((k) => (
+                              <option key={k.key} value={k.key}>{k.label} ({k.type})</option>
+                            ))
                           )}
-                          {prop.column_header ? (
-                            <div className="text-[10px] text-gray-400 mt-0.5">
-                              Header: &quot;{prop.column_header}&quot;
-                              {isAutoMatched ? (
-                                <span className="text-green-600 ml-1">(from sheet)</span>
-                              ) : prop.field_key ? (
-                                <span className="text-amber-500 ml-1">(from key)</span>
-                              ) : null}
-                            </div>
-                          ) : prop.field_key ? (
-                            <div className="text-[10px] text-amber-500 mt-0.5">
-                              Header: &quot;{deriveHeader(prop.field_key)}&quot; (from key)
+                        </select>
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-gray-400 mb-0.5">Variance<Tip text={STUDIO_TIPS.comp_variance_policy} /></div>
+                        <select
+                          className={`${selectCls} w-full ${varianceLocked || prop.variance_policy === 'override_allowed' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          value={varianceLocked || prop.variance_policy === 'override_allowed' ? 'authoritative' : prop.variance_policy}
+                          disabled={varianceLocked || prop.variance_policy === 'override_allowed'}
+                          title={prop.variance_policy === 'override_allowed' ? 'Disabled — override checkbox is active' : lockReason}
+                          onChange={(e) => updatePropertyField(pidx, { variance_policy: e.target.value as PropertyMapping['variance_policy'] })}
+                        >
+                          {VARIANCE_POLICIES.map((vp) => (
+                            <option key={vp.value} value={vp.value}>{vp.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <button
+                          onClick={() => removePropertyRow(pidx)}
+                          className="text-xs text-red-500 hover:text-red-700 py-1.5 px-2"
+                          title="Remove"
+                        >&#10005;</button>
+                      </div>
+                    </div>
+
+                    {/* Variance lock reason + enriched type metadata */}
+                    {varianceLocked && inherited ? (
+                      <div className="px-3 pb-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500">authoritative (locked)</span>
+                          {inherited.isBool ? (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400">boolean: yes / no</span>
+                          ) : null}
+                          {isComponentDbEnum ? (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400 truncate max-w-[200px]" title={inherited.enumSource}>
+                              enum.db: {inherited.enumSource.replace(/^component_db\./, '')}
+                            </span>
+                          ) : null}
+                          {isExternalEnum ? (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400 truncate max-w-[200px]" title={inherited.enumSource}>
+                              enum: {inherited.enumSource.replace(/^(known_values|data_lists)\./, '')}
+                            </span>
+                          ) : null}
+                          {!inherited.isBool && !hasEnumSource && inherited.fieldValues.length > 0 && inherited.fieldValues.length <= 8 ? (
+                            <div className="flex flex-wrap gap-0.5">
+                              <span className="text-[10px] text-gray-400 mr-0.5">manual:</span>
+                              {inherited.fieldValues.map(v => (
+                                <span key={v} className="text-[9px] px-1 py-0.5 rounded bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400">{v}</span>
+                              ))}
                             </div>
                           ) : null}
-                          {prop.column && (() => {
-                            const others = new Set<string>();
-                            if (roles.primary_identifier) others.add(roles.primary_identifier);
-                            if (roles.maker) others.add(roles.maker);
-                            for (const a of (Array.isArray(roles.aliases) ? roles.aliases : [])) others.add(a);
-                            for (const l of (Array.isArray(roles.links) ? roles.links : [])) others.add(l);
-                            for (const pr of propertyRows) if (pr !== prop && pr.column) others.add(pr.column);
-                            return others.has(prop.column) ? (
-                              <span className="text-red-500 text-[10px]">&#9888; Column in use</span>
-                            ) : null;
-                          })()}
-                        </div>
-                        <div>
-                          <div className="text-[10px] text-gray-400 mb-0.5">Variance<Tip text={STUDIO_TIPS.comp_variance_policy} /></div>
-                          <select
-                            className={`${selectCls} w-full`}
-                            value={prop.variance_policy}
-                            onChange={(e) => updatePropertyField(pidx, { variance_policy: e.target.value as PropertyMapping['variance_policy'] })}
-                          >
-                            {VARIANCE_POLICIES.map((vp) => (
-                              <option key={vp.value} value={vp.value}>{vp.label}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <button
-                            onClick={() => removePropertyRow(pidx)}
-                            className="text-xs text-red-500 hover:text-red-700 py-1.5 px-2"
-                            title="Remove"
-                          >&#10005;</button>
+                          {!inherited.isBool && !hasEnumSource && inherited.fieldValues.length > 8 ? (
+                            <span className="text-[10px] text-gray-400" title={inherited.fieldValues.join(', ')}>manual: {inherited.fieldValues.length} values</span>
+                          ) : null}
+                          {!inherited.isBool && !hasEnumSource && inherited.fieldValues.length === 0 && inherited.type !== 'number' ? (
+                            <span className="text-[10px] text-gray-400 italic">string type</span>
+                          ) : null}
                         </div>
                       </div>
+                    ) : null}
 
-                      {/* Tolerance input (shown for upper_bound/lower_bound/range) */}
-                      {(prop.variance_policy === 'upper_bound' || prop.variance_policy === 'lower_bound' || prop.variance_policy === 'range') ? (
-                        <div className="px-3 pb-2">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] text-gray-400">Tolerance<Tip text={STUDIO_TIPS.comp_tolerance} /></span>
-                            <input
-                              className={`${inputCls} w-24`}
-                              type="number"
-                              min={0}
-                              step="any"
-                              value={prop.tolerance ?? ''}
-                              onChange={(e) => updatePropertyField(pidx, { tolerance: e.target.value ? Number(e.target.value) : null })}
-                              placeholder="e.g. 5"
-                            />
-                          </div>
+                    {/* Allow Product Override checkbox (shown for unlocked number fields) */}
+                    {!varianceLocked ? (
+                      <div className="px-3 pb-2">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={prop.variance_policy === 'override_allowed'}
+                            onChange={(e) => updatePropertyField(pidx, {
+                              variance_policy: e.target.checked ? 'override_allowed' : 'authoritative',
+                              tolerance: e.target.checked ? null : prop.tolerance,
+                            })}
+                            className="rounded border-gray-300"
+                          />
+                          <span className="text-[10px] text-gray-500">Allow Product Override</span>
+                          <Tip text={STUDIO_TIPS.comp_override_allowed} />
+                        </label>
+                      </div>
+                    ) : null}
+
+                    {/* Tolerance input (shown for unlocked numeric upper_bound/lower_bound/range) */}
+                    {!varianceLocked && (prop.variance_policy === 'upper_bound' || prop.variance_policy === 'lower_bound' || prop.variance_policy === 'range') ? (
+                      <div className="px-3 pb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-gray-400">Tolerance<Tip text={STUDIO_TIPS.comp_tolerance} /></span>
+                          <input
+                            className={`${inputCls} w-24`}
+                            type="number"
+                            min={0}
+                            step="any"
+                            value={prop.tolerance ?? ''}
+                            onChange={(e) => updatePropertyField(pidx, { tolerance: e.target.value ? Number(e.target.value) : null })}
+                            placeholder="e.g. 5"
+                          />
                         </div>
-                      ) : null}
+                      </div>
+                    ) : null}
 
-                      {/* Bottom banner: Inherited info + preview */}
+                    {/* Inherited info banner */}
+                    {inherited && prop.field_key ? (
                       <div className="bg-gray-50 dark:bg-gray-900/50 px-3 py-2 text-[11px] text-gray-500 border-t border-gray-200 dark:border-gray-700">
-                        {/* Auto mode: show inherited properties */}
-                        {!isManual && inherited && prop.field_key ? (
-                          <div className="flex flex-wrap gap-1.5 items-center">
-                            <span className="font-medium text-gray-600 dark:text-gray-300">Inherited:</span>
-                            <span className="bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 rounded text-[10px]">{inherited.type}</span>
-                            {inherited.unit ? (
-                              <span className="bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 rounded text-[10px]">{inherited.unit}</span>
-                            ) : null}
-                            {inherited.template ? (
-                              <span className="bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 px-1.5 py-0.5 rounded text-[10px]">{inherited.template}</span>
-                            ) : null}
-                            {inherited.evidenceRefs > 0 ? (
-                              <span className="bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 px-1.5 py-0.5 rounded text-[10px]">evidence:{inherited.evidenceRefs} refs</span>
-                            ) : null}
-                          </div>
-                        ) : null}
-                        {/* Manual mode: show type/unit overrides */}
-                        {isManual ? (
-                          <div className="flex items-center gap-3">
-                            <div className="flex items-center gap-1">
-                              <span className="text-[10px] text-gray-400">Type:</span>
-                              <select
-                                className={`${selectCls} text-[11px] py-0.5`}
-                                value={prop.manual_type || prop.type || 'string'}
-                                onChange={(e) => updatePropertyField(pidx, { manual_type: e.target.value })}
-                              >
-                                {PROPERTY_TYPES.map((t) => (
-                                  <option key={t.value} value={t.value}>{t.label}</option>
-                                ))}
-                              </select>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <span className="text-[10px] text-gray-400">Unit:</span>
-                              <ComboSelect
-                                value={prop.manual_unit || prop.unit || ''}
-                                onChange={(v) => updatePropertyField(pidx, { manual_unit: v })}
-                                options={UNITS}
-                                placeholder="e.g. mm"
-                              />
-                            </div>
-                            <span className="text-yellow-500 text-[10px]">&#9888; Draft</span>
-                          </div>
-                        ) : null}
-                        {/* Value preview */}
-                        {preview.length > 0 ? (
-                          <div className="mt-1">
-                            <span className="text-gray-400">Preview:</span>{' '}
-                            <span className="font-mono text-gray-600 dark:text-gray-300">{preview.join(', ')}</span>
-                            <span className="text-gray-400 ml-1">({preview.length} values)</span>
-                          </div>
-                        ) : prop.column ? (
-                          <div className="mt-1 text-gray-400">(no preview data)</div>
-                        ) : null}
+                        <div className="flex flex-wrap gap-1.5 items-center">
+                          <span className="font-medium text-gray-600 dark:text-gray-300">Inherited:</span>
+                          <span className="bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 rounded text-[10px]">{inherited.type}</span>
+                          {inherited.unit ? (
+                            <span className="bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 rounded text-[10px]">{inherited.unit}</span>
+                          ) : null}
+                          {inherited.template ? (
+                            <span className="bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 px-1.5 py-0.5 rounded text-[10px]">{inherited.template}</span>
+                          ) : null}
+                          {inherited.evidenceRefs > 0 ? (
+                            <span className="bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 px-1.5 py-0.5 rounded text-[10px]">evidence:{inherited.evidenceRefs} refs</span>
+                          ) : null}
+                          {isComponentDbEnum ? (
+                            <span className="bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-300 px-1.5 py-0.5 rounded text-[10px]">enum.db: {inherited.enumSource.replace(/^component_db\./, '')}</span>
+                          ) : isExternalEnum ? (
+                            <span className="bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-300 px-1.5 py-0.5 rounded text-[10px]">enum: {inherited.enumSource.replace(/^(known_values|data_lists)\./, '')}</span>
+                          ) : inherited.isBool ? (
+                            <span className="bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded text-[10px]">boolean: yes / no</span>
+                          ) : null}
+                        </div>
                       </div>
+                    ) : null}
 
-                      {/* Constraints (interactive) */}
-                      <ConstraintEditor
-                        constraints={prop.constraints || []}
-                        onChange={(next) => updatePropertyField(pidx, { constraints: next })}
-                        componentPropertyKeys={propertyRows.map((r) => r.field_key).filter(Boolean)}
-                        fieldOrder={fieldOrder}
-                        rules={rules}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="text-xs text-gray-400">No property rows. Use "Add from field keys" to bind attributes, or "Manual" to create custom properties.</p>
-            )}
-          </div>
-        ) : null}
+                    {/* Read-only constraints from field rule */}
+                    {inherited && inherited.constraints.length > 0 ? (
+                      <div className="px-3 py-1.5 border-t border-gray-200 dark:border-gray-700 text-[11px]">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-gray-500">Constraints</span>
+                          {inherited.constraints.map((c, ci) => (
+                            <span key={ci} className="bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 px-1.5 py-0.5 rounded text-[10px]">{c}</span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-xs text-gray-400">No attributes. Use the dropdown above to add field keys.</p>
+          )}
+        </div>
       </div>
 
       {/* Summary line */}
-      <div className="mt-3 text-xs text-gray-400">
-        Primary: <code className="bg-gray-100 dark:bg-gray-700 px-1 rounded">{colHeader(roles.primary_identifier || '?')}</code>
-        {(roles.maker || activeRoles.has('maker')) ? (
-          <> | Maker: <code className="bg-gray-100 dark:bg-gray-700 px-1 rounded">{roles.maker ? colHeader(roles.maker) : '-'}</code></>
-        ) : null}
-        {(activeRoles.has('aliases') || (Array.isArray(roles.aliases) && roles.aliases.length > 0)) ? (
-          <> | Aliases: <code className="bg-gray-100 dark:bg-gray-700 px-1 rounded">{Array.isArray(roles.aliases) ? roles.aliases.map((a) => colHeader(a)).join(', ') || '-' : '-'}</code></>
-        ) : null}
-        {(activeRoles.has('links') || (Array.isArray(roles.links) && roles.links.length > 0)) ? (
-          <> | Links: <code className="bg-gray-100 dark:bg-gray-700 px-1 rounded">{Array.isArray(roles.links) ? roles.links.map((l) => colHeader(l)).join(', ') || '-' : '-'}</code></>
-        ) : null}
-        {(buildMode === 'scratch' || activeRoles.has('properties')) ? (
-          <> | Props: {propertyRows.length}</>
-        ) : null}
-        {source.auto_derive_aliases ? ' | auto-derive' : ''}
+      <div className="mt-3 text-xs text-gray-400 flex flex-wrap gap-1.5">
+        <span className="px-1.5 py-0.5 rounded bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400">Name</span>
+        {activeRoles.has('maker') ? <span className="px-1.5 py-0.5 rounded bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400">Maker</span> : null}
+        {activeRoles.has('aliases') ? <span className="px-1.5 py-0.5 rounded bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400">Aliases</span> : null}
+        {activeRoles.has('links') ? <span className="px-1.5 py-0.5 rounded bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400">Links</span> : null}
+        {propertyRows.length > 0 ? <span className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400">{propertyRows.length} attribute{propertyRows.length !== 1 ? 's' : ''}</span> : null}
       </div>
-    </div>
-  );
-}
-
-// ── Sheet Card ──────────────────────────────────────────────────────
-function SheetCard({ sheet }: { sheet: SheetPreview }) {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <div className="border border-gray-200 dark:border-gray-700 rounded p-3">
-      <div className="flex items-center justify-between mb-1">
-        <span className="font-mono text-sm font-medium">{sheet.name}</span>
-        <div className="flex gap-2 text-xs text-gray-400">
-          <span>{sheet.non_empty_cells} cells</span>
-          <span>{sheet.max_row}r x {sheet.max_col}c</span>
-        </div>
-      </div>
-      {sheet.detected_roles && sheet.detected_roles.length > 0 ? (
-        <div className="flex gap-1 mb-2">
-          {sheet.detected_roles.map((role) => (
-            <span key={role} className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 rounded">{role}</span>
-          ))}
-        </div>
-      ) : null}
-      {sheet.preview ? (
-        <>
-          <button onClick={() => setExpanded(!expanded)} className="text-xs text-accent hover:underline">
-            {expanded ? 'Hide preview' : 'Show preview'}
-          </button>
-          {expanded && sheet.preview.rows ? (
-            <div className="mt-2 overflow-x-auto">
-              <table className="text-xs border-collapse">
-                <thead>
-                  <tr>
-                    {sheet.preview.columns.map((col) => (
-                      <th key={col} className="border border-gray-200 dark:border-gray-600 px-2 py-1 bg-gray-50 dark:bg-gray-700 font-mono">{col}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {sheet.preview.rows.slice(0, 8).map((row, i) => (
-                    <tr key={i}>
-                      {sheet.preview!.columns.map((col) => (
-                        <td key={col} className="border border-gray-200 dark:border-gray-600 px-2 py-1 max-w-[200px] truncate">{String(row.cells?.[col] ?? '')}</td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
-        </>
-      ) : null}
     </div>
   );
 }
@@ -3190,251 +2404,405 @@ function Section({ title, children, defaultOpen = false }: { title: string; chil
   );
 }
 
+
 function KeyNavigatorTab({
   category,
-  fieldOrder,
-  rules,
   selectedKey,
   onSelectKey,
-  onSaveRules,
+  onSave,
   saving,
   saveSuccess,
   knownValues,
   enumLists,
-  sheets,
   componentDb,
+  componentSources,
 }: {
   category: string;
-  fieldOrder: string[];
-  rules: Record<string, Record<string, unknown>>;
   selectedKey: string;
   onSelectKey: (key: string) => void;
-  onSaveRules: (rules: Record<string, unknown>) => void;
+  onSave: () => void;
   saving: boolean;
   saveSuccess: boolean;
   knownValues: Record<string, string[]>;
-  enumLists: EnumListEntry[];
-  sheets: SheetPreview[];
+  enumLists: EnumEntry[];
+  componentSources: ComponentSource[];
   componentDb: ComponentDbResponse;
 }) {
-  // Local editable copy of all rules
-  const [editedRules, setEditedRules] = useState<Record<string, Record<string, unknown>>>({});
-  const [initialized, setInitialized] = useState(false);
+  const {
+    editedRules, editedFieldOrder, updateField,
+    addKey, removeKey, renameKey, bulkAddKeys,
+    reorder, addGroup, removeGroup, renameGroup,
+  } = useFieldRulesStore();
+
+  // Add key UI state
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [addKeyValue, setAddKeyValue] = useState('');
+  const [addKeyGroup, setAddKeyGroup] = useState('');
+
+  // Rename UI state
+  const [renamingKey, setRenamingKey] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+
+  // Label edit state
+  const [editingLabel, setEditingLabel] = useState(false);
+  const [editLabelValue, setEditLabelValue] = useState('');
+
+  // Delete confirmation state
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // Group UI state
+  const [selectedGroup, setSelectedGroup] = useState('');
+  const [showAddGroupForm, setShowAddGroupForm] = useState(false);
+  const [addGroupValue, setAddGroupValue] = useState('');
+
+  // Bulk paste modal state
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkGridRows, setBulkGridRows] = useState<BulkGridRow[]>([]);
+  const [bulkGroup, setBulkGroup] = useState('');
 
   useEffect(() => {
-    if (Object.keys(rules).length > 0 && !initialized) {
-      setEditedRules(JSON.parse(JSON.stringify(rules)));
-      setInitialized(true);
-    }
-  }, [rules, initialized]);
+    setRenamingKey(false);
+    setEditingLabel(false);
+    setConfirmDelete(false);
+  }, [selectedKey]);
+
+  const activeFieldOrder = editedFieldOrder;
 
   const groups = useMemo(() => {
-    const source = Object.keys(editedRules).length > 0 ? editedRules : rules;
-    const map: Record<string, string[]> = {};
-    for (const key of fieldOrder) {
-      const r = source[key] as Record<string, unknown> | undefined;
-      const uiGroup = r?.ui ? strN(r, 'ui.group', '') : '';
-      const group = uiGroup || String(r?.group || 'ungrouped');
-      (map[group] = map[group] || []).push(key);
+    return deriveGroupsTs(activeFieldOrder, editedRules);
+  }, [activeFieldOrder, editedRules]);
+
+  const existingGroups = useMemo(() => {
+    const gs = new Set<string>();
+    for (const [g] of groups) gs.add(g);
+    return Array.from(gs);
+  }, [groups]);
+
+  const existingLabels = useMemo(() => {
+    return activeFieldOrder
+      .filter(k => !k.startsWith('__grp::'))
+      .map(k => displayLabel(k, editedRules[k]));
+  }, [activeFieldOrder, editedRules]);
+
+  const bulkPreviewRows: BulkKeyRow[] = useMemo(() => {
+    const filled = bulkGridRows.filter(r => r.col1.trim() || r.col2.trim());
+    if (filled.length === 0) return [];
+    const lines = filled.map(r => r.col2.trim() ? `${r.col1}\t${r.col2}` : r.col1);
+    const existingKeys = activeFieldOrder.filter(k => !k.startsWith('__grp::'));
+    return validateBulkRows(lines, existingKeys, existingLabels);
+  }, [bulkGridRows, activeFieldOrder, existingLabels]);
+
+  const bulkCounts = useMemo(() => {
+    const c = { ready: 0, existing: 0, duplicate: 0, invalid: 0 };
+    for (const row of bulkPreviewRows) {
+      if (row.status === 'ready') c.ready++;
+      else if (row.status === 'duplicate_existing') c.existing++;
+      else if (row.status === 'duplicate_in_paste') c.duplicate++;
+      else c.invalid++;
     }
-    return Object.entries(map).sort(([a], [b]) => a.localeCompare(b));
-  }, [fieldOrder, editedRules, rules]);
+    return c;
+  }, [bulkPreviewRows]);
 
-  // Update a field in the local edited rules
-  // Helper: set a nested value on a rule object (mutates in place)
-  function setNested(rule: Record<string, unknown>, dotPath: string, val: unknown) {
-    const p = dotPath.split('.');
-    if (p.length === 1) { rule[p[0]] = val; return; }
-    if (p.length === 2) {
-      const parent = { ...((rule[p[0]] || {}) as Record<string, unknown>) };
-      parent[p[1]] = val;
-      rule[p[0]] = parent;
-      return;
-    }
-    if (p.length === 3) {
-      const p1 = { ...((rule[p[0]] || {}) as Record<string, unknown>) };
-      const p2 = { ...((p1[p[1]] || {}) as Record<string, unknown>) };
-      p2[p[2]] = val;
-      p1[p[1]] = p2;
-      rule[p[0]] = p1;
-    }
-  }
+  const bulkReadyRows = useMemo(() =>
+    bulkPreviewRows.filter(r => r.status === 'ready'),
+  [bulkPreviewRows]);
 
-  function updateField(key: string, path: string, value: unknown) {
-    setEditedRules((prev) => {
-      const next = { ...prev };
-      const rule = { ...(next[key] || {}) };
-
-      // Apply the primary update
-      setNested(rule, path, value);
-
-      // ── Flat mirror properties for backward compat ──────────
-      if (path === 'contract.type') { rule.type = value; rule.data_type = value; }
-      if (path === 'contract.shape') { rule.shape = value; rule.output_shape = value; rule.value_form = value; }
-      if (path === 'contract.unit') { rule.unit = value; }
-      if (path === 'priority.required_level') rule.required_level = value;
-      if (path === 'priority.availability') rule.availability = value;
-      if (path === 'priority.difficulty') rule.difficulty = value;
-      if (path === 'priority.effort') rule.effort = value;
-      if (path === 'priority.publish_gate') rule.publish_gate = value;
-      if (path === 'evidence.required') rule.evidence_required = value;
-      if (path === 'evidence.min_evidence_refs') rule.min_evidence_refs = value;
-      if (path === 'enum.policy') rule.enum_policy = value;
-      if (path === 'enum.source') rule.enum_source = value;
-      if (path === 'parse.template') rule.parse_template = value;
-      if (path === 'ui.group') rule.group = value;
-      if (path === 'ui.label') rule.display_name = value;
-
-      // ── Global coupling: Parse Template → Enum + UI ────────
-      if (path === 'parse.template') {
-        const tpl = String(value || '');
-
-        if (tpl === 'boolean_yes_no_unk') {
-          // Boolean locks enum to yes/no
-          setNested(rule, 'enum.policy', 'closed');
-          setNested(rule, 'enum.source', 'yes_no');
-          setNested(rule, 'enum.match.strategy', 'exact');
-          rule.enum_policy = 'closed';
-          rule.enum_source = 'yes_no';
-          setNested(rule, 'ui.input_control', 'text');
-        } else if (tpl === 'component_reference') {
-          // Auto-detect component type from field key
-          const COMP_MAP: Record<string, string> = { sensor: 'sensor', switch: 'switch', encoder: 'encoder', material: 'material' };
-          const compType = COMP_MAP[key] || '';
-          if (compType) {
-            setNested(rule, 'component.type', compType);
-            setNested(rule, 'enum.source', `component_db.${compType}`);
-            rule.enum_source = `component_db.${compType}`;
-          }
-          setNested(rule, 'enum.policy', 'open_prefer_known');
-          setNested(rule, 'enum.match.strategy', 'alias');
-          rule.enum_policy = 'open_prefer_known';
-          setNested(rule, 'ui.input_control', 'component_picker');
-        } else if (['number_with_unit', 'list_of_numbers_with_unit', 'list_numbers_or_ranges_with_unit'].includes(tpl)) {
-          // Numeric — disable enum, enable unit controls
-          setNested(rule, 'enum.policy', 'open');
-          setNested(rule, 'enum.source', null);
-          rule.enum_policy = 'open';
-          rule.enum_source = '';
-          setNested(rule, 'ui.input_control', 'number');
-        } else if (tpl === 'url_field') {
-          setNested(rule, 'enum.policy', 'open');
-          setNested(rule, 'enum.source', null);
-          rule.enum_policy = 'open';
-          rule.enum_source = '';
-          setNested(rule, 'ui.input_control', 'url');
-        } else if (tpl === 'date_field') {
-          setNested(rule, 'enum.policy', 'open');
-          setNested(rule, 'enum.source', null);
-          rule.enum_policy = 'open';
-          rule.enum_source = '';
-          setNested(rule, 'ui.input_control', 'date');
-        } else if (tpl === 'list_of_tokens_delimited' || tpl === 'token_list') {
-          // Token list — enable enum, suggest multi_select
-          setNested(rule, 'ui.input_control', 'multi_select');
-        }
-        // text_field / text_block — keep current enum config, no auto-change
-      }
-
-      // ── Global coupling: Value Source → UI input control ────
-      if (path === 'enum.source') {
-        const src = String(value || '');
-        if (src.startsWith('component_db.')) {
-          setNested(rule, 'ui.input_control', 'component_picker');
-        } else if (src === 'yes_no') {
-          setNested(rule, 'ui.input_control', 'text');
-        } else if (src.startsWith('data_lists.')) {
-          // Workbook enum — suggest select for closed, text otherwise
-          const pol = String((rule.enum as Record<string, unknown>)?.policy || rule.enum_policy || 'open');
-          setNested(rule, 'ui.input_control', pol === 'closed' ? 'select' : 'text');
-        }
-      }
-
-      // ── Global coupling: Enum Policy → UI input control ────
-      if (path === 'enum.policy') {
-        const pol = String(value || 'open');
-        const src = String((rule.enum as Record<string, unknown>)?.source || rule.enum_source || '');
-        if (src.startsWith('data_lists.') && pol === 'closed') {
-          setNested(rule, 'ui.input_control', 'select');
-        } else if (src.startsWith('component_db.')) {
-          setNested(rule, 'ui.input_control', 'component_picker');
-        }
-      }
-
-      // ── Priority/difficulty/effort changes: clear auto-written notes so placeholder takes over ──
-      if (['priority.required_level', 'priority.difficulty', 'priority.effort'].includes(path)) {
-        const ai = (rule.ai_assist || {}) as Record<string, unknown>;
-        const existingNote = String(ai.reasoning_note || '');
-        // If the note looks auto-generated (contains " - auto: " or "LLM extraction skipped"), clear it
-        if (existingNote && (existingNote.includes(' - auto: ') || existingNote.includes('LLM extraction skipped'))) {
-          setNested(rule, 'ai_assist.reasoning_note', '');
-        }
-      }
-
-      // ── Global coupling: Component type → enum source ──────
-      if (path === 'component.type') {
-        const ct = String(value || '');
-        if (ct) {
-          setNested(rule, 'enum.source', `component_db.${ct}`);
-          rule.enum_source = `component_db.${ct}`;
-        }
-      }
-
-      rule._edited = true;
-      next[key] = rule;
-      return next;
-    });
-  }
+  const handleReorder = useCallback((activeItem: string, overItem: string) => {
+    reorder(activeItem, overItem);
+    onSave();
+  }, [reorder, onSave]);
 
   function handleSaveAll() {
-    onSaveRules(editedRules);
+    onSave();
   }
 
-  const currentRule = selectedKey ? (editedRules[selectedKey] || rules[selectedKey] || null) : null;
+  function handleAddKey() {
+    const key = addKeyValue.trim();
+    const err = validateNewKeyTs(key, activeFieldOrder);
+    if (err) return;
+    const label = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    addKey(key, { label, group: addKeyGroup || 'ungrouped', ui: { label, group: addKeyGroup || 'ungrouped' }, constraints: [] }, selectedKey || undefined);
+    setShowAddForm(false);
+    setAddKeyValue('');
+    setAddKeyGroup('');
+    setSelectedGroup('');
+    onSelectKey(key);
+    onSave();
+  }
+
+  function handleDeleteKey() {
+    if (!selectedKey) return;
+    const deletedKey = selectedKey;
+    removeKey(deletedKey);
+    setConfirmDelete(false);
+    const nextOrder = activeFieldOrder.filter((k) => k !== deletedKey);
+    const idx = activeFieldOrder.indexOf(deletedKey);
+    const nextKey = nextOrder[Math.min(idx, nextOrder.length - 1)] || '';
+    onSelectKey(nextKey);
+    onSave();
+  }
+
+  function handleRenameKey() {
+    const newKey = renameValue.trim();
+    if (!selectedKey || !newKey || newKey === selectedKey) { setRenamingKey(false); return; }
+    const err = validateNewKeyTs(newKey, activeFieldOrder.filter((k) => k !== selectedKey));
+    if (err) { return; }
+    renameKey(selectedKey, newKey, rewriteConstraintsTs, constraintRefsKey);
+    setRenamingKey(false);
+    onSelectKey(newKey);
+    onSave();
+  }
+
+  function handleAddGroup() {
+    const name = addGroupValue.trim();
+    const err = validateNewGroupTs(name, existingGroups);
+    if (err) return;
+    addGroup(name);
+    setShowAddGroupForm(false);
+    setAddGroupValue('');
+    onSave();
+  }
+
+  function handleBulkImport() {
+    if (bulkReadyRows.length === 0) return;
+    const group = bulkGroup || 'ungrouped';
+    bulkAddKeys(bulkReadyRows.map((row) => ({
+      key: row.key,
+      rule: { label: row.label, group, ui: { label: row.label, group }, constraints: [] },
+    })));
+    onSave();
+    setBulkOpen(false);
+    setBulkGridRows([]);
+    setBulkGroup('');
+  }
+
+  function handleDeleteGroup(group: string) {
+    if (!window.confirm(`Delete group "${group}"? Fields in this group will become ungrouped.`)) return;
+    removeGroup(group);
+    setSelectedGroup('');
+    onSave();
+  }
+
+  function handleRenameGroup(oldName: string, newName: string) {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName) return;
+    const otherGroups = existingGroups.filter(g => g.toLowerCase() !== oldName.toLowerCase());
+    if (validateNewGroupTs(trimmed, otherGroups)) return;
+    renameGroup(oldName, trimmed);
+    setSelectedGroup(trimmed);
+    onSave();
+  }
+
+  function handleSelectGroup(group: string) {
+    setSelectedGroup((prev) => prev === group ? '' : group);
+    onSelectKey('');
+  }
+
+  function handleSelectKey(key: string) {
+    setSelectedGroup('');
+    onSelectKey(key);
+  }
+
+  const currentRule = selectedKey ? (editedRules[selectedKey] || null) : null;
 
   return (
+    <>
     <div className="flex gap-4" style={{ minHeight: 'calc(100vh - 350px)' }}>
       {/* Key list */}
       <div className="w-56 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 pr-3 overflow-y-auto max-h-[calc(100vh-350px)]">
         <div className="flex items-center justify-between mb-2">
           <p className="text-xs text-gray-500">Click a key to edit</p>
-          <span className="text-xs text-gray-400">{fieldOrder.length} keys</span>
+          <span className="text-xs text-gray-400">{activeFieldOrder.filter(k => !k.startsWith('__grp::')).length} keys</span>
         </div>
-        {groups.map(([group, keys]) => (
-          <div key={group} className="mb-3">
-            <h4 className="text-xs font-semibold uppercase text-gray-400 mb-1">{group}</h4>
-            {keys.map((key) => (
-              <button
-                key={key}
-                onClick={() => onSelectKey(key)}
-                className={`block w-full text-left px-2 py-1 text-sm rounded ${
-                  selectedKey === key
-                    ? 'bg-accent/10 text-accent font-medium'
-                    : 'hover:bg-gray-100 dark:hover:bg-gray-700'
-                }${editedRules[key]?._edited ? ' border-l-2 border-amber-400' : ''}`}
-              >
-                {humanizeField(key)}
-              </button>
-            ))}
+
+        {/* Add Key Button + Add Group Button + Bulk Paste */}
+        {!showAddForm && !showAddGroupForm && (
+          <div className="flex flex-col gap-1 mb-2">
+            <div className="flex gap-1">
+              <button onClick={() => setShowAddForm(true)} className={`${btnSecondary} flex-1 text-xs`}>+ Add Key</button>
+              <button onClick={() => setShowAddGroupForm(true)} className={`${btnSecondary} flex-1 text-xs`}>+ Add Group</button>
+            </div>
+            <button onClick={() => setBulkOpen(true)} className={`${btnSecondary} w-full text-xs`}>Bulk Paste</button>
           </div>
-        ))}
+        )}
+
+        {/* Add Key Inline Form */}
+        {showAddForm && (
+          <div className="mb-3 p-2 border border-blue-300 dark:border-blue-700 rounded bg-blue-50 dark:bg-blue-900/20 space-y-1.5">
+            <input
+              autoFocus
+              className={`${inputCls} w-full text-xs`}
+              placeholder="new_field_key"
+              value={addKeyValue}
+              onChange={(e) => setAddKeyValue(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleAddKey(); if (e.key === 'Escape') { setShowAddForm(false); setAddKeyValue(''); } }}
+            />
+            {addKeyValue && validateNewKeyTs(addKeyValue.trim(), activeFieldOrder) && (
+              <p className="text-[10px] text-red-500">{validateNewKeyTs(addKeyValue.trim(), activeFieldOrder)}</p>
+            )}
+            <select className={`${selectCls} w-full text-xs`} value={addKeyGroup} onChange={(e) => setAddKeyGroup(e.target.value)}>
+              <option value="">Group: ungrouped</option>
+              {existingGroups.map((g) => <option key={g} value={g}>{g}</option>)}
+            </select>
+            <div className="flex gap-1">
+              <button
+                onClick={handleAddKey}
+                disabled={!!validateNewKeyTs(addKeyValue.trim(), activeFieldOrder)}
+                className={`${btnPrimary} text-xs py-1 flex-1`}
+              >Create</button>
+              <button onClick={() => { setShowAddForm(false); setAddKeyValue(''); }} className={`${btnSecondary} text-xs py-1 flex-1`}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {/* Add Group Inline Form */}
+        {showAddGroupForm && (
+          <div className="mb-3 p-2 border border-green-300 dark:border-green-700 rounded bg-green-50 dark:bg-green-900/20 space-y-1.5">
+            <input
+              autoFocus
+              className={`${inputCls} w-full text-xs`}
+              placeholder="Group name"
+              value={addGroupValue}
+              onChange={(e) => setAddGroupValue(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleAddGroup(); if (e.key === 'Escape') { setShowAddGroupForm(false); setAddGroupValue(''); } }}
+            />
+            {addGroupValue && validateNewGroupTs(addGroupValue.trim(), existingGroups) && (
+              <p className="text-[10px] text-red-500">{validateNewGroupTs(addGroupValue.trim(), existingGroups)}</p>
+            )}
+            <div className="flex gap-1">
+              <button
+                onClick={handleAddGroup}
+                disabled={!!validateNewGroupTs(addGroupValue.trim(), existingGroups)}
+                className={`${btnPrimary} text-xs py-1 flex-1`}
+              >Create</button>
+              <button onClick={() => { setShowAddGroupForm(false); setAddGroupValue(''); }} className={`${btnSecondary} text-xs py-1 flex-1`}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        <DraggableKeyList
+          fieldOrder={activeFieldOrder}
+          selectedKey={selectedKey}
+          editedRules={editedRules}
+          rules={editedRules}
+          displayLabel={displayLabel}
+          onSelectKey={handleSelectKey}
+          onReorder={handleReorder}
+          selectedGroup={selectedGroup}
+          onSelectGroup={handleSelectGroup}
+          onDeleteGroup={handleDeleteGroup}
+          onRenameGroup={handleRenameGroup}
+          existingGroups={existingGroups}
+        />
       </div>
 
       {/* Key detail editor */}
       <div className="flex-1 overflow-y-auto max-h-[calc(100vh-350px)] pr-2">
         {selectedKey && currentRule ? (
           <div className="space-y-3">
-            <div className="flex items-center justify-between sticky top-0 bg-white dark:bg-gray-900 py-2 z-10 border-b border-gray-200 dark:border-gray-700">
-              <div>
-                <h3 className="text-lg font-semibold font-mono">{humanizeField(selectedKey)}</h3>
-                <span className="text-xs text-gray-400 font-mono">{selectedKey}</span>
+            <div className="sticky top-0 bg-white dark:bg-gray-900 py-2 z-10 border-b border-gray-200 dark:border-gray-700 space-y-2">
+              {/* Row 1: Label (read-only or editable) + actions */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 min-w-0">
+                  {editingLabel ? (() => {
+                    const trimmedLabel = editLabelValue.trim();
+                    const otherLabels = activeFieldOrder
+                      .filter(k => !k.startsWith('__grp::') && k !== selectedKey)
+                      .map(k => displayLabel(k, editedRules[k]).toLowerCase());
+                    const labelDup = trimmedLabel && otherLabels.includes(trimmedLabel.toLowerCase())
+                      ? 'A field with this label already exists'
+                      : null;
+                    const labelDisabled = !trimmedLabel || !!labelDup;
+                    const commitLabel = () => {
+                      if (labelDisabled) return;
+                      updateField(selectedKey, 'ui.label', trimmedLabel);
+                      setEditingLabel(false);
+                    };
+                    return <div className="flex flex-col gap-0.5">
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          autoFocus
+                          className={`${inputCls} text-sm font-semibold py-0.5 px-1.5 w-56`}
+                          value={editLabelValue}
+                          onChange={(e) => setEditLabelValue(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') commitLabel();
+                            if (e.key === 'Escape') setEditingLabel(false);
+                          }}
+                        />
+                        <button
+                          onClick={commitLabel}
+                          disabled={labelDisabled}
+                          className="px-3 py-1 text-xs font-medium bg-accent text-white rounded hover:bg-blue-600 disabled:opacity-50"
+                        >Save</button>
+                        <button onClick={() => setEditingLabel(false)} className="px-3 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">Cancel</button>
+                      </div>
+                      {labelDup && <span className="text-[10px] text-red-500">{labelDup}</span>}
+                    </div>;
+                  })() : (
+                    <>
+                      <h3 className="text-lg font-semibold truncate">{displayLabel(selectedKey, currentRule as Record<string, unknown>)}</h3>
+                      <button
+                        onClick={() => { setEditingLabel(true); setEditLabelValue(displayLabel(selectedKey, currentRule as Record<string, unknown>)); }}
+                        className="px-1.5 py-0.5 text-xs text-gray-400 hover:text-accent rounded hover:bg-gray-100 dark:hover:bg-gray-700 flex-shrink-0"
+                        title="Edit label"
+                      >&#9998;</button>
+                    </>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {currentRule._edited ? <span className="text-xs text-amber-500">Modified</span> : null}
+                  <button onClick={handleSaveAll} disabled={saving} className={btnPrimary}>
+                    {saving ? 'Saving...' : 'Save All Changes'}
+                  </button>
+                  {saveSuccess ? <span className="text-xs text-green-600">Saved</span> : null}
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                {currentRule._edited ? <span className="text-xs text-amber-500">Modified</span> : null}
-                <button onClick={handleSaveAll} disabled={saving} className={btnPrimary}>
-                  {saving ? 'Saving...' : 'Save All Changes'}
-                </button>
-                {saveSuccess ? <span className="text-xs text-green-600">Saved</span> : null}
+
+              {/* Row 2: Key (read-only or rename) + Delete */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  {renamingKey ? (() => {
+                    const renameErr = renameValue && renameValue.trim() !== selectedKey
+                      ? validateNewKeyTs(renameValue.trim(), activeFieldOrder.filter((k) => k !== selectedKey))
+                      : null;
+                    const renameDisabled = !renameValue.trim() || renameValue.trim() === selectedKey || !!renameErr;
+                    return <>
+                      <input
+                        autoFocus
+                        className={`${inputCls} text-xs font-mono py-0.5 px-1.5 w-48`}
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' && !renameDisabled) handleRenameKey(); if (e.key === 'Escape') setRenamingKey(false); }}
+                      />
+                      {renameErr && (
+                        <span className="text-[10px] text-red-500">{renameErr}</span>
+                      )}
+                      <button onClick={handleRenameKey} disabled={renameDisabled} className="px-3 py-1 text-xs font-medium bg-accent text-white rounded hover:bg-blue-600 disabled:opacity-50">Save</button>
+                      <button onClick={() => setRenamingKey(false)} className="px-3 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">Cancel</button>
+                    </>;
+                  })() : (
+                    <>
+                      <span className="text-xs text-gray-400 font-mono">{selectedKey}</span>
+                      <button
+                        onClick={() => { setRenamingKey(true); setRenameValue(selectedKey); }}
+                        className="px-1.5 py-0.5 text-xs text-gray-400 hover:text-accent rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+                        title="Rename key"
+                      >&#9998;</button>
+                    </>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {!confirmDelete ? (
+                    <button onClick={() => setConfirmDelete(true)} className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700">Delete Key</button>
+                  ) : (
+                    <div className="flex items-center gap-1.5 bg-red-50 dark:bg-red-900/20 border border-red-300 dark:border-red-700 rounded px-2.5 py-1.5">
+                      <span className="text-xs text-red-600 dark:text-red-400">Delete &quot;{selectedKey}&quot;? This cannot be undone.</span>
+                      <button onClick={handleDeleteKey} className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700">Confirm</button>
+                      <button onClick={() => setConfirmDelete(false)} className="px-3 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">Cancel</button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -3449,11 +2817,10 @@ function KeyNavigatorTab({
               const isComponent = pt === 'component_reference';
               const isBoolean = pt === 'boolean_yes_no_unk';
               const isNumeric = ['number_with_unit', 'list_of_numbers_with_unit', 'list_numbers_or_ranges_with_unit'].includes(pt);
-              const isDisabled = pt === 'url_field' || pt === 'date_field';
               return (
                 <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 text-xs">
                   <span className="text-gray-400 font-medium mr-1">Coupling:</span>
-                  <span className={`${chipCls} ${isComponent ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' : isBoolean ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : isNumeric ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300' : isDisabled ? 'bg-gray-200 text-gray-500 dark:bg-gray-700 dark:text-gray-400' : 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'}`}>
+                  <span className={`${chipCls} ${isComponent ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' : isBoolean ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : isNumeric ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300' : 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'}`}>
                     {pt || 'none'}
                   </span>
                   <span className="text-gray-300 dark:text-gray-600">|</span>
@@ -3860,9 +3227,7 @@ function KeyNavigatorTab({
                 rule={currentRule}
                 knownValues={knownValues}
                 enumLists={enumLists}
-                sheets={sheets}
                 parseTemplate={strN(currentRule, 'parse.template', strN(currentRule, 'parse_template'))}
-                componentDb={componentDb}
                 onUpdate={(path, value) => updateField(selectedKey, path, value)}
               />
             </Section>
@@ -3980,8 +3345,19 @@ function KeyNavigatorTab({
               </div>
             </Section>
 
+            {/* ── Cross-Field Constraints ────────────────────────── */}
+            <Section title="Cross-Field Constraints">
+              <KeyConstraintEditor
+                currentKey={selectedKey}
+                constraints={arrN(currentRule, 'constraints')}
+                onChange={(next) => updateField(selectedKey, 'constraints', next)}
+                fieldOrder={activeFieldOrder}
+                rules={editedRules}
+              />
+            </Section>
+
             {/* ── Component Reference ─────────────────────────────── */}
-            <Section title="Component & Excel">
+            <Section title="Components">
               <div className="grid grid-cols-4 gap-3">
                 <div>
                   <div className={labelCls}>Component DB<Tip text={STUDIO_TIPS.component_db} /></div>
@@ -4035,140 +3411,133 @@ function KeyNavigatorTab({
                   </>
                 ) : null}
               </div>
-              {strN(currentRule, 'component.type') ? (
-                <>
-                  {/* ── Match Settings ─────────────────────────────── */}
-                  <div className="mt-3 border-t border-gray-200 dark:border-gray-700 pt-3">
-                    <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">Match Settings</div>
-                    <div className="grid grid-cols-3 gap-3">
-                      <div>
-                        <div className={labelCls}>Fuzzy Threshold</div>
-                        <input type="number" min={0} max={1} step={0.05}
-                          className={`${selectCls} w-full`}
-                          value={numN(currentRule, 'component.match.fuzzy_threshold', 0.75)}
-                          onChange={(e) => updateField(selectedKey, 'component.match.fuzzy_threshold', parseFloat(e.target.value) || 0.75)}
-                        />
+              {strN(currentRule, 'component.type') ? (() => {
+                const compType = strN(currentRule, 'component.type');
+                const compSource = componentSources.find(
+                  s => (s.component_type || s.type) === compType
+                );
+                const NUMERIC_ONLY_POLICIES = ['upper_bound', 'lower_bound', 'range'];
+                const derivedProps = (compSource?.roles?.properties || []).filter(p => p.field_key);
+                return (
+                  <>
+                    {/* ── Match Settings ─────────────────────────────── */}
+                    <div className="mt-3 border-t border-gray-200 dark:border-gray-700 pt-3">
+                      <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">Match Settings</div>
+                      {/* Name Matching */}
+                      <div className="text-[11px] font-medium text-gray-400 mb-1">Name Matching</div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <div className={labelCls}>Fuzzy Threshold<Tip text={STUDIO_TIPS.comp_match_fuzzy_threshold} /></div>
+                          <input type="number" min={0} max={1} step={0.05}
+                            className={`${selectCls} w-full`}
+                            value={numN(currentRule, 'component.match.fuzzy_threshold', 0.75)}
+                            onChange={(e) => updateField(selectedKey, 'component.match.fuzzy_threshold', parseFloat(e.target.value) || 0.75)}
+                          />
+                        </div>
+                        <div>
+                          <div className={labelCls}>Name Weight<Tip text={STUDIO_TIPS.comp_match_name_weight} /></div>
+                          <input type="number" min={0} max={1} step={0.05}
+                            className={`${selectCls} w-full`}
+                            value={numN(currentRule, 'component.match.name_weight', 0.4)}
+                            onChange={(e) => updateField(selectedKey, 'component.match.name_weight', parseFloat(e.target.value) || 0.4)}
+                          />
+                        </div>
+                        <div>
+                          <div className={labelCls}>Auto-Accept Score<Tip text={STUDIO_TIPS.comp_match_auto_accept_score} /></div>
+                          <input type="number" min={0} max={1} step={0.05}
+                            className={`${selectCls} w-full`}
+                            value={numN(currentRule, 'component.match.auto_accept_score', 0.95)}
+                            onChange={(e) => updateField(selectedKey, 'component.match.auto_accept_score', parseFloat(e.target.value) || 0.95)}
+                          />
+                        </div>
+                        <div>
+                          <div className={labelCls}>Flag Review Score<Tip text={STUDIO_TIPS.comp_match_flag_review_score} /></div>
+                          <input type="number" min={0} max={1} step={0.05}
+                            className={`${selectCls} w-full`}
+                            value={numN(currentRule, 'component.match.flag_review_score', 0.65)}
+                            onChange={(e) => updateField(selectedKey, 'component.match.flag_review_score', parseFloat(e.target.value) || 0.65)}
+                          />
+                        </div>
                       </div>
-                      <div>
-                        <div className={labelCls}>Property Weight</div>
-                        <input type="number" min={0} max={1} step={0.05}
-                          className={`${selectCls} w-full`}
-                          value={numN(currentRule, 'component.match.property_weight', 0.6)}
-                          onChange={(e) => updateField(selectedKey, 'component.match.property_weight', parseFloat(e.target.value) || 0.6)}
-                        />
-                      </div>
-                      <div>
-                        <div className={labelCls}>Name Weight</div>
-                        <input type="number" min={0} max={1} step={0.05}
-                          className={`${selectCls} w-full`}
-                          value={numN(currentRule, 'component.match.name_weight', 0.4)}
-                          onChange={(e) => updateField(selectedKey, 'component.match.name_weight', parseFloat(e.target.value) || 0.4)}
-                        />
-                      </div>
-                      <div>
-                        <div className={labelCls}>Auto-Accept Score</div>
-                        <input type="number" min={0} max={1} step={0.05}
-                          className={`${selectCls} w-full`}
-                          value={numN(currentRule, 'component.match.auto_accept_score', 0.95)}
-                          onChange={(e) => updateField(selectedKey, 'component.match.auto_accept_score', parseFloat(e.target.value) || 0.95)}
-                        />
-                      </div>
-                      <div>
-                        <div className={labelCls}>Flag Review Score</div>
-                        <input type="number" min={0} max={1} step={0.05}
-                          className={`${selectCls} w-full`}
-                          value={numN(currentRule, 'component.match.flag_review_score', 0.65)}
-                          onChange={(e) => updateField(selectedKey, 'component.match.flag_review_score', parseFloat(e.target.value) || 0.65)}
-                        />
-                      </div>
-                      <div>
-                        <div className={labelCls}>Property Keys</div>
-                        <TagPicker values={arrN(currentRule, 'component.match.property_keys')} onChange={(v) => updateField(selectedKey, 'component.match.property_keys', v)} placeholder="dpi, ips..." />
+                      {/* Property Matching */}
+                      <div className="text-[11px] font-medium text-gray-400 mb-1 mt-3">Property Matching</div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <div className={labelCls}>Property Weight<Tip text={STUDIO_TIPS.comp_match_property_weight} /></div>
+                          <input type="number" min={0} max={1} step={0.05}
+                            className={`${selectCls} w-full`}
+                            value={numN(currentRule, 'component.match.property_weight', 0.6)}
+                            onChange={(e) => updateField(selectedKey, 'component.match.property_weight', parseFloat(e.target.value) || 0.6)}
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <div className={labelCls}>Property Keys<Tip text={STUDIO_TIPS.comp_match_property_keys} /></div>
+                          <div className="space-y-1.5">
+                            {derivedProps.map(p => {
+                              const raw = p.variance_policy || 'authoritative';
+                              const fieldRule = editedRules[p.field_key || ''] as Record<string, unknown> | undefined;
+                              const contractType = fieldRule ? strN(fieldRule, 'contract.type') : '';
+                              const parseTemplate = fieldRule ? strN(fieldRule, 'parse.template') : '';
+                              const enumSrc = fieldRule ? strN(fieldRule, 'enum.source') : '';
+                              const isBool = contractType === 'boolean';
+                              const hasEnum = !!enumSrc;
+                              const isComponentDb = hasEnum && enumSrc.startsWith('component_db');
+                              const isExtEnum = hasEnum && !isComponentDb;
+                              const isLocked = contractType !== 'number' || isBool || hasEnum;
+                              const vp = isLocked && NUMERIC_ONLY_POLICIES.includes(raw) ? 'authoritative' : raw;
+                              const fieldValues = knownValues[p.field_key || ''] || [];
+                              const lockReason = isBool
+                                ? 'Boolean field — variance locked to authoritative'
+                                : isComponentDb
+                                  ? `enum.db (${enumSrc.replace(/^component_db\./, '')}) — variance locked to authoritative`
+                                  : isExtEnum
+                                    ? `Enum (${enumSrc.replace(/^(known_values|data_lists)\./, '')}) — variance locked to authoritative`
+                                    : contractType !== 'number' && fieldValues.length > 0
+                                      ? `Manual values (${fieldValues.length}) — variance locked to authoritative`
+                                      : isLocked
+                                        ? 'String property — variance locked to authoritative'
+                                        : '';
+                              return (
+                                <div key={p.field_key} className="flex items-start gap-2 px-2 py-1 rounded bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+                                  <span className="text-[11px] font-medium text-blue-700 dark:text-blue-300 shrink-0">{p.field_key}</span>
+                                  <span
+                                    className={`text-[9px] px-1 rounded shrink-0 ${vp === 'override_allowed' ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300' : isLocked ? 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500' : 'bg-blue-100 text-blue-600 dark:bg-blue-800 dark:text-blue-300'}`}
+                                    title={lockReason || (vp === 'override_allowed' ? 'Products can override this value without triggering review' : `Variance policy: ${vp}`)}
+                                  >{vp === 'override_allowed' ? 'override' : vp}</span>
+                                  {parseTemplate ? <span className="text-[9px] px-1 rounded bg-gray-50 text-gray-400 dark:bg-gray-800 dark:text-gray-500 shrink-0">{parseTemplate}</span> : null}
+                                  {isBool ? (
+                                    <span className="text-[9px] px-1 rounded bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400 shrink-0">boolean: yes / no</span>
+                                  ) : null}
+                                  {isComponentDb ? (
+                                    <span className="text-[9px] px-1 rounded bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400 shrink-0 truncate max-w-[140px]" title={enumSrc}>enum.db: {enumSrc.replace(/^component_db\./, '')}</span>
+                                  ) : null}
+                                  {isExtEnum ? (
+                                    <span className="text-[9px] px-1 rounded bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400 shrink-0 truncate max-w-[140px]" title={enumSrc}>enum: {enumSrc.replace(/^(known_values|data_lists)\./, '')}</span>
+                                  ) : null}
+                                  {!isBool && !hasEnum && isLocked && fieldValues.length > 0 && fieldValues.length <= 8 ? (
+                                    <div className="flex flex-wrap gap-0.5">
+                                      <span className="text-[9px] text-gray-400 mr-0.5">manual:</span>
+                                      {fieldValues.map(v => (
+                                        <span key={v} className="text-[9px] px-1 rounded bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400">{v}</span>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                  {!isBool && !hasEnum && isLocked && fieldValues.length > 8 ? (
+                                    <span className="text-[9px] text-gray-400" title={fieldValues.join(', ')}>manual: {fieldValues.length} values</span>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                            {derivedProps.length === 0 ? (
+                              <span className="text-xs text-gray-400 italic">No properties mapped — add in Mapping Studio</span>
+                            ) : null}
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  {/* ── AI Settings ────────────────────────────────── */}
-                  <div className="mt-3 border-t border-gray-200 dark:border-gray-700 pt-3">
-                    <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">AI Review Settings</div>
-                    <div className="grid grid-cols-3 gap-3">
-                      <div>
-                        <div className={labelCls}>Mode</div>
-                        <select className={`${selectCls} w-full`}
-                          value={strN(currentRule, 'component.ai.mode', 'off')}
-                          onChange={(e) => updateField(selectedKey, 'component.ai.mode', e.target.value)}
-                        >
-                          <option value="off">off</option>
-                          <option value="judge">judge (thinking model)</option>
-                          <option value="planner">planner (escalate if uncertain)</option>
-                          <option value="advisory">advisory (fast only)</option>
-                        </select>
-                      </div>
-                      <div>
-                        <div className={labelCls}>Model Strategy</div>
-                        <select className={`${selectCls} w-full`}
-                          value={strN(currentRule, 'component.ai.model_strategy', 'auto')}
-                          onChange={(e) => updateField(selectedKey, 'component.ai.model_strategy', e.target.value)}
-                        >
-                          <option value="auto">auto</option>
-                          <option value="force_deep">force_deep (reasoning model)</option>
-                          <option value="fast_only">fast_only</option>
-                        </select>
-                      </div>
-                      <div>
-                        <div className={labelCls}>Context Level</div>
-                        <select className={`${selectCls} w-full`}
-                          value={strN(currentRule, 'component.ai.context_level', 'properties')}
-                          onChange={(e) => updateField(selectedKey, 'component.ai.context_level', e.target.value)}
-                        >
-                          <option value="name_only">name_only</option>
-                          <option value="properties">properties</option>
-                          <option value="properties_and_evidence">properties_and_evidence</option>
-                        </select>
-                      </div>
-                    </div>
-                    <div className="mt-2">
-                      <div className={labelCls}>Reasoning Note</div>
-                      <textarea
-                        className={`${selectCls} w-full h-16 resize-y`}
-                        value={strN(currentRule, 'component.ai.reasoning_note')}
-                        onChange={(e) => updateField(selectedKey, 'component.ai.reasoning_note', e.target.value)}
-                        placeholder="Human-authored guidance for the AI about this component type..."
-                      />
-                    </div>
-                  </div>
-                  {/* ── Component Priority ─────────────────────────── */}
-                  <div className="mt-3 border-t border-gray-200 dark:border-gray-700 pt-3">
-                    <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">Component Priority</div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <div className={labelCls}>Difficulty</div>
-                        <select className={`${selectCls} w-full`}
-                          value={strN(currentRule, 'component.priority.difficulty', 'medium')}
-                          onChange={(e) => updateField(selectedKey, 'component.priority.difficulty', e.target.value)}
-                        >
-                          <option value="easy">easy</option>
-                          <option value="medium">medium</option>
-                          <option value="hard">hard</option>
-                        </select>
-                      </div>
-                      <div>
-                        <div className={labelCls}>Effort (1-10)</div>
-                        <input type="number" min={1} max={10} step={1}
-                          className={`${selectCls} w-full`}
-                          value={numN(currentRule, 'component.priority.effort', 5)}
-                          onChange={(e) => updateField(selectedKey, 'component.priority.effort', parseInt(e.target.value, 10) || 5)}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </>
-              ) : null}
-              {(currentRule as Record<string, unknown>).excel_hints ? (
-                <div className="mt-2">
-                  <div className={labelCls}>Excel Hints (read-only)</div>
-                  <JsonViewer data={(currentRule as Record<string, unknown>).excel_hints} maxDepth={2} />
-                </div>
-              ) : null}
+                  </>
+                );
+              })() : null}
             </Section>
 
             {/* ── Raw JSON ────────────────────────────────────────── */}
@@ -4184,6 +3553,119 @@ function KeyNavigatorTab({
         )}
       </div>
     </div>
+
+    {bulkOpen && (
+      <div className="fixed inset-0 z-40 bg-black/45 p-4 flex items-start md:items-center justify-center">
+        <div className="w-full max-w-5xl max-h-[92vh] overflow-hidden bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 shadow-2xl flex flex-col">
+          <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+            <div>
+              <h4 className="text-sm font-semibold">Bulk Paste Keys + Labels</h4>
+              <p className="text-xs text-gray-500 mt-0.5">Paste two columns: <strong>Key</strong> and <strong>Label</strong> (tab-separated from Excel/Sheets).</p>
+            </div>
+            <button
+              onClick={() => { setBulkOpen(false); setBulkGridRows([]); setBulkGroup(''); }}
+              className="text-gray-400 hover:text-gray-600 text-lg leading-none"
+              aria-label="Close bulk paste modal"
+            >&times;</button>
+          </div>
+
+          <div className="p-4 space-y-3 overflow-auto">
+            <div className="grid grid-cols-1 md:grid-cols-[260px,1fr] gap-3 items-end">
+              <div>
+                <label className={labelCls}>Group</label>
+                <select
+                  value={bulkGroup}
+                  onChange={(e) => setBulkGroup(e.target.value)}
+                  className={`${selectCls} w-full`}
+                >
+                  <option value="">ungrouped</option>
+                  {existingGroups.map((g) => (
+                    <option key={g} value={g}>{g}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="text-xs text-gray-500">
+                Type or paste two columns from a spreadsheet. Label is optional (auto-generated from key).
+              </div>
+            </div>
+
+            <BulkPasteGrid
+              col1Header="Key"
+              col2Header="Label"
+              col1Placeholder="sensor_dpi_max"
+              col2Placeholder="Max DPI"
+              rows={bulkGridRows}
+              onChange={setBulkGridRows}
+              col1Mono
+            />
+
+            <div className="flex flex-wrap gap-2 text-xs">
+              <span className="px-2 py-1 rounded bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300">Ready: {bulkCounts.ready}</span>
+              <span className="px-2 py-1 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">Existing: {bulkCounts.existing}</span>
+              <span className="px-2 py-1 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">Duplicates: {bulkCounts.duplicate}</span>
+              <span className="px-2 py-1 rounded bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300">Invalid: {bulkCounts.invalid}</span>
+              <span className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200">Rows: {bulkPreviewRows.length}</span>
+            </div>
+
+            {bulkPreviewRows.length > 0 && (
+            <div className="border border-gray-200 dark:border-gray-700 rounded overflow-auto max-h-[24vh]">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-gray-50 dark:bg-gray-900/70 border-b border-gray-200 dark:border-gray-700">
+                  <tr>
+                    <th className="text-left px-2 py-1.5 w-12">#</th>
+                    <th className="text-left px-2 py-1.5">Key</th>
+                    <th className="text-left px-2 py-1.5">Label</th>
+                    <th className="text-left px-2 py-1.5 w-36">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bulkPreviewRows.map((row) => {
+                    const statusCls = row.status === 'ready'
+                      ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300'
+                      : row.status === 'duplicate_existing'
+                        ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300'
+                        : row.status === 'duplicate_in_paste'
+                          ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
+                          : 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300';
+                    return (
+                      <tr key={`${row.rowNumber}-${row.key}-${row.raw}`} className="border-b border-gray-100 dark:border-gray-700/50">
+                        <td className="px-2 py-1.5 text-gray-500">{row.rowNumber}</td>
+                        <td className="px-2 py-1.5 font-mono">{row.key || <span className="italic text-gray-400">&mdash;</span>}</td>
+                        <td className="px-2 py-1.5">{row.label || <span className="italic text-gray-400">&mdash;</span>}</td>
+                        <td className="px-2 py-1.5">
+                          <span className={`inline-block px-2 py-0.5 rounded-full ${statusCls}`}>{row.reason}</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            )}
+          </div>
+
+          <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between gap-2">
+            <div className="text-xs text-gray-500">
+              Ready rows will be added to group <strong>{bulkGroup || 'ungrouped'}</strong>.
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setBulkOpen(false); setBulkGridRows([]); setBulkGroup(''); }}
+                className={btnSecondary}
+              >Close</button>
+              <button
+                onClick={handleBulkImport}
+                disabled={bulkReadyRows.length === 0}
+                className={btnPrimary}
+              >
+                {`Import ${bulkReadyRows.length} Ready Row${bulkReadyRows.length === 1 ? '' : 's'}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 

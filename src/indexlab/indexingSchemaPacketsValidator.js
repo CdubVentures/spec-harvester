@@ -14,7 +14,7 @@ const validatorCache = new Map();
 function normalizeSchemaRoot(schemaRoot = '') {
   const token = String(schemaRoot || '').trim();
   if (token) return path.resolve(token);
-  return path.resolve(process.cwd(), 'implementation', 'parrsing-managament');
+  return path.resolve(process.cwd(), 'implementation', 'ai-indexing-plans', 'parsing-managament');
 }
 
 function schemaErrorToText(error = {}) {

@@ -240,6 +240,21 @@ test('batch with upper_bound policy', () => {
   assert.equal(result.summary.violations, 1);
 });
 
+test('batch with override_allowed → all compliant regardless of values', () => {
+  const entries = [
+    { product_id: 'p1', value: '50' },
+    { product_id: 'p2', value: '999' },
+    { product_id: 'p3', value: '0' },
+  ];
+  const result = evaluateVarianceBatch('override_allowed', '100', entries);
+  assert.equal(result.summary.total, 3);
+  assert.equal(result.summary.compliant, 3);
+  assert.equal(result.summary.violations, 0);
+  for (const r of result.results) {
+    assert.equal(r.compliant, true);
+  }
+});
+
 test('batch with null policy → all compliant', () => {
   const entries = [
     { product_id: 'p1', value: '50' },

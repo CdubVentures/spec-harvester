@@ -47,6 +47,21 @@ const METHOD_WEIGHTS = {
   component_db_inference: 0.15
 };
 
+const LLM_EXTRACT_TIER_WEIGHTS = {
+  tier1_manufacturer: 0.6,
+  tier2_lab: 0.4,
+  tier3_retailer: 0.2,
+  tier4_community: 0.15,
+  tier5_aggregator: 0.15
+};
+
+function resolveMethodWeight(method, tierKey) {
+  if (String(method || '') === 'llm_extract') {
+    return LLM_EXTRACT_TIER_WEIGHTS[String(tierKey || '')] || 0.15;
+  }
+  return METHOD_WEIGHTS[String(method || '')] || 0.15;
+}
+
 function withDefaultSource(candidate = {}) {
   return {
     ...candidate,
@@ -73,7 +88,7 @@ export class CandidateMerger {
     const rule = this.getFieldRule(field);
     let score = 0;
     score += TIER_WEIGHTS[String(candidate?.source?.tier || '')] || 0.1;
-    score += METHOD_WEIGHTS[String(candidate?.method || '')] || 0.15;
+    score += resolveMethodWeight(candidate?.method, candidate?.source?.tier);
     if (Array.isArray(rule?.preferred_source_hosts)) {
       const url = String(candidate?.source?.url || '');
       if (rule.preferred_source_hosts.some((host) => url.includes(host))) {

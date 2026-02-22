@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useMutation, useQuery, type QueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { trafficColor, trafficTextColor, sourceBadgeClass, SOURCE_BADGE_FALLBACK } from '../../utils/colors';
-import { hasKnownValue, humanizeField } from '../../utils/fieldNormalize';
+import { hasKnownValue } from '../../utils/fieldNormalize';
+import { useFieldLabels } from '../../hooks/useFieldLabels';
 import { pct } from '../../utils/formatting';
 import {
   DrawerShell,
@@ -34,6 +35,7 @@ interface ComponentReviewDrawerProps {
   pendingReviewItems?: ComponentReviewFlaggedItem[];
   isSynthetic?: boolean;
   debugLinkedProducts?: boolean;
+  propertyColumns?: string[];
 }
 
 const varianceBadge: Record<string, string> = {
@@ -100,11 +102,13 @@ function PropertyCard({
   state,
   onOverride,
   isPending,
+  getLabel,
 }: {
   propKey: string;
   state: ComponentPropertyState;
   onOverride: (value: string) => void;
   isPending: boolean;
+  getLabel: (key: string) => string;
 }) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
@@ -116,7 +120,7 @@ function PropertyCard({
       <div className="flex items-center gap-2">
         <span className={`inline-block w-3 h-3 rounded-full flex-shrink-0 ${trafficColor(state.selected.color)}`} />
         <span className="text-xs font-medium text-gray-500 dark:text-gray-400 flex-shrink-0">
-          {humanizeField(propKey)}
+          {getLabel(propKey)}
         </span>
         <span
           className={`font-mono text-sm font-semibold flex-1 truncate ${trafficTextColor(state.selected.color)}`}
@@ -143,31 +147,89 @@ function PropertyCard({
         </button>
       ) : (
         <div className="flex gap-2 mt-1">
-          <input
-            type="text"
-            value={editValue}
-            onChange={(event) => setEditValue(event.target.value)}
-            className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700"
-            autoFocus
-            placeholder="Enter new value..."
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && editValue) {
+          {state.enum_policy === 'closed' && state.enum_values && state.enum_values.length > 0 ? (
+            <select
+              value={editValue}
+              onChange={(event) => {
+                setEditValue(event.target.value);
+                if (event.target.value) {
+                  onOverride(event.target.value);
+                  setEditing(false);
+                }
+              }}
+              className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700"
+              autoFocus
+            >
+              <option value="">Select value...</option>
+              {state.enum_values.map((v) => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+          ) : state.enum_values && state.enum_values.length > 0 ? (
+            <>
+              <select
+                value={state.enum_values.includes(editValue) ? editValue : '__other__'}
+                onChange={(event) => {
+                  if (event.target.value === '__other__') return;
+                  setEditValue(event.target.value);
+                  onOverride(event.target.value);
+                  setEditing(false);
+                }}
+                className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700"
+                autoFocus
+              >
+                <option value="">Select value...</option>
+                {state.enum_values.map((v) => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+                <option value="__other__">Other...</option>
+              </select>
+              {!state.enum_values.includes(editValue) && (
+                <input
+                  type="text"
+                  value={editValue}
+                  onChange={(event) => setEditValue(event.target.value)}
+                  className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700"
+                  placeholder="Custom value..."
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && editValue) {
+                      onOverride(editValue);
+                      setEditing(false);
+                    }
+                    if (event.key === 'Escape') setEditing(false);
+                  }}
+                />
+              )}
+            </>
+          ) : (
+            <input
+              type="text"
+              value={editValue}
+              onChange={(event) => setEditValue(event.target.value)}
+              className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700"
+              autoFocus
+              placeholder="Enter new value..."
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && editValue) {
+                  onOverride(editValue);
+                  setEditing(false);
+                }
+                if (event.key === 'Escape') setEditing(false);
+              }}
+            />
+          )}
+          {!(state.enum_policy === 'closed' && state.enum_values && state.enum_values.length > 0) && (
+            <button
+              onClick={() => {
                 onOverride(editValue);
                 setEditing(false);
-              }
-              if (event.key === 'Escape') setEditing(false);
-            }}
-          />
-          <button
-            onClick={() => {
-              onOverride(editValue);
-              setEditing(false);
-            }}
-            disabled={!editValue || isPending}
-            className="px-3 py-1 text-sm bg-orange-500 text-white rounded hover:bg-orange-600 disabled:opacity-50"
-          >
-            Apply
-          </button>
+              }}
+              disabled={!editValue || isPending}
+              className="px-3 py-1 text-sm bg-orange-500 text-white rounded hover:bg-orange-600 disabled:opacity-50"
+            >
+              Apply
+            </button>
+          )}
         </div>
       )}
     </DrawerCard>
@@ -580,7 +642,21 @@ export function ComponentReviewDrawer({
   pendingReviewItems = [],
   isSynthetic = false,
   debugLinkedProducts = false,
+  propertyColumns = [],
 }: ComponentReviewDrawerProps) {
+  const { getLabel } = useFieldLabels(category);
+  const sortedPropertyEntries = useMemo(() => {
+    const entries = Object.entries(item.properties);
+    if (propertyColumns.length > 0) {
+      const orderIndex = new Map(propertyColumns.map((k, i) => [k, i]));
+      return [...entries].sort(([a], [b]) => {
+        const ai = orderIndex.has(a) ? orderIndex.get(a)! : Number.MAX_SAFE_INTEGER;
+        const bi = orderIndex.has(b) ? orderIndex.get(b)! : Number.MAX_SAFE_INTEGER;
+        return ai - bi;
+      });
+    }
+    return entries;
+  }, [item.properties, propertyColumns]);
   const drawerPendingReviewItems = (() => {
     const propKey = String(focusedProperty || '').trim();
     if (!propKey) return pendingReviewItems;
@@ -777,6 +853,7 @@ export function ComponentReviewDrawer({
       && (
         Boolean(state.accepted_candidate_id)
         || state.source === 'workbook'
+        || state.source === 'reference'
         || state.source === 'manual'
         || state.source === 'user'
       );
@@ -905,6 +982,7 @@ export function ComponentReviewDrawer({
       && (
         Boolean(state.accepted_candidate_id)
         || state.source === 'workbook'
+        || state.source === 'reference'
         || state.source === 'manual'
         || state.source === 'user'
       );
@@ -924,7 +1002,7 @@ export function ComponentReviewDrawer({
 
     return (
       <CellDrawer
-        title={humanizeField(focusedProperty)}
+        title={getLabel(focusedProperty)}
         subtitle={subtitle}
         onClose={onClose}
         currentValue={{
@@ -1048,7 +1126,7 @@ export function ComponentReviewDrawer({
         );
       }
       // 2. Apply best candidate values for each property as overrides
-      for (const [propKey, state] of Object.entries(item.properties)) {
+      for (const [propKey, state] of sortedPropertyEntries) {
         const componentValueId = toPositiveId(state.slot_id);
         if (!componentValueId) continue;
         const bestCandidate = state.candidates?.[0];
@@ -1192,7 +1270,7 @@ export function ComponentReviewDrawer({
       </DrawerSection>
 
       {(() => {
-        const flaggedProps = Object.entries(item.properties)
+        const flaggedProps = sortedPropertyEntries
           .filter(([, state]) => state.needs_review)
           .map(([key, state]) => ({ key, reasonCodes: state.reason_codes || ['missing_value'] }));
         return flaggedProps.length > 0 ? <FlagsOverviewSection flaggedProperties={flaggedProps} /> : null;
@@ -1274,6 +1352,7 @@ export function ComponentReviewDrawer({
               });
             }}
             isPending={overrideMut.isPending}
+            getLabel={getLabel}
           />
         ))}
       </DrawerSection>

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { planDiscoveryQueriesLLM } from '../src/llm/discoveryPlanner.js';
+import { planDiscoveryQueriesLLM, normalizeQueryRows } from '../src/llm/discoveryPlanner.js';
 
 function makeChatCompletionResponse(payload) {
   return {
@@ -65,7 +65,8 @@ test('planDiscoveryQueriesLLM runs single planning pass outside aggressive mode'
     });
 
     assert.equal(seenModels.length, 1);
-    assert.deepEqual(queries, ['razer viper v3 pro specs', 'razer viper v3 pro manual pdf']);
+    const queryStrings = queries.map((r) => typeof r === 'object' ? r.query : r);
+    assert.deepEqual(queryStrings, ['razer viper v3 pro specs', 'razer viper v3 pro manual pdf']);
   } finally {
     global.fetch = originalFetch;
   }
@@ -130,12 +131,89 @@ test('planDiscoveryQueriesLLM runs multi-pass planning in aggressive mode and de
     });
 
     assert.equal(calls.length, 3);
-    assert.equal(queries.includes('logitech g pro x superlight 2 support'), true);
-    assert.equal(queries.includes('logitech g pro x superlight 2 latency test'), true);
+    const queryStrings = queries.map((r) => typeof r === 'object' ? r.query : r);
+    assert.equal(queryStrings.includes('logitech g pro x superlight 2 support'), true);
+    assert.equal(queryStrings.includes('logitech g pro x superlight 2 latency test'), true);
     assert.equal(
-      queries.filter((query) => query === 'logitech g pro x superlight 2 support').length,
+      queryStrings.filter((query) => query === 'logitech g pro x superlight 2 support').length,
       1
     );
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('normalizeQueryRows converts flat string array to structured rows with empty target_fields', () => {
+  const result = normalizeQueryRows(['q1', 'q2']);
+  assert.deepEqual(result, [
+    { query: 'q1', target_fields: [] },
+    { query: 'q2', target_fields: [] }
+  ]);
+});
+
+test('normalizeQueryRows preserves structured rows with target_fields', () => {
+  const result = normalizeQueryRows([
+    { query: 'q1', target_fields: ['dpi', 'sensor'] },
+    { query: 'q2', target_fields: [] }
+  ]);
+  assert.deepEqual(result, [
+    { query: 'q1', target_fields: ['dpi', 'sensor'] },
+    { query: 'q2', target_fields: [] }
+  ]);
+});
+
+test('normalizeQueryRows handles mixed array of strings and objects', () => {
+  const result = normalizeQueryRows([
+    'plain query',
+    { query: 'structured query', target_fields: ['weight'] }
+  ]);
+  assert.equal(result.length, 2);
+  assert.equal(result[0].query, 'plain query');
+  assert.deepEqual(result[0].target_fields, []);
+  assert.equal(result[1].query, 'structured query');
+  assert.deepEqual(result[1].target_fields, ['weight']);
+});
+
+test('planDiscoveryQueriesLLM returns structured rows with query and target_fields', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => makeChatCompletionResponse({
+    queries: [
+      { query: 'razer viper v3 pro weight specs', target_fields: ['weight'] },
+      'razer viper v3 pro manual'
+    ]
+  });
+
+  try {
+    const queries = await planDiscoveryQueriesLLM({
+      job: {
+        productId: 'mouse-razer-viper-v3-pro',
+        category: 'mouse',
+        identityLock: { brand: 'Razer', model: 'Viper V3 Pro', variant: '' }
+      },
+      categoryConfig: { category: 'mouse', schema: { critical_fields: ['weight'] } },
+      baseQueries: [],
+      missingCriticalFields: ['weight'],
+      config: {
+        llmEnabled: true,
+        llmPlanDiscoveryQueries: true,
+        llmApiKey: 'sk-test',
+        llmBaseUrl: 'https://api.openai.com',
+        llmProvider: 'openai',
+        llmModelPlan: 'gpt-5-low',
+        llmTimeoutMs: 5_000
+      },
+      llmContext: {
+        mode: 'balanced',
+        budgetGuard: { canCall: () => ({ allowed: true }), recordCall: () => {} }
+      }
+    });
+
+    assert.ok(queries.length >= 2);
+    assert.ok(queries.every((r) => typeof r === 'object' && typeof r.query === 'string'));
+    const structured = queries.find((r) => r.query.includes('weight'));
+    assert.ok(structured);
+    assert.ok(Array.isArray(structured.target_fields));
+    assert.ok(structured.target_fields.includes('weight'));
   } finally {
     global.fetch = originalFetch;
   }

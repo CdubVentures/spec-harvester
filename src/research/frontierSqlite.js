@@ -231,22 +231,23 @@ export class FrontierDbSqlite {
     let cooldownNextRetryTs = '';
 
     if (statusCode === 404) {
-      cooldownSeconds = fetchCount >= this._pathPenaltyThreshold
+      const isRepeat = fetchCount >= 3;
+      cooldownSeconds = isRepeat
         ? Math.round(this._cooldown404RepeatMs / 1000)
         : Math.round(this._cooldown404Ms / 1000);
-      cooldownReason = '404_not_found';
+      cooldownReason = isRepeat ? 'status_404_repeated' : 'status_404';
       cooldownNextRetryTs = new Date(Date.parse(ts) + cooldownSeconds * 1000).toISOString();
     } else if (statusCode === 410) {
       cooldownSeconds = Math.round(this._cooldown410Ms / 1000);
-      cooldownReason = '410_gone';
+      cooldownReason = 'status_410';
       cooldownNextRetryTs = new Date(Date.parse(ts) + cooldownSeconds * 1000).toISOString();
     } else if (statusCode === 403) {
-      cooldownSeconds = Math.round(this._cooldown403BaseMs * Math.pow(2, Math.min(fetchCount - 1, 8)) / 1000);
-      cooldownReason = '403_forbidden_backoff';
+      cooldownSeconds = Math.round(this._cooldown403BaseMs * Math.pow(2, Math.min(4, fetchCount - 1)) / 1000);
+      cooldownReason = 'status_403_backoff';
       cooldownNextRetryTs = new Date(Date.parse(ts) + cooldownSeconds * 1000).toISOString();
     } else if (statusCode === 429) {
-      cooldownSeconds = Math.round(this._cooldown429BaseMs * Math.pow(2, Math.min(fetchCount - 1, 8)) / 1000);
-      cooldownReason = '429_rate_limited';
+      cooldownSeconds = Math.round(this._cooldown429BaseMs * Math.pow(2, Math.min(4, fetchCount - 1)) / 1000);
+      cooldownReason = 'status_429_backoff';
       cooldownNextRetryTs = new Date(Date.parse(ts) + cooldownSeconds * 1000).toISOString();
     } else if (statusCode === 0 && error) {
       cooldownSeconds = Math.round(this._cooldownTimeoutMs / 1000);

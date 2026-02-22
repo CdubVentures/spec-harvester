@@ -4,7 +4,6 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import Ajv2020 from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
-import ExcelJS from 'exceljs';
 import semver from 'semver';
 import { compileCategoryWorkbook, saveWorkbookMap } from '../ingest/categoryCompile.js';
 import { buildMigrationPlan } from './migrations.js';
@@ -1586,48 +1585,6 @@ function starterFieldRows({ category, templateName }) {
   return rows;
 }
 
-async function writeStarterFieldCatalogWorkbook({
-  workbookPath,
-  category,
-  templateName
-}) {
-  const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'Spec Factory';
-  workbook.created = new Date();
-
-  const ws = workbook.addWorksheet('field_catalog');
-  ws.columns = [
-    { header: 'group', key: 'group', width: 18 },
-    { header: 'field_key', key: 'field_key', width: 28 },
-    { header: 'display_name', key: 'display_name', width: 28 },
-    { header: 'data_type', key: 'data_type', width: 14 },
-    { header: 'output_shape', key: 'output_shape', width: 14 },
-    { header: 'required_level', key: 'required_level', width: 16 },
-    { header: 'availability', key: 'availability', width: 16 },
-    { header: 'difficulty', key: 'difficulty', width: 12 },
-    { header: 'effort', key: 'effort', width: 10 },
-    { header: 'evidence_required', key: 'evidence_required', width: 18 },
-    { header: 'unknown_reason_default', key: 'unknown_reason_default', width: 28 },
-    { header: 'description', key: 'description', width: 40 }
-  ];
-  ws.getRow(1).font = { bold: true };
-  ws.views = [{ state: 'frozen', ySplit: 1 }];
-  ws.autoFilter = 'A1:L1';
-  for (const row of starterFieldRows({ category, templateName })) {
-    ws.addRow(row);
-  }
-
-  const guide = workbook.addWorksheet('instructions');
-  guide.addRow(['Spec Factory Field Catalog Starter']);
-  guide.addRow([`Category: ${category}`]);
-  guide.addRow([`Template: ${templateName}`]);
-  guide.addRow(['Edit rows in "field_catalog". Do not rename header columns.']);
-  guide.addRow(['Leave evidence_required=true for strict evidence-first operation.']);
-  guide.getRow(1).font = { bold: true };
-
-  await fs.mkdir(path.dirname(workbookPath), { recursive: true });
-  await workbook.xlsx.writeFile(workbookPath);
-}
 
 async function writeIfMissing(filePath, payload) {
   if (await fileExists(filePath)) {
@@ -1681,16 +1638,6 @@ export async function initCategory({
       createdFiles.push(filePath);
     }
   }
-  const starterWorkbookPath = path.join(sourceRoot, 'field_catalog.xlsx');
-  if (!(await fileExists(starterWorkbookPath))) {
-    await writeStarterFieldCatalogWorkbook({
-      workbookPath: starterWorkbookPath,
-      category: normalizedCategory,
-      templateName
-    });
-    createdFiles.push(starterWorkbookPath);
-  }
-
   return {
     category: normalizedCategory,
     template: templateName,
@@ -1885,10 +1832,8 @@ export async function discoverCompileCategories({
     const hasWorkbookMap = await fileExists(path.join(categoryRoot, '_control_plane', 'workbook_map.json'));
     const hasGeneratedRules = await fileExists(path.join(categoryRoot, '_generated', 'field_rules.json'));
     const sourceRoot = path.join(categoryRoot, '_source');
-    const hasWorkbook = await fileExists(path.join(categoryRoot, `${category}Data.xlsm`))
-      || await fileExists(path.join(categoryRoot, `${category}Data.xlsx`))
-      || await fileExists(path.join(sourceRoot, 'field_catalog.xlsx'));
-    if (hasWorkbookMap || hasGeneratedRules || hasWorkbook) {
+    const hasSourceSeed = await fileExists(path.join(sourceRoot, 'field_catalog.seed.json'));
+    if (hasWorkbookMap || hasGeneratedRules || hasSourceSeed) {
       categories.push(category);
     }
   }
@@ -2048,21 +1993,12 @@ export async function watchCompileRules({
   const categoryRoot = path.join(helperRoot, normalizedCategory);
   const sourceRoot = path.join(categoryRoot, '_source');
   const controlRoot = path.join(categoryRoot, '_control_plane');
-  const workbookCandidates = [
-    path.join(categoryRoot, `${normalizedCategory}Data.xlsm`),
-    path.join(categoryRoot, `${normalizedCategory}Data.xlsx`)
-  ];
   const watchTargets = [];
   if (await fileExists(sourceRoot)) {
     watchTargets.push(sourceRoot);
   }
   if (await fileExists(controlRoot)) {
     watchTargets.push(controlRoot);
-  }
-  for (const candidate of workbookCandidates) {
-    if (await fileExists(candidate)) {
-      watchTargets.push(candidate);
-    }
   }
   if (watchTargets.length === 0) {
     watchTargets.push(categoryRoot);

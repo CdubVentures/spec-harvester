@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import ExcelJS from 'exceljs';
 import {
   compileRules,
   initCategory,
@@ -391,32 +390,11 @@ test('initCategory creates category scaffolding in helper_files and categories r
     assert.equal(await exists(path.join(helperRoot, 'monitor', '_generated')), true);
     assert.equal(await exists(path.join(helperRoot, 'monitor', '_suggestions')), true);
     assert.equal(await exists(path.join(helperRoot, 'monitor', '_overrides')), true);
-    const starterWorkbookPath = path.join(helperRoot, 'monitor', '_source', 'field_catalog.xlsx');
-    assert.equal(await exists(starterWorkbookPath), true);
     assert.equal(await exists(path.join(categoriesRoot, 'monitor', 'schema.json')), true);
     assert.equal(await exists(path.join(categoriesRoot, 'monitor', 'sources.json')), true);
     assert.equal(await exists(path.join(categoriesRoot, 'monitor', 'required_fields.json')), true);
     assert.equal(await exists(path.join(categoriesRoot, 'monitor', 'search_templates.json')), true);
     assert.equal(await exists(path.join(categoriesRoot, 'monitor', 'anchors.json')), true);
-
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(starterWorkbookPath);
-    const catalog = workbook.getWorksheet('field_catalog');
-    assert.equal(Boolean(catalog), true);
-    const header = catalog.getRow(1).values;
-    assert.equal(Array.isArray(header), true);
-    const rows = [];
-    catalog.eachRow((row, rowNumber) => {
-      if (rowNumber === 1) {
-        return;
-      }
-      rows.push(row.values);
-    });
-    assert.equal(rows.length > 10, true);
-    assert.equal(
-      rows.some((row) => String(row[2] || '').trim() === 'brand'),
-      true
-    );
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

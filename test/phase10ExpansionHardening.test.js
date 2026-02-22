@@ -52,8 +52,6 @@ test('bootstrapExpansionCategories initializes monitor and keyboard scaffolding 
     assert.equal(result.categories.includes('monitor'), true);
     assert.equal(result.categories.includes('keyboard'), true);
 
-    assert.equal(await exists(path.join(helperRoot, 'monitor', '_source', 'field_catalog.xlsx')), true);
-    assert.equal(await exists(path.join(helperRoot, 'keyboard', '_source', 'field_catalog.xlsx')), true);
     assert.equal(await exists(path.join(categoriesRoot, 'monitor', 'schema.json')), true);
     assert.equal(await exists(path.join(categoriesRoot, 'keyboard', 'schema.json')), true);
     assert.equal(await exists(path.join(goldenRoot, 'monitor', 'manifest.json')), true);

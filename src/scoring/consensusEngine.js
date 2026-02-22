@@ -43,6 +43,24 @@ const TIER_WEIGHT = {
   3: 0.45
 };
 
+function resolveMethodWeight(method, tier, config = null) {
+  if (method === 'llm_extract') {
+    if (tier === 1) return config?.consensusLlmWeightTier1 ?? 0.6;
+    if (tier === 2) return config?.consensusLlmWeightTier2 ?? 0.4;
+    if (tier === 3) return config?.consensusLlmWeightTier3 ?? 0.2;
+    return config?.consensusLlmWeightTier4 ?? 0.15;
+  }
+  return METHOD_WEIGHT[method] || 0.4;
+}
+
+function resolveTierWeight(tier, config = null) {
+  if (config) {
+    const key = `consensusTier${tier}Weight`;
+    if (config[key] !== undefined && config[key] !== null) return config[key];
+  }
+  return TIER_WEIGHT[tier] || 0.4;
+}
+
 const PASS_EXEMPT_FIELDS = new Set([
   'id',
   'brand',
@@ -178,7 +196,7 @@ function selectBestCluster(clusters) {
   return { best, second };
 }
 
-function clusterCandidates(rows) {
+function clusterCandidates(rows, config = null) {
   const byKey = new Map();
 
   for (const row of rows) {
@@ -195,7 +213,7 @@ function clusterCandidates(rows) {
     }
 
     const cluster = byKey.get(row.clusterKey);
-    const scoreAdd = (TIER_WEIGHT[row.tier] || 0.4) * (METHOD_WEIGHT[row.method] || 0.4);
+    const scoreAdd = resolveTierWeight(row.tier, config) * resolveMethodWeight(row.method, row.tier, config);
 
     if (row.approvedDomain) {
       cluster.score += scoreAdd;
@@ -391,7 +409,7 @@ export function runConsensusEngine({
         keyPath: candidate.keyPath,
         url: source.finalUrl || source.url,
         citation: resolveCitationFromCandidate(source, candidate, evidenceIndexCache),
-        score: (TIER_WEIGHT[source.tier] || 0.4) * (METHOD_WEIGHT[candidate.method] || 0.4)
+        score: resolveTierWeight(source.tier, config) * resolveMethodWeight(candidate.method, source.tier, config)
       });
     }
   }
@@ -484,7 +502,7 @@ export function runConsensusEngine({
       continue;
     }
 
-    const clusters = clusterCandidates(rows);
+    const clusters = clusterCandidates(rows, config);
 
     // Apply selection_policy bonus if engine provides a string enum policy
     const fieldRule = fieldRulesEngine?.getFieldRule?.(field);

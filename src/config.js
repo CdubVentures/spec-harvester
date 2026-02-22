@@ -355,7 +355,7 @@ export function loadDotEnvFile(dotEnvPath = '.env') {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
       continue;
     }
-    if (process.env[key] !== undefined) {
+    if (process.env[key] !== undefined && process.env[key] !== '') {
       continue;
     }
 
@@ -412,7 +412,10 @@ export function loadConfig(overrides = {}) {
     scannedPdfOcrMinLinesPerPage: parseIntEnv('SCANNED_PDF_OCR_MIN_LINES_PER_PAGE', 2),
     scannedPdfOcrMinConfidence: parseFloatEnv('SCANNED_PDF_OCR_MIN_CONFIDENCE', 0.5),
     concurrency: parseIntEnv('CONCURRENCY', 2),
-    perHostMinDelayMs: parseIntEnv('PER_HOST_MIN_DELAY_MS', 900),
+    perHostMinDelayMs: parseIntEnv('PER_HOST_MIN_DELAY_MS', 300),
+    fetchSchedulerEnabled: parseBoolEnv('FETCH_SCHEDULER_ENABLED', false),
+    fetchSchedulerMaxRetries: parseIntEnv('FETCH_SCHEDULER_MAX_RETRIES', 1),
+    fetchSchedulerFallbackWaitMs: parseIntEnv('FETCH_SCHEDULER_FALLBACK_WAIT_MS', 60000),
     userAgent:
       process.env.USER_AGENT ||
       'Mozilla/5.0 (compatible; EGSpecHarvester/1.0; +https://eggear.com)',
@@ -428,9 +431,9 @@ export function loadConfig(overrides = {}) {
     runProfile: normalizeRunProfile(process.env.RUN_PROFILE || 'standard'),
     discoveryEnabled: parseBoolEnv('DISCOVERY_ENABLED', false),
     fetchCandidateSources: parseBoolEnv('FETCH_CANDIDATE_SOURCES', true),
-    discoveryMaxQueries: parseIntEnv('DISCOVERY_MAX_QUERIES', 8),
+    discoveryMaxQueries: parseIntEnv('DISCOVERY_MAX_QUERIES', 6),
     discoveryResultsPerQuery: parseIntEnv('DISCOVERY_RESULTS_PER_QUERY', 10),
-    discoveryMaxDiscovered: parseIntEnv('DISCOVERY_MAX_DISCOVERED', 120),
+    discoveryMaxDiscovered: parseIntEnv('DISCOVERY_MAX_DISCOVERED', 80),
     discoveryQueryConcurrency: parseIntEnv('DISCOVERY_QUERY_CONCURRENCY', 4),
     searchProvider: process.env.SEARCH_PROVIDER || 'none',
     searxngBaseUrl: process.env.SEARXNG_BASE_URL || process.env.SEARXNG_URL || '',
@@ -509,7 +512,7 @@ export function loadConfig(overrides = {}) {
     llmWriteFallbackProvider: (process.env.LLM_WRITE_FALLBACK_PROVIDER || '').trim().toLowerCase(),
     llmWriteFallbackBaseUrl: process.env.LLM_WRITE_FALLBACK_BASE_URL || '',
     llmWriteFallbackApiKey: process.env.LLM_WRITE_FALLBACK_API_KEY || '',
-    llmSerpRerankEnabled: parseBoolEnv('LLM_SERP_RERANK_ENABLED', false),
+    llmSerpRerankEnabled: parseBoolEnv('LLM_SERP_RERANK_ENABLED', true),
     llmModelCatalog: process.env.LLM_MODEL_CATALOG || '',
     llmModelPricingMap: mergeModelPricingMaps(
       buildDefaultModelPricingMap(),
@@ -557,6 +560,34 @@ export function loadConfig(overrides = {}) {
     uberMaxUrlsPerProduct: parseIntEnv('UBER_MAX_URLS_PER_PRODUCT', 25),
     uberMaxUrlsPerDomain: parseIntEnv('UBER_MAX_URLS_PER_DOMAIN', 6),
     uberMaxRounds: parseIntEnv('UBER_MAX_ROUNDS', 6),
+    identityGatePublishThreshold: parseFloatEnv('IDENTITY_GATE_PUBLISH_THRESHOLD', 0.70),
+    convergenceMaxRounds: parseIntEnv('CONVERGENCE_MAX_ROUNDS', 3),
+    convergenceNoProgressLimit: parseIntEnv('CONVERGENCE_NO_PROGRESS_LIMIT', 2),
+    convergenceMaxLowQualityRounds: parseIntEnv('CONVERGENCE_MAX_LOW_QUALITY_ROUNDS', 1),
+    convergenceIdentityFailFastRounds: parseIntEnv('CONVERGENCE_IDENTITY_FAIL_FAST_ROUNDS', 1),
+    convergenceLowQualityConfidence: parseFloatEnv('CONVERGENCE_LOW_QUALITY_CONFIDENCE', 0.20),
+    convergenceMaxDispatchQueries: parseIntEnv('CONVERGENCE_MAX_DISPATCH_QUERIES', 20),
+    convergenceMaxTargetFields: parseIntEnv('CONVERGENCE_MAX_TARGET_FIELDS', 30),
+    needsetEvidenceDecayDays: parseIntEnv('NEEDSET_EVIDENCE_DECAY_DAYS', 14),
+    needsetEvidenceDecayFloor: parseFloatEnv('NEEDSET_EVIDENCE_DECAY_FLOOR', 0.30),
+    needsetCapIdentityLocked: parseFloatEnv('NEEDSET_CAP_IDENTITY_LOCKED', 1.00),
+    needsetCapIdentityProvisional: parseFloatEnv('NEEDSET_CAP_IDENTITY_PROVISIONAL', 0.74),
+    needsetCapIdentityConflict: parseFloatEnv('NEEDSET_CAP_IDENTITY_CONFLICT', 0.39),
+    needsetCapIdentityUnlocked: parseFloatEnv('NEEDSET_CAP_IDENTITY_UNLOCKED', 0.59),
+    consensusLlmWeightTier1: parseFloatEnv('CONSENSUS_LLM_WEIGHT_TIER1', 0.60),
+    consensusLlmWeightTier2: parseFloatEnv('CONSENSUS_LLM_WEIGHT_TIER2', 0.40),
+    consensusLlmWeightTier3: parseFloatEnv('CONSENSUS_LLM_WEIGHT_TIER3', 0.20),
+    consensusLlmWeightTier4: parseFloatEnv('CONSENSUS_LLM_WEIGHT_TIER4', 0.15),
+    consensusTier1Weight: parseFloatEnv('CONSENSUS_TIER1_WEIGHT', 1.00),
+    consensusTier2Weight: parseFloatEnv('CONSENSUS_TIER2_WEIGHT', 0.80),
+    consensusTier3Weight: parseFloatEnv('CONSENSUS_TIER3_WEIGHT', 0.45),
+    consensusTier4Weight: parseFloatEnv('CONSENSUS_TIER4_WEIGHT', 0.25),
+    serpTriageMinScore: parseIntEnv('SERP_TRIAGE_MIN_SCORE', 5),
+    serpTriageMaxUrls: parseIntEnv('SERP_TRIAGE_MAX_URLS', 12),
+    serpTriageEnabled: parseBoolEnv('SERP_TRIAGE_ENABLED', true),
+    retrievalMaxHitsPerField: parseIntEnv('RETRIEVAL_MAX_HITS_PER_FIELD', 24),
+    retrievalMaxPrimeSources: parseIntEnv('RETRIEVAL_MAX_PRIME_SOURCES', 8),
+    retrievalIdentityFilterEnabled: parseBoolEnv('RETRIEVAL_IDENTITY_FILTER_ENABLED', true),
     specDbDir: process.env.SPEC_DB_DIR || '.specfactory_tmp',
     frontierDbPath: process.env.FRONTIER_DB_PATH || '_intel/frontier/frontier.json',
     frontierEnableSqlite: parseBoolEnv('FRONTIER_ENABLE_SQLITE', true),
@@ -697,8 +728,8 @@ export function loadConfig(overrides = {}) {
     graphqlReplayEnabled: parseBoolEnv('GRAPHQL_REPLAY_ENABLED', true),
     maxGraphqlReplays: parseIntEnv('MAX_GRAPHQL_REPLAYS', 5),
     maxNetworkResponsesPerPage: parseIntEnv('MAX_NETWORK_RESPONSES_PER_PAGE', 1200),
-    pageGotoTimeoutMs: parseIntEnv('PAGE_GOTO_TIMEOUT_MS', 30_000),
-    pageNetworkIdleTimeoutMs: parseIntEnv('PAGE_NETWORK_IDLE_TIMEOUT_MS', 6_000),
+    pageGotoTimeoutMs: parseIntEnv('PAGE_GOTO_TIMEOUT_MS', 15_000),
+    pageNetworkIdleTimeoutMs: parseIntEnv('PAGE_NETWORK_IDLE_TIMEOUT_MS', 2_000),
     postLoadWaitMs: parseIntEnv('POST_LOAD_WAIT_MS', 0),
     articleExtractorV2Enabled: parseBoolEnv('ARTICLE_EXTRACTOR_V2', true),
     articleExtractorMinChars: parseIntEnv('ARTICLE_EXTRACTOR_MIN_CHARS', 700),

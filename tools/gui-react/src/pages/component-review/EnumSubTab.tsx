@@ -9,7 +9,8 @@ import { FlagIcon } from '../../components/common/FlagIcon';
 import { FlagsSection } from '../../components/common/FlagsSection';
 import { LinkedProductsList } from '../../components/common/LinkedProductsList';
 import { useComponentReviewStore } from '../../stores/componentReviewStore';
-import { hasKnownValue, humanizeField } from '../../utils/fieldNormalize';
+import { hasKnownValue } from '../../utils/fieldNormalize';
+import { useFieldLabels } from '../../hooks/useFieldLabels';
 import { sourceBadgeClass, SOURCE_BADGE_FALLBACK } from '../../utils/colors';
 import type { EnumReviewPayload, EnumFieldReview, EnumValueReviewItem } from '../../types/componentReview';
 
@@ -57,10 +58,12 @@ function FieldListItem({
   field,
   isSelected,
   onClick,
+  getLabel,
 }: {
   field: EnumFieldReview;
   isSelected: boolean;
   onClick: () => void;
+  getLabel: (key: string) => string;
 }) {
   return (
     <button
@@ -71,7 +74,7 @@ function FieldListItem({
           : 'hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300'
       }`}
     >
-      <span className="truncate">{humanizeField(field.field)}</span>
+      <span className="truncate">{getLabel(field.field)}</span>
       <div className="flex items-center gap-2 flex-shrink-0 ml-2">
         <span className="text-[10px] text-gray-400">{field.metrics.total}</span>
         {(() => {
@@ -222,6 +225,7 @@ export function EnumSubTab({
   queryClient,
   debugLinkedProducts = false,
 }: EnumSubTabProps) {
+  const { getLabel } = useFieldLabels(category);
   // Individual selectors to avoid re-renders from unrelated store changes
   const selectedEnumField = useComponentReviewStore((s) => s.selectedEnumField);
   const setSelectedEnumField = useComponentReviewStore((s) => s.setSelectedEnumField);
@@ -528,11 +532,12 @@ export function EnumSubTab({
             <p className="text-xs font-medium text-gray-500">Fields ({data.fields.length})</p>
           </div>
           <div className="p-1 space-y-0.5">
-            {data.fields.map((field) => (
+            {[...data.fields].sort((a, b) => a.field.localeCompare(b.field)).map((field) => (
               <FieldListItem
                 key={field.field}
                 field={field}
                 isSelected={field.field === selectedEnumField}
+                getLabel={getLabel}
                 onClick={() => {
                   setSelectedEnumField(field.field);
                   closeEnumDrawer();
@@ -550,7 +555,7 @@ export function EnumSubTab({
               <>
                 <div className="sticky top-0 bg-gray-50 dark:bg-gray-800 px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
                   <p className="text-xs font-medium text-gray-500">
-                    {humanizeField(selectedFieldData.field)} - {selectedFieldData.values.length} values
+                    {getLabel(selectedFieldData.field)} - {selectedFieldData.values.length} values
                   </p>
                   {(() => {
                     const pipelineCount = selectedFieldData.values.filter((v) => hasActionablePending(v) && v.source === 'pipeline').length;
@@ -643,7 +648,7 @@ export function EnumSubTab({
             const hasMeaningfulValue = hasKnownValue(vi.value);
             const isAccepted = hasMeaningfulValue
               && !vi.needs_review
-              && (vi.source === 'manual' || vi.source === 'workbook' || Boolean(vi.accepted_candidate_id));
+              && (vi.source === 'manual' || vi.source === 'workbook' || vi.source === 'reference' || Boolean(vi.accepted_candidate_id));
             const drawerIsPending = acceptMutation.isPending || removeMutation.isPending || drawerRenameMutation.isPending;
 
             const extraActions = (
@@ -697,7 +702,7 @@ export function EnumSubTab({
             return (
               <CellDrawer
                 title={vi.value}
-                subtitle={humanizeField(fd.field)}
+                subtitle={getLabel(fd.field)}
                 onClose={closeEnumDrawer}
                 currentValue={{
                   value: vi.value,

@@ -98,6 +98,54 @@ function componentLaneSlug(componentName, componentMaker = '') {
   return `${slugify(componentName)}_${slugify(componentMaker || 'na')}`;
 }
 
+function isTestModeCategory(category) {
+  return String(category || '').trim().toLowerCase().startsWith('_test_');
+}
+
+function discoveredFromSource(source) {
+  const token = normalizeSourceToken(source);
+  return token === 'pipeline' || token === 'discovered' || token === 'ai_discovered';
+}
+
+function normalizeDiscoveryRows(rows = []) {
+  return toArray(rows).map((row) => {
+    const source = String(row?.discovery_source || '').trim();
+    const discovered = typeof row?.discovered === 'boolean'
+      ? row.discovered
+      : discoveredFromSource(source);
+    return {
+      ...row,
+      discovery_source: source,
+      discovered,
+    };
+  });
+}
+
+function enforceNonDiscoveredRows(rows = [], category = '') {
+  const normalizedRows = normalizeDiscoveryRows(rows);
+  if (!isTestModeCategory(category) || normalizedRows.length === 0) {
+    return normalizedRows;
+  }
+  const maxNonDiscovered = 3;
+  let nonDiscoveredSeen = 0;
+  const result = normalizedRows.map((row) => {
+    if (!row.discovered) {
+      nonDiscoveredSeen += 1;
+      if (nonDiscoveredSeen > maxNonDiscovered) {
+        return { ...row, discovered: true };
+      }
+    }
+    return row;
+  });
+  const hasNonDiscovered = result.some((row) => !row.discovered);
+  if (!hasNonDiscovered) {
+    const firstUnlinked = result.findIndex((row) => (row?.linked_products?.length || 0) === 0);
+    const anchorIdx = firstUnlinked >= 0 ? firstUnlinked : 0;
+    return result.map((row, index) => (index === anchorIdx ? { ...row, discovered: false } : row));
+  }
+  return result;
+}
+
 function stableSerialize(value) {
   if (Array.isArray(value)) return `[${value.map((item) => stableSerialize(item)).join(',')}]`;
   if (value && typeof value === 'object') {
@@ -130,8 +178,8 @@ function clamp01(value, fallback = 0) {
 function normalizeSourceToken(source) {
   const token = normalizeToken(source);
   if (!token) return '';
-  if (token === 'component_db' || token === 'known_values' || token === 'workbook' || token === 'excel import') {
-    return 'workbook';
+  if (token === 'component_db' || token === 'known_values' || token === 'workbook' || token === 'excel import' || token === 'reference') {
+    return 'reference';
   }
   if (token === 'pipeline' || token.startsWith('pipeline')) return 'pipeline';
   if (token === 'specdb') return 'specdb';
@@ -142,7 +190,7 @@ function normalizeSourceToken(source) {
 function sourceLabelFromToken(token, fallback = '') {
   const normalized = normalizeSourceToken(token);
   const fallbackLabel = String(fallback || '').trim();
-  if (normalized === 'workbook') return fallbackLabel || 'Excel Import';
+  if (normalized === 'reference') return fallbackLabel || 'Reference';
   if (normalized === 'pipeline') return fallbackLabel || 'Pipeline';
   if (normalized === 'specdb') return fallbackLabel || 'SpecDb';
   if (normalized === 'user') return fallbackLabel || 'user';
@@ -151,7 +199,7 @@ function sourceLabelFromToken(token, fallback = '') {
 
 function sourceMethodFromToken(token, fallback = null) {
   const normalized = normalizeSourceToken(token);
-  if (normalized === 'workbook') return 'workbook_import';
+  if (normalized === 'reference') return 'reference_data';
   if (normalized === 'pipeline') return 'pipeline_extraction';
   if (normalized === 'specdb') return 'specdb_lookup';
   if (normalized === 'user') return 'manual_override';
@@ -546,7 +594,7 @@ function normalizeCandidateSharedReviewStatus(candidate, reviewRow = null) {
   }
   const sourceToken = candidateSourceToken(candidate, '');
   if (
-    sourceToken === 'workbook'
+    sourceToken === 'reference'
     || sourceToken === 'known_values'
     || sourceToken === 'component_db'
     || sourceToken === 'manual'
@@ -591,6 +639,38 @@ async function listJsonFiles(dirPath) {
   } catch { return []; }
 }
 
+// ── Field Rules Metadata Resolution ──────────────────────────────────
+
+export function resolvePropertyFieldMeta(propertyKey, fieldRules) {
+  if (!propertyKey || propertyKey.startsWith('__')) return null;
+  const fields = fieldRules?.rules?.fields ?? fieldRules?.fields ?? {};
+  const rule = fields[propertyKey];
+  if (!rule) return null;
+
+  const variance_policy = rule.variance_policy ?? null;
+  const constraints = Array.isArray(rule.constraints) ? rule.constraints : [];
+
+  let enum_values = null;
+  let enum_policy = null;
+  if (rule.enum && typeof rule.enum === 'object') {
+    enum_policy = rule.enum.policy ?? null;
+    const source = String(rule.enum.source || '');
+    if (source.startsWith('data_lists.')) {
+      const listKey = source.slice('data_lists.'.length);
+      const enums = fieldRules?.knownValues?.enums ?? {};
+      const entry = enums[listKey];
+      if (entry) {
+        const vals = Array.isArray(entry.values) ? entry.values : (Array.isArray(entry) ? entry : []);
+        enum_values = vals
+          .map(v => typeof v === 'object' ? String(v.canonical ?? v.value ?? '') : String(v))
+          .filter(Boolean);
+      }
+    }
+  }
+
+  return { variance_policy, constraints, enum_values, enum_policy };
+}
+
 // ── Layout ──────────────────────────────────────────────────────────
 
 export async function buildComponentReviewLayout({ config = {}, category, specDb = null }) {
@@ -598,11 +678,20 @@ export async function buildComponentReviewLayout({ config = {}, category, specDb
     return buildComponentReviewLayoutLegacy({ config, category });
   }
   const typeRows = specDb.getComponentTypeList();
-  const types = typeRows.map(row => ({
-    type: row.component_type,
-    property_columns: specDb.getPropertyColumnsForType(row.component_type),
-    item_count: row.item_count,
+  const componentTypes = [...new Set(
+    toArray(typeRows)
+      .map((row) => String(row?.component_type || '').trim())
+      .filter(Boolean)
+  )];
+  const payloads = await Promise.all(componentTypes.map(async (componentType) => {
+    const payload = await buildComponentReviewPayloadsSpecDb({ config, category, componentType, specDb });
+    return {
+      type: componentType,
+      property_columns: payload?.property_columns || specDb.getPropertyColumnsForType(componentType),
+      item_count: Array.isArray(payload?.items) ? payload.items.length : 0,
+    };
   }));
+  const types = payloads;
   return { category, types };
 }
 
@@ -638,16 +727,27 @@ async function buildComponentReviewLayoutLegacy({ config = {}, category }) {
 
 // ── Component Payloads ──────────────────────────────────────────────
 
-export async function buildComponentReviewPayloads({ config = {}, category, componentType, specDb = null }) {
+export async function buildComponentReviewPayloads({ config = {}, category, componentType, specDb = null, fieldRules = null, fieldOrderOverride = null }) {
+  let result;
   if (!specDb) {
-    return buildComponentReviewPayloadsLegacy({ config, category, componentType, specDb });
+    result = await buildComponentReviewPayloadsLegacy({ config, category, componentType, specDb });
+  } else {
+    result = await buildComponentReviewPayloadsSpecDb({ config, category, componentType, specDb, fieldRules });
   }
-  return buildComponentReviewPayloadsSpecDb({ config, category, componentType, specDb });
+  if (Array.isArray(fieldOrderOverride) && fieldOrderOverride.length > 0 && Array.isArray(result?.property_columns)) {
+    const orderIndex = new Map(fieldOrderOverride.map((k, i) => [k, i]));
+    result.property_columns = [...result.property_columns].sort((a, b) => {
+      const ai = orderIndex.has(a) ? orderIndex.get(a) : Number.MAX_SAFE_INTEGER;
+      const bi = orderIndex.has(b) ? orderIndex.get(b) : Number.MAX_SAFE_INTEGER;
+      return ai - bi;
+    });
+  }
+  return result;
 }
 
 // ── SpecDb-primary component payloads ────────────────────────────────
 
-async function buildComponentReviewPayloadsSpecDb({ config = {}, category, componentType, specDb }) {
+async function buildComponentReviewPayloadsSpecDb({ config = {}, category, componentType, specDb, fieldRules = null }) {
   const helperRoot = path.resolve(config.helperFilesRoot || 'helper_files');
 
   let allComponents = specDb.getAllComponentsForType(componentType);
@@ -780,6 +880,13 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
       });
     }
   }
+  const makerVariantsByName = new Map();
+  for (const comp of allComponents) {
+    const nameKey = String(comp?.identity?.canonical_name || '').trim().toLowerCase();
+    if (!nameKey) continue;
+    if (!makerVariantsByName.has(nameKey)) makerVariantsByName.set(nameKey, new Set());
+    makerVariantsByName.get(nameKey).add(normalizeToken(comp?.identity?.maker || ''));
+  }
 
   const items = [];
 
@@ -796,6 +903,7 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
         const key = String(propertyKey || '').trim();
         if (!key || propByKey.has(key)) continue;
         const template = propertyTemplateByKey.get(key) || null;
+        const fieldMeta = resolvePropertyFieldMeta(key, fieldRules);
         specDb.upsertComponentValue({
           componentType,
           componentName: itemName,
@@ -808,12 +916,31 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
           acceptedCandidateId: null,
           needsReview: true,
           overridden: false,
-          constraints: template?.constraints || [],
+          constraints: fieldMeta?.constraints?.length > 0 ? fieldMeta.constraints : (template?.constraints || []),
         });
         insertedSlots = true;
       }
       if (insertedSlots) {
         propRows = specDb.getComponentValuesWithMaker(componentType, itemName, itemMaker) || [];
+        const componentIdentifier = buildComponentIdentifier(componentType, itemName, itemMaker);
+        for (const cv of propRows) {
+          if (!cv?.id) continue;
+          const existing = specDb.db.prepare(
+            "SELECT id FROM key_review_state WHERE category = ? AND target_kind = 'component_key' AND component_value_id = ?"
+          ).get(specDb.category, cv.id);
+          if (existing) continue;
+          specDb.upsertKeyReviewState({
+            category: specDb.category,
+            targetKind: 'component_key',
+            componentIdentifier,
+            propertyKey: cv.property_key,
+            fieldKey: cv.property_key,
+            componentValueId: cv.id,
+            componentIdentityId: cv.component_identity_id ?? identity.id,
+            aiConfirmSharedStatus: cv.needs_review ? 'pending' : 'not_run',
+            userAcceptSharedStatus: cv.overridden ? 'accepted' : null,
+          });
+        }
       }
     }
     const itemAliases = aliasRows
@@ -852,19 +979,19 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
       candidate_id: id,
       value: rawValue,
       score: 1.0,
-      source_id: 'workbook',
-      source: 'Excel Import',
+      source_id: 'reference',
+      source: 'Reference',
       tier: null,
-      method: 'workbook_import',
+      method: 'reference_data',
       evidence: {
         url: '',
         retrieved_at: dbGeneratedAt || '',
         snippet_id: '',
         snippet_hash: '',
-        quote: `Imported from ${category}Data.xlsm`,
+        quote: `From reference database`,
         quote_span: null,
-        snippet_text: `Imported from ${category}Data.xlsm`,
-        source_id: 'workbook',
+        snippet_text: `From reference database`,
+        source_id: 'reference',
       },
     }] : [];
 
@@ -892,12 +1019,12 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
       selected: {
         value: nameKeyState?.selected_value ?? itemName,
         confidence: nameBaseConfidence,
-        status: nameIsOverridden ? 'override' : (nameIsPipeline ? 'pipeline' : 'workbook'),
+        status: nameIsOverridden ? 'override' : (nameIsPipeline ? 'pipeline' : 'reference'),
         color: confidenceColor(nameBaseConfidence, nameNeedsReview ? ['new_component'] : []),
       },
       needs_review: nameNeedsReview,
       reason_codes: nameIsOverridden ? ['manual_override'] : (nameNeedsReview ? ['new_component'] : []),
-      source: nameIsOverridden ? 'user' : (nameIsPipeline ? 'pipeline' : 'workbook'),
+      source: nameIsOverridden ? 'user' : (nameIsPipeline ? 'pipeline' : 'reference'),
       source_timestamp: null,
       variance_policy: null,
       constraints: [],
@@ -926,12 +1053,12 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
       selected: {
         value: makerKeyState?.selected_value ?? itemMaker,
         confidence: itemMaker ? 1.0 : 0,
-        status: makerIsOverridden ? 'override' : (itemMaker ? 'workbook' : 'unknown'),
+        status: makerIsOverridden ? 'override' : (itemMaker ? 'reference' : 'unknown'),
         color: confidenceColor(itemMaker ? 1.0 : 0, []),
       },
       needs_review: makerNeedsReview,
       reason_codes: makerIsOverridden ? ['manual_override'] : (makerNeedsReview ? ['new_component'] : []),
-      source: makerIsOverridden ? 'user' : (itemMaker ? 'workbook' : 'unknown'),
+      source: makerIsOverridden ? 'user' : (itemMaker ? 'reference' : 'unknown'),
       source_timestamp: null,
       variance_policy: null,
       constraints: [],
@@ -944,10 +1071,10 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
     // Links tracked state
     const effectiveLinks = toArray(identity.links ? JSON.parse(identity.links) : []);
     const links_tracked = effectiveLinks.map((url) => ({
-      selected: { value: url, confidence: 1.0, status: 'workbook', color: confidenceColor(1.0, []) },
+      selected: { value: url, confidence: 1.0, status: 'reference', color: confidenceColor(1.0, []) },
       needs_review: false,
       reason_codes: [],
-      source: 'workbook',
+      source: 'reference',
       source_timestamp: null,
       overridden: false,
     }));
@@ -970,7 +1097,10 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
       const source = dbRow?.source || (hasRawValue ? 'component_db' : 'unknown');
       const confidence = hasRawValue || isOverridden ? (dbRow?.confidence ?? 1.0) : 0;
       const variance = dbRow?.variance_policy || null;
-      const fieldConstraints = dbRow?.constraints ? JSON.parse(dbRow.constraints) : [];
+      const meta = resolvePropertyFieldMeta(key, fieldRules);
+      const fieldConstraints = meta?.constraints?.length > 0
+        ? meta.constraints
+        : (dbRow?.constraints ? JSON.parse(dbRow.constraints) : []);
       const baseNeedsReview = Boolean(dbRow?.needs_review) || (!hasRawValue && !isOverridden);
       const needsReview = isSharedLanePending(propertyKeyState, baseNeedsReview);
       const laneNeedsReview = propertyKeyState ? isSharedLanePending(propertyKeyState, false) : false;
@@ -987,12 +1117,12 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
         selected: {
           value: rawValue,
           confidence,
-          status: isOverridden ? 'override' : (source === 'user' ? 'override' : (hasRawValue ? 'workbook' : 'unknown')),
+          status: isOverridden ? 'override' : (source === 'user' ? 'override' : (hasRawValue ? 'reference' : 'unknown')),
           color: confidenceColor(confidence, reasonCodes),
         },
         needs_review: needsReview,
         reason_codes: reasonCodes,
-        source: isOverridden ? 'user' : (source === 'component_db' ? 'workbook' : source),
+        source: isOverridden ? 'user' : (source === 'component_db' ? 'reference' : source),
         source_timestamp: null,
         variance_policy: variance,
         constraints: fieldConstraints,
@@ -1002,6 +1132,8 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
         accepted_candidate_id: String(propertyKeyState?.selected_candidate_id || '').trim()
           || dbRow?.accepted_candidate_id
           || null,
+        enum_values: meta?.enum_values ?? null,
+        enum_policy: meta?.enum_policy ?? null,
       };
 
       itemPropCount++;
@@ -1099,9 +1231,12 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
       // SpecDb enrichment is best-effort
     }
     if (!hasDbLinkedProducts && reviewItemsForName.length > 0) {
+      const makerVariants = makerVariantsByName.get(String(itemName || '').trim().toLowerCase()) || null;
+      const allowMakerlessForNamedLane = Boolean(String(itemMaker || '').trim()) && Number(makerVariants?.size || 0) <= 1;
       itemReviewItems = reviewItemsForName.filter((ri) => reviewItemMatchesMakerLane(ri, {
         componentType,
         maker: itemMaker,
+        allowMakerlessForNamedLane,
       }));
       itemReviewAttribution = buildPipelineAttributionContext(itemReviewItems);
       if (itemReviewItems.length > 0) {
@@ -1232,6 +1367,7 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
     const avgConf = confidenceValues.length > 0
       ? confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length
       : 0;
+    const identitySource = String(identity?.source || '').trim();
 
     items.push({
       component_identity_id: identity.id ?? null,
@@ -1246,6 +1382,8 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
       properties,
       linked_products: linkedProducts,
       review_status: reviewStatus,
+      discovery_source: identitySource,
+      discovered: discoveredFromSource(identitySource),
       metrics: {
         confidence: Math.round(avgConf * 100) / 100,
         flags: itemFlags,
@@ -1254,8 +1392,12 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
     });
   }
 
-  const visibleItems = items.filter((item) => {
+  const normalizedItems = enforceNonDiscoveredRows(items, category);
+  const visibleItems = normalizedItems.filter((item) => {
     const linkedCount = Array.isArray(item.linked_products) ? item.linked_products.length : 0;
+    if (isTestModeCategory(category) && item.discovered && linkedCount === 0) {
+      return false;
+    }
     const hasNamePending = Boolean(item.name_tracked?.needs_review) && hasActionableCandidate(item.name_tracked?.candidates);
     const hasMakerPending = Boolean(item.maker_tracked?.needs_review) && hasActionableCandidate(item.maker_tracked?.candidates);
     const hasPropertyPending = propertyColumns.some((key) => {
@@ -1282,18 +1424,19 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
       || hasStableIdentitySource
       || hasStablePropertySource;
   });
-  const visibleFlags = visibleItems.reduce((sum, item) => sum + (item.metrics?.flags || 0), 0);
-  const visibleAvgConfidence = visibleItems.length > 0
-    ? Math.round((visibleItems.reduce((sum, item) => sum + (item.metrics?.confidence || 0), 0) / visibleItems.length) * 100) / 100
+  const finalItems = enforceNonDiscoveredRows(visibleItems, category);
+  const visibleFlags = finalItems.reduce((sum, item) => sum + (item.metrics?.flags || 0), 0);
+  const visibleAvgConfidence = finalItems.length > 0
+    ? Math.round((finalItems.reduce((sum, item) => sum + (item.metrics?.confidence || 0), 0) / finalItems.length) * 100) / 100
     : 0;
 
   return {
     category,
     componentType,
     property_columns: propertyColumns,
-    items: visibleItems,
+    items: finalItems,
     metrics: {
-      total: visibleItems.length,
+      total: finalItems.length,
       avg_confidence: visibleAvgConfidence,
       flags: visibleFlags,
     },
@@ -1414,19 +1557,19 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
       }),
       value: item.name,
       score: 1.0,
-      source_id: 'workbook',
-      source: 'Excel Import',
+      source_id: 'reference',
+      source: 'Reference',
       tier: null,
-      method: 'workbook_import',
+      method: 'reference_data',
       evidence: {
         url: '',
         retrieved_at: dbGeneratedAt,
         snippet_id: '',
         snippet_hash: '',
-        quote: `Imported from ${category}Data.xlsm`,
+        quote: `From reference database`,
         quote_span: null,
-        snippet_text: `Imported from ${category}Data.xlsm`,
-        source_id: 'workbook',
+        snippet_text: `From reference database`,
+        source_id: 'reference',
       },
     }] : [];
 
@@ -1434,12 +1577,12 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
       selected: {
         value: nameVal,
         confidence: nameHasOverride ? 1.0 : nameHasRaw ? 1.0 : 0,
-        status: nameHasOverride ? 'override' : nameHasRaw ? 'workbook' : 'unknown',
+        status: nameHasOverride ? 'override' : nameHasRaw ? 'reference' : 'unknown',
         color: confidenceColor(nameHasOverride ? 1.0 : nameHasRaw ? 1.0 : 0, []),
       },
       needs_review: !nameHasRaw && !nameHasOverride,
       reason_codes: nameHasOverride ? ['manual_override'] : [],
-      source: nameHasOverride ? 'user' : (nameHasRaw ? 'workbook' : 'unknown'),
+      source: nameHasOverride ? 'user' : (nameHasRaw ? 'reference' : 'unknown'),
       source_timestamp: nameHasOverride ? (overrideTimestamps['__name'] || override?.updated_at || null) : null,
       variance_policy: null,
       constraints: [],
@@ -1530,19 +1673,19 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
       }),
       value: item.maker,
       score: 1.0,
-      source_id: 'workbook',
-      source: 'Excel Import',
+      source_id: 'reference',
+      source: 'Reference',
       tier: null,
-      method: 'workbook_import',
+      method: 'reference_data',
       evidence: {
         url: '',
         retrieved_at: dbGeneratedAt,
         snippet_id: '',
         snippet_hash: '',
-        quote: `Imported from ${category}Data.xlsm`,
+        quote: `From reference database`,
         quote_span: null,
-        snippet_text: `Imported from ${category}Data.xlsm`,
-        source_id: 'workbook',
+        snippet_text: `From reference database`,
+        source_id: 'reference',
       },
     }] : [];
 
@@ -1550,12 +1693,12 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
       selected: {
         value: makerVal,
         confidence: makerHasOverride ? 1.0 : makerHasRaw ? 1.0 : 0,
-        status: makerHasOverride ? 'override' : makerHasRaw ? 'workbook' : 'unknown',
+        status: makerHasOverride ? 'override' : makerHasRaw ? 'reference' : 'unknown',
         color: confidenceColor(makerHasOverride ? 1.0 : makerHasRaw ? 1.0 : 0, []),
       },
       needs_review: !makerHasRaw && !makerHasOverride,
       reason_codes: makerHasOverride ? ['manual_override'] : [],
-      source: makerHasOverride ? 'user' : (makerHasRaw ? 'workbook' : 'unknown'),
+      source: makerHasOverride ? 'user' : (makerHasRaw ? 'reference' : 'unknown'),
       source_timestamp: makerHasOverride ? (overrideTimestamps['__maker'] || override?.updated_at || null) : null,
       variance_policy: null,
       constraints: [],
@@ -1604,12 +1747,12 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
       selected: {
         value: url,
         confidence: linksOverride ? 1.0 : 1.0,
-        status: linksOverride ? 'override' : 'workbook',
+        status: linksOverride ? 'override' : 'reference',
         color: confidenceColor(linksOverride ? 1.0 : 1.0, []),
       },
       needs_review: false,
       reason_codes: linksOverride ? ['manual_override'] : [],
-      source: linksOverride ? 'user' : 'workbook',
+      source: linksOverride ? 'user' : 'reference',
       source_timestamp: linksTimestamp,
       overridden: Boolean(linksOverride),
     }));
@@ -1635,7 +1778,7 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
         source = 'user';
       } else if (hasRawValue) {
         confidence = 1.0;
-        source = 'workbook';
+        source = 'reference';
       } else {
         confidence = 0;
         source = 'unknown';
@@ -1661,19 +1804,19 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
         }),
         value: rawValue,
         score: 1.0,
-        source_id: 'workbook',
-        source: 'Excel Import',
+        source_id: 'reference',
+        source: 'Reference',
         tier: null,
-        method: 'workbook_import',
+        method: 'reference_data',
         evidence: {
           url: '',
           retrieved_at: dbGeneratedAt,
           snippet_id: '',
           snippet_hash: '',
-          quote: `Imported from ${category}Data.xlsm`,
+          quote: `From reference database`,
           quote_span: null,
-          snippet_text: `Imported from ${category}Data.xlsm`,
-          source_id: 'workbook',
+          snippet_text: `From reference database`,
+          source_id: 'reference',
         },
       }] : [];
 
@@ -1943,6 +2086,7 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
     const legacyIdentity = specDb
       ? specDb.getComponentIdentity(componentType, resolvedName, resolvedMaker)
       : null;
+    const identitySource = String(legacyIdentity?.source || 'component_db').trim();
 
     items.push({
       component_identity_id: legacyIdentity?.id ?? null,
@@ -1957,6 +2101,8 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
       properties,
       linked_products: linkedProducts,
       review_status: override?.review_status || 'pending',
+      discovery_source: identitySource,
+      discovered: discoveredFromSource(identitySource),
       metrics: {
         confidence: Math.round(avgConf * 100) / 100,
         flags: itemFlags,
@@ -1965,8 +2111,12 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
     });
   }
 
-  const visibleItems = items.filter((item) => {
+  const normalizedItems = enforceNonDiscoveredRows(items, category);
+  const visibleItems = normalizedItems.filter((item) => {
     const linkedCount = Array.isArray(item.linked_products) ? item.linked_products.length : 0;
+    if (isTestModeCategory(category) && item.discovered && linkedCount === 0) {
+      return false;
+    }
     const hasNamePending = Boolean(item.name_tracked?.needs_review) && hasActionableCandidate(item.name_tracked?.candidates);
     const hasMakerPending = Boolean(item.maker_tracked?.needs_review) && hasActionableCandidate(item.maker_tracked?.candidates);
     const hasPropertyPending = propertyColumns.some((key) => {
@@ -1993,18 +2143,19 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
       || hasStableIdentitySource
       || hasStablePropertySource;
   });
-  const visibleFlags = visibleItems.reduce((sum, item) => sum + (item.metrics?.flags || 0), 0);
-  const visibleAvgConfidence = visibleItems.length > 0
-    ? Math.round((visibleItems.reduce((sum, item) => sum + (item.metrics?.confidence || 0), 0) / visibleItems.length) * 100) / 100
+  const finalItems = enforceNonDiscoveredRows(visibleItems, category);
+  const visibleFlags = finalItems.reduce((sum, item) => sum + (item.metrics?.flags || 0), 0);
+  const visibleAvgConfidence = finalItems.length > 0
+    ? Math.round((finalItems.reduce((sum, item) => sum + (item.metrics?.confidence || 0), 0) / finalItems.length) * 100) / 100
     : 0;
 
   return {
     category,
     componentType,
     property_columns: propertyColumns,
-    items: visibleItems,
+    items: finalItems,
     metrics: {
-      total: visibleItems.length,
+      total: finalItems.length,
       avg_confidence: visibleAvgConfidence,
       flags: visibleFlags,
     },
@@ -2013,11 +2164,22 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
 
 // ── Enum Payloads ───────────────────────────────────────────────────
 
-export async function buildEnumReviewPayloads({ config = {}, category, specDb = null }) {
+export async function buildEnumReviewPayloads({ config = {}, category, specDb = null, fieldOrderOverride = null }) {
+  let result;
   if (!specDb) {
-    return buildEnumReviewPayloadsLegacy({ config, category, specDb });
+    result = await buildEnumReviewPayloadsLegacy({ config, category, specDb });
+  } else {
+    result = await buildEnumReviewPayloadsSpecDb({ config, category, specDb });
   }
-  return buildEnumReviewPayloadsSpecDb({ config, category, specDb });
+  if (Array.isArray(fieldOrderOverride) && fieldOrderOverride.length > 0 && Array.isArray(result?.fields)) {
+    const orderIndex = new Map(fieldOrderOverride.map((k, i) => [k, i]));
+    result.fields = [...result.fields].sort((a, b) => {
+      const ai = orderIndex.has(a.field) ? orderIndex.get(a.field) : Number.MAX_SAFE_INTEGER;
+      const bi = orderIndex.has(b.field) ? orderIndex.get(b.field) : Number.MAX_SAFE_INTEGER;
+      return ai - bi;
+    });
+  }
+  return result;
 }
 
 // ── SpecDb-primary enum payloads ─────────────────────────────────────
@@ -2073,17 +2235,17 @@ async function buildEnumReviewPayloadsSpecDb({ config = {}, category, specDb }) 
           candidate_id: buildWorkbookEnumCandidateId({ fieldKey: field, value: row.value }),
           value: row.value,
           score: 1.0,
-          source_id: 'workbook',
-          source: 'Excel Import',
+          source_id: 'reference',
+          source: 'Reference',
           tier: null,
-          method: 'workbook_import',
+          method: 'reference_data',
           evidence: {
             url: '', retrieved_at: '',
             snippet_id: '', snippet_hash: '',
-            quote: `Imported from ${category}Data.xlsm`,
+            quote: `From reference database`,
             quote_span: null,
-            snippet_text: `Imported from ${category}Data.xlsm`,
-            source_id: 'workbook',
+            snippet_text: `From reference database`,
+            source_id: 'reference',
           },
         });
       }
@@ -2227,7 +2389,7 @@ async function buildEnumReviewPayloadsLegacy({ config = {}, category, specDb = n
     // Source reflects ORIGINAL provenance — never destroyed by user actions:
     //   'pipeline' = originally discovered by pipeline, user accepted it
     //   'manual'   = user added it fresh (not from pipeline)
-    //   'workbook' = from the original workbook, untouched by user
+    //   'reference' = from the reference database, untouched by user
     const pipelineOriginSet = pipelineOriginByField[field] || new Set();
     for (const v of workbookValues) {
       const normalized = String(v).trim().toLowerCase();
@@ -2240,7 +2402,7 @@ async function buildEnumReviewPayloadsLegacy({ config = {}, category, specDb = n
       } else if (isManual) {
         valueSource = 'manual';   // User added it fresh
       } else {
-        valueSource = 'workbook'; // From workbook, untouched
+        valueSource = 'reference'; // From reference database
       }
       // Build candidate for audit trail (manual overrides are NOT candidates per source hierarchy)
       const wbCandidates = valueSource === 'manual' ? [] : [{
@@ -2249,10 +2411,10 @@ async function buildEnumReviewPayloadsLegacy({ config = {}, category, specDb = n
           : buildWorkbookEnumCandidateId({ fieldKey: field, value: v }),
         value: String(v).trim(),
         score: 1.0,
-        source_id: valueSource === 'pipeline' ? 'pipeline' : 'workbook',
-        source: valueSource === 'pipeline' ? 'Pipeline' : 'Excel Import',
+        source_id: valueSource === 'pipeline' ? 'pipeline' : 'reference',
+        source: valueSource === 'pipeline' ? 'Pipeline' : 'Reference',
         tier: null,
-        method: valueSource === 'pipeline' ? 'pipeline_extraction' : 'workbook_import',
+        method: valueSource === 'pipeline' ? 'pipeline_extraction' : 'reference_data',
         evidence: {
           url: '',
           retrieved_at: kvGeneratedAt,
@@ -2261,7 +2423,7 @@ async function buildEnumReviewPayloadsLegacy({ config = {}, category, specDb = n
           quote: valueSource === 'pipeline' ? 'Discovered by pipeline, accepted by user' : `Imported from ${category}Data.xlsm`,
           quote_span: null,
           snippet_text: valueSource === 'pipeline' ? 'Discovered by pipeline, accepted by user' : `Imported from ${category}Data.xlsm`,
-          source_id: valueSource === 'pipeline' ? 'pipeline' : 'workbook',
+          source_id: valueSource === 'pipeline' ? 'pipeline' : 'reference',
         },
       }];
       valueMap.set(normalized, {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildEvidencePackV2, fingerprintEvidenceCandidate } from '../src/evidence/evidencePackV2.js';
+import { buildEvidencePackV2, fingerprintEvidenceCandidate, stripHtml } from '../src/evidence/evidencePackV2.js';
 
 test('buildEvidencePackV2 captures definition lists, label-value pairs, and target windows', () => {
   const pack = buildEvidencePackV2({
@@ -280,4 +280,182 @@ test('buildEvidencePackV2 emits PDF router metadata and row-level PDF snippets',
   assert.equal(snippetTypes.has('pdf_table_row'), true);
   assert.equal(String(pack?.meta?.pdf_extraction?.backend_selected || ''), 'pdfplumber');
   assert.equal(Number(pack?.meta?.pdf_extraction?.pair_count || 0), 3);
+});
+
+test('buildEvidencePackV2 output includes chunk_data array with expected fields', () => {
+  const pack = buildEvidencePackV2({
+    source: {
+      url: 'https://example.com/mouse',
+      host: 'example.com'
+    },
+    pageData: {
+      html: `
+        <h2>Specifications</h2>
+        <dl>
+          <dt>Weight</dt><dd>60 g</dd>
+        </dl>
+      `,
+      networkResponses: [],
+      ldjsonBlocks: [],
+      embeddedState: {}
+    },
+    adapterExtra: {},
+    config: {
+      llmMaxEvidenceChars: 4000,
+      articleExtractorDomainPolicyMap: {
+        'example.com': { mode: 'prefer_fallback', minChars: 300, minScore: 15 }
+      }
+    },
+    targetFields: ['weight']
+  });
+
+  assert.equal(Array.isArray(pack.chunk_data), true);
+  assert.equal(pack.chunk_data.length > 0, true);
+  assert.equal(pack.chunk_data.length, pack.snippets.length);
+
+  const first = pack.chunk_data[0];
+  assert.equal(typeof first.contentHash, 'string');
+  assert.equal(typeof first.normalizedText, 'string');
+  assert.equal(typeof first.text, 'string');
+  assert.equal(typeof first.type, 'string');
+  assert.equal(typeof first.extractionMethod, 'string');
+  assert.equal(Array.isArray(first.fieldHints), true);
+  assert.equal(typeof first.chunkIndex, 'number');
+});
+
+test('buildEvidencePackV2 produces sn_ prefixed snippet IDs instead of index-based IDs', () => {
+  const pack = buildEvidencePackV2({
+    source: {
+      url: 'https://example.com/mouse',
+      host: 'example.com'
+    },
+    pageData: {
+      html: `
+        <dl><dt>Weight</dt><dd>60 g</dd></dl>
+        <table><tr><td>DPI</td><td>26000</td></tr></table>
+      `,
+      networkResponses: [],
+      ldjsonBlocks: [],
+      embeddedState: {}
+    },
+    adapterExtra: {},
+    config: {
+      llmMaxEvidenceChars: 4000,
+      articleExtractorDomainPolicyMap: {
+        'example.com': { mode: 'prefer_fallback', minChars: 300, minScore: 15 }
+      }
+    },
+    targetFields: ['weight', 'dpi']
+  });
+
+  for (const snippet of pack.snippets) {
+    assert.equal(snippet.id.startsWith('sn_'), true,
+      `Snippet ID "${snippet.id}" should start with "sn_"`);
+    assert.equal(snippet.id.length, 3 + 16,
+      `Snippet ID "${snippet.id}" should be 19 chars (sn_ + 16 hex)`);
+  }
+
+  for (const ref of pack.references) {
+    assert.equal(ref.id.startsWith('sn_'), true,
+      `Reference ID "${ref.id}" should start with "sn_"`);
+  }
+});
+
+test('buildEvidencePackV2 produces deterministic IDs — same content indexed twice gives same IDs', () => {
+  const args = {
+    source: {
+      url: 'https://example.com/stable',
+      host: 'example.com'
+    },
+    pageData: {
+      html: '<dl><dt>Sensor</dt><dd>Focus Pro 35K</dd></dl>',
+      networkResponses: [],
+      ldjsonBlocks: [],
+      embeddedState: {}
+    },
+    adapterExtra: {},
+    config: { llmMaxEvidenceChars: 3000 },
+    targetFields: ['sensor']
+  };
+
+  const pack1 = buildEvidencePackV2(args);
+  const pack2 = buildEvidencePackV2(args);
+
+  assert.equal(pack1.snippets.length, pack2.snippets.length);
+  for (let i = 0; i < pack1.snippets.length; i += 1) {
+    assert.equal(pack1.snippets[i].id, pack2.snippets[i].id,
+      `Snippet at index ${i} should have identical IDs across runs`);
+  }
+});
+
+test('buildEvidencePackV2 candidate_bindings use sn_ prefixed IDs', () => {
+  const pack = buildEvidencePackV2({
+    source: {
+      url: 'https://example.com/mouse',
+      host: 'example.com'
+    },
+    pageData: {
+      html: '<table><tr><td>Weight</td><td>60g</td></tr></table>',
+      networkResponses: [],
+      ldjsonBlocks: [],
+      embeddedState: {}
+    },
+    adapterExtra: {},
+    config: { llmMaxEvidenceChars: 3000 },
+    targetFields: ['weight'],
+    deterministicCandidates: [
+      { field: 'weight', value: '60g', method: 'html_table', keyPath: 'table.weight' }
+    ]
+  });
+
+  const bindings = pack.candidate_bindings;
+  assert.equal(Object.keys(bindings).length > 0, true);
+  for (const snippetId of Object.values(bindings)) {
+    assert.equal(snippetId.startsWith('sn_'), true,
+      `Candidate binding snippet ID "${snippetId}" should start with "sn_"`);
+  }
+});
+
+test('stripHtml removes script, style, and noscript block tags', () => {
+  assert.equal(stripHtml('<script>alert("xss")</script>hello'), 'hello');
+  assert.equal(stripHtml('<style>.x{color:red}</style>world'), 'world');
+  assert.equal(stripHtml('<noscript>Enable JS</noscript>text'), 'text');
+  assert.equal(stripHtml('<SCRIPT type="text/javascript">var x=1;</SCRIPT>ok'), 'ok');
+});
+
+test('stripHtml removes HTML comments', () => {
+  assert.equal(stripHtml('before<!-- comment -->after'), 'beforeafter');
+  assert.equal(stripHtml('<!-- multi\nline\ncomment -->text'), 'text');
+});
+
+test('stripHtml removes remaining HTML tags', () => {
+  assert.equal(stripHtml('<p>paragraph</p>'), 'paragraph');
+  assert.equal(stripHtml('<div class="x"><span>nested</span></div>'), 'nested');
+  assert.equal(stripHtml('<br/>line<br>break'), 'line break');
+});
+
+test('stripHtml decodes all 6 HTML entities', () => {
+  assert.equal(stripHtml('&nbsp;'), '');
+  assert.equal(stripHtml('&amp;'), '&');
+  assert.equal(stripHtml('&lt;'), '<');
+  assert.equal(stripHtml('&gt;'), '>');
+  assert.equal(stripHtml('&quot;'), '"');
+  assert.equal(stripHtml('&#39;'), "'");
+  assert.equal(stripHtml('a&amp;b&lt;c&gt;d&quot;e&#39;f'), 'a&b<c>d"e\'f');
+});
+
+test('stripHtml normalizes whitespace and trims', () => {
+  assert.equal(stripHtml('  hello   world  '), 'hello world');
+  assert.equal(stripHtml('\n\t  spaced  \n\t'), 'spaced');
+});
+
+test('stripHtml handles empty and null input', () => {
+  assert.equal(stripHtml(''), '');
+  assert.equal(stripHtml(null), '');
+  assert.equal(stripHtml(undefined), '');
+});
+
+test('stripHtml handles complex nested content', () => {
+  const html = '<div><script>evil()</script><p>Weight: 49&nbsp;g &amp; more</p><style>.x{}</style></div>';
+  assert.equal(stripHtml(html), 'Weight: 49 g & more');
 });

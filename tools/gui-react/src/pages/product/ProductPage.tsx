@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { useUiStore } from '../../stores/uiStore';
@@ -5,10 +6,10 @@ import { useProductStore } from '../../stores/productStore';
 import { MetricRow } from '../../components/common/MetricRow';
 import { DataTable } from '../../components/common/DataTable';
 import { TrafficLight } from '../../components/common/TrafficLight';
-import { ProgressBar } from '../../components/common/ProgressBar';
 import { Spinner } from '../../components/common/Spinner';
 import { pct, relativeTime } from '../../utils/formatting';
-import { hasKnownValue, humanizeField } from '../../utils/fieldNormalize';
+import { hasKnownValue } from '../../utils/fieldNormalize';
+import { useFieldLabels } from '../../hooks/useFieldLabels';
 import { PIPELINE_STAGE_DEFS } from '../../utils/constants';
 import { useEventsStore } from '../../stores/eventsStore';
 import type { ProductSummary, NormalizedProduct } from '../../types/product';
@@ -19,6 +20,7 @@ interface ProductDetail {
   normalized: NormalizedProduct;
   provenance: Record<string, { confidence: number; value: unknown; meets_pass_target?: boolean }>;
   trafficLight: { by_field: Record<string, string> };
+  fieldOrder?: string[] | null;
 }
 
 interface FieldRow {
@@ -28,34 +30,6 @@ interface FieldRow {
   color: string;
   meetsTarget: boolean;
 }
-
-const fieldColumns: ColumnDef<FieldRow, unknown>[] = [
-  {
-    accessorKey: 'color',
-    header: '',
-    cell: ({ getValue }) => <TrafficLight color={getValue() as string} />,
-    size: 30,
-  },
-  {
-    accessorKey: 'field',
-    header: 'Field',
-    cell: ({ getValue }) => humanizeField(getValue() as string),
-    size: 180,
-  },
-  { accessorKey: 'value', header: 'Value', size: 200 },
-  {
-    accessorKey: 'confidence',
-    header: 'Confidence',
-    cell: ({ getValue }) => pct(getValue() as number),
-    size: 80,
-  },
-  {
-    accessorKey: 'meetsTarget',
-    header: 'Pass',
-    cell: ({ getValue }) => (getValue() ? '\u2714' : '\u2716'),
-    size: 50,
-  },
-];
 
 function computePipelineStage(events: Array<{ event: string }>) {
   let reached = -1;
@@ -71,6 +45,7 @@ function computePipelineStage(events: Array<{ event: string }>) {
 
 export function ProductPage() {
   const category = useUiStore((s) => s.category);
+  const { getLabel } = useFieldLabels(category);
   const productId = useProductStore((s) => s.selectedProductId);
   const events = useEventsStore((s) => s.events);
 
@@ -81,6 +56,50 @@ export function ProductPage() {
     refetchInterval: 10_000,
   });
 
+  const normalizedFields = data?.normalized?.fields;
+  const apiFieldOrder = data?.fieldOrder;
+
+  const fieldColumns: ColumnDef<FieldRow, unknown>[] = useMemo(() => [
+    {
+      accessorKey: 'color',
+      header: '',
+      cell: ({ getValue }) => <TrafficLight color={getValue() as string} />,
+      size: 30,
+    },
+    {
+      accessorKey: 'field',
+      header: 'Field',
+      cell: ({ getValue }) => getLabel(getValue() as string),
+      size: 180,
+    },
+    { accessorKey: 'value', header: 'Value', size: 200 },
+    {
+      accessorKey: 'confidence',
+      header: 'Confidence',
+      cell: ({ getValue }) => pct(getValue() as number),
+      size: 80,
+    },
+    {
+      accessorKey: 'meetsTarget',
+      header: 'Pass',
+      cell: ({ getValue }) => (getValue() ? '\u2714' : '\u2716'),
+      size: 50,
+    },
+  ], [getLabel]);
+
+  const sortedFieldEntries = useMemo(() => {
+    const entries = Object.entries(normalizedFields || {});
+    if (Array.isArray(apiFieldOrder) && apiFieldOrder.length > 0) {
+      const orderIndex = new Map(apiFieldOrder.map((k: string, i: number) => [k, i]));
+      return [...entries].sort(([a], [b]) => {
+        const ai = orderIndex.has(a) ? orderIndex.get(a)! : Number.MAX_SAFE_INTEGER;
+        const bi = orderIndex.has(b) ? orderIndex.get(b)! : Number.MAX_SAFE_INTEGER;
+        return ai - bi;
+      });
+    }
+    return entries;
+  }, [normalizedFields, apiFieldOrder]);
+
   if (!productId) {
     return <p className="text-gray-500 mt-8 text-center">Select a product — choose a Brand and Model from the sidebar, or click a row in the Overview tab.</p>;
   }
@@ -88,10 +107,9 @@ export function ProductPage() {
   if (!data) return <p className="text-gray-500 mt-8 text-center">No data found.</p>;
 
   const { summary, normalized, provenance, trafficLight } = data;
-  const fields = normalized?.fields || {};
   const traffic = trafficLight?.by_field || {};
 
-  const fieldRows: FieldRow[] = Object.entries(fields).map(([field, value]) => {
+  const fieldRows: FieldRow[] = sortedFieldEntries.map(([field, value]) => {
     const prov = provenance?.[field] || { confidence: 0, meets_pass_target: false };
     const color = traffic[field] || (hasKnownValue(value) ? (prov.confidence >= 0.85 ? 'green' : prov.confidence >= 0.6 ? 'yellow' : 'red') : 'gray');
     return {

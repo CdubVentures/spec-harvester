@@ -611,18 +611,18 @@ test('DB SEED — SpecDb table verification', async (t) => {
     });
 
     await t.test('DB-10: candidate_reviews created from override files with candidate_id', () => {
-      // Logitech dpi override has candidate_id 'logi-d1'
-      const logiReviews = db.getReviewsForCandidate('logi-d1');
+      // Logitech dpi override has candidate_id 'logi-d1' → scoped as productId::field::rawId
+      const logiReviews = db.getReviewsForCandidate('mouse-logitech-g502-x::dpi::logi-d1');
       assert.ok(logiReviews.length > 0, 'Should have review for logi-d1');
       assert.equal(logiReviews[0].context_type, 'item');
       assert.equal(logiReviews[0].human_accepted, 1);
 
       // Zowie sensor override has candidate_id 'zowie-s1'
-      const zowieReviews = db.getReviewsForCandidate('zowie-s1');
+      const zowieReviews = db.getReviewsForCandidate('mouse-zowie-ec2-c::sensor::zowie-s1');
       assert.ok(zowieReviews.length > 0, 'Should have review for zowie-s1');
 
       // Endgame switch override has candidate_id 'eg-sw1'
-      const egReviews = db.getReviewsForCandidate('eg-sw1');
+      const egReviews = db.getReviewsForCandidate('mouse-endgame-gear-op1we::switch_type::eg-sw1');
       assert.ok(egReviews.length > 0, 'Should have review for eg-sw1');
 
       // Razer weight override is manual_entry with no candidate_id → no review
@@ -812,14 +812,14 @@ test('GRID-10: Source timestamp from override flows into field state', async () 
 // SECTION 3: COMPONENT REVIEW (12 scenarios including shared sources)
 // ════════════════════════════════════════════════════════════════════════
 
-test('COMP-01: Workbook value shows source=workbook, overridden=false', async () => {
+test('COMP-01: Reference value shows source=reference, overridden=false', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'review-eco-'));
   try {
     const { config } = await createFullFixture(tempRoot);
     const payload = await buildComponentReviewPayloads({ config, category: CATEGORY, componentType: 'sensor' });
     const paw3950 = payload.items.find((i) => i.name === 'PAW3950');
     assert.ok(paw3950);
-    assert.equal(paw3950.properties.dpi_max.source, 'workbook');
+    assert.equal(paw3950.properties.dpi_max.source, 'reference');
     assert.equal(paw3950.properties.dpi_max.overridden, false);
     assert.equal(paw3950.properties.dpi_max.selected.value, '35000');
     assert.equal(paw3950.properties.dpi_max.selected.confidence, 1.0);
@@ -852,7 +852,7 @@ test('COMP-03: Missing property shows source=unknown, needs_review=true', async 
     const hero = payload.items.find((i) => i.name === 'HERO26K');
     assert.ok(hero);
     assert.equal(hero.properties.dpi_max.selected.value, '25600');
-    assert.equal(hero.properties.dpi_max.source, 'workbook');
+    assert.equal(hero.properties.dpi_max.source, 'reference');
   } finally { await fs.rm(tempRoot, { recursive: true, force: true }); }
 });
 
@@ -930,7 +930,7 @@ test('COMP-08: Multiple items — override only affects target', async () => {
     assert.equal(kailh.properties.actuation_force.selected.value, '50');
     assert.equal(kailh.properties.actuation_force.source, 'user');
     assert.equal(omron.properties.actuation_force.selected.value, '75');
-    assert.equal(omron.properties.actuation_force.source, 'workbook');
+    assert.equal(omron.properties.actuation_force.source, 'reference');
   } finally { await fs.rm(tempRoot, { recursive: true, force: true }); }
 });
 
@@ -962,7 +962,7 @@ test('COMP-10: Shared sensor PAW3950 shows pipeline candidates from BOTH razer a
     assert.ok(dpiCandidates.length >= 2, `PAW3950 dpi_max should have >= 2 candidates, got ${dpiCandidates.length}`);
 
     // Workbook candidate
-    const wbCandidate = dpiCandidates.find((c) => c.source_id === 'workbook');
+    const wbCandidate = dpiCandidates.find((c) => c.source_id === 'reference');
     assert.ok(wbCandidate, 'Should have workbook candidate');
     assert.equal(wbCandidate.value, '35000');
 
@@ -989,7 +989,7 @@ test('COMP-11: Shared switch Kailh GM 8.0 shows pipeline candidates from pulsar 
     // Name candidates: workbook + pipeline variant (raw_query 'Kailh GM8.0' differs from canonical 'Kailh GM 8.0')
     const nameCandidates = kailh.name_tracked.candidates;
     assert.ok(nameCandidates.length >= 2, `Kailh name should have >= 2 candidates (wb + pipeline variant), got ${nameCandidates.length}`);
-    const wbNameCand = nameCandidates.find((c) => c.source_id === 'workbook');
+    const wbNameCand = nameCandidates.find((c) => c.source_id === 'reference');
     assert.ok(wbNameCand, 'Should have workbook name candidate');
     assert.equal(wbNameCand.value, 'Kailh GM 8.0');
 
@@ -1030,7 +1030,7 @@ test('COMP-12: Single-use component HERO26K shows 1 product in pipeline candidat
 // SECTION 4: ENUM LIST (10 scenarios)
 // ════════════════════════════════════════════════════════════════════════
 
-test('ENUM-01: Workbook-only value gets source=workbook', async () => {
+test('ENUM-01: Reference value gets source=reference', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'review-eco-'));
   try {
     const { config } = await createFullFixture(tempRoot);
@@ -1038,7 +1038,7 @@ test('ENUM-01: Workbook-only value gets source=workbook', async () => {
     const connField = payload.fields.find((f) => f.field === 'connection');
     assert.ok(connField);
     const wired = connField.values.find((v) => v.value === 'Wired');
-    assert.equal(wired.source, 'workbook');
+    assert.equal(wired.source, 'reference');
     assert.equal(wired.confidence, 1.0);
     assert.equal(wired.color, 'green');
     assert.equal(wired.needs_review, false);
@@ -1103,7 +1103,7 @@ test('ENUM-04: Pipeline suggestion already in workbook is not duplicated', async
     const connField = payload.fields.find((f) => f.field === 'connection');
     const wiredValues = connField.values.filter((v) => v.value.toLowerCase() === 'wired');
     assert.equal(wiredValues.length, 1, 'Wired should not be duplicated');
-    assert.equal(wiredValues[0].source, 'workbook');
+    assert.equal(wiredValues[0].source, 'reference');
   } finally { await fs.rm(tempRoot, { recursive: true, force: true }); }
 });
 

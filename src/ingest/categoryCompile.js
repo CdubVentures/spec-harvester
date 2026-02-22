@@ -1294,7 +1294,7 @@ function normalizeSheetRoleRow(row = {}) {
   };
 }
 
-function normalizeWorkbookMap(map = {}) {
+function normalizeWorkbookMap(map = {}, { warnings = null } = {}) {
   const sheetRoles = toArray(map.sheet_roles).map((row) => normalizeSheetRoleRow(row));
   const keySourceRaw = isObject(map.key_source) ? map.key_source : {};
   const keyListRaw = isObject(map.key_list) ? map.key_list : {};
@@ -1413,9 +1413,8 @@ function normalizeWorkbookMap(map = {}) {
   if (dataListsRaw.length > 0) {
     dataLists = dataListsRaw.map((row) => {
       const field = normalizeFieldKey(row.field || '');
-      const rowManualValues = Array.isArray(row.manual_values)
-        ? orderedUniqueStrings(row.manual_values.map((val) => String(val).trim()).filter(Boolean))
-        : [];
+      const rawManualValues = Array.isArray(row.manual_values) ? row.manual_values : (Array.isArray(row.values) ? row.values : []);
+      const rowManualValues = orderedUniqueStrings(rawManualValues.map((val) => String(val).trim()).filter(Boolean));
       const mergedManualValues = field
         ? orderedUniqueStrings([...(manualEnumValuesInput[field] || []), ...rowManualValues])
         : rowManualValues;
@@ -1456,6 +1455,29 @@ function normalizeWorkbookMap(map = {}) {
         ai_assist: normalizeReviewAiAssist(row.ai_assist)
       };
     });
+    for (const row of enumRowsRaw) {
+      if (!isObject(row)) continue;
+      const field = normalizeFieldKey(row.field || '');
+      if (!field || seenFields.has(field)) continue;
+      const rowValues = Array.isArray(row.values) ? row.values : (Array.isArray(row.manual_values) ? row.manual_values : []);
+      if (!normalizeText(row.sheet)) {
+        seenFields.add(field);
+        dataLists.push({
+          field,
+          mode: 'scratch',
+          sheet: '',
+          value_column: '',
+          header_row: 0,
+          row_start: 2,
+          row_end: 0,
+          normalize: normalizeToken(row.normalize || 'lower_trim') || 'lower_trim',
+          delimiter: normalizeText(row.delimiter || ''),
+          manual_values: orderedUniqueStrings(rowValues.map((val) => String(val).trim()).filter(Boolean)),
+          priority: normalizeReviewPriority(row.priority),
+          ai_assist: normalizeReviewAiAssist(row.ai_assist)
+        });
+      }
+    }
     for (const [field, values] of Object.entries(manualEnumValuesInput)) {
       if (seenFields.has(field) || !Array.isArray(values) || values.length === 0) {
         continue;
@@ -1493,17 +1515,25 @@ function normalizeWorkbookMap(map = {}) {
       .map((entry) => {
         const fieldKey = normalizeFieldKey(entry.field_key || '');
         const legacyKey = normalizeFieldKey(entry.key || entry.property_key || '');
+        const propType = ['number', 'string'].includes(normalizeToken(entry.type)) ? normalizeToken(entry.type) : 'string';
+        const rawPolicy = normalizeToken(entry.variance_policy || 'authoritative');
+        const NUMERIC_ONLY = ['upper_bound', 'lower_bound', 'range'];
+        const coerced = propType !== 'number' && NUMERIC_ONLY.includes(rawPolicy);
+        const effectivePolicy = coerced ? 'authoritative' : rawPolicy;
+        if (coerced && warnings) {
+          warnings.push(`component_sources: variance_policy '${entry.variance_policy}' on string property '${fieldKey || legacyKey || '?'}' coerced to 'authoritative' (numeric policies require type 'number')`);
+        }
         return {
           key: fieldKey || legacyKey,
           column: normalizeText(entry.column || entry.col || '').toUpperCase(),
-          type: ['number', 'string'].includes(normalizeToken(entry.type || entry.manual_type)) ? normalizeToken(entry.type || entry.manual_type) : 'string',
-          unit: normalizeText(entry.unit || entry.manual_unit || ''),
+          type: propType,
+          unit: normalizeText(entry.unit || ''),
           field_key: fieldKey || undefined,
-          variance_policy: normalizeToken(entry.variance_policy || 'authoritative'),
+          variance_policy: effectivePolicy,
           constraints: Array.isArray(entry.constraints) ? entry.constraints.map((c) => normalizeText(c)) : []
         };
       })
-      .filter((entry) => entry.column);
+      .filter((entry) => entry.column || entry.field_key);
     if (propertyMappings.length === 0) {
       for (const col of stableSortStrings(toArray(row.property_columns || row.props_columns).map((entry) => normalizeText(entry).toUpperCase()))) {
         if (!col) continue;
@@ -1649,10 +1679,11 @@ function normalizeWorkbookMap(map = {}) {
       })),
     component_sheets: [],
     component_sources: componentSheets
-      .filter((row) => row.sheet)
+      .filter((row) => row.sheet || row.component_type)
       .map((row) => ({
         sheet: row.sheet,
         type: row.component_type,
+        component_type: row.component_type,
         header_row: row.header_row,
         first_data_row: row.first_data_row,
         roles: {
@@ -1758,9 +1789,9 @@ function mergeWorkbookMapDefaults(baseMap = {}, suggestedMap = {}) {
 }
 
 export function validateWorkbookMap(map = {}, options = {}) {
-  const normalized = normalizeWorkbookMap(map);
   const errors = [];
   const warnings = [];
+  const normalized = normalizeWorkbookMap(map, { warnings });
   const sheetNames = new Set(toArray(options.sheetNames).map((name) => normalizeText(name)));
   const checkSheet = (sheet, label) => {
     if (!sheet) {
@@ -2325,13 +2356,17 @@ function pullComponentDbs(workbook, map) {
       .map((entry) => {
         const fieldKey = normalizeFieldKey(entry.field_key || '');
         const legacyKey = normalizeFieldKey(entry.key || entry.property_key || '');
+        const propType = ['number', 'string'].includes(normalizeToken(entry.type)) ? normalizeToken(entry.type) : 'string';
+        const rawPolicy = normalizeToken(entry.variance_policy || 'authoritative');
+        const NUMERIC_ONLY = ['upper_bound', 'lower_bound', 'range'];
+        const effectivePolicy = propType !== 'number' && NUMERIC_ONLY.includes(rawPolicy) ? 'authoritative' : rawPolicy;
         return {
           key: fieldKey || legacyKey,
           column: normalizeText(entry.column || entry.col || '').toUpperCase(),
-          type: ['number', 'string'].includes(normalizeToken(entry.type || entry.manual_type)) ? normalizeToken(entry.type || entry.manual_type) : 'string',
-          unit: normalizeText(entry.unit || entry.manual_unit || ''),
+          type: propType,
+          unit: normalizeText(entry.unit || ''),
           field_key: fieldKey || undefined,
-          variance_policy: normalizeToken(entry.variance_policy || 'authoritative'),
+          variance_policy: effectivePolicy,
           constraints: Array.isArray(entry.constraints) ? entry.constraints.map((c) => normalizeText(c)) : []
         };
       })
@@ -2999,11 +3034,47 @@ function buildEnumBucketSummary({
   return out;
 }
 
+function buildPropertyConstraintsFromMap(map, fieldKey) {
+  const sources = toArray(map?.component_sources).length > 0
+    ? toArray(map.component_sources)
+    : toArray(map?.component_sheets);
+  for (const row of sources) {
+    if (!isObject(row)) continue;
+    const rolesBlock = isObject(row.roles) ? row.roles : {};
+    for (const entry of toArray(rolesBlock.properties)) {
+      if (!isObject(entry)) continue;
+      const entryKey = normalizeFieldKey(entry.field_key || entry.key || entry.property_key || '');
+      if (entryKey === fieldKey && Array.isArray(entry.constraints) && entry.constraints.length > 0) {
+        return entry.constraints.filter(Boolean);
+      }
+    }
+  }
+  return [];
+}
+
+function applyKeyLevelConstraintsToEntities(componentDb, fieldsRuntime) {
+  for (const rows of Object.values(componentDb)) {
+    for (const entity of toArray(rows)) {
+      if (!isObject(entity?.properties)) continue;
+      for (const propKey of Object.keys(entity.properties)) {
+        const fieldDef = fieldsRuntime[propKey];
+        if (!isObject(fieldDef)) continue;
+        const keyConstraints = Array.isArray(fieldDef.constraints) ? fieldDef.constraints.filter(Boolean) : [];
+        if (keyConstraints.length === 0) continue;
+        if (!entity.__constraints) entity.__constraints = {};
+        entity.__constraints[propKey] = keyConstraints;
+      }
+    }
+  }
+}
+
 function buildComponentSourceSummary({
   map,
   componentDb,
-  sourceStats
+  sourceStats,
+  fieldsRuntime
 } = {}) {
+  const fr = isObject(fieldsRuntime) ? fieldsRuntime : {};
   const out = {};
   const sourceRows = toArray(map?.component_sources).length > 0 ? toArray(map.component_sources) : toArray(map?.component_sheets);
   for (const row of sourceRows) {
@@ -3020,14 +3091,17 @@ function buildComponentSourceSummary({
       .map((entry) => {
         const fieldKey = normalizeFieldKey(entry.field_key || '');
         const legacyKey = normalizeFieldKey(entry.key || entry.property_key || '');
+        const resolvedKey = fieldKey || legacyKey;
+        const keyLevelConstraints = Array.isArray(fr[resolvedKey]?.constraints) ? fr[resolvedKey].constraints.filter(Boolean) : null;
+        const mapConstraints = Array.isArray(entry.constraints) ? entry.constraints.map((c) => normalizeText(c)) : [];
         return {
-          key: fieldKey || legacyKey,
+          key: resolvedKey,
           column: normalizeText(entry.column || entry.col || '').toUpperCase(),
-          type: ['number', 'string'].includes(normalizeToken(entry.type || entry.manual_type)) ? normalizeToken(entry.type || entry.manual_type) : 'string',
-          unit: normalizeText(entry.unit || entry.manual_unit || ''),
+          type: ['number', 'string'].includes(normalizeToken(entry.type)) ? normalizeToken(entry.type) : 'string',
+          unit: normalizeText(entry.unit || ''),
           field_key: fieldKey || undefined,
           variance_policy: normalizeToken(entry.variance_policy || 'authoritative'),
-          constraints: Array.isArray(entry.constraints) ? entry.constraints.map((c) => normalizeText(c)) : []
+          constraints: keyLevelConstraints !== null ? keyLevelConstraints : mapConstraints
         };
       })
       .filter((entry) => entry.column);
@@ -3780,7 +3854,19 @@ function buildStudioFieldRule({
       fuzzy_threshold: rawFuzzyThreshold !== null ? Math.max(0, Math.min(1, rawFuzzyThreshold)) : 0.75,
       property_weight: rawPropWeight !== null ? Math.max(0, Math.min(1, rawPropWeight)) : 0.6,
       name_weight: rawNameWeight !== null ? Math.max(0, Math.min(1, rawNameWeight)) : 0.4,
-      property_keys: toArray(matchInput.property_keys).map(k => normalizeFieldKey(k)).filter(Boolean),
+      property_keys: (() => {
+        const authored = toArray(matchInput.property_keys).map(k => normalizeFieldKey(k)).filter(Boolean);
+        if (authored.length > 0) return authored;
+        const cSources = toArray(map?.component_sources).length > 0
+          ? toArray(map.component_sources)
+          : toArray(map?.component_sheets);
+        const cRow = cSources.find(
+          entry => normalizeFieldKey(entry?.component_type || entry?.type || '') === nestedComponent.type
+        );
+        return toArray(isObject(cRow?.roles) ? cRow.roles.properties : [])
+          .map(entry => normalizeFieldKey(entry?.field_key || entry?.key || entry?.property_key || ''))
+          .filter(Boolean);
+      })(),
       auto_accept_score: rawAutoAccept !== null ? Math.max(0, Math.min(1, rawAutoAccept)) : 0.95,
       flag_review_score: rawFlagReview !== null ? Math.max(0, Math.min(1, rawFlagReview)) : 0.65,
     };
@@ -4004,6 +4090,7 @@ function buildStudioFieldRule({
       return candidate && candidate !== key ? candidate : null;
     })(),
     component: Object.keys(nestedComponent).length ? nestedComponent : null,
+    constraints: Array.isArray(rule.constraints) ? rule.constraints.filter(Boolean) : [],
     contract: outContract,
     data_type: nestedContract.type || 'string',
     difficulty,
@@ -4820,6 +4907,34 @@ export async function compileCategoryWorkbook({
     }
   }
   const draftPayload = await readJsonIfExists(path.join(controlPlaneRoot, 'field_rules_draft.json'));
+  const pendingRenamesPayload = await readJsonIfExists(path.join(controlPlaneRoot, 'pending_renames.json'));
+  const pendingRenames = isObject(pendingRenamesPayload?.renames) ? pendingRenamesPayload.renames : {};
+  if (Object.keys(pendingRenames).length > 0) {
+    const renameKey = (k) => pendingRenames[k] || k;
+    if (Array.isArray(map.selected_keys)) {
+      map.selected_keys = map.selected_keys.map(renameKey);
+    }
+    if (isObject(map.field_overrides)) {
+      const renamedOverrides = {};
+      for (const [k, v] of Object.entries(map.field_overrides)) {
+        renamedOverrides[renameKey(k)] = v;
+      }
+      map.field_overrides = renamedOverrides;
+    }
+    for (const entry of toArray(map.enum_lists)) {
+      if (isObject(entry) && entry.field) entry.field = renameKey(entry.field);
+    }
+    for (const entry of toArray(map.data_lists)) {
+      if (isObject(entry) && entry.field) entry.field = renameKey(entry.field);
+    }
+    for (const src of toArray(map.component_sources)) {
+      if (isObject(src) && isObject(src.roles)) {
+        for (const prop of toArray(src.roles.properties)) {
+          if (isObject(prop) && prop.field_key) prop.field_key = renameKey(prop.field_key);
+        }
+      }
+    }
+  }
   const draftFieldOverridesRaw = isObject(draftPayload?.fields) ? draftPayload.fields : {};
   const baselineFieldOverrides = isObject(baselineFieldRules?.fields) ? baselineFieldRules.fields : {};
   const mapFieldOverrides = Object.keys(baselineFieldOverrides).length > 0
@@ -5057,6 +5172,9 @@ export async function compileCategoryWorkbook({
     }
     merged.key = outputField;
     merged.canonical_key = requestedCanonical || null;
+    if (!Array.isArray(merged.constraints)) {
+      merged.constraints = buildPropertyConstraintsFromMap(map, outputField);
+    }
 
     if ((merged.enum_policy === 'closed' || merged.enum_policy === 'closed_with_curation') && (!merged.vocab?.known_values || merged.vocab.known_values.length === 0)) {
       merged.enum_policy = 'open_prefer_known';
@@ -5455,7 +5573,8 @@ export async function compileCategoryWorkbook({
   const componentDbSources = buildComponentSourceSummary({
     map,
     componentDb,
-    sourceStats: componentSourceStats
+    sourceStats: componentSourceStats,
+    fieldsRuntime
   });
   const parseTemplates = isObject(baselineFieldRules?.parse_templates)
     ? baselineFieldRules.parse_templates
@@ -5730,6 +5849,8 @@ export async function compileCategoryWorkbook({
     mcu: 'mcus',
     material: 'materials'
   };
+  applyKeyLevelConstraintsToEntities(componentDb, fieldsRuntime);
+
   // Merge component overrides from _overrides/components/ into compiled output
   const componentOverrideDir = path.join(categoryRoot, '_overrides', 'components');
   const componentOverrides = {};
@@ -5793,6 +5914,10 @@ export async function compileCategoryWorkbook({
   await fs.mkdir(path.join(categoryRoot, '_overrides'), { recursive: true });
 
   await writeJsonStable(path.join(generatedRoot, '_compile_report.json'), compileReport);
+
+  if (Object.keys(pendingRenames).length > 0) {
+    await fs.rm(path.join(controlPlaneRoot, 'pending_renames.json'), { force: true });
+  }
 
   return {
     category,

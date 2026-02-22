@@ -1,0 +1,41 @@
+flowchart TD
+  A["Key contract edit (Key Navigator / Field Contract)"] --> B["POST /studio/:category/save-drafts"]
+  B --> B1["_control_plane/field_rules_draft.json merge"]
+  B --> B2["optional pending_renames.json update"]
+  B --> B3["broadcast data-change: studio-drafts-saved"]
+
+  A --> C["POST /studio/:category/compile"]
+  C --> D["category-compile"]
+  D --> D1["pullKeyRowsFromMap + selected_keys filter"]
+  D1 --> D2["mergeFieldOverride / buildStudioFieldRule"]
+  D2 --> D3["_generated/field_rules.json + field_rules.runtime.json"]
+  D2 --> D4["_generated/ui_field_catalog.json + known_values.json"]
+  D2 --> D5["_generated/component_db/*.json (constraints applied)"]
+  D2 --> D6["_control_plane snapshots: field_rules_draft/full/ui draft"]
+  D --> D7["broadcast data-change: process-completed"]
+
+  D3 --> E["loadCategoryConfig reads generated artifacts"]
+  D4 --> E
+  D5 --> E
+
+  E --> F["GET /field-labels/:category"]
+  E --> G["GET /review/:category/layout -> normalizeFieldContract"]
+  G --> H["GET /review/:category/products-index -> buildProductReviewPayload -> inferFlags"]
+
+  E --> I{"SpecDb state"}
+  I -- "DB unseeded" --> I1["triggerAutoSeed -> seedSpecDb"]
+  I -- "DB already seeded" --> I2["no automatic reseed on compile"]
+
+  I1 --> J1["component_values/list_values/item_field_state/key_review_state refreshed"]
+  I2 --> J2["SQL contract rows may remain stale"]
+
+  J1 --> K["GET /review-components/:category/components + /enums"]
+  J2 --> K
+
+  L["POST /review-components/.../component-override"] --> L1["cascadeComponentChange"]
+  L1 --> L2["evaluateAndFlagLinkedProducts + evaluateConstraintsForLinkedProducts"]
+  L2 --> L3["item_field_state.needs_ai_review + product_queue dirty_flags"]
+  L3 --> H
+
+  M["POST /review-components/.../enum-override"] --> M1["cascadeEnumChange"]
+  M1 --> L3

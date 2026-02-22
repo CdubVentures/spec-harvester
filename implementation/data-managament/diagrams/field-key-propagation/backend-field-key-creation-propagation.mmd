@@ -1,0 +1,72 @@
+flowchart TB
+  classDef trigger fill:#e8f0fe,stroke:#2563eb,color:#0f172a,stroke-width:1px;
+  classDef api fill:#ffedd5,stroke:#c2410c,color:#111827,stroke-width:1px;
+  classDef json fill:#dcfce7,stroke:#16a34a,color:#052e16,stroke-width:1px;
+  classDef decision fill:#fef9c3,stroke:#ca8a04,color:#111827,stroke-width:1px;
+  classDef sql fill:#ede9fe,stroke:#7c3aed,color:#2e1065,stroke-width:1px;
+  classDef note fill:#f8fafc,stroke:#64748b,color:#0f172a,stroke-dasharray:3 3;
+
+  subgraph A["Save Drafts (create starts here)"]
+    A0["Key Navigator create/edit"]:::trigger
+    A1["POST /studio/{category}/save-drafts"]:::api
+    A2["Merge -> _control_plane/field_rules_draft.json"]:::json
+    A3{"renames payload present?"}:::decision
+    A4["Merge -> _control_plane/pending_renames.json"]:::json
+    A5["broadcast data-change: studio-drafts-saved"]:::api
+    A0 --> A1 --> A2 --> A3
+    A3 -- yes (rename path) --> A4 --> A5
+    A3 -- no (create path) --> A5
+  end
+
+  subgraph B["Compile and Artifact Build"]
+    B0["POST /studio/{category}/compile"]:::trigger
+    B1["startProcess: category-compile"]:::api
+    B2["Read workbook_map + field_rules_draft + pending_renames"]:::api
+    B3{"pending_renames exists?"}:::decision
+    B4["Rewrite map references for renamed keys:<br/>selected_keys, field_overrides,<br/>enum_lists, data_lists, component_sources"]:::json
+    B5["Extract workbook keys (pullKeyRowsFromMap)"]:::api
+    B6["Filter by map.selected_keys"]:::api
+    B7{"created key present in filtered keyRows?"}:::decision
+    B8["Build fieldsRuntime/fieldsStudio for key"]:::json
+    B9["Key not emitted to generated runtime artifacts<br/>(draft-only)"]:::note
+    B10["Write control-plane outputs:<br/>workbook_map.json, draft.json,<br/>field_rules_draft.json, field_rules.full.json,<br/>ui_field_catalog_draft.json, _versions snapshot"]:::json
+    B11["On success write generated outputs:<br/>field_rules.json + field_rules.runtime.json,<br/>ui_field_catalog.json, known_values.json,<br/>_compile_report.json"]:::json
+    B12["Remove pending_renames.json if present"]:::json
+    B13["process exit 0 -> broadcast data-change: process-completed"]:::api
+
+    B0 --> B1 --> B2 --> B3
+    B3 -- yes --> B4 --> B5
+    B3 -- no --> B5
+    B5 --> B6 --> B7
+    B7 -- yes --> B8 --> B10
+    B7 -- no --> B9 --> B10
+    B10 --> B11 --> B12 --> B13
+  end
+
+  A5 --> B0
+
+  subgraph C["SQL / SpecDb Effects"]
+    C0["Direct save-drafts/compile SQL writes"]:::sql
+    C1["None"]:::note
+    C2["SpecDb auto-seed only when DB missing/unseeded"]:::sql
+    C3["loadFieldRules reads generated artifacts:<br/>field_rules.json, known_values.json,<br/>ui_field_catalog.json, component_db/*"]:::api
+    C4["seedSpecDb writes key-driven tables:<br/>enum_lists, list_values, item_field_state,<br/>item_component_links, item_list_links,<br/>source_assertions, key_review_state,<br/>products, product_queue"]:::sql
+    C5["Review payload path can upsert missing item_field_state<br/>slots for every layout field key (unk defaults)"]:::sql
+    C6["Component/Enum review visibility still depends on<br/>component_values/list_values data presence"]:::note
+    C0 --> C1
+  end
+
+  B11 --> C2 --> C3 --> C4
+  B11 --> C5
+  C4 --> C6
+  C5 --> C6
+
+  subgraph D["Create vs Rename Summary"]
+    D0["Create and rename share the same save -> compile -> invalidate backbone."]:::note
+    D1["Rename adds pending_renames rewrite branch before compile emission."]:::note
+    D2["Create adds no rename map; key must still survive keyRows extraction to propagate globally."]:::note
+  end
+
+  A3 -.-> D1
+  B7 -.-> D2
+  B11 -.-> D0

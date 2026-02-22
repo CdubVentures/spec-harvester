@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { SpecDb } from '../src/db/specDb.js';
 import { buildComponentIdentifier } from '../src/utils/componentIdentifier.js';
-import { buildComponentReviewPayloads, buildEnumReviewPayloads } from '../src/review/componentReviewData.js';
+import { buildComponentReviewLayout, buildComponentReviewPayloads, buildEnumReviewPayloads, resolvePropertyFieldMeta } from '../src/review/componentReviewData.js';
 
 const CATEGORY = 'mouse';
 
@@ -136,6 +136,88 @@ test('component payload hydrates __name/__maker accepted_candidate_id from key_r
     assert.ok(row, 'expected PAW3950/PixArt row');
     assert.equal(row.name_tracked.accepted_candidate_id, 'cand_name');
     assert.equal(row.maker_tracked.accepted_candidate_id, 'cand_maker');
+  } finally {
+    await cleanupTempSpecDb(tempRoot, specDb);
+  }
+});
+
+test('component layout item_count matches visible payload rows', async () => {
+  const { tempRoot, specDb } = await createTempSpecDb();
+  try {
+    const helperRoot = path.join(tempRoot, 'helper_files');
+    const config = { helperFilesRoot: helperRoot };
+    const componentType = 'sensor';
+
+    // Visible row: linked product exists.
+    specDb.upsertComponentIdentity({
+      componentType,
+      canonicalName: 'PAW3950',
+      maker: 'PixArt',
+      links: [],
+      source: 'pipeline',
+    });
+    specDb.upsertComponentValue({
+      componentType,
+      componentName: 'PAW3950',
+      componentMaker: 'PixArt',
+      propertyKey: 'dpi_max',
+      value: '35000',
+      confidence: 1,
+      variancePolicy: null,
+      source: 'pipeline',
+      acceptedCandidateId: null,
+      needsReview: false,
+      overridden: false,
+      constraints: [],
+    });
+    specDb.upsertItemComponentLink({
+      productId: 'mouse-layout-visible',
+      fieldKey: 'sensor',
+      componentType,
+      componentName: 'PAW3950',
+      componentMaker: 'PixArt',
+      matchType: 'exact',
+      matchScore: 1,
+    });
+
+    // Hidden row: discovered pipeline row with no linked products/candidates.
+    specDb.upsertComponentIdentity({
+      componentType,
+      canonicalName: 'PAW3950 Hidden',
+      maker: 'PixArt',
+      links: [],
+      source: 'pipeline',
+    });
+    specDb.upsertComponentValue({
+      componentType,
+      componentName: 'PAW3950 Hidden',
+      componentMaker: 'PixArt',
+      propertyKey: 'dpi_max',
+      value: null,
+      confidence: 0,
+      variancePolicy: null,
+      source: 'pipeline',
+      acceptedCandidateId: null,
+      needsReview: false,
+      overridden: false,
+      constraints: [],
+    });
+
+    const payload = await buildComponentReviewPayloads({
+      config,
+      category: CATEGORY,
+      componentType,
+      specDb,
+    });
+    const layout = await buildComponentReviewLayout({
+      config,
+      category: CATEGORY,
+      specDb,
+    });
+    const typeRow = (layout.types || []).find((row) => row.type === componentType);
+
+    assert.ok(typeRow, 'expected sensor type in layout');
+    assert.equal(Number(typeRow.item_count || 0), (payload.items || []).length);
   } finally {
     await cleanupTempSpecDb(tempRoot, specDb);
   }
@@ -389,6 +471,77 @@ test('component payload isolates same-name lanes by maker for linked-product can
     assert.equal(propCandidatesB.length, 2);
     assert.equal(propCandidatesA.every((candidate) => String(candidate?.value || '') === '55'), true);
     assert.equal(propCandidatesB.every((candidate) => String(candidate?.value || '') === '65'), true);
+  } finally {
+    await cleanupTempSpecDb(tempRoot, specDb);
+  }
+});
+
+test('component payload keeps a single row per exact component name+maker identity', async () => {
+  const { tempRoot, specDb } = await createTempSpecDb();
+  try {
+    const componentType = 'switch';
+    const componentName = 'Omron D2FC-F-7N';
+    const componentMaker = 'Omron';
+    const propertyKey = 'actuation_force';
+
+    specDb.upsertComponentIdentity({
+      componentType,
+      canonicalName: componentName,
+      maker: componentMaker,
+      links: [],
+      source: 'pipeline',
+    });
+    specDb.upsertComponentIdentity({
+      componentType,
+      canonicalName: componentName,
+      maker: componentMaker,
+      links: [],
+      source: 'pipeline',
+    });
+    specDb.upsertComponentValue({
+      componentType,
+      componentName,
+      componentMaker,
+      propertyKey,
+      value: '55',
+      confidence: 1,
+      variancePolicy: null,
+      source: 'pipeline',
+      acceptedCandidateId: null,
+      needsReview: false,
+      overridden: false,
+      constraints: [],
+    });
+    specDb.upsertItemComponentLink({
+      productId: 'mouse-dup-row-a',
+      fieldKey: 'switch',
+      componentType,
+      componentName,
+      componentMaker,
+      matchType: 'shared_accept',
+      matchScore: 1,
+    });
+    specDb.upsertItemComponentLink({
+      productId: 'mouse-dup-row-b',
+      fieldKey: 'switch',
+      componentType,
+      componentName,
+      componentMaker,
+      matchType: 'shared_accept',
+      matchScore: 1,
+    });
+
+    const payload = await buildComponentReviewPayloads({
+      config: { helperFilesRoot: path.join(tempRoot, 'helper_files') },
+      category: CATEGORY,
+      componentType,
+      specDb,
+    });
+    const rows = (payload.items || []).filter(
+      (item) => item.name === componentName && item.maker === componentMaker,
+    );
+    assert.equal(rows.length, 1);
+    assert.equal((rows[0]?.linked_products || []).length, 2);
   } finally {
     await cleanupTempSpecDb(tempRoot, specDb);
   }
@@ -833,6 +986,782 @@ test('enum payload hides pending pipeline values without linked products', async
     const values = (field?.values || []).map((entry) => String(entry?.value || ''));
     assert.equal(values.includes('Bluetooth'), true);
     assert.equal(values.includes('Wireless'), false);
+  } finally {
+    await cleanupTempSpecDb(tempRoot, specDb);
+  }
+});
+
+test('component payload aggregates candidates from ALL linked products for EVERY slot type', async () => {
+  const { tempRoot, specDb } = await createTempSpecDb();
+  try {
+    const componentType = 'sensor';
+    const componentName = 'PAW3950';
+    const componentMaker = 'PixArt';
+    const propertyKeys = ['dpi_max', 'ips', 'acceleration'];
+    const productIds = ['mouse-agg-p1', 'mouse-agg-p2', 'mouse-agg-p3'];
+
+    specDb.upsertComponentIdentity({
+      componentType,
+      canonicalName: componentName,
+      maker: componentMaker,
+      links: [],
+      source: 'pipeline',
+    });
+
+    for (const propKey of propertyKeys) {
+      specDb.upsertComponentValue({
+        componentType,
+        componentName,
+        componentMaker,
+        propertyKey: propKey,
+        value: '1000',
+        confidence: 1,
+        variancePolicy: null,
+        source: 'pipeline',
+        acceptedCandidateId: null,
+        needsReview: true,
+        overridden: false,
+        constraints: [],
+      });
+    }
+
+    for (const productId of productIds) {
+      specDb.upsertItemComponentLink({
+        productId,
+        fieldKey: 'sensor',
+        componentType,
+        componentName,
+        componentMaker,
+        matchType: 'exact',
+        matchScore: 1,
+      });
+
+      specDb.insertCandidate({
+        candidate_id: `${productId}::sensor::name_a`,
+        category: CATEGORY,
+        product_id: productId,
+        field_key: 'sensor',
+        value: componentName,
+        normalized_value: componentName.toLowerCase(),
+        score: 0.95,
+        rank: 1,
+        source_host: 'contract.test',
+        source_method: 'pipeline_extract',
+        source_tier: 1,
+      });
+      specDb.insertCandidate({
+        candidate_id: `${productId}::sensor::name_b`,
+        category: CATEGORY,
+        product_id: productId,
+        field_key: 'sensor',
+        value: componentName,
+        normalized_value: componentName.toLowerCase(),
+        score: 0.85,
+        rank: 2,
+        source_host: 'review.test',
+        source_method: 'llm_extract',
+        source_tier: 2,
+      });
+
+      specDb.insertCandidate({
+        candidate_id: `${productId}::sensor_brand::maker_a`,
+        category: CATEGORY,
+        product_id: productId,
+        field_key: 'sensor_brand',
+        value: componentMaker,
+        normalized_value: componentMaker.toLowerCase(),
+        score: 0.9,
+        rank: 1,
+        source_host: 'contract.test',
+        source_method: 'pipeline_extract',
+        source_tier: 1,
+      });
+      specDb.insertCandidate({
+        candidate_id: `${productId}::sensor_brand::maker_b`,
+        category: CATEGORY,
+        product_id: productId,
+        field_key: 'sensor_brand',
+        value: componentMaker,
+        normalized_value: componentMaker.toLowerCase(),
+        score: 0.8,
+        rank: 2,
+        source_host: 'review.test',
+        source_method: 'llm_extract',
+        source_tier: 2,
+      });
+
+      for (const propKey of propertyKeys) {
+        specDb.insertCandidate({
+          candidate_id: `${productId}::${propKey}::prop_a`,
+          category: CATEGORY,
+          product_id: productId,
+          field_key: propKey,
+          value: '1000',
+          normalized_value: '1000',
+          score: 0.88,
+          rank: 1,
+          source_host: 'contract.test',
+          source_method: 'pipeline_extract',
+          source_tier: 1,
+          is_component_field: true,
+          component_type: componentType,
+        });
+        specDb.insertCandidate({
+          candidate_id: `${productId}::${propKey}::prop_b`,
+          category: CATEGORY,
+          product_id: productId,
+          field_key: propKey,
+          value: '1000',
+          normalized_value: '1000',
+          score: 0.75,
+          rank: 2,
+          source_host: 'review.test',
+          source_method: 'llm_extract',
+          source_tier: 2,
+          is_component_field: true,
+          component_type: componentType,
+        });
+      }
+    }
+
+    const helperRoot = path.join(tempRoot, 'helper_files');
+    const reviewPath = path.join(helperRoot, CATEGORY, '_suggestions', 'component_review.json');
+    await fs.mkdir(path.dirname(reviewPath), { recursive: true });
+    await fs.writeFile(reviewPath, JSON.stringify({ version: 1, category: CATEGORY, items: [] }, null, 2), 'utf8');
+
+    const payload = await buildComponentReviewPayloads({
+      config: { helperFilesRoot: helperRoot },
+      category: CATEGORY,
+      componentType,
+      specDb,
+    });
+
+    const row = payload.items.find((item) => item.name === componentName && item.maker === componentMaker);
+    assert.ok(row, 'expected component row');
+    assert.equal((row.linked_products || []).length, 3, 'expected 3 linked products');
+
+    assert.equal(row.name_tracked.candidates.length, 6, 'name slot should have 6 candidates (2 per product x 3 products)');
+    assert.equal(row.name_tracked.candidate_count, row.name_tracked.candidates.length, 'name candidate_count must match candidates.length');
+
+    assert.equal(row.maker_tracked.candidates.length, 6, 'maker slot should have 6 candidates (2 per product x 3 products)');
+    assert.equal(row.maker_tracked.candidate_count, row.maker_tracked.candidates.length, 'maker candidate_count must match candidates.length');
+
+    for (const propKey of propertyKeys) {
+      const prop = row.properties?.[propKey];
+      assert.ok(prop, `property ${propKey} should exist`);
+      assert.equal(prop.candidates.length, 6, `${propKey} should have 6 candidates (2 per product x 3 products)`);
+      assert.equal(prop.candidate_count, prop.candidates.length, `${propKey} candidate_count must match candidates.length`);
+    }
+  } finally {
+    await cleanupTempSpecDb(tempRoot, specDb);
+  }
+});
+
+test('candidate_count equals candidates.length for every slot in component payload', async () => {
+  const { tempRoot, specDb } = await createTempSpecDb();
+  try {
+    const componentType = 'switch';
+    const componentName = 'TTC Gold';
+    const componentMaker = 'TTC';
+    const propertyKey = 'actuation_force';
+
+    specDb.upsertComponentIdentity({
+      componentType,
+      canonicalName: componentName,
+      maker: componentMaker,
+      links: [],
+      source: 'pipeline',
+    });
+    specDb.upsertComponentValue({
+      componentType,
+      componentName,
+      componentMaker,
+      propertyKey,
+      value: '50',
+      confidence: 1,
+      variancePolicy: null,
+      source: 'pipeline',
+      acceptedCandidateId: null,
+      needsReview: true,
+      overridden: false,
+      constraints: [],
+    });
+
+    specDb.upsertItemComponentLink({
+      productId: 'mouse-ttc-1',
+      fieldKey: 'switch',
+      componentType,
+      componentName,
+      componentMaker,
+      matchType: 'exact',
+      matchScore: 1,
+    });
+    specDb.insertCandidate({
+      candidate_id: 'mouse-ttc-1::switch::name',
+      category: CATEGORY,
+      product_id: 'mouse-ttc-1',
+      field_key: 'switch',
+      value: componentName,
+      normalized_value: componentName.toLowerCase(),
+      score: 0.95,
+      rank: 1,
+      source_host: 'contract.test',
+      source_method: 'pipeline_extract',
+      source_tier: 1,
+    });
+    specDb.insertCandidate({
+      candidate_id: 'mouse-ttc-1::switch_brand::maker',
+      category: CATEGORY,
+      product_id: 'mouse-ttc-1',
+      field_key: 'switch_brand',
+      value: componentMaker,
+      normalized_value: componentMaker.toLowerCase(),
+      score: 0.9,
+      rank: 1,
+      source_host: 'contract.test',
+      source_method: 'pipeline_extract',
+      source_tier: 1,
+    });
+    specDb.insertCandidate({
+      candidate_id: 'mouse-ttc-1::actuation_force::value',
+      category: CATEGORY,
+      product_id: 'mouse-ttc-1',
+      field_key: propertyKey,
+      value: '50',
+      normalized_value: '50',
+      score: 0.88,
+      rank: 1,
+      source_host: 'contract.test',
+      source_method: 'pipeline_extract',
+      source_tier: 1,
+      is_component_field: true,
+      component_type: componentType,
+    });
+
+    const helperRoot = path.join(tempRoot, 'helper_files');
+    const reviewPath = path.join(helperRoot, CATEGORY, '_suggestions', 'component_review.json');
+    await fs.mkdir(path.dirname(reviewPath), { recursive: true });
+    await fs.writeFile(reviewPath, JSON.stringify({ version: 1, category: CATEGORY, items: [] }, null, 2), 'utf8');
+
+    const payload = await buildComponentReviewPayloads({
+      config: { helperFilesRoot: helperRoot },
+      category: CATEGORY,
+      componentType,
+      specDb,
+    });
+
+    for (const row of payload.items) {
+      assert.equal(row.name_tracked.candidate_count, row.name_tracked.candidates.length,
+        `${row.name}/${row.maker}: name candidate_count (${row.name_tracked.candidate_count}) must match candidates.length (${row.name_tracked.candidates.length})`);
+      assert.equal(row.maker_tracked.candidate_count, row.maker_tracked.candidates.length,
+        `${row.name}/${row.maker}: maker candidate_count (${row.maker_tracked.candidate_count}) must match candidates.length (${row.maker_tracked.candidates.length})`);
+      for (const [key, prop] of Object.entries(row.properties || {})) {
+        assert.equal(prop.candidate_count, prop.candidates.length,
+          `${row.name}/${row.maker}/${key}: candidate_count (${prop.candidate_count}) must match candidates.length (${prop.candidates.length})`);
+      }
+    }
+  } finally {
+    await cleanupTempSpecDb(tempRoot, specDb);
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════
+// EDGE CASE: :: delimiter in component names
+// ══════════════════════════════════════════════════════════════════════
+
+test('edge case — :: delimiter in component name produces ambiguous identifier', () => {
+  const identifier = buildComponentIdentifier('sensor', 'Type::A::Model', 'Maker::X');
+  assert.strictEqual(identifier, 'sensor::Type::A::Model::Maker::X');
+
+  const parts = identifier.split('::');
+  assert.ok(parts.length > 3,
+    `identifier with :: in name/maker splits into ${parts.length} parts, making naive split('::') ambiguous`);
+});
+
+test('edge case — safe identifiers have exactly 3 :: delimited parts', () => {
+  const safeId = buildComponentIdentifier('sensor', 'PAW3950', 'PixArt');
+  const safeParts = safeId.split('::');
+  assert.strictEqual(safeParts.length, 3,
+    'safe identifier should have exactly 3 parts when split on ::');
+
+  const ambiguousId = buildComponentIdentifier('sensor', 'PAW::3950', 'PixArt');
+  const ambiguousParts = ambiguousId.split('::');
+  assert.ok(ambiguousParts.length > 3,
+    'identifier with :: in name produces >3 parts, signaling ambiguity');
+});
+
+// ══════════════════════════════════════════════════════════════════════
+// EDGE CASE: Confidence boundary values
+// ══════════════════════════════════════════════════════════════════════
+
+test('edge case — confidence boundary values map to correct colors', async () => {
+  const { confidenceColor } = await import('../src/review/confidenceColor.js');
+
+  assert.strictEqual(confidenceColor(0.0, []), 'gray', 'confidence 0.0 should be gray');
+  assert.strictEqual(confidenceColor(0.5, []), 'red', 'confidence 0.5 should be red');
+  assert.strictEqual(confidenceColor(0.59, []), 'red', 'confidence 0.59 should be red');
+  assert.strictEqual(confidenceColor(0.6, []), 'yellow', 'confidence 0.6 should be yellow');
+  assert.strictEqual(confidenceColor(0.8, []), 'yellow', 'confidence 0.8 should be yellow');
+  assert.strictEqual(confidenceColor(0.84, []), 'yellow', 'confidence 0.84 should be yellow');
+  assert.strictEqual(confidenceColor(0.85, []), 'green', 'confidence 0.85 should be green');
+  assert.strictEqual(confidenceColor(1.0, []), 'green', 'confidence 1.0 should be green');
+});
+
+test('edge case — confidence boundaries in component payload slots', async () => {
+  const { tempRoot, specDb } = await createTempSpecDb();
+  try {
+    const componentType = 'sensor';
+    const boundaries = [
+      { name: 'ZeroConf', confidence: 0, expected: 'gray' },
+      { name: 'LowConf', confidence: 0.5, expected: 'red' },
+      { name: 'MidConf', confidence: 0.8, expected: 'yellow' },
+      { name: 'HighConf', confidence: 1.0, expected: 'green' },
+    ];
+
+    for (const { name, confidence } of boundaries) {
+      specDb.upsertComponentIdentity({
+        componentType,
+        canonicalName: name,
+        maker: 'TestMaker',
+        links: null,
+        source: 'test',
+      });
+      specDb.upsertComponentValue({
+        componentType,
+        componentName: name,
+        componentMaker: 'TestMaker',
+        propertyKey: 'dpi_max',
+        value: '16000',
+        confidence,
+        variancePolicy: null,
+        source: 'pipeline',
+        acceptedCandidateId: null,
+        needsReview: confidence < 0.85,
+        overridden: false,
+        constraints: [],
+      });
+    }
+
+    const helperRoot = path.join(tempRoot, 'helper_files');
+    const reviewPath = path.join(helperRoot, CATEGORY, '_suggestions', 'component_review.json');
+    await fs.mkdir(path.dirname(reviewPath), { recursive: true });
+    await fs.writeFile(reviewPath, JSON.stringify({ version: 1, category: CATEGORY, items: [] }, null, 2), 'utf8');
+
+    const payload = await buildComponentReviewPayloads({
+      config: { helperFilesRoot: helperRoot },
+      category: CATEGORY,
+      componentType,
+      specDb,
+    });
+
+    for (const { name, expected } of boundaries) {
+      const row = payload.items.find(r => r.name === name);
+      assert.ok(row, `row for ${name} should exist`);
+      const prop = row.properties?.dpi_max;
+      if (prop?.selected?.color) {
+        assert.strictEqual(prop.selected.color, expected,
+          `${name} with boundary confidence should map to ${expected}, got ${prop.selected.color}`);
+      }
+    }
+  } finally {
+    await cleanupTempSpecDb(tempRoot, specDb);
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════
+// EDGE CASE: Enum values that normalize to the same token
+// ══════════════════════════════════════════════════════════════════════
+
+test('edge case — enum values with different casing are stored as distinct rows', async () => {
+  const { tempRoot, specDb } = await createTempSpecDb();
+  try {
+    specDb.upsertListValue({
+      fieldKey: 'connection',
+      value: '2.4GHz',
+      normalizedValue: '2.4ghz',
+      source: 'known_values',
+      needsReview: false,
+      overridden: false,
+    });
+
+    specDb.upsertListValue({
+      fieldKey: 'connection',
+      value: '2.4ghz',
+      normalizedValue: '2.4ghz',
+      source: 'pipeline',
+      needsReview: true,
+      overridden: false,
+    });
+
+    const allValues = specDb.getListValues('connection');
+    assert.strictEqual(allValues.length, 2,
+      'both casing variants should be stored as separate list_values rows');
+
+    const normalizedValues = allValues.map(v => v.normalized_value);
+    assert.deepStrictEqual(normalizedValues, ['2.4ghz', '2.4ghz'],
+      'both rows should share the same normalized_value');
+
+    const distinctValues = new Set(allValues.map(v => v.value));
+    assert.strictEqual(distinctValues.size, 2,
+      'the display values should remain distinct');
+  } finally {
+    await cleanupTempSpecDb(tempRoot, specDb);
+  }
+});
+
+// ── resolvePropertyFieldMeta pure function tests ─────────────────────────────
+
+test('resolvePropertyFieldMeta returns variance_policy and constraints from field definition', () => {
+  const fieldRules = {
+    rules: {
+      fields: {
+        dpi: {
+          variance_policy: 'upper_bound',
+          constraints: [],
+        },
+      },
+    },
+    knownValues: { enums: {} },
+  };
+  const result = resolvePropertyFieldMeta('dpi', fieldRules);
+  assert.deepStrictEqual(result, {
+    variance_policy: 'upper_bound',
+    constraints: [],
+    enum_values: null,
+    enum_policy: null,
+  });
+});
+
+test('resolvePropertyFieldMeta returns enum_values and enum_policy for enum fields', () => {
+  const fieldRules = {
+    rules: {
+      fields: {
+        encoder_type: {
+          variance_policy: 'authoritative',
+          constraints: [],
+          enum: { policy: 'closed', source: 'data_lists.encoder_type' },
+        },
+      },
+    },
+    knownValues: {
+      enums: {
+        encoder_type: { policy: 'closed', values: ['optical', 'mechanical'] },
+      },
+    },
+  };
+  const result = resolvePropertyFieldMeta('encoder_type', fieldRules);
+  assert.deepStrictEqual(result, {
+    variance_policy: 'authoritative',
+    constraints: [],
+    enum_values: ['optical', 'mechanical'],
+    enum_policy: 'closed',
+  });
+});
+
+test('resolvePropertyFieldMeta returns null for unknown key', () => {
+  const fieldRules = {
+    rules: { fields: { dpi: { variance_policy: 'upper_bound', constraints: [] } } },
+    knownValues: { enums: {} },
+  };
+  assert.strictEqual(resolvePropertyFieldMeta('nonexistent_key', fieldRules), null);
+});
+
+test('resolvePropertyFieldMeta returns null for identity key __name', () => {
+  const fieldRules = {
+    rules: { fields: { __name: { variance_policy: null, constraints: [] } } },
+    knownValues: { enums: {} },
+  };
+  assert.strictEqual(resolvePropertyFieldMeta('__name', fieldRules), null);
+});
+
+test('component payload inherits constraints from field rules, not DB row', async () => {
+  const { tempRoot, specDb } = await createTempSpecDb();
+  try {
+    specDb.upsertComponentIdentity({
+      componentType: 'sensor',
+      canonicalName: 'TestSensor',
+      maker: 'TestMaker',
+      links: [],
+      source: 'component_db',
+    });
+    specDb.upsertComponentValue({
+      componentType: 'sensor',
+      componentName: 'TestSensor',
+      componentMaker: 'TestMaker',
+      propertyKey: 'sensor_date',
+      value: '2024-01',
+      confidence: 1,
+      variancePolicy: 'authoritative',
+      source: 'component_db',
+      acceptedCandidateId: null,
+      needsReview: false,
+      overridden: false,
+      constraints: null,
+    });
+    specDb.upsertItemComponentLink({
+      productId: 'mouse-test-constraints',
+      fieldKey: 'sensor',
+      componentType: 'sensor',
+      componentName: 'TestSensor',
+      componentMaker: 'TestMaker',
+      matchType: 'exact',
+      matchScore: 1,
+    });
+
+    const fieldRules = {
+      rules: {
+        fields: {
+          sensor_date: {
+            variance_policy: 'authoritative',
+            constraints: ['sensor_date <= release_date'],
+          },
+        },
+      },
+      knownValues: { enums: {} },
+    };
+
+    const payload = await buildComponentReviewPayloads({
+      config: { helperFilesRoot: path.join(tempRoot, 'helper_files') },
+      category: CATEGORY,
+      componentType: 'sensor',
+      specDb,
+      fieldRules,
+    });
+    const row = payload.items.find(item => item.name === 'TestSensor' && item.maker === 'TestMaker');
+    assert.ok(row, 'expected TestSensor/TestMaker row');
+    assert.deepStrictEqual(row.properties.sensor_date.constraints, ['sensor_date <= release_date'],
+      'constraints should come from field rules');
+    assert.strictEqual(row.properties.sensor_date.variance_policy, 'authoritative',
+      'variance_policy should come from DB row (component-level)');
+  } finally {
+    await cleanupTempSpecDb(tempRoot, specDb);
+  }
+});
+
+test('component payload includes enum_values and enum_policy from field rules', async () => {
+  const { tempRoot, specDb } = await createTempSpecDb();
+  try {
+    specDb.upsertComponentIdentity({
+      componentType: 'encoder',
+      canonicalName: 'TestEncoder',
+      maker: 'TestMaker',
+      links: [],
+      source: 'component_db',
+    });
+    specDb.upsertComponentValue({
+      componentType: 'encoder',
+      componentName: 'TestEncoder',
+      componentMaker: 'TestMaker',
+      propertyKey: 'encoder_steps',
+      value: '20',
+      confidence: 1,
+      variancePolicy: 'authoritative',
+      source: 'component_db',
+      acceptedCandidateId: null,
+      needsReview: false,
+      overridden: false,
+      constraints: [],
+    });
+    specDb.upsertItemComponentLink({
+      productId: 'mouse-test-enum',
+      fieldKey: 'encoder',
+      componentType: 'encoder',
+      componentName: 'TestEncoder',
+      componentMaker: 'TestMaker',
+      matchType: 'exact',
+      matchScore: 1,
+    });
+
+    const fieldRules = {
+      rules: {
+        fields: {
+          encoder_steps: {
+            variance_policy: 'authoritative',
+            constraints: [],
+            enum: { policy: 'closed', source: 'data_lists.encoder_steps' },
+          },
+        },
+      },
+      knownValues: {
+        enums: {
+          encoder_steps: { policy: 'closed', values: ['5', '16', '18', '20', '24'] },
+        },
+      },
+    };
+
+    const payload = await buildComponentReviewPayloads({
+      config: { helperFilesRoot: path.join(tempRoot, 'helper_files') },
+      category: CATEGORY,
+      componentType: 'encoder',
+      specDb,
+      fieldRules,
+    });
+    const row = payload.items.find(item => item.name === 'TestEncoder');
+    assert.ok(row, 'expected TestEncoder row');
+    assert.deepStrictEqual(row.properties.encoder_steps.enum_values, ['5', '16', '18', '20', '24'],
+      'enum_values should come from field rules');
+    assert.strictEqual(row.properties.encoder_steps.enum_policy, 'closed',
+      'enum_policy should come from field rules');
+  } finally {
+    await cleanupTempSpecDb(tempRoot, specDb);
+  }
+});
+
+test('override_allowed property skips variance evaluation — no violation flags despite value mismatch', async () => {
+  const { tempRoot, specDb } = await createTempSpecDb();
+  try {
+    specDb.upsertComponentIdentity({
+      componentType: 'sensor',
+      canonicalName: 'PAW3950',
+      maker: 'PixArt',
+      links: [],
+      source: 'component_db',
+    });
+    specDb.upsertComponentValue({
+      componentType: 'sensor',
+      componentName: 'PAW3950',
+      componentMaker: 'PixArt',
+      propertyKey: 'max_dpi',
+      value: '35000',
+      confidence: 1,
+      variancePolicy: 'override_allowed',
+      source: 'component_db',
+      acceptedCandidateId: null,
+      needsReview: false,
+      overridden: false,
+      constraints: [],
+    });
+    specDb.upsertItemComponentLink({
+      productId: 'mouse-override-test',
+      fieldKey: 'sensor',
+      componentType: 'sensor',
+      componentName: 'PAW3950',
+      componentMaker: 'PixArt',
+      matchType: 'exact',
+      matchScore: 1,
+    });
+    specDb.upsertItemFieldState({
+      productId: 'mouse-override-test',
+      fieldKey: 'max_dpi',
+      value: '26000',
+      confidence: 0.8,
+      source: 'pipeline',
+      acceptedCandidateId: null,
+      overridden: false,
+      needsAiReview: false,
+      aiReviewComplete: false,
+    });
+
+    const fieldRules = {
+      rules: {
+        fields: {
+          max_dpi: {
+            variance_policy: 'override_allowed',
+            constraints: [],
+          },
+        },
+      },
+      knownValues: { enums: {} },
+    };
+
+    const payload = await buildComponentReviewPayloads({
+      config: { helperFilesRoot: path.join(tempRoot, 'helper_files') },
+      category: CATEGORY,
+      componentType: 'sensor',
+      specDb,
+      fieldRules,
+    });
+    const row = payload.items.find(item => item.name === 'PAW3950');
+    assert.ok(row, 'expected PAW3950 row');
+    const prop = row.properties.max_dpi;
+    assert.ok(prop, 'expected max_dpi property');
+    assert.strictEqual(prop.variance_policy, 'override_allowed',
+      'property should carry override_allowed policy');
+    assert.strictEqual(prop.reason_codes.includes('variance_violation'), false,
+      'override_allowed must NOT produce variance_violation reason code');
+    assert.strictEqual(prop.variance_violations, undefined,
+      'override_allowed must NOT populate variance_violations');
+  } finally {
+    await cleanupTempSpecDb(tempRoot, specDb);
+  }
+});
+
+test('authoritative property DOES flag variance violation for same mismatch scenario', async () => {
+  const { tempRoot, specDb } = await createTempSpecDb();
+  try {
+    specDb.upsertComponentIdentity({
+      componentType: 'sensor',
+      canonicalName: 'PAW3950',
+      maker: 'PixArt',
+      links: [],
+      source: 'component_db',
+    });
+    specDb.upsertComponentValue({
+      componentType: 'sensor',
+      componentName: 'PAW3950',
+      componentMaker: 'PixArt',
+      propertyKey: 'max_dpi',
+      value: '35000',
+      confidence: 1,
+      variancePolicy: 'authoritative',
+      source: 'component_db',
+      acceptedCandidateId: null,
+      needsReview: false,
+      overridden: false,
+      constraints: [],
+    });
+    specDb.upsertItemComponentLink({
+      productId: 'mouse-auth-test',
+      fieldKey: 'sensor',
+      componentType: 'sensor',
+      componentName: 'PAW3950',
+      componentMaker: 'PixArt',
+      matchType: 'exact',
+      matchScore: 1,
+    });
+    specDb.upsertItemFieldState({
+      productId: 'mouse-auth-test',
+      fieldKey: 'max_dpi',
+      value: '26000',
+      confidence: 0.8,
+      source: 'pipeline',
+      acceptedCandidateId: null,
+      overridden: false,
+      needsAiReview: false,
+      aiReviewComplete: false,
+    });
+
+    const fieldRules = {
+      rules: {
+        fields: {
+          max_dpi: {
+            variance_policy: 'authoritative',
+            constraints: [],
+          },
+        },
+      },
+      knownValues: { enums: {} },
+    };
+
+    const payload = await buildComponentReviewPayloads({
+      config: { helperFilesRoot: path.join(tempRoot, 'helper_files') },
+      category: CATEGORY,
+      componentType: 'sensor',
+      specDb,
+      fieldRules,
+    });
+    const row = payload.items.find(item => item.name === 'PAW3950');
+    assert.ok(row, 'expected PAW3950 row');
+    const prop = row.properties.max_dpi;
+    assert.ok(prop, 'expected max_dpi property');
+    assert.strictEqual(prop.variance_policy, 'authoritative',
+      'property should carry authoritative policy');
+    assert.strictEqual(prop.reason_codes.includes('variance_violation'), true,
+      'authoritative mismatch MUST produce variance_violation');
+    assert.ok(prop.variance_violations,
+      'authoritative mismatch MUST populate variance_violations');
+    assert.strictEqual(prop.variance_violations.count, 1,
+      'one product has a mismatched value');
   } finally {
     await cleanupTempSpecDb(tempRoot, specDb);
   }

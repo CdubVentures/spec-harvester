@@ -1,5 +1,4 @@
 export interface ReviewLayoutRow {
-  excel_row: number | null;
   group: string;
   key: string;
   label: string;
@@ -15,14 +14,6 @@ export interface ReviewLayoutRow {
 
 export interface ReviewLayout {
   category: string;
-  excel: {
-    workbook: string;
-    workbook_path: string;
-    sheet: string;
-    key_range: string;
-    brand_key_cell: string;
-    model_key_cell: string;
-  };
   rows: ReviewLayoutRow[];
 }
 

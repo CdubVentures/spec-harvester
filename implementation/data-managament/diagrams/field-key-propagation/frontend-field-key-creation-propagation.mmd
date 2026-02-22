@@ -1,0 +1,67 @@
+flowchart TB
+  classDef trigger fill:#e8f0fe,stroke:#2563eb,color:#0f172a,stroke-width:1px;
+  classDef api fill:#ffedd5,stroke:#c2410c,color:#111827,stroke-width:1px;
+  classDef state fill:#dcfce7,stroke:#16a34a,color:#052e16,stroke-width:1px;
+  classDef ui fill:#ede9fe,stroke:#7c3aed,color:#2e1065,stroke-width:1px;
+  classDef warn fill:#fef3c7,stroke:#ca8a04,color:#111827,stroke-width:1px;
+  classDef note fill:#f8fafc,stroke:#64748b,color:#0f172a,stroke-dasharray:3 3;
+
+  subgraph S["Studio Key Creation and Save"]
+    A0["Studio > Key Navigator<br/>+ Add Key"]:::trigger
+    A1["Local edits:<br/>editedRules + editedFieldOrder<br/>_edited=true"]:::state
+    A2["Save All Changes"]:::trigger
+    A3["POST /studio/{category}/save-drafts<br/>fieldRulesDraft.fields + fieldOrder"]:::api
+    A4["Write _control_plane/field_rules_draft.json"]:::state
+    A5["broadcast data-change:<br/>studio-drafts-saved"]:::api
+    A6["AppShell invalidates caches:<br/>fieldLabels, reviewLayout, product,<br/>reviewProductsIndex, component/enum review, studio"]:::state
+    A0 --> A1 --> A2 --> A3 --> A4 --> A5 --> A6
+  end
+
+  subgraph D["Draft Stage (no compile yet)"]
+    D0["GET /studio/{category}/payload<br/>compiled fieldRules + draft fieldOrder"]:::api
+    D1["GET /studio/{category}/drafts<br/>full fieldRulesDraft available"]:::api
+    D2["Studio tabs update quickly:<br/>Key Navigator, Mapping, Workbench,<br/>Context key lists"]:::ui
+    D3["Global runtime still based on generated artifacts"]:::warn
+    A6 --> D0
+    A6 --> D1
+    D0 --> D2
+    D1 --> D2
+    D0 --> D3
+  end
+
+  subgraph C["Compile Promotion"]
+    C0["Compile and Generate Artifacts"]:::trigger
+    C1["POST /studio/{category}/compile"]:::api
+    C2["category-compile process"]:::api
+    C3["process-completed data-change<br/>+ Studio process-finish invalidations"]:::state
+    C4["Generated artifacts refreshed:<br/>field_rules.json, field_rules.runtime.json,<br/>ui_field_catalog.json, known_values.json"]:::state
+    C0 --> C1 --> C2 --> C3 --> C4
+  end
+
+  A6 --> C0
+
+  subgraph G["Global Frontend Surfaces after Compile"]
+    G0["/field-labels/{category}<br/>useFieldLabels map includes new key label"]:::api
+    G1["/review/{category}/layout<br/>Review rows include new compiled key"]:::api
+    G2["Review Matrix row labels<br/>+ Review drawer field title"]:::ui
+    G3["Product page field table label/order"]:::ui
+    G4["Component + Enum tabs use labels;<br/>order honors draft fieldOrder override"]:::ui
+    G5["Component/Enum key visibility is data-dependent:<br/>needs component_values/list_values rows"]:::warn
+    C4 --> G0
+    C4 --> G1
+    G1 --> G2
+    G0 --> G2
+    G0 --> G3
+    G1 --> G3
+    G0 --> G4
+    G4 --> G5
+  end
+
+  subgraph N["Creation Branch Notes"]
+    N0["A created key propagates globally only after compile."]:::note
+    N1["Even after compile, component/enum screens show it only when backend data exists for that key."]:::note
+  end
+
+  D3 -.-> N0
+  C4 -.-> N0
+  G5 -.-> N1

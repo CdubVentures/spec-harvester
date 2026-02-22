@@ -36,27 +36,58 @@ function rerankSchema() {
   };
 }
 
-function deterministicScore(row, { identity = {}, frontier = null } = {}) {
+const IDENTITY_MATCH_BONUS = {
+  strong: 2.0,
+  partial: 0.8,
+  weak: 0,
+  none: -1.5
+};
+
+function deterministicScoreWithBreakdown(row, { identity = {}, frontier = null } = {}) {
   const url = normalizeText(row?.url);
   const text = `${row?.title || ''} ${row?.snippet || ''} ${url}`.toLowerCase();
   const brand = String(identity?.brand || '').toLowerCase();
   const model = String(identity?.model || '').toLowerCase();
   const host = normalizeHost(row?.host || '');
 
-  let score = 0;
-  if (brand && text.includes(brand)) score += 2.5;
-  if (model && text.includes(model)) score += 2.5;
-  if (/spec|manual|datasheet|technical|support/.test(text)) score += 1.3;
-  if (/review|benchmark|latency|measure/.test(text)) score += 0.9;
-  if (/forum|reddit|community/.test(text)) score -= 0.9;
+  let baseScore = 0;
+  if (brand && text.includes(brand)) baseScore += 2.5;
+  if (model && text.includes(model)) baseScore += 2.5;
+  if (/spec|manual|datasheet|technical|support/.test(text)) baseScore += 1.3;
+  if (/review|benchmark|latency|measure/.test(text)) baseScore += 0.9;
+  if (/forum|reddit|community/.test(text)) baseScore -= 0.9;
   if (host) {
-    if (host.includes(brand.replace(/\s+/g, ''))) score += 1.2;
-    if (host.includes('wikipedia')) score -= 1;
+    if (host.includes(brand.replace(/\s+/g, ''))) baseScore += 1.2;
+    if (host.includes('wikipedia')) baseScore -= 1;
   }
+
+  let frontierPenalty = 0;
   if (frontier && typeof frontier.rankPenaltyForUrl === 'function') {
-    score += Number(frontier.rankPenaltyForUrl(url) || 0);
+    frontierPenalty = Number(frontier.rankPenaltyForUrl(url) || 0);
   }
-  return score;
+
+  const identityLevel = String(row?.identity_match_level || '').toLowerCase();
+  const identityBonus = IDENTITY_MATCH_BONUS[identityLevel] ?? 0;
+
+  const variantGuardPenalty = row?.variant_guard_hit ? -3.0 : 0;
+
+  const multiModelPenalty = row?.multi_model_hint ? -1.5 : 0;
+
+  const tierBonus = row?.tier === 1 ? 1.5 : (row?.tier === 2 ? 0.5 : 0);
+
+  const total = baseScore + frontierPenalty + identityBonus + variantGuardPenalty + multiModelPenalty + tierBonus;
+
+  return {
+    score: total,
+    breakdown: {
+      base_score: baseScore,
+      frontier_penalty: frontierPenalty,
+      identity_bonus: identityBonus,
+      variant_guard_penalty: variantGuardPenalty,
+      multi_model_penalty: multiModelPenalty,
+      tier_bonus: tierBonus
+    }
+  };
 }
 
 export async function rerankSerpResults({
@@ -67,14 +98,27 @@ export async function rerankSerpResults({
   missingFields = [],
   serpResults = [],
   frontier = null,
-  topK = 16
+  topK = 16,
+  domainSafetyResults = null
 } = {}) {
-  const scored = toArray(serpResults).map((row, idx) => ({
-    ...row,
-    rank: Number.parseInt(String(row?.rank || idx + 1), 10) || (idx + 1),
-    host: normalizeHost(row?.host || ''),
-    score_det: deterministicScore(row, { identity, frontier })
-  }));
+  const safetyFiltered = domainSafetyResults
+    ? toArray(serpResults).filter((row) => {
+      const host = normalizeHost(row?.host || '');
+      const safety = domainSafetyResults.get(host);
+      return !safety || safety.safe !== false;
+    })
+    : toArray(serpResults);
+
+  const scored = safetyFiltered.map((row, idx) => {
+    const { score, breakdown } = deterministicScoreWithBreakdown(row, { identity, frontier });
+    return {
+      ...row,
+      rank: Number.parseInt(String(row?.rank || idx + 1), 10) || (idx + 1),
+      host: normalizeHost(row?.host || ''),
+      score_det: score,
+      score_breakdown: breakdown
+    };
+  });
   const deterministic = scored
     .sort((a, b) => b.score_det - a.score_det || a.rank - b.rank)
     .slice(0, Math.max(1, topK));

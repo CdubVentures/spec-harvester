@@ -96,7 +96,7 @@ export function buildWorkbenchRows(
   const msgMap = mapCompileMessages(guardrails);
   const kv = knownValues || {};
 
-  return fieldOrder.map((key) => {
+  return fieldOrder.filter((key) => !key.startsWith('__grp::')).map((key) => {
     const r = rules[key] || {};
     const msgs = msgMap[key];
     const compileMessages = [

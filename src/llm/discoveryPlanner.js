@@ -7,7 +7,19 @@ function querySchema() {
     properties: {
       queries: {
         type: 'array',
-        items: { type: 'string' }
+        items: {
+          anyOf: [
+            { type: 'string' },
+            {
+              type: 'object',
+              properties: {
+                query: { type: 'string' },
+                target_fields: { type: 'array', items: { type: 'string' } }
+              },
+              required: ['query']
+            }
+          ]
+        }
       }
     },
     required: ['queries']
@@ -15,9 +27,30 @@ function querySchema() {
 }
 
 function normalizeQuery(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return String(value.query || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
   return String(value || '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+export function normalizeQueryRows(rawQueries = []) {
+  const rows = Array.isArray(rawQueries) ? rawQueries : [];
+  return rows.map((item) => {
+    if (item && typeof item === 'object' && !Array.isArray(item)) {
+      return {
+        query: String(item.query || '').replace(/\s+/g, ' ').trim(),
+        target_fields: Array.isArray(item.target_fields) ? item.target_fields.map((f) => String(f || '').trim()).filter(Boolean) : []
+      };
+    }
+    return {
+      query: String(item || '').replace(/\s+/g, ' ').trim(),
+      target_fields: []
+    };
+  }).filter((row) => row.query);
 }
 
 function dedupeQueries(rows = [], cap = 24) {
@@ -174,7 +207,8 @@ export async function planDiscoveryQueriesLLM({
         timeoutMs: config.llmTimeoutMs || config.openaiTimeoutMs,
         logger
       });
-      allQueries.push(...(result?.queries || []));
+      const normalized = normalizeQueryRows(result?.queries || []);
+      allQueries.push(...normalized);
     } catch (error) {
       logger?.warn?.('llm_discovery_planner_failed', {
         message: error.message,
@@ -186,5 +220,14 @@ export async function planDiscoveryQueriesLLM({
   const maxQueryCap = aggressiveMode
     ? Math.max(12, toInt(config.aggressiveLlmDiscoveryQueryCap, 24))
     : Math.max(8, toInt(config.discoveryMaxQueries, 8));
-  return dedupeQueries(allQueries, maxQueryCap);
+  const deduped = [];
+  const seen = new Set();
+  for (const row of allQueries) {
+    const normalized = row.query.toLowerCase();
+    if (!row.query || seen.has(normalized)) continue;
+    seen.add(normalized);
+    deduped.push(row);
+    if (deduped.length >= Math.max(1, Number(maxQueryCap || 24))) break;
+  }
+  return deduped;
 }

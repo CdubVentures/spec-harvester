@@ -1,611 +1,91 @@
 {
-  "component_sheets": [],
-  "component_sources": [
-    {
-      "auto_derive_aliases": true,
-      "first_data_row": 2,
-      "header_row": 1,
-      "roles": {
-        "aliases": [],
-        "links": [
-          "J"
-        ],
-        "maker": "B",
-        "primary_identifier": "C",
-        "properties": [
-          {
-            "column": "D",
-            "constraints": [],
-            "field_key": "flawless_sensor",
-            "key": "flawless_sensor",
-            "type": "string",
-            "unit": "",
-            "variance_policy": "authoritative"
-          },
-          {
-            "column": "E",
-            "constraints": [],
-            "field_key": "sensor_type",
-            "key": "sensor_type",
-            "type": "string",
-            "unit": "",
-            "variance_policy": "authoritative"
-          },
-          {
-            "column": "F",
-            "constraints": [],
-            "field_key": "dpi",
-            "key": "dpi",
-            "type": "number",
-            "unit": "dpi",
-            "variance_policy": "upper_bound"
-          },
-          {
-            "column": "G",
-            "constraints": [],
-            "field_key": "ips",
-            "key": "ips",
-            "type": "number",
-            "unit": "ips",
-            "variance_policy": "upper_bound"
-          },
-          {
-            "column": "H",
-            "constraints": [],
-            "field_key": "acceleration",
-            "key": "acceleration",
-            "type": "number",
-            "unit": "g",
-            "variance_policy": "upper_bound"
-          },
-          {
-            "column": "I",
-            "constraints": [
-              "sensor_date <= release_date"
-            ],
-            "field_key": "sensor_date",
-            "key": "sensor_date",
-            "type": "string",
-            "unit": "",
-            "variance_policy": "authoritative"
-          }
-        ]
-      },
-      "sheet": "sensors",
-      "start_row": 2,
-      "stop_after_blank_primary": 10,
-      "type": "sensor",
-      "priority": {
-        "required_level": "required",
-        "availability": "expected",
-        "difficulty": "medium",
-        "effort": 8
-      }
-    },
-    {
-      "auto_derive_aliases": true,
-      "first_data_row": 2,
-      "header_row": 1,
-      "roles": {
-        "aliases": [],
-        "links": [
-          "H"
-        ],
-        "maker": "B",
-        "primary_identifier": "C",
-        "properties": [
-          {
-            "column": "D",
-            "constraints": [],
-            "field_key": "switch_type",
-            "key": "switch_type",
-            "type": "string",
-            "unit": "",
-            "variance_policy": "authoritative"
-          },
-          {
-            "column": "E",
-            "constraints": [],
-            "key": "switch_life_span",
-            "type": "string",
-            "unit": "",
-            "variance_policy": "authoritative"
-          },
-          {
-            "column": "F",
-            "constraints": [],
-            "field_key": "click_force",
-            "key": "click_force",
-            "type": "number",
-            "unit": "gf",
-            "variance_policy": "override_allowed"
-          },
-          {
-            "column": "G",
-            "constraints": [],
-            "key": "releasing_force",
-            "type": "number",
-            "unit": "gf",
-            "variance_policy": "authoritative"
-          }
-        ]
-      },
-      "sheet": "switches",
-      "start_row": 2,
-      "stop_after_blank_primary": 10,
-      "type": "switch",
-      "priority": {
-        "required_level": "required",
-        "availability": "expected",
-        "difficulty": "hard",
-        "effort": 8
-      }
-    },
-    {
-      "auto_derive_aliases": true,
-      "first_data_row": 2,
-      "header_row": 1,
-      "roles": {
-        "aliases": [],
-        "links": [
-          "G"
-        ],
-        "maker": "B",
-        "primary_identifier": "C",
-        "properties": [
-          {
-            "column": "D",
-            "constraints": [],
-            "key": "encoder_type",
-            "type": "string",
-            "unit": "",
-            "variance_policy": "authoritative"
-          },
-          {
-            "column": "E",
-            "constraints": [],
-            "key": "encoder_steps",
-            "type": "number",
-            "unit": "",
-            "variance_policy": "authoritative"
-          },
-          {
-            "column": "F",
-            "constraints": [],
-            "key": "encoder_life_span",
-            "type": "string",
-            "unit": "",
-            "variance_policy": "authoritative"
-          }
-        ]
-      },
-      "sheet": "encoder",
-      "start_row": 2,
-      "stop_after_blank_primary": 10,
-      "type": "encoder",
-      "priority": {
-        "required_level": "expected",
-        "availability": "sometimes",
-        "difficulty": "medium",
-        "effort": 5
-      }
-    },
-    {
-      "auto_derive_aliases": true,
-      "first_data_row": 2,
-      "header_row": 1,
-      "roles": {
-        "aliases": [],
-        "links": [],
-        "maker": "",
-        "primary_identifier": "B",
-        "properties": []
-      },
-      "sheet": "material",
-      "start_row": 2,
-      "stop_after_blank_primary": 10,
-      "type": "material",
-      "priority": {
-        "required_level": "expected",
-        "availability": "expected",
-        "difficulty": "easy",
-        "effort": 3
-      }
-    }
-  ],
-  "enum_lists": [
-    {
-      "delimiter": "",
-      "field": "form_factor",
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "row_end": 0,
-      "row_start": 2,
-      "sheet": "data_lists",
-      "value_column": "D",
-      "priority": {
-        "required_level": "expected",
-        "availability": "expected",
-        "difficulty": "easy",
-        "effort": 3
-      }
-    },
-    {
-      "delimiter": "",
-      "field": "shape",
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "row_end": 0,
-      "row_start": 2,
-      "sheet": "data_lists",
-      "value_column": "E",
-      "priority": {
-        "required_level": "expected",
-        "availability": "expected",
-        "difficulty": "easy",
-        "effort": 3
-      }
-    },
-    {
-      "delimiter": "",
-      "field": "hump",
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "row_end": 0,
-      "row_start": 2,
-      "sheet": "data_lists",
-      "value_column": "F",
-      "priority": {
-        "required_level": "expected",
-        "availability": "expected",
-        "difficulty": "easy",
-        "effort": 3
-      }
-    },
-    {
-      "delimiter": "",
-      "field": "front_flare",
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "row_end": 0,
-      "row_start": 2,
-      "sheet": "data_lists",
-      "value_column": "G",
-      "priority": {
-        "required_level": "expected",
-        "availability": "expected",
-        "difficulty": "easy",
-        "effort": 3
-      }
-    },
-    {
-      "delimiter": "",
-      "field": "sensor_type",
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "row_end": 0,
-      "row_start": 2,
-      "sheet": "data_lists",
-      "value_column": "H",
-      "priority": {
-        "required_level": "expected",
-        "availability": "expected",
-        "difficulty": "easy",
-        "effort": 3
-      }
-    },
-    {
-      "delimiter": "",
-      "field": "mcu",
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "row_end": 0,
-      "row_start": 2,
-      "sheet": "data_lists",
-      "value_column": "L",
-      "priority": {
-        "required_level": "expected",
-        "availability": "sometimes",
-        "difficulty": "medium",
-        "effort": 5
-      }
-    },
-    {
-      "delimiter": "",
-      "field": "switch_type",
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "row_end": 0,
-      "row_start": 2,
-      "sheet": "data_lists",
-      "value_column": "N",
-      "priority": {
-        "required_level": "expected",
-        "availability": "expected",
-        "difficulty": "easy",
-        "effort": 3
-      }
-    },
-    {
-      "delimiter": "",
-      "field": "connection",
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "row_end": 0,
-      "row_start": 2,
-      "sheet": "data_lists",
-      "value_column": "P",
-      "priority": {
-        "required_level": "required",
-        "availability": "expected",
-        "difficulty": "easy",
-        "effort": 6
-      }
-    },
-    {
-      "delimiter": "",
-      "field": "connectivity",
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "row_end": 0,
-      "row_start": 2,
-      "sheet": "data_lists",
-      "value_column": "Q",
-      "priority": {
-        "required_level": "required",
-        "availability": "expected",
-        "difficulty": "easy",
-        "effort": 6
-      }
-    },
-    {
-      "delimiter": "",
-      "field": "polling",
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "row_end": 0,
-      "row_start": 2,
-      "sheet": "data_lists",
-      "value_column": "R",
-      "priority": {
-        "required_level": "required",
-        "availability": "expected",
-        "difficulty": "medium",
-        "effort": 6
-      }
-    },
-    {
-      "delimiter": "",
-      "field": "switch_type",
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "row_end": 0,
-      "row_start": 2,
-      "sheet": "data_lists",
-      "value_column": "S",
-      "priority": {
-        "required_level": "expected",
-        "availability": "expected",
-        "difficulty": "easy",
-        "effort": 3
-      }
-    },
-    {
-      "delimiter": "",
-      "field": "lighting",
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "row_end": 0,
-      "row_start": 2,
-      "sheet": "data_lists",
-      "value_column": "T",
-      "priority": {
-        "required_level": "expected",
-        "availability": "expected",
-        "difficulty": "easy",
-        "effort": 3
-      }
-    },
-    {
-      "delimiter": "",
-      "field": "feet_material",
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "row_end": 0,
-      "row_start": 2,
-      "sheet": "data_lists",
-      "value_column": "U",
-      "priority": {
-        "required_level": "expected",
-        "availability": "expected",
-        "difficulty": "easy",
-        "effort": 3
-      }
-    },
-    {
-      "delimiter": "",
-      "field": "lift_notes",
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "row_end": 0,
-      "row_start": 2,
-      "sheet": "data_lists",
-      "value_column": "V",
-      "priority": {
-        "required_level": "expected",
-        "availability": "expected",
-        "difficulty": "medium",
-        "effort": 3
-      }
-    },
-    {
-      "delimiter": "",
-      "field": "coating",
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "row_end": 0,
-      "row_start": 2,
-      "sheet": "data_lists",
-      "value_column": "W",
-      "priority": {
-        "required_level": "expected",
-        "availability": "expected",
-        "difficulty": "easy",
-        "effort": 3
-      }
-    }
-  ],
-  "enum_sources": [
-    {
-      "bucket": "form_factor",
-      "column": "D",
-      "delimiter": "",
-      "end_row": null,
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "sheet": "data_lists",
-      "start_row": 2
-    },
-    {
-      "bucket": "shape",
-      "column": "E",
-      "delimiter": "",
-      "end_row": null,
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "sheet": "data_lists",
-      "start_row": 2
-    },
-    {
-      "bucket": "hump",
-      "column": "F",
-      "delimiter": "",
-      "end_row": null,
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "sheet": "data_lists",
-      "start_row": 2
-    },
-    {
-      "bucket": "front_flare",
-      "column": "G",
-      "delimiter": "",
-      "end_row": null,
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "sheet": "data_lists",
-      "start_row": 2
-    },
-    {
-      "bucket": "sensor_type",
-      "column": "H",
-      "delimiter": "",
-      "end_row": null,
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "sheet": "data_lists",
-      "start_row": 2
-    },
-    {
-      "bucket": "mcu",
-      "column": "L",
-      "delimiter": "",
-      "end_row": null,
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "sheet": "data_lists",
-      "start_row": 2
-    },
-    {
-      "bucket": "switch_type",
-      "column": "N",
-      "delimiter": "",
-      "end_row": null,
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "sheet": "data_lists",
-      "start_row": 2
-    },
-    {
-      "bucket": "connection",
-      "column": "P",
-      "delimiter": "",
-      "end_row": null,
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "sheet": "data_lists",
-      "start_row": 2
-    },
-    {
-      "bucket": "connectivity",
-      "column": "Q",
-      "delimiter": "",
-      "end_row": null,
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "sheet": "data_lists",
-      "start_row": 2
-    },
-    {
-      "bucket": "polling",
-      "column": "R",
-      "delimiter": "",
-      "end_row": null,
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "sheet": "data_lists",
-      "start_row": 2
-    },
-    {
-      "bucket": "switch_type",
-      "column": "S",
-      "delimiter": "",
-      "end_row": null,
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "sheet": "data_lists",
-      "start_row": 2
-    },
-    {
-      "bucket": "lighting",
-      "column": "T",
-      "delimiter": "",
-      "end_row": null,
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "sheet": "data_lists",
-      "start_row": 2
-    },
-    {
-      "bucket": "feet_material",
-      "column": "U",
-      "delimiter": "",
-      "end_row": null,
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "sheet": "data_lists",
-      "start_row": 2
-    },
-    {
-      "bucket": "lift_notes",
-      "column": "V",
-      "delimiter": "",
-      "end_row": null,
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "sheet": "data_lists",
-      "start_row": 2
-    },
-    {
-      "bucket": "coating",
-      "column": "W",
-      "delimiter": "",
-      "end_row": null,
-      "header_row": 1,
-      "normalize": "lower_trim",
-      "sheet": "data_lists",
-      "start_row": 2
-    }
+  "version": 2,
+  "version_note": "Migrated: removed Excel import fields",
+  "identity": {
+    "anti_merge_rules": [],
+    "min_identifiers": 2
+  },
+  "tooltip_source": {
+    "format": "auto",
+    "path": ""
+  },
+  "ui_defaults": {},
+  "selected_keys": [
+    "acceleration",
+    "adjustable_scroll_wheel",
+    "adjustable_weight",
+    "battery_hours",
+    "bluetooth",
+    "cable_type",
+    "click_force",
+    "click_latency",
+    "click_latency_list",
+    "coating",
+    "colors",
+    "computer_side_connector",
+    "connection",
+    "connectivity",
+    "debounce",
+    "design",
+    "discontinued",
+    "dpi",
+    "encoder",
+    "encoder_brand",
+    "encoder_link",
+    "feet_material",
+    "flawless_sensor",
+    "form_factor",
+    "front_flare",
+    "grip",
+    "hand_size",
+    "hardware_acceleration",
+    "height",
+    "honeycomb_frame",
+    "hot_swappable",
+    "hump",
+    "ips",
+    "lift",
+    "lift_settings",
+    "lighting",
+    "lngth",
+    "material",
+    "mcu",
+    "mcu_link",
+    "middle_buttons",
+    "motion_sync",
+    "mouse_side_connector",
+    "nvidia_reflex",
+    "onboard_memory",
+    "onboard_memory_value",
+    "paracord",
+    "polling_rate",
+    "price_range",
+    "profile_switching",
+    "programmable_buttons",
+    "release_date",
+    "rgb",
+    "sensor",
+    "sensor_brand",
+    "sensor_date",
+    "sensor_latency",
+    "sensor_latency_list",
+    "sensor_link",
+    "sensor_type",
+    "shape",
+    "shift_latency",
+    "side_buttons",
+    "silent_clicks",
+    "sku",
+    "smoothing",
+    "switch",
+    "switch_brand",
+    "switch_link",
+    "switch_type",
+    "thumb_rest",
+    "tilt_scroll_wheel",
+    "weight",
+    "width",
+    "wireless_charging"
   ],
   "expectations": {
     "critical_fields": [
@@ -12281,208 +11761,417 @@
       "value_form_sample": "scalar"
     }
   },
-  "identity": {
-    "anti_merge_rules": [],
-    "min_identifiers": 2
-  },
-  "key_list": {
-    "column": "B",
-    "named_range": "",
-    "range": "B9:B83",
-    "row_end": 83,
-    "row_start": 9,
-    "sheet": "dataEntry",
-    "source": "column_range"
-  },
-  "key_source": {
-    "column": "B",
-    "named_range": null,
-    "range": "B9:B83",
-    "row_end": 83,
-    "row_start": 9,
-    "sheet": "dataEntry",
-    "source": "column_range"
-  },
-  "manual_enum_values": {
-    "coating": [
-      "A",
-      "help"
-    ],
-    "connection": [
-      "1",
-      "2",
-      "he"
-    ],
-    "connectivity": [
-      "1",
-      "2.5"
-    ],
-    "feet_material": [
-      "l"
-    ],
-    "form_factor": [
-      "lets"
-    ],
-    "switch_type": [
-      "eqwe",
-      "yay"
-    ]
-  },
-  "product_table": {
-    "brand_row": 3,
-    "data_row_start": 2,
-    "header_row": 1,
-    "id_row": 0,
-    "identifier_row": 0,
-    "key_column": "B",
-    "layout": "matrix",
-    "model_row": 4,
-    "sample_columns": 18,
-    "sheet": "dataEntry",
-    "value_col_end": "",
-    "value_col_start": "C",
-    "variant_row": 5
-  },
-  "sampling": {
-    "brand_row": 3,
-    "first_key_row": 2,
-    "key_column": "B",
-    "layout": "matrix",
-    "model_row": 4,
-    "sample_columns": 18,
-    "sheet": "dataEntry",
-    "value_start_column": "C",
-    "variant_row": 5
-  },
-  "selected_keys": [
-    "acceleration",
-    "adjustable_scroll_wheel",
-    "adjustable_weight",
-    "battery_hours",
-    "bluetooth",
-    "cable_type",
-    "click_force",
-    "click_latency",
-    "click_latency_list",
-    "coating",
-    "colors",
-    "computer_side_connector",
-    "connection",
-    "connectivity",
-    "debounce",
-    "design",
-    "discontinued",
-    "dpi",
-    "encoder",
-    "encoder_brand",
-    "encoder_link",
-    "feet_material",
-    "flawless_sensor",
-    "form_factor",
-    "front_flare",
-    "grip",
-    "hand_size",
-    "hardware_acceleration",
-    "height",
-    "honeycomb_frame",
-    "hot_swappable",
-    "hump",
-    "ips",
-    "lift",
-    "lift_settings",
-    "lighting",
-    "lngth",
-    "material",
-    "mcu",
-    "mcu_link",
-    "middle_buttons",
-    "motion_sync",
-    "mouse_side_connector",
-    "nvidia_reflex",
-    "onboard_memory",
-    "onboard_memory_value",
-    "paracord",
-    "polling_rate",
-    "price_range",
-    "profile_switching",
-    "programmable_buttons",
-    "release_date",
-    "rgb",
-    "sensor",
-    "sensor_brand",
-    "sensor_date",
-    "sensor_latency",
-    "sensor_latency_list",
-    "sensor_link",
-    "sensor_type",
-    "shape",
-    "shift_latency",
-    "side_buttons",
-    "silent_clicks",
-    "sku",
-    "smoothing",
-    "switch",
-    "switch_brand",
-    "switch_link",
-    "switch_type",
-    "thumb_rest",
-    "tilt_scroll_wheel",
-    "weight",
-    "width",
-    "wireless_charging"
-  ],
-  "sheet_roles": [
+  "component_sources": [
     {
-      "role": "ignore",
-      "sheet": "Sheet1"
+      "type": "sensor",
+      "component_type": "sensor",
+      "roles": {
+        "properties": [
+          {
+            "field_key": "flawless_sensor",
+            "variance_policy": "authoritative"
+          },
+          {
+            "field_key": "sensor_type",
+            "variance_policy": "authoritative"
+          },
+          {
+            "field_key": "dpi",
+            "variance_policy": "upper_bound"
+          },
+          {
+            "field_key": "ips",
+            "variance_policy": "upper_bound"
+          },
+          {
+            "field_key": "acceleration",
+            "variance_policy": "upper_bound"
+          },
+          {
+            "field_key": "sensor_date",
+            "variance_policy": "authoritative",
+            "constraints": [
+              "sensor_date <= release_date"
+            ]
+          }
+        ],
+        "maker": "yes",
+        "aliases": [],
+        "links": []
+      },
+      "priority": {
+        "required_level": "required",
+        "availability": "expected",
+        "difficulty": "medium",
+        "effort": 8
+      }
     },
     {
-      "role": "field_key_list",
-      "sheet": "dataEntry"
+      "type": "switch",
+      "component_type": "switch",
+      "roles": {
+        "properties": [
+          {
+            "field_key": "switch_type",
+            "variance_policy": "authoritative"
+          },
+          {
+            "field_key": "switch_life_span",
+            "variance_policy": "authoritative"
+          },
+          {
+            "field_key": "click_force",
+            "variance_policy": "override_allowed"
+          },
+          {
+            "field_key": "releasing_force",
+            "variance_policy": "authoritative"
+          }
+        ],
+        "maker": "yes",
+        "aliases": [],
+        "links": []
+      },
+      "priority": {
+        "required_level": "required",
+        "availability": "expected",
+        "difficulty": "hard",
+        "effort": 8
+      }
     },
     {
-      "role": "ignore",
-      "sheet": "data_lists"
+      "type": "encoder",
+      "component_type": "encoder",
+      "roles": {
+        "properties": [
+          {
+            "field_key": "encoder_type",
+            "variance_policy": "authoritative"
+          },
+          {
+            "field_key": "encoder_steps",
+            "variance_policy": "authoritative"
+          },
+          {
+            "field_key": "encoder_life_span",
+            "variance_policy": "authoritative"
+          }
+        ],
+        "maker": "yes",
+        "aliases": [],
+        "links": []
+      },
+      "priority": {
+        "required_level": "expected",
+        "availability": "sometimes",
+        "difficulty": "medium",
+        "effort": 5
+      }
     },
     {
-      "role": "ignore",
-      "sheet": "data_values"
-    },
-    {
-      "role": "ignore",
-      "sheet": "alinkStatus"
-    },
-    {
-      "role": "field_key_list",
-      "sheet": "sensors"
-    },
-    {
-      "role": "ignore",
-      "sheet": "switches"
-    },
-    {
-      "role": "ignore",
-      "sheet": "encoder"
-    },
-    {
-      "role": "ignore",
-      "sheet": "material"
-    },
-    {
-      "role": "ignore",
-      "sheet": "image_description_text"
-    },
-    {
-      "role": "ignore",
-      "sheet": "EG_ID_QC"
+      "type": "material",
+      "component_type": "material",
+      "roles": {
+        "properties": [],
+        "aliases": [],
+        "links": []
+      },
+      "priority": {
+        "required_level": "expected",
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3
+      }
     }
   ],
-  "tooltip_source": {
-    "format": "auto",
-    "path": ""
-  },
-  "ui_defaults": {},
-  "version": 1,
-  "version_note": "",
-  "workbook_path": "helper_files/mouse/mouseData.xlsm"
+  "enum_lists": [
+    {
+      "field": "form_factor",
+      "normalize": "lower_trim",
+      "values": [
+        "ambidextrous",
+        "left",
+        "lets",
+        "right"
+      ],
+      "priority": {
+        "required_level": "expected",
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3
+      }
+    },
+    {
+      "field": "shape",
+      "normalize": "lower_trim",
+      "values": [
+        "asymmetrical",
+        "ergonomic",
+        "symmetrical"
+      ],
+      "priority": {
+        "required_level": "expected",
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3
+      }
+    },
+    {
+      "field": "hump",
+      "normalize": "lower_trim",
+      "values": [
+        "back - front",
+        "back - rear",
+        "back mid",
+        "front",
+        "middle"
+      ],
+      "priority": {
+        "required_level": "expected",
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3
+      }
+    },
+    {
+      "field": "front_flare",
+      "normalize": "lower_trim",
+      "values": [
+        "flat",
+        "inward",
+        "outward"
+      ],
+      "priority": {
+        "required_level": "expected",
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3
+      }
+    },
+    {
+      "field": "sensor_type",
+      "normalize": "lower_trim",
+      "values": [
+        "laser",
+        "optical",
+        "unk"
+      ],
+      "priority": {
+        "required_level": "expected",
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3
+      }
+    },
+    {
+      "field": "mcu",
+      "normalize": "lower_trim",
+      "values": [
+        "Holtek HT32F52352",
+        "NXP LPC11U68",
+        "NXP LPC54605J512",
+        "Nordic nRF52832",
+        "Nordic nRF52833",
+        "Nordic nRF52840",
+        "Nuvoton M484SIDAE",
+        "STM32",
+        "STM32F072CBU6",
+        "STM32L412C8U6",
+        "Ti CC2462R",
+        "unk",
+        "unspecified"
+      ],
+      "priority": {
+        "required_level": "expected",
+        "availability": "sometimes",
+        "difficulty": "medium",
+        "effort": 5
+      }
+    },
+    {
+      "field": "switch_type",
+      "normalize": "lower_trim",
+      "values": [
+        "Black Shell Blue Dot",
+        "Corsair Quickstrike",
+        "D2FC-F-7N (20M)",
+        "Haptic Inductive Trigger System (HITS)",
+        "Kailh GM 4.0",
+        "LK Optical V2",
+        "Logitech LIGHTFORCE (Omron (70M) - D2FP-FH1)",
+        "Omron",
+        "Omron D2FC-7N",
+        "Omron D2FC-7N (60M)",
+        "Omron D2FC-F-K",
+        "Omron D2FC-F-K (50M)",
+        "Omron D2FP-FN2",
+        "ROG 70M",
+        "ROG Micro Switch II",
+        "ROG Micro Switches",
+        "ROG Optical Micro Switches",
+        "TTC Optical Microswitch",
+        "Transparent Crystal Shell White Dot",
+        "eqwe",
+        "mechanical",
+        "optical",
+        "optical / mechanical",
+        "optical-mechanical",
+        "unk",
+        "unspecified",
+        "yay"
+      ],
+      "priority": {
+        "required_level": "expected",
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3
+      }
+    },
+    {
+      "field": "connection",
+      "normalize": "lower_trim",
+      "values": [
+        "1",
+        "2",
+        "bluetooth",
+        "he",
+        "hybrid",
+        "unk",
+        "wired",
+        "wireless"
+      ],
+      "priority": {
+        "required_level": "required",
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 6
+      }
+    },
+    {
+      "field": "connectivity",
+      "normalize": "lower_trim",
+      "values": [
+        "1",
+        "2.4GHz Dongle",
+        "2.4GHz RF Dongle",
+        "2.4GHz WIFI Dongle",
+        "2.5",
+        "n/a",
+        "unk"
+      ],
+      "priority": {
+        "required_level": "required",
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 6
+      }
+    },
+    {
+      "field": "polling",
+      "normalize": "lower_trim",
+      "values": [],
+      "priority": {
+        "required_level": "required",
+        "availability": "expected",
+        "difficulty": "medium",
+        "effort": 6
+      }
+    },
+    {
+      "field": "lighting",
+      "normalize": "lower_trim",
+      "values": [
+        "1 zone (led)",
+        "1 zone (rgb)",
+        "2 zone (led)",
+        "2 zone (rgb)",
+        "3 zone (led)",
+        "3 zone (rgb)",
+        "4 zone (led)",
+        "4 zone (rgb)",
+        "5 zone (led)",
+        "5 zone (rgb)",
+        "6 zone (led)",
+        "6 zone (rgb)",
+        "7 zone (led)",
+        "7 zone (rgb)",
+        "8 zone (rgb)",
+        "9 zone (rgb)",
+        "none"
+      ],
+      "priority": {
+        "required_level": "expected",
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3
+      }
+    },
+    {
+      "field": "feet_material",
+      "normalize": "lower_trim",
+      "values": [
+        "Glass",
+        "PTFE",
+        "PTFE (95%)",
+        "PTFE (Black-Dyed)",
+        "PTFE (Teflon)",
+        "PTFE (Virgin-Grade)",
+        "l"
+      ],
+      "priority": {
+        "required_level": "expected",
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3
+      }
+    },
+    {
+      "field": "lift_notes",
+      "normalize": "lower_trim",
+      "values": [],
+      "priority": {
+        "required_level": "expected",
+        "availability": "expected",
+        "difficulty": "medium",
+        "effort": 3
+      }
+    },
+    {
+      "field": "coating",
+      "normalize": "lower_trim",
+      "values": [
+        "A",
+        "help",
+        "matte",
+        "rubber grips"
+      ],
+      "priority": {
+        "required_level": "expected",
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3
+      }
+    },
+    {
+      "field": "encoder_steps",
+      "normalize": "lower_trim",
+      "values": [
+        "5",
+        "16",
+        "18",
+        "20",
+        "24",
+        "25",
+        "26",
+        "30",
+        "59"
+      ],
+      "priority": {
+        "required_level": "expected",
+        "availability": "sometimes",
+        "difficulty": "medium",
+        "effort": 5
+      }
+    }
+  ]
 }

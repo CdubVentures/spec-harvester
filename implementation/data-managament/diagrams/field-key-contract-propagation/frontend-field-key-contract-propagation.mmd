@@ -1,0 +1,42 @@
+flowchart LR
+  A["Studio Key Navigator / Field Contract edit"] --> B["POST /studio/:category/save-drafts"]
+  B --> C["data-change: studio-drafts-saved"]
+  C --> D["AppShell invalidateQueries fanout"]
+
+  D --> E1["Studio tabs refetch"]
+  E1 --> E2["Studio payload uses compiled fieldRules + draft fieldOrder only"]
+  E1 --> E3["Key Navigator/Workbench local edited state"]
+
+  D --> F1["/review/:category/layout refetch"]
+  F1 --> F2["fieldOrder override can move rows immediately"]
+
+  D --> G1["/product/:category/:productId refetch"]
+  G1 --> G2["product page field ordering can move immediately"]
+
+  B --> H["No compile yet"]
+  H --> H2["Global contract consumers still read compiled artifacts"]
+
+  A --> I["Run Compile"]
+  I --> J["POST /studio/:category/compile"]
+  J --> K["process-completed data-change"]
+  K --> L["Global query refetch"]
+
+  L --> M1["/field-labels/:category"]
+  M1 --> M2["Labels update in Review/Product/Component/Enum UI"]
+
+  L --> N1["/review/:category/layout"]
+  N1 --> N2["Review matrix contract badges (required/unit/enum) update"]
+
+  L --> O1["/review/:category/products-index"]
+  O1 --> O2["buildProductReviewPayload + inferFlags recompute grid flags"]
+  O2 --> O3["Review matrix flags / drawer reason codes update"]
+
+  L --> P1["/review-components/:category/components + /enums"]
+  P1 --> Q{"SpecDb reseeded with new contract?"}
+  Q -- "No" --> Q1["Component/Enum tabs can stay stale"]
+  Q -- "Yes" --> Q2["componentReviewData + enumReviewData recompute"]
+  Q2 --> Q3["Variance/constraint flags + enum policy/value views update"]
+
+  R["Component/Enum override actions"] --> S["cascade -> needs_ai_review updates"]
+  S --> O2
+  S --> Q2

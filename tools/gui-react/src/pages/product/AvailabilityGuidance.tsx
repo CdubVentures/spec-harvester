@@ -4,9 +4,10 @@ interface AvailabilityGuidanceProps {
   fieldsBelow: string[];
   criticalBelow: string[];
   missingRequired: string[];
+  getLabel?: (key: string) => string;
 }
 
-export function AvailabilityGuidance({ fieldsBelow, criticalBelow, missingRequired }: AvailabilityGuidanceProps) {
+export function AvailabilityGuidance({ fieldsBelow, criticalBelow, missingRequired, getLabel = humanizeField }: AvailabilityGuidanceProps) {
   if (fieldsBelow.length === 0 && criticalBelow.length === 0 && missingRequired.length === 0) {
     return (
       <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded p-3 text-sm text-green-800 dark:text-green-200">
@@ -27,7 +28,7 @@ export function AvailabilityGuidance({ fieldsBelow, criticalBelow, missingRequir
           <div className="flex flex-wrap gap-1">
             {criticalBelow.map((f) => (
               <span key={f} className="px-2 py-0.5 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-xs">
-                {humanizeField(f)}
+                {getLabel(f)}
               </span>
             ))}
           </div>
@@ -42,7 +43,7 @@ export function AvailabilityGuidance({ fieldsBelow, criticalBelow, missingRequir
           <div className="flex flex-wrap gap-1">
             {missingRequired.map((f) => (
               <span key={f} className="px-2 py-0.5 bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200 rounded text-xs">
-                {humanizeField(f)}
+                {getLabel(f)}
               </span>
             ))}
           </div>
@@ -57,7 +58,7 @@ export function AvailabilityGuidance({ fieldsBelow, criticalBelow, missingRequir
           <div className="flex flex-wrap gap-1">
             {fieldsBelow.map((f) => (
               <span key={f} className="px-2 py-0.5 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded text-xs">
-                {humanizeField(f)}
+                {getLabel(f)}
               </span>
             ))}
           </div>

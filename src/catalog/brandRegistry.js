@@ -122,6 +122,123 @@ export async function addBrand({ config, name, aliases = [], categories = [], we
 }
 
 /**
+ * Bulk add brands from a single-column list.
+ * Rows are treated as brand names. Existing brands are kept and can be
+ * assigned to the provided category if missing.
+ */
+export async function addBrandsBulk({ config, names = [], category = '' }) {
+  const cat = String(category ?? '').trim().toLowerCase();
+  if (!cat || cat === 'all') {
+    return { ok: false, error: 'category_required' };
+  }
+
+  const rows = Array.isArray(names) ? names : [];
+  const registry = await loadBrandRegistry(config);
+  const seenInRequest = new Set();
+  const results = [];
+
+  let created = 0;
+  let skippedExisting = 0;
+  let skippedDuplicate = 0;
+  let invalid = 0;
+  let failed = 0;
+  let touchedExisting = false;
+
+  for (let i = 0; i < rows.length; i += 1) {
+    const rawName = String(rows[i] ?? '').trim();
+    const baseResult = { index: i, name: rawName, slug: '' };
+
+    if (!rawName) {
+      invalid += 1;
+      results.push({ ...baseResult, status: 'invalid', reason: 'brand_name_required' });
+      continue;
+    }
+
+    const brandSlug = slugify(rawName);
+    if (!brandSlug) {
+      invalid += 1;
+      results.push({ ...baseResult, status: 'invalid', reason: 'brand_name_invalid' });
+      continue;
+    }
+
+    const normalizedResult = { ...baseResult, slug: brandSlug };
+    if (seenInRequest.has(brandSlug)) {
+      skippedDuplicate += 1;
+      results.push({ ...normalizedResult, status: 'skipped_duplicate', reason: 'duplicate_in_request' });
+      continue;
+    }
+    seenInRequest.add(brandSlug);
+
+    const existing = registry.brands[brandSlug];
+    if (existing) {
+      const mergedCategories = new Set([...(existing.categories || [])]);
+      const hadCategory = mergedCategories.has(cat);
+      mergedCategories.add(cat);
+      existing.categories = [...mergedCategories].sort();
+      existing.updated_at = nowIso();
+      touchedExisting = true;
+      skippedExisting += 1;
+      results.push({
+        ...normalizedResult,
+        status: 'skipped_existing',
+        reason: hadCategory ? 'already_exists' : 'category_added'
+      });
+      continue;
+    }
+
+    registry.brands[brandSlug] = {
+      canonical_name: rawName,
+      identifier: generateIdentifier(),
+      aliases: [],
+      categories: [cat],
+      website: '',
+      added_at: nowIso(),
+      added_by: 'gui_bulk'
+    };
+    created += 1;
+    results.push({ ...normalizedResult, status: 'created' });
+  }
+
+  if (created > 0 || touchedExisting) {
+    try {
+      await saveBrandRegistry(config, registry);
+    } catch (error) {
+      failed = rows.length;
+      return {
+        ok: false,
+        error: String(error?.message || error || 'brand_bulk_save_failed'),
+        total: rows.length,
+        created: 0,
+        skipped_existing: 0,
+        skipped_duplicate: 0,
+        invalid: 0,
+        failed,
+        total_brands: Object.keys(registry.brands || {}).length,
+        results: rows.map((name, index) => ({
+          index,
+          name: String(name ?? '').trim(),
+          slug: '',
+          status: 'failed',
+          reason: 'brand_bulk_save_failed'
+        }))
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    total: rows.length,
+    created,
+    skipped_existing: skippedExisting,
+    skipped_duplicate: skippedDuplicate,
+    invalid,
+    failed,
+    total_brands: Object.keys(registry.brands || {}).length,
+    results
+  };
+}
+
+/**
  * Update an existing brand. Only patches provided fields.
  */
 export async function updateBrand({ config, slug, patch = {} }) {

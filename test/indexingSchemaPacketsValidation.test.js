@@ -93,7 +93,7 @@ test('indexing schema packets: generated packets validate against v1 schemas', a
     sourceCollection: packets.sourceCollection,
     itemPacket: packets.itemPacket,
     runMetaPacket: packets.runMetaPacket,
-    schemaRoot: path.resolve(process.cwd(), 'implementation', 'parrsing-managament')
+    schemaRoot: path.resolve(process.cwd(), 'implementation', 'ai-indexing-plans', 'parsing-managament')
   });
   assert.equal(result.valid, true, JSON.stringify(result.errors, null, 2));
   assert.equal(result.error_count, 0);
@@ -110,7 +110,7 @@ test('indexing schema packets: invalid packet shape is rejected', async () => {
     sourceCollection: packets.sourceCollection,
     itemPacket: brokenItem,
     runMetaPacket: packets.runMetaPacket,
-    schemaRoot: path.resolve(process.cwd(), 'implementation', 'parrsing-managament')
+    schemaRoot: path.resolve(process.cwd(), 'implementation', 'ai-indexing-plans', 'parsing-managament')
   });
   assert.equal(result.valid, false);
   assert.ok(result.error_count > 0);

@@ -128,7 +128,7 @@ test('sqlite frontier: 403 triggers cooldown', () => {
     const skip = frontier.shouldSkipUrl('https://example.com/forbidden');
     assert.equal(skip.skip, true);
     const row = frontier.getUrlRow('https://example.com/forbidden');
-    assert.equal(row?.cooldown?.reason, '403_forbidden_backoff');
+    assert.equal(row?.cooldown?.reason, 'status_403_backoff');
     frontier.close();
   } finally {
     cleanup(dbPath);

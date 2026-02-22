@@ -9,8 +9,8 @@ export function Tip({ text }: { text: string }) {
           tabIndex={0}
           className="inline-flex shrink-0 items-center justify-center rounded-full border border-gray-300 font-semibold leading-none text-gray-500 align-middle cursor-help hover:text-accent hover:border-accent focus:text-accent focus:border-accent focus:outline-none dark:border-gray-600 dark:text-gray-400 ml-1"
           style={{
-            width: 'calc(1em + 0.2rem)',
-            height: 'calc(1em + 0.2rem)'
+            width: '0.95em',
+            height: '0.95em'
           }}
         >
           ?

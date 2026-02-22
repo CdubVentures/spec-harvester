@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
 import { ruleUnit } from '../engine/ruleAccessors.js';
+import { generateStableSnippetId } from '../index/evidenceIndexDb.js';
+import { toTierNumber, parseTierPreferenceFromRule, parseTierPreferenceFromNeedRow } from '../utils/tierHelpers.js';
 
 const DEFAULT_TIER_WEIGHTS = new Map([
   [1, 3],
@@ -67,22 +69,6 @@ function normalizeToken(value) {
     .trim();
 }
 
-function toTierNumber(value) {
-  if (value === null || value === undefined || value === '') return null;
-  const direct = Number(value);
-  if (Number.isFinite(direct) && direct > 0) {
-    return Math.max(1, Math.floor(direct));
-  }
-  const token = String(value || '').trim().toLowerCase();
-  if (!token) return null;
-  const match = token.match(/tier\s*([1-9])/i);
-  if (match) return Number.parseInt(match[1], 10);
-  if (token.includes('manufacturer')) return 1;
-  if (token.includes('lab') || token.includes('review')) return 2;
-  if (token.includes('retailer') || token.includes('store')) return 3;
-  if (token.includes('database') || token.includes('community') || token.includes('aggregator')) return 4;
-  return null;
-}
 
 function uniqueStrings(values = [], limit = 24) {
   const out = [];
@@ -107,31 +93,6 @@ function extractHost(url) {
   }
 }
 
-function parseTierPreferenceFromRule(fieldRule = {}) {
-  const evidence = isObject(fieldRule.evidence) ? fieldRule.evidence : {};
-  const raw = toArray(evidence.tier_preference);
-  const tiers = [];
-  for (const row of raw) {
-    const tier = toTierNumber(row);
-    if (!tier) continue;
-    if (!tiers.includes(tier)) tiers.push(tier);
-  }
-  return tiers;
-}
-
-function parseTierPreference(needRow = {}, fieldRule = {}) {
-  const fromNeed = toArray(needRow.tier_preference)
-    .map((value) => toTierNumber(value))
-    .filter((value) => Number.isFinite(value));
-  if (fromNeed.length > 0) {
-    return [...new Set(fromNeed)];
-  }
-  const fromRule = parseTierPreferenceFromRule(fieldRule);
-  if (fromRule.length > 0) {
-    return fromRule;
-  }
-  return [1, 2, 3];
-}
 
 function buildTierWeightLookup(tierPreference = []) {
   const lookup = new Map(DEFAULT_TIER_WEIGHTS);
@@ -139,10 +100,13 @@ function buildTierWeightLookup(tierPreference = []) {
     toArray(tierPreference).map((value) => String(toTierNumber(value) || '')).filter(Boolean),
     8
   ).map((value) => Number.parseInt(value, 10));
+  if (unique.length === 0) return lookup;
+  const maxDefaultWeight = Math.max(...DEFAULT_TIER_WEIGHTS.values());
   for (let idx = 0; idx < unique.length; idx += 1) {
     const tier = unique[idx];
     const boost = Math.max(0, 1.25 - (idx * 0.12));
-    const base = lookup.get(tier) || (1 / Math.max(1, tier));
+    const positionBase = maxDefaultWeight - (idx * 0.4);
+    const base = Math.max(positionBase, lookup.get(tier) || (1 / Math.max(1, tier)));
     lookup.set(tier, Number((base * boost).toFixed(6)));
   }
   return lookup;
@@ -242,10 +206,19 @@ function countMatches(text, terms = []) {
   return uniqueStrings(out, 20);
 }
 
-function makeSnippetId({ fieldKey = '', url = '', quote = '', index = 0 } = {}) {
-  const seed = `${String(fieldKey || '').trim()}|${String(url || '').trim()}|${String(quote || '').trim()}|${index}`;
-  const hash = crypto.createHash('sha1').update(seed).digest('hex').slice(0, 14);
-  return `sn_${hash}`;
+function makeSnippetId({ fieldKey = '', url = '', quote = '', index = 0, contentHash = '' } = {}) {
+  const hash = String(contentHash || '').trim();
+  if (hash) {
+    return generateStableSnippetId({ contentHash: hash, parserVersion: 'v1', chunkIndex: index });
+  }
+  const quoteText = String(quote || '').trim();
+  if (quoteText) {
+    const fallbackHash = `sha256:${crypto.createHash('sha256').update(quoteText, 'utf8').digest('hex')}`;
+    return generateStableSnippetId({ contentHash: fallbackHash, parserVersion: 'v1', chunkIndex: index });
+  }
+  const seed = `${String(fieldKey || '').trim()}|${String(url || '').trim()}|${index}`;
+  const seedHash = `sha256:${crypto.createHash('sha256').update(seed, 'utf8').digest('hex')}`;
+  return generateStableSnippetId({ contentHash: seedHash, parserVersion: 'v1', chunkIndex: index });
 }
 
 function sanitizePreview(value, maxLen = 280) {
@@ -391,6 +364,8 @@ function normalizeEvidencePackSnippets(evidencePack = {}) {
 
 function pushPoolRow(pool = [], dedupe = new Set(), row = {}) {
   const normalized = normalizeEvidenceRow(row.origin_field || '', row, { value: row.value || '' });
+  if (row.source_identity_match !== undefined) normalized.source_identity_match = row.source_identity_match;
+  if (row.source_identity_score !== undefined) normalized.source_identity_score = row.source_identity_score;
   const fingerprint = [
     normalized.url,
     normalized.snippet_id,
@@ -436,13 +411,16 @@ export function buildEvidencePoolFromSourceResults(sourceResults = [], options =
     if (pool.length >= maxRows) break;
     const fallbackUrl = String(source?.finalUrl || source?.url || '').trim();
     const fallbackHost = String(source?.host || extractHost(fallbackUrl)).trim().toLowerCase();
+    const sourceIdentity = isObject(source?.identity) ? source.identity : {};
     const baseMeta = {
       host: fallbackHost,
       root_domain: String(source?.rootDomain || fallbackHost).trim().toLowerCase(),
       tier: source?.tier ?? null,
       tier_name: String(source?.tierName || '').trim() || null,
       source_id: String(source?.sourceId || source?.source_id || fallbackHost || 'source').trim(),
-      retrieved_at: String(source?.ts || '').trim() || null
+      retrieved_at: String(source?.ts || '').trim() || null,
+      source_identity_match: sourceIdentity.match !== undefined ? Boolean(sourceIdentity.match) : null,
+      source_identity_score: Number.isFinite(Number(sourceIdentity.score)) ? Number(sourceIdentity.score) : null
     };
 
     const evidencePack = source?.llmEvidencePack || {};
@@ -538,13 +516,34 @@ export function buildEvidencePoolFromSourceResults(sourceResults = [], options =
   return pool;
 }
 
+const IDENTITY_FILTERABLE_LEVELS = new Set(['identity', 'critical']);
+
+export function filterByIdentityGate({ hits = [], requiredLevel = 'optional', identityFilterEnabled = false } = {}) {
+  if (!identityFilterEnabled || !IDENTITY_FILTERABLE_LEVELS.has(String(requiredLevel || '').trim().toLowerCase())) {
+    return { accepted: [...hits], rejected: [] };
+  }
+  const accepted = [];
+  const rejected = [];
+  for (const hit of hits) {
+    if (hit.source_identity_match === false) {
+      rejected.push({ ...hit, rejection_reason: 'identity_mismatch' });
+    } else {
+      accepted.push(hit);
+    }
+  }
+  return { accepted, rejected };
+}
+
 export function buildTierAwareFieldRetrieval({
   fieldKey = '',
   needRow = {},
   fieldRule = {},
   evidencePool = [],
   identity = {},
-  maxHits = 24
+  maxHits = 24,
+  ftsQueryFn = null,
+  identityFilterEnabled = false,
+  traceEnabled = false
 } = {}) {
   const key = String(fieldKey || '').trim();
   const cap = Math.max(1, Math.min(80, Number(maxHits || 24)));
@@ -557,7 +556,7 @@ export function buildTierAwareFieldRetrieval({
 
   const anchors = collectAnchorTerms({ fieldKey: key, fieldRule });
   const unitHint = String(ruleUnit(fieldRule) || '').trim();
-  const tierPreference = parseTierPreference(needRow, fieldRule);
+  const tierPreference = parseTierPreferenceFromNeedRow(needRow, fieldRule);
   const tierWeightLookup = buildTierWeightLookup(tierPreference);
   const docHints = uniqueStrings(
     toArray(fieldRule?.search_hints?.preferred_content_types).map((value) => String(value || '').trim()),
@@ -569,7 +568,18 @@ export function buildTierAwareFieldRetrieval({
   const hits = [];
   const seen = new Set();
 
-  for (const row of evidencePool || []) {
+  const ftsResults = typeof ftsQueryFn === 'function'
+    ? (() => { try { return ftsQueryFn({ fieldKey: key, anchors, unitHint }); } catch { return null; } })()
+    : null;
+  const pool = (Array.isArray(ftsResults) && ftsResults.length > 0) ? ftsResults : (evidencePool || []);
+
+  let poolRowsScanned = 0;
+  let anchorMatchCount = 0;
+  let noAnchorSkipCount = 0;
+  const rejectedHits = [];
+
+  for (const row of pool) {
+    poolRowsScanned += 1;
     const scored = scoreEvidenceHit({
       evidence: row,
       fieldKey: key,
@@ -578,10 +588,17 @@ export function buildTierAwareFieldRetrieval({
       identity,
       tierWeightLookup
     });
+    scored.source_identity_match = row.source_identity_match ?? null;
+    scored.source_identity_score = row.source_identity_score ?? null;
     const directField = normalizeText(String(row.origin_field || '')) === normalizeText(key);
     if (!directField && scored.ranking_features.anchor_matches.length === 0 && !scored.ranking_features.unit_match) {
+      noAnchorSkipCount += 1;
+      if (traceEnabled && rejectedHits.length < 20) {
+        rejectedHits.push({ url: scored.url, host: scored.host, score: scored.score, rejection_reason: 'no_anchor', ranking_features: scored.ranking_features });
+      }
       continue;
     }
+    anchorMatchCount += 1;
     const fingerprint = `${scored.url}|${scored.snippet_id || ''}|${normalizeText(scored.quote_preview)}`;
     if (seen.has(fingerprint)) continue;
     seen.add(fingerprint);
@@ -596,14 +613,28 @@ export function buildTierAwareFieldRetrieval({
     return String(a.url || '').localeCompare(String(b.url || ''));
   });
 
-  const topHits = hits.slice(0, cap).map((row, idx) => ({
+  const requiredLevel = String(needRow.required_level || '').trim().toLowerCase() || 'optional';
+  const identityGate = filterByIdentityGate({
+    hits,
+    requiredLevel,
+    identityFilterEnabled
+  });
+  const identityFilteredCount = identityGate.rejected.length;
+  if (traceEnabled) {
+    for (const rej of identityGate.rejected.slice(0, 20 - rejectedHits.length)) {
+      rejectedHits.push({ url: rej.url, host: rej.host, score: rej.score, rejection_reason: rej.rejection_reason, ranking_features: rej.ranking_features });
+    }
+  }
+
+  const topHits = identityGate.accepted.slice(0, cap).map((row, idx) => ({
     ...row,
     rank: idx + 1,
     snippet_id: row.snippet_id || makeSnippetId({
       fieldKey: key,
       url: row.url,
       quote: row.quote_preview,
-      index: idx + 1
+      index: idx + 1,
+      contentHash: row.content_hash || ''
     })
   }));
 
@@ -622,9 +653,31 @@ export function buildTierAwareFieldRetrieval({
     .filter(Boolean)
     .join(' | ');
 
-  return {
+  const preferredTierHitCount = topHits.filter((h) => tierPreference.includes(h.tier)).length;
+  const minRefsRequired = Math.max(1, Number(needRow.min_refs || 1));
+  const minRefsGap = Math.max(0, minRefsRequired - topHits.length);
+  const missReasons = [];
+  if (poolRowsScanned === 0) missReasons.push('pool_empty');
+  if (poolRowsScanned > 0 && anchorMatchCount === 0) missReasons.push('no_anchor');
+  if (anchorMatchCount > 0 && preferredTierHitCount === 0) missReasons.push('tier_deficit');
+  if (identityFilteredCount > 0 && topHits.length === 0) missReasons.push('identity_mismatch');
+  const missStatus = topHits.length >= minRefsRequired
+    ? 'satisfied'
+    : (topHits.length > 0 ? 'partial' : 'miss');
+
+  const missDiagnostics = {
+    status: missStatus,
+    reasons: missReasons,
+    pool_rows_scanned: poolRowsScanned,
+    anchor_match_count: anchorMatchCount,
+    preferred_tier_hit_count: preferredTierHitCount,
+    identity_filtered_count: identityFilteredCount,
+    min_refs_gap: minRefsGap
+  };
+
+  const result = {
     field_key: key,
-    required_level: String(needRow.required_level || '').trim() || 'optional',
+    required_level: requiredLevel,
     need_score: Number(needRow.need_score || 0),
     tier_preference: tierPreference,
     anchors,
@@ -633,6 +686,27 @@ export function buildTierAwareFieldRetrieval({
     component_hint: componentHintValue || null,
     doc_hints: docHints,
     retrieval_query: retrievalQuery,
-    hits: topHits
+    hits: topHits,
+    identity_rejected: identityGate.rejected,
+    miss_diagnostics: missDiagnostics
   };
+
+  if (traceEnabled) {
+    result.trace = {
+      query: retrievalQuery,
+      pool_size: poolRowsScanned,
+      scored_count: anchorMatchCount,
+      accepted_count: topHits.length,
+      rejected_count: noAnchorSkipCount + identityFilteredCount,
+      identity_filtered_count: identityFilteredCount,
+      rejected_hits: rejectedHits.slice(0, 20),
+      filter_stats: {
+        no_anchor: noAnchorSkipCount,
+        identity_mismatch: identityFilteredCount,
+        cap_exceeded: Math.max(0, identityGate.accepted.length - cap)
+      }
+    };
+  }
+
+  return result;
 }

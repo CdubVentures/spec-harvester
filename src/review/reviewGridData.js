@@ -179,6 +179,7 @@ function normalizeFieldContract(rule = {}) {
   const level = ruleRequiredLevel(rule);
   const comp = isObject(rule.component) ? rule.component : null;
   const enu = isObject(rule.enum) ? rule.enum : null;
+  const evidence = isObject(rule.evidence) ? rule.evidence : {};
   return {
     type: String(contract.type || 'string'),
     shape: String(contract.shape || 'scalar').trim().toLowerCase() || 'scalar',
@@ -187,7 +188,47 @@ function normalizeFieldContract(rule = {}) {
     enum_name: String(rule.enum_name || '').trim() || null,
     component_type: comp?.type || null,
     enum_source: enu?.source || null,
+    min_evidence_refs: toInt(evidence.min_evidence_refs, 1),
+    conflict_policy: String(evidence.conflict_policy || 'resolve_by_tier').trim(),
   };
+}
+
+const REAL_FLAG_CODES = new Set([
+  'variance_violation',
+  'constraint_conflict',
+  'dependency_missing',
+  'new_component',
+  'new_enum_value',
+  'below_min_evidence',
+  'conflict_policy_hold',
+]);
+
+function inferFlags({ reasonCodes = [], fieldRule = {}, candidates = [], acceptedCandidateId = null, overridden = false }) {
+  const flags = [];
+  for (const code of reasonCodes) {
+    if (REAL_FLAG_CODES.has(code)) flags.push(code);
+  }
+  const minRefs = toInt(fieldRule.min_evidence_refs, 1);
+  if (minRefs > 1 && !overridden) {
+    const distinctSources = new Set(
+      toArray(candidates)
+        .map(c => String(c.source_id || c.source_host || c.host || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+    if (distinctSources.size > 0 && distinctSources.size < minRefs) {
+      flags.push('below_min_evidence');
+    }
+  }
+  if (fieldRule.conflict_policy === 'preserve_all_candidates' && !overridden) {
+    const candidateValues = toArray(candidates)
+      .map(c => String(c.value ?? '').trim().toLowerCase())
+      .filter(Boolean);
+    const distinctValues = new Set(candidateValues);
+    if (distinctValues.size > 1) {
+      flags.push('conflict_policy_hold');
+    }
+  }
+  return [...new Set(flags)];
 }
 
 async function writeJson(storage, key, value) {
@@ -280,26 +321,76 @@ function inferReasonCodes({
   return [...new Set(reasons)];
 }
 
+export function buildFieldLabelsMap(categoryConfig) {
+  const fields = (isObject(categoryConfig) && isObject(categoryConfig.fieldRules) && isObject(categoryConfig.fieldRules.fields))
+    ? categoryConfig.fieldRules.fields
+    : {};
+  const fieldOrder = (isObject(categoryConfig) && Array.isArray(categoryConfig.fieldOrder))
+    ? categoryConfig.fieldOrder
+    : Object.keys(fields);
+  const labels = {};
+  for (const field of fieldOrder) {
+    const rule = isObject(fields[field]) ? fields[field] : {};
+    const ui = isObject(rule.ui) ? rule.ui : {};
+    labels[field] = String(ui.label || rule.label || field);
+  }
+  return labels;
+}
+
 export async function buildReviewLayout({
   storage,
   config = {},
-  category
+  category,
+  fieldOrderOverride = null,
+  fieldsOverride = null
 }) {
   const categoryConfig = await loadCategoryConfig(category, { storage, config });
-  const fields = categoryConfig.fieldRules?.fields || {};
+  const compiledFields = categoryConfig.fieldRules?.fields || {};
+  const fields = fieldsOverride
+    ? Object.fromEntries(Object.keys({ ...compiledFields, ...fieldsOverride }).map((k) => {
+        const compiled = isObject(compiledFields[k]) ? compiledFields[k] : {};
+        const draft = isObject(fieldsOverride[k]) ? fieldsOverride[k] : {};
+        return [k, { ...compiled, ...draft, ui: { ...(isObject(compiled.ui) ? compiled.ui : {}), ...(isObject(draft.ui) ? draft.ui : {}) } }];
+      }))
+    : compiledFields;
   const helperRoot = path.resolve(config.helperFilesRoot || 'helper_files');
   const workbookPath = inferWorkbookPath(helperRoot, category);
   const workbookExists = await fileExists(workbookPath);
 
+  const compiledFieldList = categoryConfig.fieldOrder || Object.keys(fields || {});
+  const fieldSource = Array.isArray(fieldOrderOverride) && fieldOrderOverride.length > 0
+    ? (() => {
+        const draftKeys = fieldOrderOverride.filter((k) => !String(k).startsWith('__grp::'));
+        const draftSet = new Set(draftKeys.map(normalizeField));
+        const extras = compiledFieldList.filter((k) => !draftSet.has(normalizeField(k)));
+        return [...draftKeys, ...extras];
+      })()
+    : compiledFieldList;
+
+  const positionalGroupMap = new Map();
+  if (Array.isArray(fieldOrderOverride) && fieldOrderOverride.length > 0) {
+    let curGrp = '';
+    for (const item of fieldOrderOverride) {
+      if (String(item).startsWith('__grp::')) {
+        curGrp = String(item).slice(7);
+        continue;
+      }
+      if (curGrp) {
+        positionalGroupMap.set(normalizeField(item), curGrp);
+      }
+    }
+  }
+
   const rows = [];
-  for (const field of categoryConfig.fieldOrder || Object.keys(fields || {})) {
+  for (const field of fieldSource) {
     const rule = isObject(fields[field]) ? fields[field] : {};
     const ui = isObject(rule.ui) ? rule.ui : {};
     const excel = extractExcelHints(rule);
     const excelRow = toInt(excel.row, parseExcelRowFromCell(excel.key_cell));
+    const positionalGroup = positionalGroupMap.get(normalizeField(field));
     rows.push({
       excel_row: excelRow > 0 ? excelRow : null,
-      group: String(ui.group || '').trim(),
+      group: positionalGroup || String(ui.group || '').trim(),
       key: normalizeField(field),
       label: String(ui.label || field),
       field_rule: normalizeFieldContract(rule),
@@ -307,17 +398,26 @@ export async function buildReviewLayout({
     });
   }
 
-  rows.sort((a, b) => {
-    const aRow = a.excel_row === null ? Number.MAX_SAFE_INTEGER : a.excel_row;
-    const bRow = b.excel_row === null ? Number.MAX_SAFE_INTEGER : b.excel_row;
-    if (aRow !== bRow) {
-      return aRow - bRow;
-    }
-    if (a._order !== b._order) {
-      return a._order - b._order;
-    }
-    return a.key.localeCompare(b.key);
-  });
+  if (Array.isArray(fieldOrderOverride) && fieldOrderOverride.length > 0) {
+    const orderIndex = new Map(fieldOrderOverride.map((k, i) => [normalizeField(k), i]));
+    rows.sort((a, b) => {
+      const ai = orderIndex.has(a.key) ? orderIndex.get(a.key) : Number.MAX_SAFE_INTEGER;
+      const bi = orderIndex.has(b.key) ? orderIndex.get(b.key) : Number.MAX_SAFE_INTEGER;
+      return ai - bi;
+    });
+  } else {
+    rows.sort((a, b) => {
+      const aRow = a.excel_row === null ? Number.MAX_SAFE_INTEGER : a.excel_row;
+      const bRow = b.excel_row === null ? Number.MAX_SAFE_INTEGER : b.excel_row;
+      if (aRow !== bRow) {
+        return aRow - bRow;
+      }
+      if (a._order !== b._order) {
+        return a._order - b._order;
+      }
+      return a.key.localeCompare(b.key);
+    });
+  }
 
   let currentGroup = '';
   for (const row of rows) {
@@ -367,7 +467,7 @@ export async function readLatestArtifacts(storage, category, productId) {
 
 function dbSourceLabel(source) {
   const token = normalizeToken(source);
-  if (token === 'component_db' || token === 'known_values' || token === 'workbook') return 'Excel Import';
+  if (token === 'component_db' || token === 'known_values' || token === 'workbook' || token === 'reference') return 'Reference';
   if (token === 'pipeline') return 'Pipeline';
   if (token === 'user') return 'user';
   return String(source || '').trim();
@@ -635,36 +735,39 @@ export async function buildProductReviewPayload({
 
   if (specDb) {
     try {
-      useSpecDb = true;
       const dbFieldRows = toArray(specDb.getItemFieldState(productId));
       dbHasAnyState = dbFieldRows.length > 0;
       dbFieldRowsByField = new Map(dbFieldRows.map((row) => [normalizeField(row.field_key), row]));
       dbCandidatesByField = specDb.getCandidatesForProduct(productId) || {};
       dbProduct = specDb.getProduct(productId) || null;
 
-      // ID-first invariant: every grid field must have a persisted slot row.
-      // This guarantees itemFieldStateId exists for all drawer mutations.
-      const layoutFields = toArray(resolvedLayout?.rows)
-        .map((row) => normalizeField(row?.key))
-        .filter(Boolean);
-      const missingFields = layoutFields.filter((field) => !dbFieldRowsByField.has(field));
-      if (missingFields.length > 0) {
-        for (const fieldKey of missingFields) {
-          specDb.upsertItemFieldState({
-            productId,
-            fieldKey,
-            value: 'unk',
-            confidence: 0,
-            source: 'pipeline',
-            acceptedCandidateId: null,
-            overridden: false,
-            needsAiReview: false,
-            aiReviewComplete: false,
-          });
+      useSpecDb = dbHasAnyState || Boolean(dbProduct);
+
+      if (useSpecDb) {
+        // ID-first invariant: every grid field must have a persisted slot row.
+        // This guarantees itemFieldStateId exists for all drawer mutations.
+        const layoutFields = toArray(resolvedLayout?.rows)
+          .map((row) => normalizeField(row?.key))
+          .filter(Boolean);
+        const missingFields = layoutFields.filter((field) => !dbFieldRowsByField.has(field));
+        if (missingFields.length > 0) {
+          for (const fieldKey of missingFields) {
+            specDb.upsertItemFieldState({
+              productId,
+              fieldKey,
+              value: 'unk',
+              confidence: 0,
+              source: 'pipeline',
+              acceptedCandidateId: null,
+              overridden: false,
+              needsAiReview: false,
+              aiReviewComplete: false,
+            });
+          }
+          const refreshedRows = toArray(specDb.getItemFieldState(productId));
+          dbHasAnyState = refreshedRows.length > 0;
+          dbFieldRowsByField = new Map(refreshedRows.map((row) => [normalizeField(row.field_key), row]));
         }
-        const refreshedRows = toArray(specDb.getItemFieldState(productId));
-        dbHasAnyState = refreshedRows.length > 0;
-        dbFieldRowsByField = new Map(refreshedRows.map((row) => [normalizeField(row.field_key), row]));
       }
     } catch {
       useSpecDb = false;
@@ -820,12 +923,31 @@ export async function buildProductReviewPayload({
       }
     }
 
-    if (rows[field].needs_review) {
-      if (hasKnownValue(rows[field].selected.value)) {
-        reviewableFlags += 1;
-      } else {
-        missingCount += 1;
+    const fieldFlags = inferFlags({
+      reasonCodes: rows[field].reason_codes || [],
+      fieldRule: row.field_rule || {},
+      candidates: rows[field].candidates || [],
+      acceptedCandidateId: rows[field].accepted_candidate_id || null,
+      overridden: Boolean(rows[field].overridden),
+    });
+    for (const flag of fieldFlags) {
+      if (!(rows[field].reason_codes || []).includes(flag)) {
+        rows[field].reason_codes = [...(rows[field].reason_codes || []), flag];
+        if (!rows[field].needs_review) {
+          rows[field].needs_review = true;
+          rows[field].selected = {
+            ...rows[field].selected,
+            status: 'needs_review',
+          };
+        }
       }
+    }
+
+    if (fieldFlags.length > 0) {
+      reviewableFlags += 1;
+    }
+    if (!hasKnownValue(rows[field].selected.value) && rows[field].needs_review) {
+      missingCount += 1;
     }
   }
 

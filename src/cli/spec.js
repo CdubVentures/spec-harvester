@@ -3,6 +3,8 @@ import { loadConfig, loadDotEnvFile, validateConfig } from '../config.js';
 import { createStorage, toPosixKey } from '../s3/storage.js';
 import { parseArgs, asBool } from './args.js';
 import { runProduct } from '../pipeline/runProduct.js';
+import { runConvergenceLoop, bridgeAsLogger } from '../pipeline/runOrchestrator.js';
+import { computeNeedSet } from '../indexlab/needsetEngine.js';
 import { loadCategoryConfig } from '../categories/loader.js';
 import { discoverCandidateSources } from '../discovery/searchDiscovery.js';
 import { rebuildCategoryIndex } from '../indexer/rebuildIndex.js';
@@ -119,7 +121,7 @@ function usage() {
     '',
     'Commands:',
     '  run-one --s3key <key> [--local] [--dry-run]',
-    '  indexlab --category <category> --seed <product_id|s3key|url|title> [--product-id <id>] [--s3key <key>] [--brand <brand>] [--model <model>] [--variant <variant>] [--sku <sku>] [--fields <csv>] [--providers <csv>] [--out <dir>] [--local]',
+    '  indexlab --category <category> --seed <product_id|s3key|url|title> [--product-id <id>] [--s3key <key>] [--brand <brand>] [--model <model>] [--variant <variant>] [--sku <sku>] [--fields <csv>] [--providers <csv>] [--out <dir>] [--convergence] [--max-rounds <n>] [--mode <mode>] [--local]',
     '  run-ad-hoc <category> <brand> <model> [<variant>] [--seed-urls <csv>] [--until-complete] [--mode uber_aggressive|aggressive|balanced] [--max-rounds <n>] [--local]',
     '  run-ad-hoc --category <category> --brand <brand> --model <model> [--variant <variant>] [--seed-urls <csv>] [--until-complete] [--mode uber_aggressive|aggressive|balanced] [--max-rounds <n>] [--local]',
     '  run-batch --category <category> [--brand <brand>] [--strategy <explore|exploit|mixed|bandit>] [--local] [--dry-run]',
@@ -208,21 +210,22 @@ function buildConfig(args) {
   const profileOverride = asBool(args.thorough, false)
     ? 'thorough'
     : (args.profile || args['run-profile'] || undefined);
-  return loadConfig({
-    localMode: asBool(args.local, undefined),
-    dryRun: asBool(args['dry-run'], undefined),
+  const overrides = {
     writeMarkdownSummary: asBool(args['write-md'], true),
     localInputRoot: args['local-input-root'] || undefined,
     localOutputRoot: args['local-output-root'] || undefined,
     outputMode: args['output-mode'] || undefined,
-    mirrorToS3: asBool(args['mirror-to-s3'], undefined),
-    mirrorToS3Input: asBool(args['mirror-to-s3-input'], undefined),
-    discoveryEnabled: asBool(args['discovery-enabled'], undefined),
-    searchProvider: args['search-provider'] || undefined,
-    fetchCandidateSources: asBool(args['fetch-candidate-sources'], undefined),
     batchStrategy: args.strategy || undefined,
     runProfile: profileOverride
-  });
+  };
+  if (args.local !== undefined) overrides.localMode = asBool(args.local);
+  if (args['dry-run'] !== undefined) overrides.dryRun = asBool(args['dry-run']);
+  if (args['mirror-to-s3'] !== undefined) overrides.mirrorToS3 = asBool(args['mirror-to-s3']);
+  if (args['mirror-to-s3-input'] !== undefined) overrides.mirrorToS3Input = asBool(args['mirror-to-s3-input']);
+  if (args['discovery-enabled'] !== undefined) overrides.discoveryEnabled = asBool(args['discovery-enabled']);
+  if (args['search-provider']) overrides.searchProvider = args['search-provider'];
+  if (args['fetch-candidate-sources'] !== undefined) overrides.fetchCandidateSources = asBool(args['fetch-candidate-sources']);
+  return loadConfig(overrides);
 }
 
 async function filterKeysByBrand(storage, keys, brand) {
@@ -588,7 +591,29 @@ async function commandIndexLab(config, storage, args) {
     runConfig.discoveryEnabled = true;
   }
 
-  const result = await runProduct({ storage, config: runConfig, s3Key });
+  const convergenceEnabled = asBool(args.convergence, asBool(config.convergenceEnabled, false));
+  const convergenceMaxRounds = Math.max(1, Number.parseInt(String(args['max-rounds'] || '0'), 10) || 0) || undefined;
+  const convergenceMode = String(args.mode || config.accuracyMode || 'balanced').toLowerCase();
+
+  let result;
+  if (convergenceEnabled) {
+    const job = await storage.readJson(s3Key);
+    const loopResult = await runConvergenceLoop({
+      runProductFn: runProduct,
+      computeNeedSetFn: computeNeedSet,
+      storage,
+      config: runConfig,
+      s3Key,
+      job,
+      maxRounds: convergenceMaxRounds,
+      mode: convergenceMode,
+      logger: bridgeAsLogger(bridge)
+    });
+    result = loopResult.final_result;
+  } else {
+    result = await runProduct({ storage, config: runConfig, s3Key });
+  }
+
   bridge.setContext({
     category,
     productId: result.productId,

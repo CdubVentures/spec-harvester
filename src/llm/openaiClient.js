@@ -335,6 +335,7 @@ function extractBalancedJsonSegments(text) {
         depth -= 1;
         if (depth === 0) {
           segments.push(raw.slice(start, i + 1).trim());
+          start = i;
           break;
         }
       }

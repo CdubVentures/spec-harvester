@@ -1,0 +1,83 @@
+%%{init: {'theme': 'dark', 'themeVariables': {'fontSize': '14px'}, 'flowchart': {'curve': 'basis', 'nodeSpacing': 12, 'rankSpacing': 50}}}%%
+
+graph TD
+    START(["JOB INPUT: Brand + Model + Category"]) --> A1 & A2 & A3 & A4 & A5
+
+    A1["⚙️ PHASE 00\nHarness + Config\nLoads field rules, schema,\ncomponent DB. Creates run\ndirectory + NDJSON stream.\nEmits run_context event."]
+
+    A2["🤖 LLM: Brand Resolver\nRole: triage\nGiven a brand name and category,\nfinds the official website domain.\nSends: brand + category\nGets back: official domain, aliases,\nsupport subdomain\nExample: Razer → razer.com\nCached in SQLite permanently"]
+
+    A3["📋 Source Strategy\nGUI-editable SQLite table\nof known review sites.\nhost + tier + priority +\ndiscovery method per site.\nReplaces hardcoded adapters."]
+
+    A4["📊 PHASE 01: NeedSet\nScores every field by how\nbadly it needs more evidence.\nTiered identity caps:\nfull ≥0.70 · provisional 0.50–0.70\nabort <0.50. Freshness decay\nvia exponential half-life.\nneed = missing × conf × tier × refs"]
+
+    A5["🤖 PHASE 02: Search Planner\nRole: plan · up to 4 passes\nBuilds structured SearchProfile\nwith target_fields per query.\nSends: product identity, critical fields,\nmissing fields, existing queries\nGets back: 5-12 search queries each\ntagged with target_fields so the\nconvergence loop knows which fields\neach query is trying to fill"]
+
+    A1 & A2 & A3 & A4 & A5 --> ROUND(["⟳ PHASE 09: CONVERGENCE ROUND N\nNeedSet drives each round\n7 stop conditions: complete · max_rounds\nno_progress · budget · low_quality\nidentity_gate_stuck · escalation_exhausted"]) --> B1 & B2 & B3 & B4 & B5
+
+    B1["🔍 PHASE 03\nSearch Providers\nGoogle + SearXNG + DDG\nMulti-provider fan-out\nResults deduplicated\nacross providers"]
+
+    B2["🤖 LLM: URL Predictor\nRole: triage\nGiven the product and known review\nsites from Source Strategy, predicts\nthe most likely URL per site.\nSkips search entirely for known hosts.\nSends: product + known source hosts\nGets back: predicted URLs per source\nwith confidence score and tier\nEach URL HEAD-checked: 200=fetch,\n404=skip. Saves search budget."]
+
+    B3["⭐ LLM: SERP Reranker\nRole: plan · highest-impact LLM call\nAfter search results come back, sends\nALL results to the LLM in one call to\nfilter the useful from the junk.\nSends: identity lock, missing fields,\nfull result list with url + title +\nsnippet + deterministic score\nGets back: keep or drop per URL with\nreason tag like manufacturer_official,\nlab_review, wrong_product, irrelevant\nKeeps top 8-15 of 50-100 results.\nOne $0.001 call saves 80% of fetches."]
+
+    B4["🤖 LLM: Domain Safety Gate\nRole: triage\nBefore fetching any unknown domain,\nclassifies it for safety in batches.\nSends: batch of up to 30 domains\nGets back: classification per domain:\nmanufacturer, lab_review, retail,\nforum, adult_content, malware, etc.\nadult + malware permanently blocked.\nCached in SQLite domain_classifications."]
+
+    B5["🏥 PHASE 04\nURL Health + Frontier\nTracks per-URL status:\n200/403/404/410/timeout\nCooldown timers per host\nRepair signals → refetch queue\nHost budget scoring"]
+
+    B1 & B2 & B3 & B4 & B5 --> C1 & C2 & C3
+
+    C1["⬇️ PHASE 05: Fetch + Parse\nBounded concurrent scheduler:\nHostPacer enforces per-host delay\nFallback ladder on error:\nCrawlee → Playwright → HTTP\n(403 · timeout · 5xx · network)\nPHASE 11 worker lanes:\nWORKERS_SEARCH/FETCH/PARSE/LLM\nParsing: static HTML, dynamic JS,\nPDF, scanned OCR, article, tables,\nstructured metadata, visual capture"]
+
+    C2["💾 PHASE 06: Evidence\n06A: FTS5 SQLite index\nStable snippet_ids from\ncontent_hash + parser version\nDedupe: new / reused / updated\nChunks + facts indexed\n06B: Refetch Queue\nDurable automation queue\nWorker loop + TTL policy\nDomain staleness refresh\nRepair signal consumption"]
+
+    C3["🎯 PHASE 07: Tier Retrieval\nFTS-powered evidence ranking\nper field using tier_preference.\nTiered identity gate:\n≥0.70 full extraction\n0.50–0.70 provisional (tagged)\n<0.50 abort all fields.\nMiss diagnostics per field:\npool_empty · no_anchor ·\ntier_deficit · identity_mismatch\nPrime sources selected per field."]
+
+    C1 & C2 & C3 --> C4 & C5 & C6 & C7
+
+    C4["🤖 PHASE 08: Extraction\nRole: extract + plan · core engine\nExtractionContextAssembler builds\nper-field context from prime sources.\nVisual asset refs for ambiguous fields.\nSends: evidence text, field contracts\nwith type/unit/enum/shape, product\nidentity, extraction context matrix,\ngolden examples, component DB refs\nGets back: field candidates each with\nvalue, confidence 0-1, direct quote,\nevidence refs, and any conflicts found\nBatched by field group + difficulty.\nEasy fields: fast model\nHard fields: reasoning model"]
+
+    C5["🤖 LLM: Component Validator\nRole: validate\nWhen extraction finds a component\nname that does not exactly match\nthe component database, asks the\nLLM to decide: is this the same\npart under a different name, a\ngenuinely new component, or junk?\nSends: raw name vs DB candidate\nproperties + variance policies\nGets back: same_component or\nnew_component or reject, plus\nconfidence, reasoning, and a\nsuggested alias if same.\nExample: PAW3950 = PixArt PMW3950"]
+
+    C6["⚖️ CONSENSUS ENGINE\nMulti-source agreement\nscoring. Each candidate\nweighted by extraction\nmethod and evidence tier.\nTier-1 mfr outweighs Tier-3\nretail. All weights GUI-tunable.\nSelection policy and list union\nreducers resolve conflicts\nacross sources."]
+
+    C7["🤖 LLM: Field Validation\nRole: validate · final accuracy gate\nAfter consensus scoring, some fields\nremain uncertain with low confidence\nor conflicting values. Sends those\nfields to the LLM as a final judge.\nSends: uncertain fields with current\nvalues, full provenance per field\nshowing which URLs at which tiers\nusing which methods produced what\nGets back: accept, reject, or unknown\nper field with reason, confidence,\nand evidence refs. Unknown fields\nalso get next_best_queries hints."]
+
+    C4 & C5 & C6 & C7 --> EVAL{"🛑 STOP?\ncomplete · max_rounds\nno_progress · budget\nlow_quality · identity_stuck\nescalation_exhausted"}
+
+    EVAL -->|"Continue"| ESC["🤖 LLM: Escalation Planner\nRole: plan · reasoning model\nWhen fields remain missing after a\nround, generates targeted surgical\nre-queries specifically aimed at\nthose gaps. Avoids repeating query\npatterns that already failed.\nSends: still-missing fields, product\nidentity, all previously-tried queries\nGets back: new queries per field with\ntarget_fields + expected source type\nlike datasheet, teardown, tech DB.\nDeduped against all prior queries.\nFeeds directly into next round."] --> ROUND
+
+    EVAL -->|"Done"| D1 & D2 & D3 & D4 & D5
+
+    D1["📚 PHASE 10\nLearning Gates\n5 acceptance gates:\nconfidence ≥ 0.85\nfield status = accepted\nrefs ≥ min_refs\ntier 1 or 2 in history\ncomponent review accepted"]
+
+    D2["🧠 Learning Stores\nFour stores with decay:\ncomponent_lexicon (90d)\nfield_anchors (60d)\nurl_memory (120d)\ndomain_field_yield\nPropose via suggestions,\nnever auto-mutate rules.\nProduct B benefits from\nProduct A learned anchors."]
+
+    D3["🤖 LLM: Summary Writer\nRole: write\nAfter the pipeline finishes, asks the\nLLM to write a concise markdown\nsummary of the harvested results.\nSends: validated field values, quality\nscores, completeness percentage,\nprovenance data per field\nGets back: factual markdown summary\nmentioning confirmed values, source\ncounts, and unknowns. No opinions\nor inferences — only verified data."]
+
+    D4["📦 OUTPUT\nSpec JSON + NDJSON events\nProvenance trail per field\nEvidence refs + confidence\nComponent review data\nExport to database"]
+
+    D5["🔄 PHASE 12\nBatch Queue\nDurable SQLite state machine:\nqueued / running / completed\nfailed / skipped / stopped\nResumable across restarts\nBatch lifecycle APIs\nNext product dispatch"]
+
+    D5 -->|"Next"| START
+    D5 -->|"All done"| DONE(["✅ BATCH COMPLETE"])
+
+    classDef llm fill:#1a1a2e,stroke:#e94560,stroke-width:3px,color:#fff
+    classDef llmstar fill:#0f172a,stroke:#f59e0b,stroke-width:4px,color:#fef3c7
+    classDef green fill:#065f46,stroke:#10b981,stroke-width:3px,color:#ecfdf5
+    classDef blue fill:#1e1b4b,stroke:#818cf8,stroke-width:2px,color:#e0e7ff
+    classDef purple fill:#3b0764,stroke:#c084fc,stroke-width:2px,color:#f3e8ff
+    classDef red fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#fef2f2
+    classDef orange fill:#9a3412,stroke:#fb923c,stroke-width:3px,color:#fff
+    classDef ok fill:#14532d,stroke:#4ade80,stroke-width:3px,color:#fff
+
+    class A5,C4,C5,C7,D3 llm
+    class B3 llmstar
+    class A2,B2,B4,ESC llm
+    class A3 green
+    class A1,C1 blue
+    class A4,B1,B5,C2,C3,C6 purple
+    class D1,D2,D5 red
+    class D4 purple
+    class START,ROUND orange
+    class DONE ok

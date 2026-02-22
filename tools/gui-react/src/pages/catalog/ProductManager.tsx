@@ -5,6 +5,7 @@ import { useUiStore } from '../../stores/uiStore';
 import { useProductStore } from '../../stores/productStore';
 import { DataTable } from '../../components/common/DataTable';
 import { Spinner } from '../../components/common/Spinner';
+import BulkPasteGrid, { type BulkGridRow } from '../../components/common/BulkPasteGrid';
 import type { ColumnDef } from '@tanstack/react-table';
 
 // ── Styles ─────────────────────────────────────────────────────────
@@ -64,6 +65,126 @@ interface MutationResult {
   };
 }
 
+type BulkPreviewStatus = 'ready' | 'already_exists' | 'duplicate_in_paste' | 'invalid';
+
+interface BulkPreviewRow {
+  rowNumber: number;
+  raw: string;
+  brand: string;
+  model: string;
+  variant: string;
+  status: BulkPreviewStatus;
+  reason: string;
+  productId: string;
+}
+
+interface BulkImportResultRow {
+  index: number;
+  brand: string;
+  model: string;
+  variant: string;
+  productId?: string;
+  status: 'created' | 'skipped_existing' | 'skipped_duplicate' | 'invalid' | 'failed';
+  reason?: string;
+}
+
+interface BulkImportResult {
+  ok: boolean;
+  error?: string;
+  total?: number;
+  created?: number;
+  skipped_existing?: number;
+  skipped_duplicate?: number;
+  invalid?: number;
+  failed?: number;
+  total_catalog?: number;
+  results?: BulkImportResultRow[];
+}
+
+const BULK_VARIANT_PLACEHOLDERS = new Set([
+  '', 'unk', 'unknown', 'na', 'n/a', 'none', 'null', '-', 'default'
+]);
+
+function slugToken(value: string): string {
+  if (!value) return '';
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-_]/g, '')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function cleanVariantToken(variant: string): string {
+  const trimmed = String(variant || '').trim();
+  if (!trimmed) return '';
+  return BULK_VARIANT_PLACEHOLDERS.has(trimmed.toLowerCase()) ? '' : trimmed;
+}
+
+function isFabricatedVariantToken(model: string, variant: string): boolean {
+  const cleanedVariant = cleanVariantToken(variant);
+  if (!cleanedVariant) return false;
+  const modelSlug = slugToken(model);
+  const variantSlug = slugToken(cleanedVariant);
+  if (!modelSlug || !variantSlug) return false;
+  if (modelSlug.includes(variantSlug)) return true;
+  const modelTokens = new Set(modelSlug.split('-'));
+  const variantTokens = variantSlug.split('-');
+  return variantTokens.length > 0 && variantTokens.every((token) => modelTokens.has(token));
+}
+
+function normalizeVariantForPreview(model: string, variant: string): string {
+  const cleanedVariant = cleanVariantToken(variant);
+  if (!cleanedVariant) return '';
+  if (isFabricatedVariantToken(model, cleanedVariant)) return '';
+  return cleanedVariant;
+}
+
+function buildPreviewProductId(category: string, brand: string, model: string, variant: string): string {
+  return [category, brand, model, variant]
+    .map((value) => slugToken(value))
+    .filter(Boolean)
+    .join('-');
+}
+
+function parseBulkLine(rawLine: string): { model: string; variant: string } {
+  const line = String(rawLine || '')
+    .replace(/^\uFEFF/, '')
+    .replace(/^\s*[-*•]\s*/, '')
+    .replace(/^\s*\d+[.)]\s*/, '')
+    .trim();
+  if (!line) return { model: '', variant: '' };
+
+  // Primary mode: spreadsheet paste with 2 columns => Model<TAB>Variant
+  if (line.includes('\t')) {
+    const parts = line.split('\t').map((part) => part.trim());
+    const model = String(parts[0] || '').trim();
+    const variant = String(parts[1] || '').trim();
+    return { model, variant };
+  }
+
+  // Secondary mode: allow quick manual delimiters, but still map to 2 columns only.
+  const delimiters = ['|', ';', ','];
+  for (const delimiter of delimiters) {
+    if (!line.includes(delimiter)) continue;
+    const parts = line.split(delimiter).map((part) => part.trim());
+    const model = String(parts[0] || '').trim();
+    const variant = String(parts[1] || '').trim();
+    return { model, variant };
+  }
+
+  return { model: line, variant: '' };
+}
+
+function isHeaderRow(model: string, variant: string): boolean {
+  const m = String(model || '').trim().toLowerCase();
+  const v = String(variant || '').trim().toLowerCase();
+  return (m === 'model' || m === 'models') && (v === 'variant' || v === 'varaint' || v === 'variants');
+}
+
 // ── Columns ────────────────────────────────────────────────────────
 const columns: ColumnDef<CatalogProduct, unknown>[] = [
   {
@@ -114,18 +235,6 @@ const columns: ColumnDef<CatalogProduct, unknown>[] = [
     size: 80,
   },
   {
-    accessorKey: 'added_by',
-    header: 'Source',
-    cell: ({ getValue }) => {
-      const src = getValue() as string;
-      const cls = src === 'seed'
-        ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
-        : 'bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200';
-      return <span className={`inline-block px-2 py-0.5 text-xs rounded-full ${cls}`}>{src}</span>;
-    },
-    size: 70,
-  },
-  {
     accessorKey: 'seed_urls',
     header: 'URLs',
     cell: ({ getValue }) => {
@@ -173,12 +282,13 @@ export function ProductManager() {
   const [confirmAction, setConfirmAction] = useState<'rename' | 'delete' | 'save' | null>(null);
   const [confirmInput, setConfirmInput] = useState('');
 
-  // Seed result banner
-  const [seedResult, setSeedResult] = useState<MutationResult | null>(null);
   // Migration result banner
   const [migrationResult, setMigrationResult] = useState<MutationResult | null>(null);
-  // Import mode dropdown
-  const [showImportMenu, setShowImportMenu] = useState(false);
+  // Bulk paste modal state
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkBrand, setBulkBrand] = useState('');
+  const [bulkGridRows, setBulkGridRows] = useState<BulkGridRow[]>([]);
+  const [bulkResult, setBulkResult] = useState<BulkImportResult | null>(null);
 
   // ── Queries ────────────────────────────────────────────────────
   const { data: products = [], isLoading } = useQuery<CatalogProduct[]>({
@@ -227,14 +337,15 @@ export function ProductManager() {
     },
   });
 
-  const seedMut = useMutation({
-    mutationFn: (mode: 'identity' | 'full' = 'identity') =>
-      api.post<MutationResult>(`/catalog/${category}/products/seed`, { mode }),
+  const bulkMut = useMutation({
+    mutationFn: (payload: { brand: string; rows: Array<{ model: string; variant: string }> }) =>
+      api.post<BulkImportResult>(`/catalog/${category}/products/bulk`, payload),
     onSuccess: (data) => {
       invalidate();
-      setSeedResult(data);
-      setShowImportMenu(false);
-      setTimeout(() => setSeedResult(null), 8000);
+      setBulkResult(data);
+      if ((data?.created ?? 0) > 0) {
+        setTimeout(() => setBulkResult(null), 10000);
+      }
     },
   });
 
@@ -358,11 +469,165 @@ export function ProductManager() {
     return [...set].sort();
   }, [brands, products]);
 
+  const existingProductIds = useMemo(() => {
+    return new Set(products.map((p) => String(p.productId || '').trim()).filter(Boolean));
+  }, [products]);
+
+  const bulkPreviewRows = useMemo<BulkPreviewRow[]>(() => {
+    const brand = String(bulkBrand || '').trim();
+    const rows: BulkPreviewRow[] = [];
+    const seenInPaste = new Set<string>();
+    const gridEntries = bulkGridRows.filter((r) => r.col1.trim() || r.col2.trim());
+
+    for (let i = 0; i < gridEntries.length; i += 1) {
+      const entry = gridEntries[i];
+      const raw = `${entry.col1}\t${entry.col2}`.trim();
+      const model = String(entry.col1 || '').trim();
+      const variant = String(entry.col2 || '').trim();
+
+      if (isHeaderRow(model, variant)) {
+        rows.push({
+          rowNumber: i + 1,
+          raw,
+          brand: '',
+          model,
+          variant,
+          status: 'invalid',
+          reason: 'Header row',
+          productId: ''
+        });
+        continue;
+      }
+
+      if (!brand) {
+        rows.push({
+          rowNumber: i + 1,
+          raw,
+          brand: '',
+          model,
+          variant,
+          status: 'invalid',
+          reason: 'Select a brand',
+          productId: ''
+        });
+        continue;
+      }
+
+      if (!model) {
+        rows.push({
+          rowNumber: i + 1,
+          raw,
+          brand,
+          model: '',
+          variant,
+          status: 'invalid',
+          reason: 'Model is required',
+          productId: ''
+        });
+        continue;
+      }
+
+      const normalizedVariant = normalizeVariantForPreview(model, variant);
+      const productId = buildPreviewProductId(category, brand, model, normalizedVariant);
+
+      if (!productId) {
+        rows.push({
+          rowNumber: i + 1,
+          raw,
+          brand,
+          model,
+          variant,
+          status: 'invalid',
+          reason: 'Could not build slug',
+          productId: ''
+        });
+        continue;
+      }
+
+      if (seenInPaste.has(productId)) {
+        rows.push({
+          rowNumber: i + 1,
+          raw,
+          brand,
+          model,
+          variant: normalizedVariant,
+          status: 'duplicate_in_paste',
+          reason: 'Duplicate within pasted list',
+          productId
+        });
+        continue;
+      }
+      seenInPaste.add(productId);
+
+      if (existingProductIds.has(productId)) {
+        rows.push({
+          rowNumber: i + 1,
+          raw,
+          brand,
+          model,
+          variant: normalizedVariant,
+          status: 'already_exists',
+          reason: 'Already in catalog',
+          productId
+        });
+        continue;
+      }
+
+      rows.push({
+        rowNumber: i + 1,
+        raw,
+        brand,
+        model,
+        variant: normalizedVariant,
+        status: 'ready',
+        reason: 'Ready',
+        productId
+      });
+    }
+
+    return rows;
+  }, [bulkBrand, bulkGridRows, category, existingProductIds]);
+
+  const bulkCounts = useMemo(() => {
+    const counts = { ready: 0, existing: 0, duplicate: 0, invalid: 0 };
+    for (const row of bulkPreviewRows) {
+      if (row.status === 'ready') counts.ready += 1;
+      else if (row.status === 'already_exists') counts.existing += 1;
+      else if (row.status === 'duplicate_in_paste') counts.duplicate += 1;
+      else counts.invalid += 1;
+    }
+    return counts;
+  }, [bulkPreviewRows]);
+
+  const bulkRowsToSubmit = useMemo(() => {
+    return bulkPreviewRows
+      .filter((row) => row.status === 'ready')
+      .map((row) => ({ model: row.model, variant: row.variant }));
+  }, [bulkPreviewRows]);
+
+  const openBulkModal = useCallback(() => {
+    setBulkBrand((current) => current || brandNames[0] || '');
+    setBulkGridRows([]);
+    setBulkOpen(true);
+  }, [brandNames]);
+
+  const closeBulkModal = useCallback(() => {
+    if (bulkMut.isPending) return;
+    setBulkOpen(false);
+  }, [bulkMut.isPending]);
+
+  const runBulkImport = useCallback(() => {
+    const brand = String(bulkBrand || '').trim();
+    if (!brand || bulkRowsToSubmit.length === 0) return;
+    bulkMut.mutate({ brand, rows: bulkRowsToSubmit });
+  }, [bulkBrand, bulkRowsToSubmit, bulkMut]);
+
   // ── Render ─────────────────────────────────────────────────────
   if (isLoading) return <Spinner />;
 
   return (
-    <div className={`grid ${drawerOpen ? 'grid-cols-[1fr,380px]' : 'grid-cols-1'} gap-3`}>
+    <>
+      <div className={`grid ${drawerOpen ? 'grid-cols-[1fr,380px]' : 'grid-cols-1'} gap-3`}>
       {/* Main panel */}
       <div className="space-y-3">
         {/* Header bar */}
@@ -374,53 +639,31 @@ export function ProductManager() {
             </p>
           </div>
           <div className="flex gap-2">
-            <div className="relative">
-              <button
-                onClick={() => setShowImportMenu(!showImportMenu)}
-                disabled={seedMut.isPending || category === 'all'}
-                title={category === 'all' ? 'Select a specific category to import' : undefined}
-                className={btnSecondary}
-              >
-                {seedMut.isPending ? 'Importing...' : 'Import from Workbook'}
-              </button>
-              {showImportMenu && !seedMut.isPending && (
-                <div className="absolute right-0 mt-1 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded shadow-lg z-10">
-                  <button
-                    onClick={() => seedMut.mutate('identity')}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 border-b border-gray-100 dark:border-gray-700"
-                  >
-                    <div className="font-medium">Identity only</div>
-                    <div className="text-xs text-gray-500">Brand, model, variant</div>
-                  </button>
-                  <button
-                    onClick={() => seedMut.mutate('full')}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
-                  >
-                    <div className="font-medium">Full import</div>
-                    <div className="text-xs text-gray-500">All field values (99% confidence)</div>
-                  </button>
-                </div>
-              )}
-            </div>
+            <button
+              onClick={openBulkModal}
+              disabled={category === 'all'}
+              title={category === 'all' ? 'Select a specific category for bulk import' : undefined}
+              className={btnSecondary}
+            >
+              Bulk Paste
+            </button>
             <button onClick={openAdd} className={btnPrimary}>+ Add Product</button>
           </div>
         </div>
 
-        {/* Import progress */}
-        {seedMut.isPending && (
-          <div className="px-4 py-2 text-sm bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded flex items-center gap-2">
-            <span className="inline-block w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-            Reading workbook for {category}...
-          </div>
-        )}
-
-        {/* Import result banner */}
-        {seedResult && (
-          <div className="px-4 py-2 text-sm bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700 rounded">
-            Imported from workbook &mdash; seeded <strong>{seedResult.seeded}</strong> new product{seedResult.seeded !== 1 ? 's' : ''}.
-            {(seedResult.skipped ?? 0) > 0 && <> {seedResult.skipped} already existed.</>}
-            {' '}Total: <strong>{seedResult.total}</strong>.
-            {(seedResult.fields_imported ?? 0) > 0 && <> Fields imported: <strong>{seedResult.fields_imported}</strong>.</>}
+        {/* Bulk import result banner */}
+        {bulkResult && (
+          <div className={`px-4 py-2 text-sm rounded ${
+            (bulkResult.failed ?? 0) > 0 || !bulkResult.ok
+              ? 'bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700'
+              : 'bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700'
+          }`}>
+            Bulk import: added <strong>{bulkResult.created ?? 0}</strong>
+            {', '}existing <strong>{bulkResult.skipped_existing ?? 0}</strong>
+            {', '}duplicates <strong>{bulkResult.skipped_duplicate ?? 0}</strong>
+            {', '}invalid <strong>{bulkResult.invalid ?? 0}</strong>
+            {', '}failed <strong>{bulkResult.failed ?? 0}</strong>.
+            {' '}Catalog total: <strong>{bulkResult.total_catalog ?? products.length}</strong>.
           </div>
         )}
 
@@ -434,13 +677,6 @@ export function ProductManager() {
             {migrationResult.migration.failed_count > 0 && (
               <span className="text-amber-700 dark:text-amber-300"> ({migrationResult.migration.failed_count} failed)</span>
             )}
-          </div>
-        )}
-
-        {/* Import error */}
-        {seedMut.error && !seedMut.isPending && (
-          <div className="px-4 py-2 text-sm bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 rounded">
-            Workbook import failed: {(seedMut.error as Error).message}
           </div>
         )}
 
@@ -916,6 +1152,154 @@ export function ProductManager() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+      {bulkOpen && (
+        <div className="fixed inset-0 z-40 bg-black/45 p-4 flex items-start md:items-center justify-center">
+          <div className="w-full max-w-5xl max-h-[92vh] overflow-hidden bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 shadow-2xl flex flex-col">
+            <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+              <div>
+                <h4 className="text-sm font-semibold">Bulk Paste Models + Variants</h4>
+                <p className="text-xs text-gray-500 mt-0.5">Type or paste <strong>Model</strong> and <strong>Variant</strong> columns (supports tab-separated paste from Excel/Sheets).</p>
+              </div>
+              <button
+                onClick={closeBulkModal}
+                disabled={bulkMut.isPending}
+                className="text-gray-400 hover:text-gray-600 text-lg leading-none disabled:opacity-40"
+                aria-label="Close bulk import modal"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3 overflow-auto">
+              <div className="grid grid-cols-1 md:grid-cols-[260px,1fr] gap-3 items-end">
+                <div>
+                  <label className={labelCls}>Brand *</label>
+                  <select
+                    value={bulkBrand}
+                    onChange={(e) => setBulkBrand(e.target.value)}
+                    className={`${selectCls} w-full`}
+                    disabled={bulkMut.isPending}
+                  >
+                    <option value="">Select brand...</option>
+                    {brandNames.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="text-xs text-gray-500">
+                  Type or paste from a spreadsheet. Variant can be blank.
+                </div>
+              </div>
+
+              <div>
+                <label className={labelCls}>Paste Rows</label>
+                <BulkPasteGrid
+                  col1Header="Model"
+                  col2Header="Variant"
+                  col1Placeholder="e.g. Viper V3 Pro"
+                  col2Placeholder="e.g. White"
+                  rows={bulkGridRows}
+                  onChange={setBulkGridRows}
+                  disabled={bulkMut.isPending}
+                />
+              </div>
+
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span className="px-2 py-1 rounded bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300">Ready: {bulkCounts.ready}</span>
+                <span className="px-2 py-1 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">Existing: {bulkCounts.existing}</span>
+                <span className="px-2 py-1 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">Duplicates: {bulkCounts.duplicate}</span>
+                <span className="px-2 py-1 rounded bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300">Invalid: {bulkCounts.invalid}</span>
+                <span className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200">Rows: {bulkPreviewRows.length}</span>
+              </div>
+
+              {bulkPreviewRows.length > 0 && (
+              <div className="border border-gray-200 dark:border-gray-700 rounded overflow-auto max-h-[24vh]">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-gray-50 dark:bg-gray-900/70 border-b border-gray-200 dark:border-gray-700">
+                    <tr>
+                      <th className="text-left px-2 py-1.5 w-12">#</th>
+                      <th className="text-left px-2 py-1.5">Model</th>
+                      <th className="text-left px-2 py-1.5">Variant</th>
+                      <th className="text-left px-2 py-1.5">Slug Preview</th>
+                      <th className="text-left px-2 py-1.5 w-36">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bulkPreviewRows.map((row) => {
+                      const statusCls = row.status === 'ready'
+                        ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300'
+                        : row.status === 'already_exists'
+                          ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300'
+                          : row.status === 'duplicate_in_paste'
+                            ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
+                            : 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300';
+                      return (
+                        <tr key={`${row.rowNumber}-${row.productId}-${row.raw}`} className="border-b border-gray-100 dark:border-gray-700/50">
+                          <td className="px-2 py-1.5 text-gray-500">{row.rowNumber}</td>
+                          <td className="px-2 py-1.5">{row.model || <span className="italic text-gray-400">â€”</span>}</td>
+                          <td className="px-2 py-1.5">{row.variant || <span className="italic text-gray-400">â€”</span>}</td>
+                          <td className="px-2 py-1.5 font-mono text-[11px] text-gray-600 dark:text-gray-300">{row.productId || <span className="italic text-gray-400">â€”</span>}</td>
+                          <td className="px-2 py-1.5">
+                            <span className={`inline-block px-2 py-0.5 rounded-full ${statusCls}`}>{row.reason}</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              )}
+
+              {bulkMut.error && (
+                <div className="px-3 py-2 text-xs rounded bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 text-red-700 dark:text-red-300">
+                  Bulk import failed: {(bulkMut.error as Error).message}
+                </div>
+              )}
+
+              {bulkMut.data?.results && bulkMut.data.results.length > 0 && (
+                <details className="text-xs border border-gray-200 dark:border-gray-700 rounded">
+                  <summary className="cursor-pointer px-3 py-2 bg-gray-50 dark:bg-gray-900/60 font-medium">
+                    Last run details ({bulkMut.data.results.length} rows)
+                  </summary>
+                  <div className="max-h-40 overflow-auto p-2 space-y-1">
+                    {bulkMut.data.results.slice(0, 50).map((row, idx) => (
+                      <div key={`${idx}-${row.index}-${row.productId || ''}`} className="font-mono text-[11px] text-gray-700 dark:text-gray-300">
+                        {`[${row.index + 1}] ${row.model}${row.variant ? ` | ${row.variant}` : ''} -> ${row.status}${row.reason ? ` (${row.reason})` : ''}`}
+                      </div>
+                    ))}
+                    {bulkMut.data.results.length > 50 && (
+                      <div className="text-gray-500">Showing first 50 rows.</div>
+                    )}
+                  </div>
+                </details>
+              )}
+            </div>
+
+            <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between gap-2">
+              <div className="text-xs text-gray-500">
+                Ready rows will be added as new products for <strong>{bulkBrand || 'selected brand'}</strong>.
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={closeBulkModal}
+                  disabled={bulkMut.isPending}
+                  className={btnSecondary}
+                >
+                  Close
+                </button>
+                <button
+                  onClick={runBulkImport}
+                  disabled={bulkMut.isPending || !bulkBrand.trim() || bulkRowsToSubmit.length === 0}
+                  className={btnPrimary}
+                >
+                  {bulkMut.isPending ? 'Importing...' : `Import ${bulkRowsToSubmit.length} Ready Row${bulkRowsToSubmit.length === 1 ? '' : 's'}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

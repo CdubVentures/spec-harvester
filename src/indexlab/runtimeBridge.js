@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { dedupeOutcomeToEventKey } from '../pipeline/dedupeOutcomeEvent.js';
 
 function toIso(value) {
   const raw = String(value || '').trim();
@@ -229,6 +230,7 @@ export class IndexLabRuntimeBridge {
           status: this.status,
           ended_at: endedAt
         });
+        this.fetchByUrl.clear();
       })
       .catch(() => {});
     await this.queue;
@@ -237,21 +239,34 @@ export class IndexLabRuntimeBridge {
   async _ensureRun(row = {}) {
     const runId = normalizeRunId(row);
     if (!runId) return false;
-    if (this.runId && this.runId !== runId) return false;
     if (this.runId === runId && this.runDir) return true;
 
+    const isNewRound = this.runId
+      && this.runId !== runId
+      && String(row.event || '').trim() === 'run_started';
+
+    if (this.runId && this.runId !== runId && !isNewRound) return false;
+
+    if (isNewRound) {
+      this._previousRunIds = this._previousRunIds || [];
+      this._previousRunIds.push(this.runId);
+    }
+
     this.runId = runId;
-    this.runDir = path.join(this.outRoot, runId);
+    this.runDir = path.join(this.outRoot, this._previousRunIds?.[0] || runId);
     this.eventsPath = path.join(this.runDir, 'run_events.ndjson');
     this.runMetaPath = path.join(this.runDir, 'run.json');
     this.needSetPath = path.join(this.runDir, 'needset.json');
-    this.startedAt = toIso(row.ts || new Date().toISOString());
 
-    await fs.mkdir(this.runDir, { recursive: true });
-    await this._writeRunMeta({
-      status: 'running',
-      started_at: this.startedAt
-    });
+    if (!isNewRound) {
+      this.startedAt = toIso(row.ts || new Date().toISOString());
+      await fs.mkdir(this.runDir, { recursive: true });
+      await this._writeRunMeta({
+        status: 'running',
+        started_at: this.startedAt
+      });
+    }
+
     return true;
   }
 
@@ -570,6 +585,54 @@ export class IndexLabRuntimeBridge {
       }, ts);
     }
 
+    if (eventName === 'visual_asset_captured') {
+      await this._startStage('fetch', ts, { trigger: eventName });
+      await this._emit('fetch', 'visual_asset_captured', {
+        scope: 'url',
+        url,
+        screenshot_uri: String(row.screenshot_uri || '').trim(),
+        quality_score: asFloat(row.quality_score, 0),
+        width: asInt(row.width, 0),
+        height: asInt(row.height, 0),
+        format: String(row.format || '').trim(),
+        bytes: asInt(row.bytes, 0),
+        capture_ms: asInt(row.capture_ms, 0)
+      }, ts);
+    }
+
+    if (eventName === 'scheduler_fallback_started') {
+      await this._startStage('fetch', ts, { trigger: eventName });
+      await this._emit('fetch', 'scheduler_fallback_started', {
+        scope: 'url',
+        url,
+        from_mode: String(row.from_mode || '').trim(),
+        to_mode: String(row.to_mode || '').trim(),
+        outcome: String(row.outcome || '').trim(),
+        attempt: asInt(row.attempt, 0)
+      }, ts);
+    }
+
+    if (eventName === 'scheduler_fallback_succeeded') {
+      await this._startStage('fetch', ts, { trigger: eventName });
+      await this._emit('fetch', 'scheduler_fallback_succeeded', {
+        scope: 'url',
+        url,
+        mode: String(row.mode || '').trim(),
+        attempt: asInt(row.attempt, 0),
+        from_mode: String(row.from_mode || '').trim()
+      }, ts);
+    }
+
+    if (eventName === 'scheduler_fallback_exhausted') {
+      await this._startStage('fetch', ts, { trigger: eventName });
+      await this._emit('fetch', 'scheduler_fallback_exhausted', {
+        scope: 'url',
+        url,
+        modes_tried: Array.isArray(row.modes_tried) ? row.modes_tried : [],
+        final_outcome: String(row.final_outcome || '').trim()
+      }, ts);
+    }
+
     if (eventName === 'repair_query_enqueued') {
       await this._emit('scheduler', 'repair_query_enqueued', {
         scope: 'job',
@@ -635,6 +698,60 @@ export class IndexLabRuntimeBridge {
       });
     }
 
+    if (eventName === 'evidence_index_result') {
+      const dedupeOutcome = String(row.dedupe_outcome || 'unknown').trim();
+      const eventKey = dedupeOutcomeToEventKey(dedupeOutcome);
+      await this._emit('index', eventKey, {
+        scope: 'evidence_index',
+        url: String(row.url || ''),
+        host: String(row.host || ''),
+        doc_id: String(row.doc_id || ''),
+        dedupe_outcome: dedupeOutcome,
+        chunks_indexed: asInt(row.chunks_indexed, 0),
+        facts_indexed: asInt(row.facts_indexed, 0),
+        snippet_count: asInt(row.snippet_count, 0)
+      }, ts);
+    }
+
+    if (eventName === 'convergence_round_started') {
+      await this._emit('convergence', 'convergence_round_started', {
+        scope: 'round',
+        round: asInt(row.round, 0),
+        mode: String(row.mode || ''),
+        needset_size: asInt(row.needset_size, 0),
+        llm_target_field_count: asInt(row.llm_target_field_count, 0),
+        extra_query_count: asInt(row.extra_query_count, 0)
+      }, ts);
+    }
+
+    if (eventName === 'convergence_round_completed') {
+      this._setPhaseCursor('phase_09_convergence');
+      await this._emit('convergence', 'convergence_round_completed', {
+        scope: 'round',
+        round: asInt(row.round, 0),
+        needset_size: asInt(row.needset_size, 0),
+        missing_required_count: asInt(row.missing_required_count, 0),
+        critical_count: asInt(row.critical_count, 0),
+        confidence: asFloat(row.confidence, 0),
+        validated: asBool(row.validated, false),
+        improved: asBool(row.improved, false),
+        improvement_reasons: Array.isArray(row.improvement_reasons) ? row.improvement_reasons : [],
+        no_progress_streak: asInt(row.no_progress_streak, 0),
+        low_quality_rounds: asInt(row.low_quality_rounds, 0)
+      }, ts);
+    }
+
+    if (eventName === 'convergence_stop') {
+      await this._emit('convergence', 'convergence_stop', {
+        scope: 'round',
+        stop_reason: String(row.stop_reason || ''),
+        round_count: asInt(row.round_count, 0),
+        complete: asBool(row.complete, false),
+        final_confidence: asFloat(row.final_confidence, 0),
+        final_needset_size: asInt(row.final_needset_size, 0)
+      }, ts);
+    }
+
     if (eventName === 'phase07_prime_sources_built') {
       await this._startStage('index', ts, { trigger: eventName });
       this._setPhaseCursor('phase_07_prime_sources');
@@ -692,6 +809,14 @@ export class IndexLabRuntimeBridge {
       await this._finishStage('fetch', ts, { reason: 'run_completed' });
       await this._finishStage('parse', ts, { reason: 'run_completed' });
       await this._finishStage('index', ts, { reason: 'run_completed' });
+      await this._emit('runtime', 'run_completed', {
+        scope: 'run',
+        identity_fingerprint: this.identityFingerprint,
+        identity_lock_status: this.identityLockStatus,
+        dedupe_mode: this.dedupeMode,
+        phase_cursor: this.phaseCursor,
+        counters: { ...this.counters }
+      }, ts);
       await this._writeRunMeta({
         status: 'completed',
         ended_at: ts

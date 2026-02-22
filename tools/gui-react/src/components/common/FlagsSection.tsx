@@ -63,9 +63,10 @@ export function FlagsSection({ reasonCodes }: FlagsSectionProps) {
 
 interface FlagsOverviewSectionProps {
   flaggedProperties: Array<{ key: string; reasonCodes: string[] }>;
+  getLabel?: (key: string) => string;
 }
 
-export function FlagsOverviewSection({ flaggedProperties }: FlagsOverviewSectionProps) {
+export function FlagsOverviewSection({ flaggedProperties, getLabel = humanizeField }: FlagsOverviewSectionProps) {
   const [expanded, setExpanded] = useState(false);
 
   if (flaggedProperties.length === 0) return null;
@@ -90,7 +91,7 @@ export function FlagsOverviewSection({ flaggedProperties }: FlagsOverviewSection
             <DrawerCard key={key} className="border-l-2 border-l-amber-400">
               <div className="flex items-center gap-1.5 mb-1">
                 <FlagIcon className="w-3 h-3 text-amber-600 dark:text-amber-400 flex-shrink-0" />
-                <span className="text-xs font-semibold text-gray-800 dark:text-gray-200">{humanizeField(key)}</span>
+                <span className="text-xs font-semibold text-gray-800 dark:text-gray-200">{getLabel(key)}</span>
               </div>
               {reasonCodes.map((code) => {
                 const info = getFlagInfo(code);
@@ -113,7 +114,7 @@ export function FlagsOverviewSection({ flaggedProperties }: FlagsOverviewSection
               className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-[10px] rounded"
             >
               <FlagIcon className="w-2.5 h-2.5" />
-              {humanizeField(key)}: {reasonCodes.map((c) => getFlagInfo(c).label).join(', ')}
+              {getLabel(key)}: {reasonCodes.map((c) => getFlagInfo(c).label).join(', ')}
             </span>
           ))}
         </div>

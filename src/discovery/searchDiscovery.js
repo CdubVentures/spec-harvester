@@ -16,6 +16,15 @@ import { searchSourceCorpus } from '../intel/sourceCorpus.js';
 import { planUberQueries } from '../research/queryPlanner.js';
 import { rerankSerpResults } from '../research/serpReranker.js';
 import { dedupeSerpResults } from '../search/serpDedupe.js';
+import { resolveBrandDomain } from './brandResolver.js';
+import { classifyDomains } from './domainSafetyGate.js';
+import { predictSourceUrls } from './urlPredictor.js';
+import { callLlmWithRouting, hasLlmRouteApiKey } from '../llm/routing.js';
+import {
+  createBrandResolverCallLlm,
+  createDomainSafetyCallLlm,
+  createUrlPredictorCallLlm
+} from '../llm/discoveryLlmAdapters.js';
 
 function normalizeHost(hostname) {
   return String(hostname || '').toLowerCase().replace(/^www\./, '');
@@ -200,6 +209,40 @@ function buildManufacturerPlanUrls({ host, variables, queries, maxQueries = 3 })
   return urls.slice(0, 40);
 }
 
+export function computeIdentityMatchLevel({ url = '', title = '', snippet = '', identityLock = {} } = {}) {
+  const haystack = `${String(url || '')} ${String(title || '')} ${String(snippet || '')}`.toLowerCase();
+  const brand = String(identityLock.brand || '').trim().toLowerCase();
+  const model = String(identityLock.model || '').trim().toLowerCase();
+  const variant = String(identityLock.variant || '').trim().toLowerCase();
+  const hasBrand = brand ? haystack.includes(brand) : false;
+  const hasModel = model ? haystack.includes(model) : false;
+  const hasVariant = variant ? haystack.includes(variant) : false;
+  if (hasBrand && hasModel && hasVariant && variant) return 'strong';
+  if (hasBrand && hasModel) return 'partial';
+  if (hasBrand) return 'weak';
+  return 'none';
+}
+
+export function detectVariantGuardHit({ title = '', snippet = '', url = '', variantGuardTerms = [], targetVariant = '' } = {}) {
+  const haystack = `${String(url || '')} ${String(title || '')} ${String(snippet || '')}`.toLowerCase();
+  const target = String(targetVariant || '').trim().toLowerCase();
+  for (const term of variantGuardTerms || []) {
+    const normalized = String(term || '').trim().toLowerCase();
+    if (!normalized) continue;
+    if (target && normalized === target) continue;
+    if (haystack.includes(normalized)) return true;
+  }
+  return false;
+}
+
+export function detectMultiModelHint({ title = '', snippet = '' } = {}) {
+  const text = `${String(title || '')} ${String(snippet || '')}`.toLowerCase();
+  return /\bvs\b/.test(text)
+    || /\btop\s+\d+\b/.test(text)
+    || /\bbest\s+\d*\s*\w*\s*(mice|mouse|keyboards?|headsets?|monitors?)/.test(text)
+    || /\bcompar(ison|e|ing)\b/.test(text);
+}
+
 function classifyUrlCandidate(result, categoryConfig) {
   const parsed = new URL(result.url);
   const host = normalizeHost(parsed.hostname);
@@ -209,6 +252,9 @@ function classifyUrlCandidate(result, categoryConfig) {
     title: result.title || '',
     snippet: result.snippet || ''
   });
+  const identityLock = result._identityLock || {};
+  const variantGuardTerms = result._variantGuardTerms || [];
+  const targetVariant = String(identityLock.variant || '').trim();
   return {
     url: parsed.toString(),
     host,
@@ -222,7 +268,24 @@ function classifyUrlCandidate(result, categoryConfig) {
     tier: resolveTierForHost(host, categoryConfig),
     tierName: resolveTierNameForHost(host, categoryConfig),
     role: inferRoleForHost(host, categoryConfig),
-    doc_kind_guess: docKindGuess
+    doc_kind_guess: docKindGuess,
+    identity_match_level: computeIdentityMatchLevel({
+      url: parsed.toString(),
+      title: result.title || '',
+      snippet: result.snippet || '',
+      identityLock
+    }),
+    variant_guard_hit: detectVariantGuardHit({
+      title: result.title || '',
+      snippet: result.snippet || '',
+      url: parsed.toString(),
+      variantGuardTerms,
+      targetVariant
+    }),
+    multi_model_hint: detectMultiModelHint({
+      title: result.title || '',
+      snippet: result.snippet || ''
+    })
   };
 }
 
@@ -829,6 +892,32 @@ export async function discoverCandidateSources({
     storage,
     category: categoryConfig.category
   });
+  let brandResolution = null;
+  if (variables.brand && config.llmEnabled && hasLlmRouteApiKey(config, { role: 'triage' })) {
+    try {
+      const brandCallLlm = createBrandResolverCallLlm({
+        callRoutedLlmFn: callLlmWithRouting,
+        config
+      });
+      brandResolution = await resolveBrandDomain({
+        brand: variables.brand,
+        category: variables.category,
+        config,
+        callLlmFn: brandCallLlm,
+        storage
+      });
+      if (brandResolution?.officialDomain) {
+        logger?.info?.('brand_resolved', {
+          brand: variables.brand,
+          official_domain: brandResolution.officialDomain,
+          aliases: brandResolution.aliases?.slice(0, 5) || []
+        });
+      }
+    } catch {
+      // brand resolution is non-essential
+    }
+  }
+
   const profileMaxQueries = Math.max(6, Number(config.discoveryMaxQueries || 8) * 2);
   const searchProfileBase = buildSearchProfile({
     job,
@@ -836,7 +925,8 @@ export async function discoverCandidateSources({
     missingFields,
     lexicon: learning.lexicon,
     learnedQueries: learning.queryTemplates,
-    maxQueries: profileMaxQueries
+    maxQueries: profileMaxQueries,
+    brandResolution
   });
   const baseQueries = toArray(searchProfileBase?.base_templates);
   const targetedQueries = toArray(searchProfileBase?.queries);
@@ -880,12 +970,18 @@ export async function discoverCandidateSources({
       8
     )
   );
+  const llmQueryRows = toArray(llmQueries).map((row) => {
+    if (row && typeof row === 'object' && !Array.isArray(row)) {
+      return { query: String(row.query || '').trim(), source: 'llm', target_fields: toArray(row.target_fields) };
+    }
+    return { query: String(row || '').trim(), source: 'llm', target_fields: [] };
+  });
   const queryCandidates = [
-    ...baseQueries.map((query) => ({ query, source: 'base_template' })),
-    ...targetedQueries.map((query) => ({ query, source: 'targeted' })),
-    ...llmQueries.map((query) => ({ query, source: 'llm' })),
-    ...toArray(uberSearchPlan?.queries).map((query) => ({ query, source: 'uber' })),
-    ...extraQueries.map((query) => ({ query, source: 'runtime_extra' }))
+    ...baseQueries.map((query) => ({ query, source: 'base_template', target_fields: [] })),
+    ...targetedQueries.map((query) => ({ query, source: 'targeted', target_fields: [] })),
+    ...llmQueryRows,
+    ...toArray(uberSearchPlan?.queries).map((query) => ({ query, source: 'uber', target_fields: [] })),
+    ...extraQueries.map((query) => ({ query, source: 'runtime_extra', target_fields: [] }))
   ];
   const mergedQueryCap = Math.max(queryLimit, 6);
   const mergedQueries = dedupeQueryRows(queryCandidates, mergedQueryCap);
@@ -1188,6 +1284,53 @@ export async function discoverCandidateSources({
     });
   }
 
+  if (config.llmEnabled && hasLlmRouteApiKey(config, { role: 'triage' }) && variables.brand) {
+    try {
+      const enabledSources = typeof storage?.listEnabledSourceStrategies === 'function'
+        ? storage.listEnabledSourceStrategies(variables.category)
+        : [];
+      const predictableSources = enabledSources
+        .filter((s) => s.discovery_method === 'llm_predict' || s.discovery_method === 'search_first')
+        .map((s) => ({ host: s.host, source_type: s.source_type, search_pattern: s.search_pattern || '' }));
+      if (predictableSources.length > 0) {
+        const urlPredictorCallLlm = createUrlPredictorCallLlm({
+          callRoutedLlmFn: callLlmWithRouting,
+          config
+        });
+        const predictedUrls = await predictSourceUrls({
+          product: {
+            brand: variables.brand,
+            model: variables.model,
+            variant: variables.variant,
+            category: variables.category
+          },
+          knownSources: predictableSources,
+          config,
+          callLlmFn: urlPredictorCallLlm
+        });
+        for (const pred of predictedUrls) {
+          rawResults.push({
+            url: pred.url,
+            title: `${pred.source_host} predicted`,
+            snippet: 'LLM-predicted source URL',
+            provider: 'url_prediction',
+            host: pred.source_host,
+            tier: pred.predicted_tier || 2,
+            query: ''
+          });
+        }
+        if (predictedUrls.length > 0) {
+          logger?.info?.('url_prediction_seeded', {
+            predicted_count: predictedUrls.length,
+            sources: predictedUrls.map((p) => p.source_host).slice(0, 10)
+          });
+        }
+      }
+    } catch {
+      // URL prediction is non-essential
+    }
+  }
+
   const { deduped: dedupedResults, stats: dedupeStats } = dedupeSerpResults(rawResults);
   logger?.info?.('discovery_serp_deduped', {
     total_input: dedupeStats.total_input,
@@ -1381,6 +1524,37 @@ export async function discoverCandidateSources({
     fieldYieldMap: learning.fieldYield
   });
   let reranked = deterministicReranked;
+  let domainSafetyResults = null;
+  if (config.llmEnabled && hasLlmRouteApiKey(config, { role: 'triage' })) {
+    try {
+      const uniqueDomains = [...new Set(
+        [...byUrl.values()].map((r) => normalizeHost(r.host || '')).filter(Boolean)
+      )];
+      if (uniqueDomains.length > 0) {
+        const domainSafetyCallLlm = createDomainSafetyCallLlm({
+          callRoutedLlmFn: callLlmWithRouting,
+          config
+        });
+        domainSafetyResults = await classifyDomains({
+          domains: uniqueDomains,
+          category: variables.category,
+          config,
+          callLlmFn: domainSafetyCallLlm,
+          storage
+        });
+        const unsafeCount = [...(domainSafetyResults?.values?.() || [])].filter((v) => !v.safe).length;
+        if (unsafeCount > 0) {
+          logger?.info?.('domain_safety_gate', {
+            total: uniqueDomains.length,
+            unsafe: unsafeCount
+          });
+        }
+      }
+    } catch {
+      // domain safety classification is non-essential
+    }
+  }
+
   const llmTriageEnabled = Boolean(uberMode || (config.llmEnabled && config.llmSerpRerankEnabled));
   let llmTriageApplied = false;
   if (llmTriageEnabled) {
@@ -1392,7 +1566,8 @@ export async function discoverCandidateSources({
       missingFields,
       serpResults: [...byUrl.values()],
       frontier: frontierDb,
-      topK: Math.max(discoveryCap, Number(config.discoveryResultsPerQuery || 10) * 2)
+      topK: Math.max(discoveryCap, Number(config.discoveryResultsPerQuery || 10) * 2),
+      domainSafetyResults
     });
     if (llmReranked.length > 0) {
       reranked = llmReranked;

@@ -9,6 +9,7 @@ import { LinkedProductsList } from '../../components/common/LinkedProductsList';
 import { useComponentReviewStore } from '../../stores/componentReviewStore';
 import { api } from '../../api/client';
 import { hasKnownValue, humanizeField } from '../../utils/fieldNormalize';
+import { useFieldLabels } from '../../hooks/useFieldLabels';
 import { FlagIcon } from '../../components/common/FlagIcon';
 import { ComponentReviewDrawer } from './ComponentReviewDrawer';
 import { ComponentReviewPanel } from './ComponentReviewPanel';
@@ -61,13 +62,38 @@ function hasActionablePending(state?: ComponentReviewItem['name_tracked'] | Comp
  * This prevents the columns useMemo from depending on cellEditValue,
  * which would cause full table re-renders on every keystroke.
  */
-function ComponentEditingCell({ onCommit, onCancel, className }: {
+function ComponentEditingCell({ onCommit, onCancel, className, enumValues, enumPolicy }: {
   onCommit: () => void;
   onCancel: () => void;
   className?: string;
+  enumValues?: string[] | null;
+  enumPolicy?: string | null;
 }) {
   const cellEditValue = useComponentReviewStore((s) => s.cellEditValue);
   const setCellEditValue = useComponentReviewStore((s) => s.setCellEditValue);
+
+  if (enumPolicy === 'closed' && enumValues && enumValues.length > 0) {
+    return (
+      <select
+        value={cellEditValue}
+        onChange={(e) => {
+          setCellEditValue(e.target.value);
+          if (e.target.value) {
+            onCommit();
+          }
+        }}
+        className={className}
+        autoFocus
+        onClick={(e) => e.stopPropagation()}
+      >
+        <option value="">Select...</option>
+        {enumValues.map((v) => (
+          <option key={v} value={v}>{v}</option>
+        ))}
+      </select>
+    );
+  }
+
   return (
     <InlineCellEditor
       value={cellEditValue}
@@ -122,6 +148,7 @@ export function ComponentSubTab({
   queryClient,
   debugLinkedProducts = false,
 }: ComponentSubTabProps) {
+  const { getLabel } = useFieldLabels(category);
   // Query component review items to show inline pending_ai indicators
   const { data: reviewDoc } = useQuery({
     queryKey: ['componentReview', category],
@@ -352,6 +379,8 @@ export function ComponentSubTab({
               pendingAI={cellIsPendingAI}
               showLinkedProductBadge={debugLinkedProducts}
               linkedProductCount={row.original.linked_products?.length ?? 0}
+              showSourceCountBadge={debugLinkedProducts}
+              sourceCount={row.original.name_tracked?.candidate_count ?? 0}
               emptyWhenMissing={<span className="font-semibold text-gray-900 dark:text-gray-100">{row.original.name}</span>}
             />
           );
@@ -387,8 +416,24 @@ export function ComponentSubTab({
               pendingAI={cellIsPendingAI}
               showLinkedProductBadge={debugLinkedProducts}
               linkedProductCount={row.original.linked_products?.length ?? 0}
+              showSourceCountBadge={debugLinkedProducts}
+              sourceCount={row.original.maker_tracked?.candidate_count ?? 0}
               emptyWhenMissing={<span className="text-gray-700 dark:text-gray-300">{row.original.maker || ''}</span>}
             />
+          );
+        },
+      },
+      {
+        id: 'discovered',
+        header: 'Origin',
+        size: 110,
+        accessorFn: (row) => (row.discovered ? 'Discovered' : ''),
+        cell: ({ row }) => {
+          if (!row.original.discovered) return null;
+          return (
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300">
+              Discovered
+            </span>
           );
         },
       },
@@ -446,23 +491,49 @@ export function ComponentSubTab({
         const state = item.properties[propKey];
         return Boolean(state?.needs_review) && !hasActionablePending(state);
       }).length;
+
+      const firstState = mergedItems.find((item) => item.properties[propKey]?.variance_policy)?.properties[propKey];
+      const variancePolicy = firstState?.variance_policy ?? null;
+      const varianceLabel = variancePolicy === 'upper_bound' ? 'Upper'
+        : variancePolicy === 'lower_bound' ? 'Lower'
+        : variancePolicy === 'authoritative' ? 'Equal'
+        : variancePolicy === 'range' ? '+/-'
+        : null;
+
+      const firstConstraintState = mergedItems.find((item) => (item.properties[propKey]?.constraints?.length ?? 0) > 0)?.properties[propKey];
+      const constraints = firstConstraintState?.constraints ?? [];
+
       cols.push({
         id: `prop_${propKey}`,
         size: 160,
         header: () => (
-          <span className="flex items-center gap-1" title={propKey}>
-            {humanizeField(propKey)}
-            {propAICount > 0 && (
-              <span className="inline-flex items-center gap-0.5 text-[9px] text-purple-600 dark:text-purple-400">
-                AI {propAICount}
-              </span>
+          <span className="flex flex-col gap-0.5" title={propKey}>
+            <span className="flex items-center gap-1">
+              {getLabel(propKey)}
+              {propAICount > 0 && (
+                <span className="inline-flex items-center gap-0.5 text-[9px] text-purple-600 dark:text-purple-400">
+                  AI {propAICount}
+                </span>
+              )}
+              {propFlagCount > 0 && (
+                <span className="inline-flex items-center gap-0.5 text-[9px] text-amber-600 dark:text-amber-400">
+                  <FlagIcon className="w-2.5 h-2.5" />
+                  {propFlagCount}
+                </span>
+              )}
+            </span>
+            {varianceLabel && (
+              <span className="text-[8px] text-gray-500 dark:text-gray-400 font-normal leading-tight">{varianceLabel}</span>
             )}
-            {propFlagCount > 0 && (
-              <span className="inline-flex items-center gap-0.5 text-[9px] text-amber-600 dark:text-amber-400">
-                <FlagIcon className="w-2.5 h-2.5" />
-                {propFlagCount}
-              </span>
-            )}
+            {constraints.map((expr) => {
+              const opMatch = expr.match(/^(.+?)\s*(<=|>=|!=|==|<|>)\s*(.+)$/);
+              const label = opMatch
+                ? `${humanizeField(opMatch[1].trim())} ${opMatch[2]} ${humanizeField(opMatch[3].trim())}`
+                : expr;
+              return (
+                <span key={expr} className="text-[8px] text-gray-500 dark:text-gray-400 font-normal leading-tight">{label}</span>
+              );
+            })}
           </span>
         ),
         accessorFn: (row) => {
@@ -481,6 +552,8 @@ export function ComponentSubTab({
                 onCommit={handleCommitEdit}
                 onCancel={cancelComponentEdit}
                 className="w-full px-1 py-0.5 text-[11px] bg-white dark:bg-gray-800 border-0 outline-none ring-2 ring-accent rounded"
+                enumValues={state?.enum_values}
+                enumPolicy={state?.enum_policy}
               />
             );
           }
@@ -498,6 +571,8 @@ export function ComponentSubTab({
               pendingAI={cellIsPendingAI}
               showLinkedProductBadge={debugLinkedProducts}
               linkedProductCount={row.original.linked_products?.length ?? 0}
+              showSourceCountBadge={debugLinkedProducts}
+              sourceCount={state?.candidate_count ?? 0}
             />
           );
         },
@@ -640,6 +715,7 @@ export function ComponentSubTab({
               pendingReviewItems={reviewItemsForDrawer}
               isSynthetic={Boolean(selectedItem._isSynthetic)}
               debugLinkedProducts={debugLinkedProducts}
+              propertyColumns={data?.property_columns}
             />
           );
         })()}

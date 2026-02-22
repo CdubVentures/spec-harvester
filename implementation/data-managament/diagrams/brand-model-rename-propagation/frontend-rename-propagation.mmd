@@ -1,0 +1,67 @@
+flowchart LR
+  classDef trigger fill:#e8f0fe,stroke:#2563eb,color:#0f172a,stroke-width:1px;
+  classDef action fill:#fef3c7,stroke:#d97706,color:#111827,stroke-width:1px;
+  classDef key fill:#dcfce7,stroke:#16a34a,color:#052e16,stroke-width:1px;
+  classDef ui fill:#f3e8ff,stroke:#7e22ce,color:#3b0764,stroke-width:1px;
+  classDef note fill:#f8fafc,stroke:#64748b,color:#0f172a,stroke-dasharray:3 3;
+
+  subgraph T["Rename Save Triggers"]
+    P0["Catalog > Models tab<br/>ProductManager Save<br/>(rename model/variant)"]:::trigger
+    B0["Catalog > Brands tab<br/>BrandManager Save<br/>(rename brand name)"]:::trigger
+  end
+
+  P0 --> P1["PUT /api/v1/catalog/{category}/products/{productId}"]:::action
+  P1 --> P2["ProductManager onSuccess"]:::action
+  P2 --> P3["setSelectedProduct(newProductId)<br/>if renamed product was selected"]:::action
+  P2 --> PK1["invalidate ['catalog-products', category]"]:::key
+  P2 --> PK2["invalidate ['catalog', category]"]:::key
+  P2 --> PK3["invalidate ['reviewProductsIndex', category]"]:::key
+  P2 --> PK4["invalidate ['product', category]"]:::key
+
+  B0 --> B1["PUT /api/v1/brands/{slug}"]:::action
+  B1 --> B2["BrandManager onSuccess"]:::action
+  B2 --> BK1["invalidate ['brands'] + ['brand-impact']"]:::key
+  B2 --> BK2["invalidate ['catalog-products']"]:::key
+  B2 --> BK3["invalidate ['catalog']"]:::key
+  B2 --> BK4["invalidate ['reviewProductsIndex']"]:::key
+  B2 --> BK5["invalidate ['product']"]:::key
+
+  subgraph U["Query Key -> Frontend Surfaces"]
+    CPROD["Catalog > Models table<br/>brand/model columns"]:::ui
+    CBRAND["Catalog > Brands table<br/>brand names"]:::ui
+    CBRANDDD["Catalog > Models brand dropdown"]:::ui
+    SIDEBAR["Sidebar selectors<br/>Brand/Model/Variant + selected product card"]:::ui
+    OVERVIEW["Overview table<br/>brand/model columns"]:::ui
+    REVIEWGRID["Review matrix headers<br/>brand/model"]:::ui
+    REVIEWBAR["Review surface labels<br/>Brand chips + Finalize button + drawer subtitle"]:::ui
+    PRODUCTPAGE["Product page title<br/>brand + model + variant"]:::ui
+    INDEXPICK["Indexing Product Picker<br/>brand/model/variant + selected summary"]:::ui
+  end
+
+  PK1 --> CPROD
+  BK2 --> CPROD
+
+  BK1 --> CBRAND
+  BK1 --> CBRANDDD
+
+  PK2 --> SIDEBAR
+  PK2 --> OVERVIEW
+  PK2 --> INDEXPICK
+  BK3 --> SIDEBAR
+  BK3 --> OVERVIEW
+  BK3 --> INDEXPICK
+
+  PK3 --> REVIEWGRID
+  PK3 --> REVIEWBAR
+  BK4 --> REVIEWGRID
+  BK4 --> REVIEWBAR
+
+  PK4 --> PRODUCTPAGE
+  BK5 --> PRODUCTPAGE
+  P3 --> PRODUCTPAGE
+  P3 --> SIDEBAR
+
+  N1["Scope note:<br/>Product rename invalidation is category-scoped.<br/>Brand rename invalidation is prefix/global and refreshes all category cache matches."]:::note
+  PK2 -.-> N1
+  BK3 -.-> N1
+

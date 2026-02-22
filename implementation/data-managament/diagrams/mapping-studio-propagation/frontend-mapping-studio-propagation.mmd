@@ -1,0 +1,37 @@
+flowchart LR
+  A["Studio Mapping edits"] --> B["assembleMap()"]
+  B --> C["PUT /studio/:category/workbook-map"]
+  C --> D["Save success"]
+  D --> E1["invalidate: studio-workbook-map"]
+  D --> E2["invalidate: studio-introspect"]
+  D --> E3["No global data-change broadcast"]
+
+  E1 --> F1["Mapping tab reflects saved map JSON"]
+  E2 --> F2["Sheet introspection preview updates"]
+
+  A --> G["Run Compile"]
+  G --> H["POST /studio/:category/compile"]
+  H --> I["process-completed data-change"]
+  I --> J["AppShell invalidateQueries fanout"]
+  I --> K["Studio process-finish invalidate list"]
+
+  J --> L1["Review page: /review/layout + /products-index"]
+  L1 --> L2["Grid field contract + flags recalc"]
+
+  J --> M1["Field labels query refresh"]
+  M1 --> M2["Label surfaces update (review/product/component/enum UI)"]
+
+  J --> N1["Component Review queries"]
+  N1 --> N2["/review-components/layout + /components"]
+  J --> O1["Enum Review query"]
+  O1 --> O2["/review-components/enums"]
+
+  N2 --> P{"SpecDb synced to new compile?"}
+  O2 --> P
+  P -- "No" --> P1["Component/Enum tables may stay stale"]
+  P -- "Yes" --> P2["Component/Enum tables + flags align"]
+
+  K --> Q1["studio-known-values + studio-component-db refreshed"]
+  K --> Q2["review/product/catalog queries refreshed"]
+  K --> Q3["workbook map/context keys are not in compile invalidate list"]
+

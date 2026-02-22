@@ -98,7 +98,8 @@ export function buildPhase07PrimeSources({
   sourceResults = [],
   fieldRules = {},
   identity = {},
-  options = {}
+  options = {},
+  ftsQueryFn = null
 } = {}) {
   const now = new Date().toISOString();
   const rulesMap = normalizeFieldRulesMap(fieldRules);
@@ -138,7 +139,8 @@ export function buildPhase07PrimeSources({
       fieldRule,
       evidencePool,
       identity,
-      maxHits: maxHitsPerField
+      maxHits: maxHitsPerField,
+      ftsQueryFn
     });
     const prime = selectPrimeSourcesForField({
       hits: retrieval.hits,

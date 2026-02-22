@@ -23,6 +23,7 @@
           {
             "column": "D",
             "constraints": [],
+            "field_key": "encoder_type",
             "key": "encoder_type",
             "type": "string",
             "unit": "",
@@ -31,6 +32,7 @@
           {
             "column": "E",
             "constraints": [],
+            "field_key": "encoder_steps",
             "key": "encoder_steps",
             "type": "number",
             "unit": "",
@@ -39,6 +41,7 @@
           {
             "column": "F",
             "constraints": [],
+            "field_key": "encoder_life_span",
             "key": "encoder_life_span",
             "type": "string",
             "unit": "",
@@ -93,6 +96,7 @@
           {
             "column": "D",
             "constraints": [],
+            "field_key": "encoder_type",
             "key": "encoder_type",
             "type": "string",
             "unit": "",
@@ -101,6 +105,7 @@
           {
             "column": "E",
             "constraints": [],
+            "field_key": "encoder_steps",
             "key": "encoder_steps",
             "type": "number",
             "unit": "",
@@ -109,6 +114,7 @@
           {
             "column": "F",
             "constraints": [],
+            "field_key": "encoder_life_span",
             "key": "encoder_life_span",
             "type": "string",
             "unit": "",
@@ -405,6 +411,7 @@
           {
             "column": "E",
             "constraints": [],
+            "field_key": "switch_life_span",
             "key": "switch_life_span",
             "type": "string",
             "unit": "",
@@ -422,6 +429,7 @@
           {
             "column": "G",
             "constraints": [],
+            "field_key": "releasing_force",
             "key": "releasing_force",
             "type": "number",
             "unit": "gf",
@@ -485,6 +493,7 @@
           {
             "column": "E",
             "constraints": [],
+            "field_key": "switch_life_span",
             "key": "switch_life_span",
             "type": "string",
             "unit": "",
@@ -502,6 +511,7 @@
           {
             "column": "G",
             "constraints": [],
+            "field_key": "releasing_force",
             "key": "releasing_force",
             "type": "number",
             "unit": "gf",
@@ -1321,7 +1331,9 @@
         "tooltip_md": "Define 'Max Acceleration' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search"
+      "unknown_reason_default": "not_found_after_search",
+      "variance_policy": "upper_bound",
+      "constraints": []
     },
     "adjustable_scroll_wheel": {
       "ai_assist": {
@@ -2089,7 +2101,9 @@
         "tooltip_md": "Define 'Click Force' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search"
+      "unknown_reason_default": "not_found_after_search",
+      "variance_policy": "override_allowed",
+      "constraints": []
     },
     "click_latency": {
       "ai_assist": {
@@ -3606,7 +3620,9 @@
         "tooltip_md": "Max DPI (or max CPI) as integer. Do not list steps; store maximum unless field_rules later adds a steps field.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search"
+      "unknown_reason_default": "not_found_after_search",
+      "variance_policy": "upper_bound",
+      "constraints": []
     },
     "encoder": {
       "ai_assist": {
@@ -3875,6 +3891,117 @@
       },
       "unknown_reason_default": "not_found_after_search"
     },
+    "encoder_life_span": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
+      "aliases": [],
+      "availability": "sometimes",
+      "component": null,
+      "constraints": [],
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "data_type": "string",
+      "difficulty": "medium",
+      "display_name": "Encoder Life Span",
+      "effort": 4,
+      "enum": {
+        "match": {
+          "strategy": "alias"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 1,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "evidence_required": true,
+      "excel_hints": {},
+      "field_key": "encoder_life_span",
+      "group": "encoder",
+      "key": "encoder_life_span",
+      "output_shape": "scalar",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "sometimes",
+        "block_publish_when_unk": false,
+        "difficulty": "medium",
+        "effort": 4,
+        "publish_gate": false,
+        "required_level": "optional"
+      },
+      "required_level": "optional",
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "manual",
+          "spec",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Encoder Life Span"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "Encoder",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "Encoder Life Span",
+        "order": 78,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "Define 'Encoder Life Span' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
+        "tooltip_source": null
+      },
+      "unknown_reason_default": "not_found_after_search",
+      "variance_policy": "authoritative"
+    },
     "encoder_link": {
       "ai_assist": {
         "max_calls": null,
@@ -3991,6 +4118,233 @@
         "tooltip_source": null
       },
       "unknown_reason_default": "not_found_after_search"
+    },
+    "encoder_steps": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
+      "aliases": [],
+      "availability": "sometimes",
+      "component": null,
+      "constraints": [],
+      "contract": {
+        "rounding": {
+          "decimals": 0,
+          "mode": "nearest"
+        },
+        "shape": "scalar",
+        "type": "number",
+        "unit": "",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "data_type": "number",
+      "difficulty": "easy",
+      "display_name": "Encoder Steps",
+      "effort": 3,
+      "enum": {
+        "match": {
+          "strategy": "alias"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "closed",
+        "source": "data_lists.encoder_steps"
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 1,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "evidence_required": true,
+      "excel_hints": {},
+      "field_key": "encoder_steps",
+      "group": "encoder",
+      "key": "encoder_steps",
+      "output_shape": "scalar",
+      "parse": {
+        "template": "number_field"
+      },
+      "priority": {
+        "availability": "sometimes",
+        "block_publish_when_unk": false,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": false,
+        "required_level": "expected"
+      },
+      "required_level": "expected",
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "manual",
+          "spec",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Encoder Steps"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "Encoder",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "Encoder Steps",
+        "order": 76,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "Define 'Encoder Steps' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
+        "tooltip_source": null
+      },
+      "unknown_reason_default": "not_found_after_search",
+      "variance_policy": "authoritative"
+    },
+    "encoder_type": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
+      "aliases": [],
+      "availability": "sometimes",
+      "component": null,
+      "constraints": [],
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "data_type": "string",
+      "difficulty": "easy",
+      "display_name": "Encoder Type",
+      "effort": 3,
+      "enum": {
+        "match": {
+          "strategy": "alias"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 1,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "evidence_required": true,
+      "excel_hints": {},
+      "field_key": "encoder_type",
+      "group": "encoder",
+      "key": "encoder_type",
+      "output_shape": "scalar",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "sometimes",
+        "block_publish_when_unk": false,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": false,
+        "required_level": "expected"
+      },
+      "required_level": "expected",
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "manual",
+          "spec",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Encoder Type"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "Encoder",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "Encoder Type",
+        "order": 77,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "Define 'Encoder Type' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
+        "tooltip_source": null
+      },
+      "unknown_reason_default": "not_found_after_search",
+      "variance_policy": "authoritative"
     },
     "feet_material": {
       "ai_assist": {
@@ -4238,7 +4592,9 @@
         "tooltip_md": "Define 'Flawless Sensor' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search"
+      "unknown_reason_default": "not_found_after_search",
+      "variance_policy": "authoritative",
+      "constraints": []
     },
     "form_factor": {
       "ai_assist": {
@@ -5535,7 +5891,9 @@
         "tooltip_md": "Define 'Max IPS' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search"
+      "unknown_reason_default": "not_found_after_search",
+      "variance_policy": "upper_bound",
+      "constraints": []
     },
     "lift": {
       "ai_assist": {
@@ -8061,6 +8419,133 @@
       },
       "unknown_reason_default": "not_found_after_search"
     },
+    "releasing_force": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
+      "aliases": [],
+      "availability": "sometimes",
+      "component": null,
+      "constraints": [],
+      "contract": {
+        "rounding": {
+          "decimals": 0,
+          "mode": "nearest"
+        },
+        "shape": "scalar",
+        "type": "number",
+        "unit": "gf",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "data_type": "number",
+      "difficulty": "hard",
+      "display_name": "Releasing Force",
+      "effort": 7,
+      "enum": {
+        "match": {
+          "strategy": "alias"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 1,
+        "required": true,
+        "tier_preference": [
+          "tier2",
+          "tier1",
+          "tier3"
+        ]
+      },
+      "evidence_required": true,
+      "excel_hints": {},
+      "field_key": "releasing_force",
+      "group": "switches",
+      "key": "releasing_force",
+      "output_shape": "scalar",
+      "parse": {
+        "strict_unit_required": false,
+        "template": "number_with_unit",
+        "unit": "gf",
+        "unit_accepts": [
+          "gf",
+          "g",
+          "grams",
+          "gram-force"
+        ],
+        "unit_conversions": {
+          "g_to_gf": 1
+        }
+      },
+      "priority": {
+        "availability": "sometimes",
+        "block_publish_when_unk": false,
+        "difficulty": "hard",
+        "effort": 7,
+        "publish_gate": false,
+        "required_level": "optional"
+      },
+      "required_level": "optional",
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "manual",
+          "spec",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Releasing Force"
+        ]
+      },
+      "ui": {
+        "display_decimals": 1,
+        "display_mode": "all",
+        "examples": [],
+        "group": "Switches",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "Releasing Force",
+        "order": 73,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "Define 'Releasing Force' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
+        "tooltip_source": null
+      },
+      "unknown_reason_default": "not_found_after_search",
+      "variance_policy": "authoritative"
+    },
     "rgb": {
       "ai_assist": {
         "max_calls": null,
@@ -8470,17 +8955,13 @@
       "availability": "sometimes",
       "component": null,
       "contract": {
-        "rounding": {
-          "decimals": 0,
-          "mode": "nearest"
-        },
         "shape": "scalar",
-        "type": "integer",
-        "unit": "year",
+        "type": "string",
+        "unit": "",
         "unknown_reason_required": true,
         "unknown_token": "unk"
       },
-      "data_type": "integer",
+      "data_type": "string",
       "difficulty": "easy",
       "display_name": "Sensor Date",
       "effort": 3,
@@ -8529,7 +9010,8 @@
         "accepted_formats": [
           "YYYY",
           "YYYY-MM",
-          "YYYY-MM-DD"
+          "YYYY-MM-DD",
+          "MM YYYY"
         ],
         "template": "date_field"
       },
@@ -8577,18 +9059,22 @@
         "examples": [],
         "group": "Sensor & Performance",
         "guidance_md": null,
-        "input_control": "number",
+        "input_control": "text",
         "label": "Sensor Date",
         "order": 47,
         "placeholder": "unk",
         "prefix": null,
         "short_label": null,
-        "suffix": "year",
+        "suffix": null,
         "tooltip_key": null,
         "tooltip_md": "Define 'Sensor Date' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search"
+      "unknown_reason_default": "not_found_after_search",
+      "variance_policy": "authoritative",
+      "constraints": [
+        "sensor_date <= release_date"
+      ]
     },
     "sensor_latency": {
       "ai_assist": {
@@ -9165,7 +9651,9 @@
         "tooltip_md": "Define 'Sensor Type' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": null
       },
-      "unknown_reason_default": "not_found_after_search"
+      "unknown_reason_default": "not_found_after_search",
+      "variance_policy": "authoritative",
+      "constraints": []
     },
     "shape": {
       "ai_assist": {
@@ -10194,6 +10682,117 @@
       },
       "unknown_reason_default": "not_found_after_search"
     },
+    "switch_life_span": {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
+      "aliases": [],
+      "availability": "expected",
+      "component": null,
+      "constraints": [],
+      "contract": {
+        "shape": "scalar",
+        "type": "string",
+        "unknown_reason_required": true,
+        "unknown_token": "unk"
+      },
+      "data_type": "string",
+      "difficulty": "easy",
+      "display_name": "Switch Life Span",
+      "effort": 3,
+      "enum": {
+        "match": {
+          "strategy": "alias"
+        },
+        "new_value_policy": {
+          "accept_if_evidence": true,
+          "mark_needs_curation": true,
+          "suggestion_target": "_suggestions/enums.json"
+        },
+        "policy": "open",
+        "source": null
+      },
+      "evidence": {
+        "conflict_policy": "resolve_by_tier_else_unknown",
+        "min_evidence_refs": 1,
+        "required": true,
+        "tier_preference": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ]
+      },
+      "evidence_required": true,
+      "excel_hints": {},
+      "field_key": "switch_life_span",
+      "group": "switches",
+      "key": "switch_life_span",
+      "output_shape": "scalar",
+      "parse": {
+        "template": "text_field"
+      },
+      "priority": {
+        "availability": "expected",
+        "block_publish_when_unk": false,
+        "difficulty": "easy",
+        "effort": 3,
+        "publish_gate": false,
+        "required_level": "expected"
+      },
+      "required_level": "expected",
+      "search_hints": {
+        "domain_hints": [
+          "manufacturer",
+          "support",
+          "manual",
+          "pdf"
+        ],
+        "preferred_content_types": [
+          "support",
+          "manual",
+          "spec",
+          "pdf",
+          "product_page"
+        ],
+        "preferred_tiers": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "query_templates": [
+          "{brand} {model} {field}",
+          "{brand} {model} specifications {field}",
+          "{brand} {model} manual pdf {field}",
+          "{brand} {model} datasheet {field}"
+        ],
+        "query_terms": [
+          "Switch Life Span"
+        ]
+      },
+      "ui": {
+        "display_decimals": 0,
+        "display_mode": "all",
+        "examples": [],
+        "group": "Switches",
+        "guidance_md": null,
+        "input_control": "text",
+        "label": "Switch Life Span",
+        "order": 67,
+        "placeholder": "unk",
+        "prefix": null,
+        "short_label": null,
+        "suffix": null,
+        "tooltip_key": null,
+        "tooltip_md": "Define 'Switch Life Span' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
+        "tooltip_source": null
+      },
+      "unknown_reason_default": "not_found_after_search",
+      "variance_policy": "authoritative"
+    },
     "switch_type": {
       "ai_assist": {
         "max_calls": null,
@@ -10320,7 +10919,9 @@
         "tooltip_md": "Define 'Switch Type' according to contract. If not provable with evidence, output 'unk' with unknown_reason.",
         "tooltip_source": "hbs_tooltipsMouse.js"
       },
-      "unknown_reason_default": "not_found_after_search"
+      "unknown_reason_default": "not_found_after_search",
+      "variance_policy": "authoritative",
+      "constraints": []
     },
     "switches_link": {
       "ai_assist": {

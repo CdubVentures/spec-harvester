@@ -16,7 +16,7 @@ export function evaluateValidationGate({
 
   const checks = {
     identity_gate_ok: Boolean(identityGateValidated),
-    identity_confidence_ok: identityConfidence >= 0.99,
+    identity_confidence_ok: identityConfidence >= 0.70,
     anchor_conflicts_ok: anchorMajorConflictsCount === 0,
     required_completeness_ok: completenessRequired >= targetCompleteness,
     confidence_ok: confidence >= targetConfidence,

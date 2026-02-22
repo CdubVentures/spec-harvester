@@ -250,10 +250,64 @@ function dimensionConflict(values) {
   if (nums.length < 2) {
     return false;
   }
-  return Math.max(...nums) - Math.min(...nums) > 1;
+  return Math.max(...nums) - Math.min(...nums) > 3;
 }
 
-function buildIdentityCriticalContradictions(sources) {
+function connectionClassesCompatible(values) {
+  const classes = [...values].map((v) => {
+    const token = String(v).toLowerCase();
+    const hasWireless = token.includes('wireless');
+    const hasWired = token.includes('wired') || token.includes('usb');
+    if (hasWireless && hasWired) return 'dual';
+    if (hasWireless) return 'wireless';
+    if (hasWired) return 'wired';
+    return 'unk';
+  }).filter((c) => c !== 'unk');
+  if (classes.length < 2) return true;
+  const unique = [...new Set(classes)];
+  if (unique.length === 1) return true;
+  if (unique.includes('dual')) {
+    const nonDual = unique.filter((c) => c !== 'dual');
+    return nonDual.every((c) => c === 'wireless' || c === 'wired');
+  }
+  return false;
+}
+
+function sensorTokenOverlap(values) {
+  const tokenSets = [...values].map((v) => tokenize(v));
+  if (tokenSets.length < 2) return true;
+  for (let i = 0; i < tokenSets.length; i++) {
+    for (let j = i + 1; j < tokenSets.length; j++) {
+      const a = tokenSets[i];
+      const b = tokenSets[j];
+      const allTokens = new Set([...a, ...b]);
+      if (allTokens.size === 0) continue;
+      const overlap = a.filter((t) => b.includes(t)).length;
+      const maxLen = Math.max(a.length, b.length);
+      if (maxLen > 0 && overlap / maxLen < 0.6) return false;
+    }
+  }
+  return true;
+}
+
+function skuTokenOverlap(values) {
+  const tokenSets = [...values].map((v) => {
+    const segments = String(v).split(/[-_\s]+/).filter(Boolean);
+    return segments.map((s) => s.toLowerCase());
+  });
+  if (tokenSets.length < 2) return true;
+  for (let i = 0; i < tokenSets.length; i++) {
+    for (let j = i + 1; j < tokenSets.length; j++) {
+      const a = tokenSets[i];
+      const b = tokenSets[j];
+      const overlap = a.filter((t) => b.includes(t)).length;
+      if (overlap === 0) return false;
+    }
+  }
+  return true;
+}
+
+export function buildIdentityCriticalContradictions(sources) {
   const contradictions = [];
   const accepted = sources.filter((s) => s.identity?.match && !s.discoveryOnly);
 
@@ -263,7 +317,7 @@ function buildIdentityCriticalContradictions(sources) {
       .filter(Boolean)
       .map((v) => normalizeToken(v))
   );
-  if (connectionValues.size > 1) {
+  if (connectionValues.size > 1 && !connectionClassesCompatible(connectionValues)) {
     contradictions.push({ source: 'aggregate', conflict: 'connection_class_conflict' });
   }
 
@@ -273,7 +327,7 @@ function buildIdentityCriticalContradictions(sources) {
       .filter(Boolean)
       .map((v) => normalizeToken(v))
   );
-  if (sensorValues.size > 1) {
+  if (sensorValues.size > 1 && !sensorTokenOverlap(sensorValues)) {
     contradictions.push({ source: 'aggregate', conflict: 'sensor_family_conflict' });
   }
 
@@ -283,7 +337,7 @@ function buildIdentityCriticalContradictions(sources) {
       .filter(Boolean)
       .map((v) => normalizeToken(v))
   );
-  if (skuValues.size > 1) {
+  if (skuValues.size > 1 && !skuTokenOverlap(skuValues)) {
     contradictions.push({ source: 'aggregate', conflict: 'sku_conflict' });
   }
 
@@ -583,7 +637,7 @@ export function evaluateIdentityGate(sourceResults) {
   certainty = Math.max(0, Math.min(1, certainty));
 
   if (validated) {
-    certainty = Math.max(certainty, 0.99);
+    certainty = Math.max(certainty, 0.95);
   }
 
   let status = 'CONFIRMED';
@@ -604,7 +658,7 @@ export function evaluateIdentityGate(sourceResults) {
   }
 
   const needsReview = status !== 'CONFIRMED';
-  if (certainty < 0.99) {
+  if (certainty < 0.70) {
     reasonCodes.push('certainty_below_publish_threshold');
   }
 

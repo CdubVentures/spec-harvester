@@ -24,6 +24,19 @@ function isNoResultError(error) {
   );
 }
 
+function classifyFetchError(error) {
+  const msg = String(error?.message || '').toLowerCase();
+  const statusCode = Number(error?.statusCode || error?.status || 0);
+
+  if (statusCode === 429 || msg.includes('429') || msg.includes('too many requests')) return 'rate_limited';
+  if (statusCode === 403 || msg.includes('403') || msg.includes('forbidden')) return 'try_alternate';
+  if (statusCode >= 500 || msg.includes('500') || msg.includes('internal server error')) return 'try_alternate';
+  if (msg.includes('timeout') || msg.includes('timed out') || msg.includes('navigation timeout')) return 'try_alternate';
+  if (msg.includes('network') || msg.includes('fetch failed') || msg.includes('fetch error')) return 'try_alternate';
+  if (msg.includes('no_result') || msg.includes('request queue operation')) return 'try_alternate';
+  return 'no_fallback';
+}
+
 function fallbackModesFor(mode = '') {
   const token = normalizeMode(mode);
   if (token === 'crawlee') {
@@ -151,8 +164,8 @@ export class DynamicCrawlerService {
       return withFetcherTelemetry(pageData, this.mode);
     } catch (error) {
       const modeAtError = this.mode;
-      const noResult = isNoResultError(error);
-      const fallbackModes = noResult ? fallbackModesFor(modeAtError) : [];
+      const errorClass = classifyFetchError(error);
+      const fallbackModes = errorClass === 'try_alternate' ? fallbackModesFor(modeAtError) : [];
 
       for (const fallbackMode of fallbackModes) {
         try {

@@ -37,6 +37,10 @@ function isObject(v) {
   return Boolean(v) && typeof v === 'object' && !Array.isArray(v);
 }
 
+function toArray(v) {
+  return Array.isArray(v) ? v : [];
+}
+
 function normalizeToken(v) {
   return String(v || '').trim().toLowerCase();
 }
@@ -57,6 +61,62 @@ function extractComponentTypeFromRule(rule) {
     if (parsed) return parsed;
   }
   return null;
+}
+
+function resolveComponentMakerHint(fields, fieldKey, componentType) {
+  const scopeType = String(componentType || '').trim();
+  const scopeField = String(fieldKey || '').trim();
+  const hintKeys = [
+    `${scopeType}_brand`,
+    `${scopeType}_maker`,
+    `${scopeField}_brand`,
+    `${scopeField}_maker`,
+    'brand',
+    'maker',
+  ].filter(Boolean);
+  for (const hintKey of hintKeys) {
+    const raw = fields?.[hintKey];
+    const hint = String(raw ?? '').trim();
+    if (!isKnownToken(hint)) continue;
+    return hint;
+  }
+  return '';
+}
+
+function dedupeComponentEntries(entries = []) {
+  const unique = [];
+  const seen = new Set();
+  for (const entry of entries) {
+    if (!isObject(entry)) continue;
+    const key = `${normalizeToken(entry.canonical_name)}::${normalizeToken(entry.maker)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(entry);
+  }
+  return unique;
+}
+
+function resolveComponentEntryByNameAndMaker(compDb, rawValueText, makerHint = '') {
+  const token = normalizeToken(rawValueText);
+  if (!token) return { entry: null, ambiguous: false };
+  const compactToken = token.replace(/\s+/g, '');
+  const allMatches = dedupeComponentEntries([
+    ...(toArray(compDb?.__indexAll?.get(token))),
+    ...(toArray(compDb?.__indexAll?.get(compactToken))),
+  ]);
+  if (allMatches.length === 0) {
+    const fallback = compDb?.__index?.get(token) || compDb?.__index?.get(compactToken) || null;
+    return { entry: fallback, ambiguous: false };
+  }
+  if (allMatches.length === 1) {
+    return { entry: allMatches[0], ambiguous: false };
+  }
+  const makerToken = normalizeToken(makerHint);
+  if (!makerToken) return { entry: null, ambiguous: true };
+  const makerMatches = allMatches.filter((entry) => normalizeToken(entry?.maker) === makerToken);
+  if (makerMatches.length === 1) return { entry: makerMatches[0], ambiguous: false };
+  if (makerMatches.length > 1) return { entry: null, ambiguous: true };
+  return { entry: null, ambiguous: true };
 }
 
 function expandListLinkValues(value) {
@@ -237,12 +297,14 @@ function seedComponents(db, fieldRules) {
         const maker = String(entry.maker || '').trim();
         const links = Array.isArray(entry.links) ? entry.links : null;
 
+        const entrySource = entry.__discovery_source || 'component_db';
+
         const idRow = db.upsertComponentIdentity({
           componentType,
           canonicalName,
           maker,
           links,
-          source: 'component_db'
+          source: entrySource,
         });
         identityCount++;
 
@@ -251,18 +313,24 @@ function seedComponents(db, fieldRules) {
           for (const alias of aliases) {
             const trimmed = String(alias || '').trim();
             if (!trimmed) continue;
-            db.insertAlias(idRow.id, trimmed, 'component_db');
+            db.insertAlias(idRow.id, trimmed, entrySource);
             aliasCount++;
           }
           // Also add canonical_name as alias for findComponentByAlias lookups
-          db.insertAlias(idRow.id, canonicalName, 'component_db');
+          db.insertAlias(idRow.id, canonicalName, entrySource);
           aliasCount++;
         }
 
         const properties = isObject(entry.properties) ? entry.properties : {};
         const variancePolicies = isObject(entry.__variance_policies) ? entry.__variance_policies : {};
         const entryConstraints = isObject(entry.__constraints) ? entry.__constraints : {};
+        const ruleFields = isObject(fieldRules?.rules?.fields)
+          ? fieldRules.rules.fields
+          : (isObject(fieldRules?.fields) ? fieldRules.fields : {});
         for (const [propKey, propVal] of Object.entries(properties)) {
+          const fieldRule = isObject(ruleFields[propKey]) ? ruleFields[propKey] : null;
+          const ruleVariance = fieldRule?.variance_policy ?? null;
+          const ruleConstraints = Array.isArray(fieldRule?.constraints) ? fieldRule.constraints : null;
           db.upsertComponentValue({
             componentType,
             componentName: canonicalName,
@@ -270,9 +338,9 @@ function seedComponents(db, fieldRules) {
             propertyKey: propKey,
             value: propVal != null ? String(propVal) : null,
             confidence: 1.0,
-            variancePolicy: variancePolicies[propKey] ?? null,
-            source: 'component_db',
-            constraints: Array.isArray(entryConstraints[propKey]) ? entryConstraints[propKey] : null
+            variancePolicy: ruleVariance ?? variancePolicies[propKey] ?? null,
+            source: entrySource,
+            constraints: ruleConstraints ?? (Array.isArray(entryConstraints[propKey]) ? entryConstraints[propKey] : null)
           });
           valueCount++;
         }
@@ -686,8 +754,8 @@ async function seedProducts(db, config, category, fieldRules, fieldMeta) {
             continue;
           }
 
-          const token = normalizeToken(rawValueText);
-          const matched = compDb.__index.get(token) || compDb.__index.get(token.replace(/\s+/g, ''));
+          const makerHint = resolveComponentMakerHint(fields, fieldKey, compType);
+          const { entry: matched, ambiguous } = resolveComponentEntryByNameAndMaker(compDb, rawValueText, makerHint);
           if (matched) {
             db.upsertItemComponentLink({
               productId,
@@ -695,7 +763,7 @@ async function seedProducts(db, config, category, fieldRules, fieldMeta) {
               componentType: compType,
               componentName: matched.canonical_name || rawValueText,
               componentMaker: matched.maker || '',
-              matchType: 'exact',
+              matchType: makerHint ? 'exact_with_maker' : 'exact',
               matchScore: 1.0
             });
           } else {
@@ -705,7 +773,7 @@ async function seedProducts(db, config, category, fieldRules, fieldMeta) {
               componentType: compType,
               componentName: rawValueText,
               componentMaker: '',
-              matchType: 'unresolved',
+              matchType: ambiguous ? 'ambiguous' : 'unresolved',
               matchScore: 0.0
             });
           }
@@ -1542,6 +1610,27 @@ function seedSourceAndKeyReview(db, category, fieldMeta) {
   };
 }
 
+// ── Step 10: Default source strategies ────────────────────────────────────────
+
+const DEFAULT_SOURCE_STRATEGIES = [
+  { host: 'rtings.com', display_name: 'RTINGS', source_type: 'lab_review', default_tier: 2, discovery_method: 'search_first', priority: 90 },
+  { host: 'techpowerup.com', display_name: 'TechPowerUp', source_type: 'lab_review', default_tier: 2, discovery_method: 'search_first', priority: 85 },
+  { host: 'eloshapes.com', display_name: 'Eloshapes', source_type: 'spec_database', default_tier: 2, discovery_method: 'search_first', priority: 70 },
+];
+
+function seedDefaultSourceStrategies(db) {
+  if (typeof db.listSourceStrategies !== 'function') return 0;
+  const existing = db.listSourceStrategies();
+  const existingHosts = new Set(existing.map(r => r.host));
+  let count = 0;
+  for (const strategy of DEFAULT_SOURCE_STRATEGIES) {
+    if (existingHosts.has(strategy.host)) continue;
+    db.insertSourceStrategy(strategy);
+    count++;
+  }
+  return count;
+}
+
 // ── Main entry point ─────────────────────────────────────────────────────────
 
 export async function seedSpecDb({ db, config, category, fieldRules, logger }) {
@@ -1635,6 +1724,12 @@ export async function seedSpecDb({ db, config, category, fieldRules, logger }) {
     }
   }
 
+  // Step 10: Seed default source strategies (idempotent)
+  const sourceStrategiesSeeded = seedDefaultSourceStrategies(db);
+  if (logger && sourceStrategiesSeeded > 0) {
+    logger.log?.('info', `[seed] Source strategies: ${sourceStrategiesSeeded}`);
+  }
+
   const duration_ms = Date.now() - start;
   const counts = db.counts();
 
@@ -1643,6 +1738,7 @@ export async function seedSpecDb({ db, config, category, fieldRules, logger }) {
     counts,
     duration_ms,
     errors,
+    source_strategies_seeded: sourceStrategiesSeeded,
     components_seeded: compResult.identityCount,
     component_overrides_seeded: overrideResult.overrideCount,
     list_values_seeded: listResult.count,

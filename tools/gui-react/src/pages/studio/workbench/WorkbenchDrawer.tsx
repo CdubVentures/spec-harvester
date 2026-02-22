@@ -14,18 +14,18 @@ import {
   DOMAIN_HINT_SUGGESTIONS, CONTENT_TYPE_SUGGESTIONS, UNIT_ACCEPTS_SUGGESTIONS,
   STUDIO_TIPS,
 } from '../studioConstants';
+import { useFieldRulesStore } from '../useFieldRulesStore';
 import type { DrawerTab } from './workbenchTypes';
-import type { SheetPreview, EnumListEntry, ComponentDbResponse } from '../../../types/studio';
+import type { EnumEntry, ComponentDbResponse, ComponentSource, ComponentSourceProperty } from '../../../types/studio';
 
 interface Props {
   fieldKey: string;
   rule: Record<string, unknown>;
   fieldOrder: string[];
   knownValues: Record<string, string[]>;
-  enumLists: EnumListEntry[];
-  sheets: SheetPreview[];
+  enumLists: EnumEntry[];
   componentDb: ComponentDbResponse;
-  onUpdate: (key: string, path: string, value: unknown) => void;
+  componentSources: ComponentSource[];
   onClose: () => void;
   onNavigate: (key: string) => void;
 }
@@ -46,15 +46,15 @@ export function WorkbenchDrawer({
   fieldOrder,
   knownValues,
   enumLists,
-  sheets,
   componentDb,
-  onUpdate,
+  componentSources,
   onClose,
   onNavigate,
 }: Props) {
   const [activeTab, setActiveTab] = useState<DrawerTab>('contract');
+  const { updateField } = useFieldRulesStore();
 
-  const update = (path: string, value: unknown) => onUpdate(fieldKey, path, value);
+  const update = (path: string, value: unknown) => updateField(fieldKey, path, value);
 
   // Navigation
   const idx = fieldOrder.indexOf(fieldKey);
@@ -144,8 +144,6 @@ export function WorkbenchDrawer({
             rule={rule}
             knownValues={knownValues}
             enumLists={enumLists}
-            sheets={sheets}
-            componentDb={componentDb}
             onUpdate={update}
           />
         )}
@@ -156,7 +154,7 @@ export function WorkbenchDrawer({
           <SearchTab rule={rule} onUpdate={update} />
         )}
         {activeTab === 'deps' && (
-          <DepsTab rule={rule} fieldKey={fieldKey} onUpdate={update} />
+          <DepsTab rule={rule} fieldKey={fieldKey} onUpdate={update} componentSources={componentSources} knownValues={knownValues} />
         )}
         {activeTab === 'preview' && (
           <PreviewTab
@@ -165,7 +163,6 @@ export function WorkbenchDrawer({
             knownValues={knownValues}
             componentDb={componentDb}
             enumLists={enumLists}
-            sheets={sheets}
           />
         )}
       </div>
@@ -538,16 +535,12 @@ function EnumTab({
   rule,
   knownValues,
   enumLists,
-  sheets,
-  componentDb,
   onUpdate,
 }: {
   fieldKey: string;
   rule: Record<string, unknown>;
   knownValues: Record<string, string[]>;
-  enumLists: EnumListEntry[];
-  sheets: SheetPreview[];
-  componentDb: ComponentDbResponse;
+  enumLists: EnumEntry[];
   onUpdate: (path: string, val: unknown) => void;
 }) {
   const parseTemplate = strN(rule, 'parse.template', strN(rule, 'parse_template'));
@@ -557,9 +550,7 @@ function EnumTab({
       rule={rule}
       knownValues={knownValues}
       enumLists={enumLists}
-      sheets={sheets}
       parseTemplate={parseTemplate}
-      componentDb={componentDb}
       onUpdate={onUpdate}
     />
   );
@@ -652,8 +643,9 @@ function SearchTab({ rule, onUpdate }: { rule: Record<string, unknown>; onUpdate
   );
 }
 
-// ── Deps (Component & Excel) Tab ─────────────────────────────────────
-function DepsTab({ rule, fieldKey: _fieldKey, onUpdate }: { rule: Record<string, unknown>; fieldKey: string; onUpdate: (path: string, val: unknown) => void }) {
+// ── Deps (Component) Tab ─────────────────────────────────────────────
+function DepsTab({ rule, fieldKey: _fieldKey, onUpdate, componentSources, knownValues }: { rule: Record<string, unknown>; fieldKey: string; onUpdate: (path: string, val: unknown) => void; componentSources: ComponentSource[]; knownValues: Record<string, string[]> }) {
+  const { editedRules } = useFieldRulesStore();
   return (
     <div className="space-y-3">
       <div>
@@ -704,69 +696,108 @@ function DepsTab({ rule, fieldKey: _fieldKey, onUpdate }: { rule: Record<string,
           <details className="border border-gray-200 dark:border-gray-700 rounded">
             <summary className="px-2 py-1 text-xs font-semibold cursor-pointer bg-gray-50 dark:bg-gray-700/50">Match Settings</summary>
             <div className="p-2 space-y-2">
+              {/* Name Matching */}
+              <div className="text-[11px] font-medium text-gray-400 mb-1">Name Matching</div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <div className={labelCls}>Fuzzy Threshold</div>
+                  <div className={labelCls}>Fuzzy Threshold<Tip text={STUDIO_TIPS.comp_match_fuzzy_threshold} /></div>
                   <input type="number" min={0} max={1} step={0.05} className={`${selectCls} w-full`}
                     value={numN(rule, 'component.match.fuzzy_threshold', 0.75)}
                     onChange={(e) => onUpdate('component.match.fuzzy_threshold', parseFloat(e.target.value) || 0.75)} />
                 </div>
                 <div>
-                  <div className={labelCls}>Auto-Accept</div>
+                  <div className={labelCls}>Name Weight<Tip text={STUDIO_TIPS.comp_match_name_weight} /></div>
+                  <input type="number" min={0} max={1} step={0.05} className={`${selectCls} w-full`}
+                    value={numN(rule, 'component.match.name_weight', 0.4)}
+                    onChange={(e) => onUpdate('component.match.name_weight', parseFloat(e.target.value) || 0.4)} />
+                </div>
+                <div>
+                  <div className={labelCls}>Auto-Accept<Tip text={STUDIO_TIPS.comp_match_auto_accept_score} /></div>
                   <input type="number" min={0} max={1} step={0.05} className={`${selectCls} w-full`}
                     value={numN(rule, 'component.match.auto_accept_score', 0.95)}
                     onChange={(e) => onUpdate('component.match.auto_accept_score', parseFloat(e.target.value) || 0.95)} />
                 </div>
                 <div>
-                  <div className={labelCls}>Flag Review</div>
+                  <div className={labelCls}>Flag Review<Tip text={STUDIO_TIPS.comp_match_flag_review_score} /></div>
                   <input type="number" min={0} max={1} step={0.05} className={`${selectCls} w-full`}
                     value={numN(rule, 'component.match.flag_review_score', 0.65)}
                     onChange={(e) => onUpdate('component.match.flag_review_score', parseFloat(e.target.value) || 0.65)} />
                 </div>
+              </div>
+              {/* Property Matching */}
+              <div className="text-[11px] font-medium text-gray-400 mb-1 mt-2">Property Matching</div>
+              <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <div className={labelCls}>Prop Weight</div>
+                  <div className={labelCls}>Prop Weight<Tip text={STUDIO_TIPS.comp_match_property_weight} /></div>
                   <input type="number" min={0} max={1} step={0.05} className={`${selectCls} w-full`}
                     value={numN(rule, 'component.match.property_weight', 0.6)}
                     onChange={(e) => onUpdate('component.match.property_weight', parseFloat(e.target.value) || 0.6)} />
                 </div>
-              </div>
-              <div>
-                <div className={labelCls}>Property Keys</div>
-                <TagPicker values={arrN(rule, 'component.match.property_keys')} onChange={(v) => onUpdate('component.match.property_keys', v)} placeholder="dpi, ips..." />
-              </div>
-            </div>
-          </details>
-          {/* ── AI Settings ────────────────────────── */}
-          <details className="border border-gray-200 dark:border-gray-700 rounded">
-            <summary className="px-2 py-1 text-xs font-semibold cursor-pointer bg-gray-50 dark:bg-gray-700/50">AI Review</summary>
-            <div className="p-2 space-y-2">
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <div className={labelCls}>Mode</div>
-                  <select className={`${selectCls} w-full`} value={strN(rule, 'component.ai.mode', 'off')}
-                    onChange={(e) => onUpdate('component.ai.mode', e.target.value)}>
-                    <option value="off">off</option>
-                    <option value="judge">judge</option>
-                    <option value="planner">planner</option>
-                    <option value="advisory">advisory</option>
-                  </select>
+                <div className="col-span-2">
+                  <div className={labelCls}>Property Keys<Tip text={STUDIO_TIPS.comp_match_property_keys} /></div>
+                  {(() => {
+                    const compType = strN(rule, 'component.type');
+                    const compSource = componentSources.find(
+                      s => (s.component_type || s.type) === compType
+                    );
+                    const derivedProps = (compSource?.roles?.properties || []).filter(p => p.field_key);
+                    const NUMERIC_ONLY_VP = ['upper_bound', 'lower_bound', 'range'];
+                    return (
+                      <div className="space-y-1">
+                        {derivedProps.map(p => {
+                          const raw = p.variance_policy || 'authoritative';
+                          const fieldRule = editedRules[p.field_key || ''] as Record<string, unknown> | undefined;
+                          const enumSrc = fieldRule ? strN(fieldRule, 'enum.source') : '';
+                          const contractType = fieldRule ? strN(fieldRule, 'contract.type') : '';
+                          const parseTemplate = fieldRule ? strN(fieldRule, 'parse.template') : '';
+                          const isBool = contractType === 'boolean';
+                          const hasEnum = !!enumSrc;
+                          const isComponentDb = hasEnum && enumSrc.startsWith('component_db');
+                          const isExtEnum = hasEnum && !isComponentDb;
+                          const isLocked = contractType !== 'number' || isBool || hasEnum;
+                          const vp = isLocked && NUMERIC_ONLY_VP.includes(raw) ? 'authoritative' : raw;
+                          const fieldValues = knownValues[p.field_key || ''] || [];
+                          const lockReason = isBool
+                            ? 'Boolean field — locked to authoritative'
+                            : isComponentDb
+                              ? `enum.db (${enumSrc.replace(/^component_db\./, '')}) — locked to authoritative`
+                              : isExtEnum
+                                ? `Enum (${enumSrc.replace(/^(known_values|data_lists)\./, '')}) — locked to authoritative`
+                                : contractType !== 'number' && fieldValues.length > 0
+                                  ? `Manual values (${fieldValues.length}) — locked to authoritative`
+                                  : isLocked
+                                    ? 'String property — locked to authoritative'
+                                    : '';
+                          return (
+                            <div key={p.field_key} className="flex items-start gap-1.5 px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-[11px]">
+                              <span className="font-medium text-blue-700 dark:text-blue-300 shrink-0">{p.field_key}</span>
+                              <span
+                                className={`text-[9px] px-1 rounded shrink-0 ${vp === 'override_allowed' ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300' : isLocked ? 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500' : 'bg-blue-100 text-blue-600 dark:bg-blue-800 dark:text-blue-300'}`}
+                                title={lockReason || (vp === 'override_allowed' ? 'Products can override this value without triggering review' : `Variance: ${vp}`)}
+                              >{vp === 'override_allowed' ? 'override' : vp}</span>
+                              {parseTemplate ? <span className="text-[9px] px-1 rounded bg-gray-50 text-gray-400 dark:bg-gray-800 dark:text-gray-500 shrink-0">{parseTemplate}</span> : null}
+                              {isBool ? <span className="text-[9px] px-1 rounded bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400 shrink-0">boolean: yes / no</span> : null}
+                              {isComponentDb ? <span className="text-[9px] px-1 rounded bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400 shrink-0 truncate max-w-[120px]" title={enumSrc}>enum.db: {enumSrc.replace(/^component_db\./, '')}</span> : null}
+                              {isExtEnum ? <span className="text-[9px] px-1 rounded bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400 shrink-0 truncate max-w-[120px]" title={enumSrc}>enum: {enumSrc.replace(/^(known_values|data_lists)\./, '')}</span> : null}
+                              {!isBool && !hasEnum && isLocked && fieldValues.length > 0 && fieldValues.length <= 6 ? (
+                                <div className="flex flex-wrap gap-0.5">
+                                  <span className="text-[9px] text-gray-400 mr-0.5">manual:</span>
+                                  {fieldValues.map(v => <span key={v} className="text-[9px] px-1 rounded bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400">{v}</span>)}
+                                </div>
+                              ) : null}
+                              {!isBool && !hasEnum && isLocked && fieldValues.length > 6 ? (
+                                <span className="text-[9px] text-gray-400" title={fieldValues.join(', ')}>manual: {fieldValues.length} values</span>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                        {derivedProps.length === 0 ? (
+                          <span className="text-xs text-gray-400 italic">No properties mapped — add in Mapping Studio</span>
+                        ) : null}
+                      </div>
+                    );
+                  })()}
                 </div>
-                <div>
-                  <div className={labelCls}>Context</div>
-                  <select className={`${selectCls} w-full`} value={strN(rule, 'component.ai.context_level', 'properties')}
-                    onChange={(e) => onUpdate('component.ai.context_level', e.target.value)}>
-                    <option value="name_only">name_only</option>
-                    <option value="properties">properties</option>
-                    <option value="properties_and_evidence">properties_and_evidence</option>
-                  </select>
-                </div>
-              </div>
-              <div>
-                <div className={labelCls}>Reasoning Note</div>
-                <textarea className={`${selectCls} w-full h-12 resize-y`}
-                  value={strN(rule, 'component.ai.reasoning_note')}
-                  onChange={(e) => onUpdate('component.ai.reasoning_note', e.target.value)}
-                  placeholder="Guidance for AI..." />
               </div>
             </div>
           </details>
@@ -776,12 +807,6 @@ function DepsTab({ rule, fieldKey: _fieldKey, onUpdate }: { rule: Record<string,
         <div className={labelCls}>Aliases<Tip text={STUDIO_TIPS.aliases} /></div>
         <TagPicker values={arrN(rule, 'aliases')} onChange={(v) => onUpdate('aliases', v)} placeholder="alternative names for this key" />
       </div>
-      {rule.excel_hints != null && (
-        <div>
-          <div className={labelCls}>Excel Hints (read-only)</div>
-          <JsonViewer data={rule.excel_hints} maxDepth={2} />
-        </div>
-      )}
     </div>
   );
 }
@@ -793,36 +818,17 @@ function PreviewTab({
   knownValues,
   componentDb,
   enumLists,
-  sheets,
 }: {
   fieldKey: string;
   rule: Record<string, unknown>;
   knownValues: Record<string, string[]>;
   componentDb: ComponentDbResponse;
-  enumLists: EnumListEntry[];
-  sheets: SheetPreview[];
+  enumLists: EnumEntry[];
 }) {
   const kv = knownValues[fieldKey] || [];
   const compType = strN(rule, 'component.type');
   const compEntities = compType && componentDb[compType] ? componentDb[compType] : [];
   const enumSource = strN(rule, 'enum.source', strN(rule, 'enum_source'));
-
-  // Find workbook enum values from data_lists via sheets
-  const enumListEntry = enumLists.find((e) => e.field === fieldKey);
-  let workbookEnumValues: string[] = [];
-  if (enumListEntry && enumSource.startsWith('data_lists.')) {
-    const sheet = sheets.find((s) => s.name === enumListEntry.sheet);
-    if (sheet?.preview?.rows) {
-      const col = enumListEntry.value_column;
-      workbookEnumValues = sheet.preview.rows
-        .filter((r) => r.row >= enumListEntry.row_start && r.row <= enumListEntry.row_end)
-        .map((r) => {
-          const cell = r.cells?.[col];
-          return cell != null ? String(cell) : '';
-        })
-        .filter((v) => v.trim() !== '');
-    }
-  }
 
   return (
     <div className="space-y-3">
@@ -837,23 +843,6 @@ function PreviewTab({
           <span className="text-gray-400 italic">none</span>
         )}
       </div>
-
-      {/* Workbook enum values (from data_lists sheet) */}
-      {workbookEnumValues.length > 0 && (
-        <div>
-          <div className={labelCls}>
-            Workbook Enum Values ({workbookEnumValues.length})
-            <span className="text-[10px] text-gray-400 ml-1">from {enumListEntry!.sheet}:{enumListEntry!.value_column}</span>
-          </div>
-          <div className="flex flex-wrap gap-1 mt-1 max-h-32 overflow-y-auto">
-            {workbookEnumValues.map((v, i) => (
-              <span key={`${v}-${i}`} className="px-1.5 py-0.5 text-[11px] rounded bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 font-mono">
-                {v}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Known values */}
       <div>
@@ -903,14 +892,6 @@ function PreviewTab({
           ) : (
             <span className="text-xs text-gray-400 italic">No entities</span>
           )}
-        </div>
-      )}
-
-      {/* Excel hints preview */}
-      {rule.excel_hints != null && (
-        <div>
-          <div className={labelCls}>Excel Hints</div>
-          <JsonViewer data={rule.excel_hints} maxDepth={2} />
         </div>
       )}
 
