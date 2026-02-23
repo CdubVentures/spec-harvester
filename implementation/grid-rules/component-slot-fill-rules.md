@@ -110,7 +110,7 @@ This section is the deterministic test contract for `_test_*` categories.
 
 ### Row origin behavior in test mode
 1. Rows seeded with `__discovery_source: 'pipeline'` are `Discovered`.
-2. Rows seeded with `__discovery_source: 'component_db'` are non-discovered/manual/import placeholders.
+2. Rows seeded with `__discovery_source: 'component_db'` are non-discovered/reference placeholders.
 3. At payload time, keep up to 3 non-discovered rows per component tab; hide discovered rows with no linked products and no evidence.
 
 ### Slot count formula (authoritative)

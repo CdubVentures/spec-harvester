@@ -1,92 +1,751 @@
 {
-  "version": 2,
-  "version_note": "Migrated: removed Excel import fields",
-  "identity": {
-    "anti_merge_rules": [],
-    "min_identifiers": 2
-  },
-  "tooltip_source": {
-    "format": "auto",
-    "path": ""
-  },
-  "ui_defaults": {},
-  "selected_keys": [
-    "acceleration",
-    "adjustable_scroll_wheel",
-    "adjustable_weight",
-    "battery_hours",
-    "bluetooth",
-    "cable_type",
-    "click_force",
-    "click_latency",
-    "click_latency_list",
-    "coating",
-    "colors",
-    "computer_side_connector",
-    "connection",
-    "connectivity",
-    "debounce",
-    "design",
-    "discontinued",
-    "dpi",
-    "encoder",
-    "encoder_brand",
-    "encoder_link",
-    "feet_material",
-    "flawless_sensor",
-    "form_factor",
-    "front_flare",
-    "grip",
-    "hand_size",
-    "hardware_acceleration",
-    "height",
-    "honeycomb_frame",
-    "hot_swappable",
-    "hump",
-    "ips",
-    "lift",
-    "lift_settings",
-    "lighting",
-    "lngth",
-    "material",
-    "mcu",
-    "mcu_link",
-    "middle_buttons",
-    "motion_sync",
-    "mouse_side_connector",
-    "nvidia_reflex",
-    "onboard_memory",
-    "onboard_memory_value",
-    "paracord",
-    "polling_rate",
-    "price_range",
-    "profile_switching",
-    "programmable_buttons",
-    "release_date",
-    "rgb",
-    "sensor",
-    "sensor_brand",
-    "sensor_date",
-    "sensor_latency",
-    "sensor_latency_list",
-    "sensor_link",
-    "sensor_type",
-    "shape",
-    "shift_latency",
-    "side_buttons",
-    "silent_clicks",
-    "sku",
-    "smoothing",
-    "switch",
-    "switch_brand",
-    "switch_link",
-    "switch_type",
-    "thumb_rest",
-    "tilt_scroll_wheel",
-    "weight",
-    "width",
-    "wireless_charging"
+  "component_sheets": [],
+  "component_sources": [
+    {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
+      "auto_derive_aliases": true,
+      "component_type": "sensor",
+      "first_data_row": 2,
+      "header_row": 1,
+      "priority": {
+        "availability": "expected",
+        "difficulty": "medium",
+        "effort": 8,
+        "required_level": "required"
+      },
+      "roles": {
+        "aliases": [],
+        "links": [],
+        "maker": "YES",
+        "primary_identifier": "A",
+        "properties": [
+          {
+            "column": "",
+            "constraints": [],
+            "field_key": "flawless_sensor",
+            "key": "flawless_sensor",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "",
+            "constraints": [],
+            "field_key": "sensor_type",
+            "key": "sensor_type",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "",
+            "constraints": [],
+            "field_key": "dpi",
+            "key": "dpi",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "",
+            "constraints": [],
+            "field_key": "ips",
+            "key": "ips",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "",
+            "constraints": [],
+            "field_key": "acceleration",
+            "key": "acceleration",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "",
+            "constraints": [
+              "sensor_date <= release_date"
+            ],
+            "field_key": "sensor_date",
+            "key": "sensor_date",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          }
+        ]
+      },
+      "sheet": "",
+      "start_row": 2,
+      "stop_after_blank_primary": 10,
+      "type": "sensor"
+    },
+    {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
+      "auto_derive_aliases": true,
+      "component_type": "switch",
+      "first_data_row": 2,
+      "header_row": 1,
+      "priority": {
+        "availability": "expected",
+        "difficulty": "hard",
+        "effort": 8,
+        "required_level": "required"
+      },
+      "roles": {
+        "aliases": [],
+        "links": [],
+        "maker": "YES",
+        "primary_identifier": "A",
+        "properties": [
+          {
+            "column": "",
+            "constraints": [],
+            "field_key": "switch_type",
+            "key": "switch_type",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "",
+            "constraints": [],
+            "field_key": "switch_life_span",
+            "key": "switch_life_span",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "",
+            "constraints": [],
+            "field_key": "click_force",
+            "key": "click_force",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "override_allowed"
+          },
+          {
+            "column": "",
+            "constraints": [],
+            "field_key": "releasing_force",
+            "key": "releasing_force",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          }
+        ]
+      },
+      "sheet": "",
+      "start_row": 2,
+      "stop_after_blank_primary": 10,
+      "type": "switch"
+    },
+    {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
+      "auto_derive_aliases": true,
+      "component_type": "encoder",
+      "first_data_row": 2,
+      "header_row": 1,
+      "priority": {
+        "availability": "sometimes",
+        "difficulty": "medium",
+        "effort": 5,
+        "required_level": "expected"
+      },
+      "roles": {
+        "aliases": [],
+        "links": [],
+        "maker": "YES",
+        "primary_identifier": "A",
+        "properties": [
+          {
+            "column": "",
+            "constraints": [],
+            "field_key": "encoder_type",
+            "key": "encoder_type",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "",
+            "constraints": [],
+            "field_key": "encoder_steps",
+            "key": "encoder_steps",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          },
+          {
+            "column": "",
+            "constraints": [],
+            "field_key": "encoder_life_span",
+            "key": "encoder_life_span",
+            "type": "string",
+            "unit": "",
+            "variance_policy": "authoritative"
+          }
+        ]
+      },
+      "sheet": "",
+      "start_row": 2,
+      "stop_after_blank_primary": 10,
+      "type": "encoder"
+    },
+    {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
+      "auto_derive_aliases": true,
+      "component_type": "material",
+      "first_data_row": 2,
+      "header_row": 1,
+      "priority": {
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3,
+        "required_level": "expected"
+      },
+      "roles": {
+        "aliases": [],
+        "links": [],
+        "maker": "",
+        "primary_identifier": "A",
+        "properties": []
+      },
+      "sheet": "",
+      "start_row": 2,
+      "stop_after_blank_primary": 10,
+      "type": "material"
+    }
   ],
+  "data_lists": [
+    {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
+      "delimiter": "",
+      "field": "form_factor",
+      "header_row": 0,
+      "manual_values": [
+        "ambidextrous",
+        "left",
+        "lets",
+        "right"
+      ],
+      "mode": "scratch",
+      "normalize": "lower_trim",
+      "priority": {
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3,
+        "required_level": "expected"
+      },
+      "row_end": 0,
+      "row_start": 2,
+      "sheet": "",
+      "value_column": ""
+    },
+    {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
+      "delimiter": "",
+      "field": "shape",
+      "header_row": 0,
+      "manual_values": [
+        "asymmetrical",
+        "ergonomic",
+        "symmetrical"
+      ],
+      "mode": "scratch",
+      "normalize": "lower_trim",
+      "priority": {
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3,
+        "required_level": "expected"
+      },
+      "row_end": 0,
+      "row_start": 2,
+      "sheet": "",
+      "value_column": ""
+    },
+    {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
+      "delimiter": "",
+      "field": "hump",
+      "header_row": 0,
+      "manual_values": [
+        "back - front",
+        "back - rear",
+        "back mid",
+        "front",
+        "middle"
+      ],
+      "mode": "scratch",
+      "normalize": "lower_trim",
+      "priority": {
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3,
+        "required_level": "expected"
+      },
+      "row_end": 0,
+      "row_start": 2,
+      "sheet": "",
+      "value_column": ""
+    },
+    {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
+      "delimiter": "",
+      "field": "front_flare",
+      "header_row": 0,
+      "manual_values": [
+        "flat",
+        "inward",
+        "outward"
+      ],
+      "mode": "scratch",
+      "normalize": "lower_trim",
+      "priority": {
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3,
+        "required_level": "expected"
+      },
+      "row_end": 0,
+      "row_start": 2,
+      "sheet": "",
+      "value_column": ""
+    },
+    {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
+      "delimiter": "",
+      "field": "sensor_type",
+      "header_row": 0,
+      "manual_values": [
+        "laser",
+        "optical",
+        "unk"
+      ],
+      "mode": "scratch",
+      "normalize": "lower_trim",
+      "priority": {
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3,
+        "required_level": "expected"
+      },
+      "row_end": 0,
+      "row_start": 2,
+      "sheet": "",
+      "value_column": ""
+    },
+    {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
+      "delimiter": "",
+      "field": "mcu",
+      "header_row": 0,
+      "manual_values": [
+        "Holtek HT32F52352",
+        "NXP LPC11U68",
+        "NXP LPC54605J512",
+        "Nordic nRF52832",
+        "Nordic nRF52833",
+        "Nordic nRF52840",
+        "Nuvoton M484SIDAE",
+        "STM32",
+        "STM32F072CBU6",
+        "STM32L412C8U6",
+        "Ti CC2462R",
+        "unk",
+        "unspecified"
+      ],
+      "mode": "scratch",
+      "normalize": "lower_trim",
+      "priority": {
+        "availability": "sometimes",
+        "difficulty": "medium",
+        "effort": 5,
+        "required_level": "expected"
+      },
+      "row_end": 0,
+      "row_start": 2,
+      "sheet": "",
+      "value_column": ""
+    },
+    {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
+      "delimiter": "",
+      "field": "switch_type",
+      "header_row": 0,
+      "manual_values": [
+        "Black Shell Blue Dot",
+        "Corsair Quickstrike",
+        "D2FC-F-7N (20M)",
+        "Haptic Inductive Trigger System (HITS)",
+        "Kailh GM 4.0",
+        "LK Optical V2",
+        "Logitech LIGHTFORCE (Omron (70M) - D2FP-FH1)",
+        "Omron",
+        "Omron D2FC-7N",
+        "Omron D2FC-7N (60M)",
+        "Omron D2FC-F-K",
+        "Omron D2FC-F-K (50M)",
+        "Omron D2FP-FN2",
+        "ROG 70M",
+        "ROG Micro Switch II",
+        "ROG Micro Switches",
+        "ROG Optical Micro Switches",
+        "TTC Optical Microswitch",
+        "Transparent Crystal Shell White Dot",
+        "eqwe",
+        "mechanical",
+        "optical",
+        "optical / mechanical",
+        "optical-mechanical",
+        "unk",
+        "unspecified",
+        "yay"
+      ],
+      "mode": "scratch",
+      "normalize": "lower_trim",
+      "priority": {
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3,
+        "required_level": "expected"
+      },
+      "row_end": 0,
+      "row_start": 2,
+      "sheet": "",
+      "value_column": ""
+    },
+    {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
+      "delimiter": "",
+      "field": "connection",
+      "header_row": 0,
+      "manual_values": [
+        "1",
+        "2",
+        "bluetooth",
+        "he",
+        "hybrid",
+        "unk",
+        "wired",
+        "wireless"
+      ],
+      "mode": "scratch",
+      "normalize": "lower_trim",
+      "priority": {
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 6,
+        "required_level": "required"
+      },
+      "row_end": 0,
+      "row_start": 2,
+      "sheet": "",
+      "value_column": ""
+    },
+    {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
+      "delimiter": "",
+      "field": "connectivity",
+      "header_row": 0,
+      "manual_values": [
+        "1",
+        "2.4GHz Dongle",
+        "2.4GHz RF Dongle",
+        "2.4GHz WIFI Dongle",
+        "2.5",
+        "n/a",
+        "unk"
+      ],
+      "mode": "scratch",
+      "normalize": "lower_trim",
+      "priority": {
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 6,
+        "required_level": "required"
+      },
+      "row_end": 0,
+      "row_start": 2,
+      "sheet": "",
+      "value_column": ""
+    },
+    {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
+      "delimiter": "",
+      "field": "polling",
+      "header_row": 0,
+      "manual_values": [],
+      "mode": "scratch",
+      "normalize": "lower_trim",
+      "priority": {
+        "availability": "expected",
+        "difficulty": "medium",
+        "effort": 6,
+        "required_level": "required"
+      },
+      "row_end": 0,
+      "row_start": 2,
+      "sheet": "",
+      "value_column": ""
+    },
+    {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
+      "delimiter": "",
+      "field": "lighting",
+      "header_row": 0,
+      "manual_values": [
+        "1 zone (led)",
+        "1 zone (rgb)",
+        "2 zone (led)",
+        "2 zone (rgb)",
+        "3 zone (led)",
+        "3 zone (rgb)",
+        "4 zone (led)",
+        "4 zone (rgb)",
+        "5 zone (led)",
+        "5 zone (rgb)",
+        "6 zone (led)",
+        "6 zone (rgb)",
+        "7 zone (led)",
+        "7 zone (rgb)",
+        "8 zone (rgb)",
+        "9 zone (rgb)",
+        "none"
+      ],
+      "mode": "scratch",
+      "normalize": "lower_trim",
+      "priority": {
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3,
+        "required_level": "expected"
+      },
+      "row_end": 0,
+      "row_start": 2,
+      "sheet": "",
+      "value_column": ""
+    },
+    {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
+      "delimiter": "",
+      "field": "feet_material",
+      "header_row": 0,
+      "manual_values": [
+        "Glass",
+        "PTFE",
+        "PTFE (95%)",
+        "PTFE (Black-Dyed)",
+        "PTFE (Teflon)",
+        "PTFE (Virgin-Grade)",
+        "l"
+      ],
+      "mode": "scratch",
+      "normalize": "lower_trim",
+      "priority": {
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3,
+        "required_level": "expected"
+      },
+      "row_end": 0,
+      "row_start": 2,
+      "sheet": "",
+      "value_column": ""
+    },
+    {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
+      "delimiter": "",
+      "field": "lift_notes",
+      "header_row": 0,
+      "manual_values": [],
+      "mode": "scratch",
+      "normalize": "lower_trim",
+      "priority": {
+        "availability": "expected",
+        "difficulty": "medium",
+        "effort": 3,
+        "required_level": "expected"
+      },
+      "row_end": 0,
+      "row_start": 2,
+      "sheet": "",
+      "value_column": ""
+    },
+    {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
+      "delimiter": "",
+      "field": "coating",
+      "header_row": 0,
+      "manual_values": [
+        "A",
+        "help",
+        "matte",
+        "rubber grips"
+      ],
+      "mode": "scratch",
+      "normalize": "lower_trim",
+      "priority": {
+        "availability": "expected",
+        "difficulty": "easy",
+        "effort": 3,
+        "required_level": "expected"
+      },
+      "row_end": 0,
+      "row_start": 2,
+      "sheet": "",
+      "value_column": ""
+    },
+    {
+      "ai_assist": {
+        "max_calls": null,
+        "max_tokens": null,
+        "mode": null,
+        "model_strategy": "auto",
+        "reasoning_note": ""
+      },
+      "delimiter": "",
+      "field": "encoder_steps",
+      "header_row": 0,
+      "manual_values": [
+        "5",
+        "16",
+        "18",
+        "20",
+        "24",
+        "25",
+        "26",
+        "30",
+        "59"
+      ],
+      "mode": "scratch",
+      "normalize": "lower_trim",
+      "priority": {
+        "availability": "sometimes",
+        "difficulty": "medium",
+        "effort": 5,
+        "required_level": "expected"
+      },
+      "row_end": 0,
+      "row_start": 2,
+      "sheet": "",
+      "value_column": ""
+    }
+  ],
+  "enum_lists": [],
+  "enum_sources": [],
   "expectations": {
     "critical_fields": [
       "polling_rate"
@@ -11761,417 +12420,236 @@
       "value_form_sample": "scalar"
     }
   },
-  "component_sources": [
-    {
-      "type": "sensor",
-      "component_type": "sensor",
-      "roles": {
-        "properties": [
-          {
-            "field_key": "flawless_sensor",
-            "variance_policy": "authoritative"
-          },
-          {
-            "field_key": "sensor_type",
-            "variance_policy": "authoritative"
-          },
-          {
-            "field_key": "dpi",
-            "variance_policy": "upper_bound"
-          },
-          {
-            "field_key": "ips",
-            "variance_policy": "upper_bound"
-          },
-          {
-            "field_key": "acceleration",
-            "variance_policy": "upper_bound"
-          },
-          {
-            "field_key": "sensor_date",
-            "variance_policy": "authoritative",
-            "constraints": [
-              "sensor_date <= release_date"
-            ]
-          }
-        ],
-        "maker": "yes",
-        "aliases": [],
-        "links": []
-      },
-      "priority": {
-        "required_level": "required",
-        "availability": "expected",
-        "difficulty": "medium",
-        "effort": 8
-      }
-    },
-    {
-      "type": "switch",
-      "component_type": "switch",
-      "roles": {
-        "properties": [
-          {
-            "field_key": "switch_type",
-            "variance_policy": "authoritative"
-          },
-          {
-            "field_key": "switch_life_span",
-            "variance_policy": "authoritative"
-          },
-          {
-            "field_key": "click_force",
-            "variance_policy": "override_allowed"
-          },
-          {
-            "field_key": "releasing_force",
-            "variance_policy": "authoritative"
-          }
-        ],
-        "maker": "yes",
-        "aliases": [],
-        "links": []
-      },
-      "priority": {
-        "required_level": "required",
-        "availability": "expected",
-        "difficulty": "hard",
-        "effort": 8
-      }
-    },
-    {
-      "type": "encoder",
-      "component_type": "encoder",
-      "roles": {
-        "properties": [
-          {
-            "field_key": "encoder_type",
-            "variance_policy": "authoritative"
-          },
-          {
-            "field_key": "encoder_steps",
-            "variance_policy": "authoritative"
-          },
-          {
-            "field_key": "encoder_life_span",
-            "variance_policy": "authoritative"
-          }
-        ],
-        "maker": "yes",
-        "aliases": [],
-        "links": []
-      },
-      "priority": {
-        "required_level": "expected",
-        "availability": "sometimes",
-        "difficulty": "medium",
-        "effort": 5
-      }
-    },
-    {
-      "type": "material",
-      "component_type": "material",
-      "roles": {
-        "properties": [],
-        "aliases": [],
-        "links": []
-      },
-      "priority": {
-        "required_level": "expected",
-        "availability": "expected",
-        "difficulty": "easy",
-        "effort": 3
-      }
-    }
+  "identity": {
+    "anti_merge_rules": [],
+    "min_identifiers": 2
+  },
+  "key_list": null,
+  "key_source": null,
+  "manual_enum_values": {
+    "coating": [
+      "A",
+      "help",
+      "matte",
+      "rubber grips"
+    ],
+    "connection": [
+      "1",
+      "2",
+      "bluetooth",
+      "he",
+      "hybrid",
+      "unk",
+      "wired",
+      "wireless"
+    ],
+    "connectivity": [
+      "1",
+      "2.4GHz Dongle",
+      "2.4GHz RF Dongle",
+      "2.4GHz WIFI Dongle",
+      "2.5",
+      "n/a",
+      "unk"
+    ],
+    "encoder_steps": [
+      "5",
+      "16",
+      "18",
+      "20",
+      "24",
+      "25",
+      "26",
+      "30",
+      "59"
+    ],
+    "feet_material": [
+      "Glass",
+      "PTFE",
+      "PTFE (95%)",
+      "PTFE (Black-Dyed)",
+      "PTFE (Teflon)",
+      "PTFE (Virgin-Grade)",
+      "l"
+    ],
+    "form_factor": [
+      "ambidextrous",
+      "left",
+      "lets",
+      "right"
+    ],
+    "front_flare": [
+      "flat",
+      "inward",
+      "outward"
+    ],
+    "hump": [
+      "back - front",
+      "back - rear",
+      "back mid",
+      "front",
+      "middle"
+    ],
+    "lighting": [
+      "1 zone (led)",
+      "1 zone (rgb)",
+      "2 zone (led)",
+      "2 zone (rgb)",
+      "3 zone (led)",
+      "3 zone (rgb)",
+      "4 zone (led)",
+      "4 zone (rgb)",
+      "5 zone (led)",
+      "5 zone (rgb)",
+      "6 zone (led)",
+      "6 zone (rgb)",
+      "7 zone (led)",
+      "7 zone (rgb)",
+      "8 zone (rgb)",
+      "9 zone (rgb)",
+      "none"
+    ],
+    "mcu": [
+      "Holtek HT32F52352",
+      "NXP LPC11U68",
+      "NXP LPC54605J512",
+      "Nordic nRF52832",
+      "Nordic nRF52833",
+      "Nordic nRF52840",
+      "Nuvoton M484SIDAE",
+      "STM32",
+      "STM32F072CBU6",
+      "STM32L412C8U6",
+      "Ti CC2462R",
+      "unk",
+      "unspecified"
+    ],
+    "sensor_type": [
+      "laser",
+      "optical",
+      "unk"
+    ],
+    "shape": [
+      "asymmetrical",
+      "ergonomic",
+      "symmetrical"
+    ],
+    "switch_type": [
+      "Black Shell Blue Dot",
+      "Corsair Quickstrike",
+      "D2FC-F-7N (20M)",
+      "Haptic Inductive Trigger System (HITS)",
+      "Kailh GM 4.0",
+      "LK Optical V2",
+      "Logitech LIGHTFORCE (Omron (70M) - D2FP-FH1)",
+      "Omron",
+      "Omron D2FC-7N",
+      "Omron D2FC-7N (60M)",
+      "Omron D2FC-F-K",
+      "Omron D2FC-F-K (50M)",
+      "Omron D2FP-FN2",
+      "ROG 70M",
+      "ROG Micro Switch II",
+      "ROG Micro Switches",
+      "ROG Optical Micro Switches",
+      "TTC Optical Microswitch",
+      "Transparent Crystal Shell White Dot",
+      "eqwe",
+      "mechanical",
+      "optical",
+      "optical / mechanical",
+      "optical-mechanical",
+      "unk",
+      "unspecified",
+      "yay"
+    ]
+  },
+  "product_table": null,
+  "sampling": null,
+  "selected_keys": [
+    "acceleration",
+    "adjustable_scroll_wheel",
+    "adjustable_weight",
+    "battery_hours",
+    "bluetooth",
+    "cable_type",
+    "click_force",
+    "click_latency",
+    "click_latency_list",
+    "coating",
+    "colors",
+    "computer_side_connector",
+    "connection",
+    "connectivity",
+    "debounce",
+    "design",
+    "discontinued",
+    "dpi",
+    "encoder",
+    "encoder_brand",
+    "encoder_link",
+    "feet_material",
+    "flawless_sensor",
+    "form_factor",
+    "front_flare",
+    "grip",
+    "hand_size",
+    "hardware_acceleration",
+    "height",
+    "honeycomb_frame",
+    "hot_swappable",
+    "hump",
+    "ips",
+    "lift",
+    "lift_settings",
+    "lighting",
+    "lngth",
+    "material",
+    "mcu",
+    "mcu_link",
+    "middle_buttons",
+    "motion_sync",
+    "mouse_side_connector",
+    "nvidia_reflex",
+    "onboard_memory",
+    "onboard_memory_value",
+    "paracord",
+    "polling_rate",
+    "price_range",
+    "profile_switching",
+    "programmable_buttons",
+    "release_date",
+    "rgb",
+    "sensor",
+    "sensor_brand",
+    "sensor_date",
+    "sensor_latency",
+    "sensor_latency_list",
+    "sensor_link",
+    "sensor_type",
+    "shape",
+    "shift_latency",
+    "side_buttons",
+    "silent_clicks",
+    "sku",
+    "smoothing",
+    "switch",
+    "switch_brand",
+    "switch_link",
+    "switch_type",
+    "thumb_rest",
+    "tilt_scroll_wheel",
+    "weight",
+    "width",
+    "wireless_charging"
   ],
-  "enum_lists": [
-    {
-      "field": "form_factor",
-      "normalize": "lower_trim",
-      "values": [
-        "ambidextrous",
-        "left",
-        "lets",
-        "right"
-      ],
-      "priority": {
-        "required_level": "expected",
-        "availability": "expected",
-        "difficulty": "easy",
-        "effort": 3
-      }
-    },
-    {
-      "field": "shape",
-      "normalize": "lower_trim",
-      "values": [
-        "asymmetrical",
-        "ergonomic",
-        "symmetrical"
-      ],
-      "priority": {
-        "required_level": "expected",
-        "availability": "expected",
-        "difficulty": "easy",
-        "effort": 3
-      }
-    },
-    {
-      "field": "hump",
-      "normalize": "lower_trim",
-      "values": [
-        "back - front",
-        "back - rear",
-        "back mid",
-        "front",
-        "middle"
-      ],
-      "priority": {
-        "required_level": "expected",
-        "availability": "expected",
-        "difficulty": "easy",
-        "effort": 3
-      }
-    },
-    {
-      "field": "front_flare",
-      "normalize": "lower_trim",
-      "values": [
-        "flat",
-        "inward",
-        "outward"
-      ],
-      "priority": {
-        "required_level": "expected",
-        "availability": "expected",
-        "difficulty": "easy",
-        "effort": 3
-      }
-    },
-    {
-      "field": "sensor_type",
-      "normalize": "lower_trim",
-      "values": [
-        "laser",
-        "optical",
-        "unk"
-      ],
-      "priority": {
-        "required_level": "expected",
-        "availability": "expected",
-        "difficulty": "easy",
-        "effort": 3
-      }
-    },
-    {
-      "field": "mcu",
-      "normalize": "lower_trim",
-      "values": [
-        "Holtek HT32F52352",
-        "NXP LPC11U68",
-        "NXP LPC54605J512",
-        "Nordic nRF52832",
-        "Nordic nRF52833",
-        "Nordic nRF52840",
-        "Nuvoton M484SIDAE",
-        "STM32",
-        "STM32F072CBU6",
-        "STM32L412C8U6",
-        "Ti CC2462R",
-        "unk",
-        "unspecified"
-      ],
-      "priority": {
-        "required_level": "expected",
-        "availability": "sometimes",
-        "difficulty": "medium",
-        "effort": 5
-      }
-    },
-    {
-      "field": "switch_type",
-      "normalize": "lower_trim",
-      "values": [
-        "Black Shell Blue Dot",
-        "Corsair Quickstrike",
-        "D2FC-F-7N (20M)",
-        "Haptic Inductive Trigger System (HITS)",
-        "Kailh GM 4.0",
-        "LK Optical V2",
-        "Logitech LIGHTFORCE (Omron (70M) - D2FP-FH1)",
-        "Omron",
-        "Omron D2FC-7N",
-        "Omron D2FC-7N (60M)",
-        "Omron D2FC-F-K",
-        "Omron D2FC-F-K (50M)",
-        "Omron D2FP-FN2",
-        "ROG 70M",
-        "ROG Micro Switch II",
-        "ROG Micro Switches",
-        "ROG Optical Micro Switches",
-        "TTC Optical Microswitch",
-        "Transparent Crystal Shell White Dot",
-        "eqwe",
-        "mechanical",
-        "optical",
-        "optical / mechanical",
-        "optical-mechanical",
-        "unk",
-        "unspecified",
-        "yay"
-      ],
-      "priority": {
-        "required_level": "expected",
-        "availability": "expected",
-        "difficulty": "easy",
-        "effort": 3
-      }
-    },
-    {
-      "field": "connection",
-      "normalize": "lower_trim",
-      "values": [
-        "1",
-        "2",
-        "bluetooth",
-        "he",
-        "hybrid",
-        "unk",
-        "wired",
-        "wireless"
-      ],
-      "priority": {
-        "required_level": "required",
-        "availability": "expected",
-        "difficulty": "easy",
-        "effort": 6
-      }
-    },
-    {
-      "field": "connectivity",
-      "normalize": "lower_trim",
-      "values": [
-        "1",
-        "2.4GHz Dongle",
-        "2.4GHz RF Dongle",
-        "2.4GHz WIFI Dongle",
-        "2.5",
-        "n/a",
-        "unk"
-      ],
-      "priority": {
-        "required_level": "required",
-        "availability": "expected",
-        "difficulty": "easy",
-        "effort": 6
-      }
-    },
-    {
-      "field": "polling",
-      "normalize": "lower_trim",
-      "values": [],
-      "priority": {
-        "required_level": "required",
-        "availability": "expected",
-        "difficulty": "medium",
-        "effort": 6
-      }
-    },
-    {
-      "field": "lighting",
-      "normalize": "lower_trim",
-      "values": [
-        "1 zone (led)",
-        "1 zone (rgb)",
-        "2 zone (led)",
-        "2 zone (rgb)",
-        "3 zone (led)",
-        "3 zone (rgb)",
-        "4 zone (led)",
-        "4 zone (rgb)",
-        "5 zone (led)",
-        "5 zone (rgb)",
-        "6 zone (led)",
-        "6 zone (rgb)",
-        "7 zone (led)",
-        "7 zone (rgb)",
-        "8 zone (rgb)",
-        "9 zone (rgb)",
-        "none"
-      ],
-      "priority": {
-        "required_level": "expected",
-        "availability": "expected",
-        "difficulty": "easy",
-        "effort": 3
-      }
-    },
-    {
-      "field": "feet_material",
-      "normalize": "lower_trim",
-      "values": [
-        "Glass",
-        "PTFE",
-        "PTFE (95%)",
-        "PTFE (Black-Dyed)",
-        "PTFE (Teflon)",
-        "PTFE (Virgin-Grade)",
-        "l"
-      ],
-      "priority": {
-        "required_level": "expected",
-        "availability": "expected",
-        "difficulty": "easy",
-        "effort": 3
-      }
-    },
-    {
-      "field": "lift_notes",
-      "normalize": "lower_trim",
-      "values": [],
-      "priority": {
-        "required_level": "expected",
-        "availability": "expected",
-        "difficulty": "medium",
-        "effort": 3
-      }
-    },
-    {
-      "field": "coating",
-      "normalize": "lower_trim",
-      "values": [
-        "A",
-        "help",
-        "matte",
-        "rubber grips"
-      ],
-      "priority": {
-        "required_level": "expected",
-        "availability": "expected",
-        "difficulty": "easy",
-        "effort": 3
-      }
-    },
-    {
-      "field": "encoder_steps",
-      "normalize": "lower_trim",
-      "values": [
-        "5",
-        "16",
-        "18",
-        "20",
-        "24",
-        "25",
-        "26",
-        "30",
-        "59"
-      ],
-      "priority": {
-        "required_level": "expected",
-        "availability": "sometimes",
-        "difficulty": "medium",
-        "effort": 5
-      }
-    }
-  ]
+  "sheet_roles": [],
+  "tooltip_source": {
+    "format": "auto",
+    "path": ""
+  },
+  "ui_defaults": {},
+  "version": 2,
+  "version_note": "Migrated: removed Excel import fields",
+  "workbook_path": ""
 }

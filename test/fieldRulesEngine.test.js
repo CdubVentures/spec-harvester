@@ -695,3 +695,60 @@ test('normalizeFullRecord is deterministic across repeated runs', async () => {
     await fs.rm(fixture.root, { recursive: true, force: true });
   }
 });
+
+test('crossValidate compound boundary: value between field-rule max and component max triggers compound_range_conflict', async () => {
+  const fixture = await createAdvancedEngineFixtureRoot();
+  try {
+    const engine = await FieldRulesEngine.create('mouse', {
+      config: { helperFilesRoot: fixture.helperRoot }
+    });
+    const result = engine.crossValidate('dpi', 28000, {
+      sensor: 'PAW3395',
+      dpi: 28000
+    });
+    assert.equal(result.ok, false);
+    const violation = result.violations.find(v => v.rule === 'sensor_dpi_limit');
+    assert.ok(violation, 'should have sensor_dpi_limit violation');
+    assert.equal(violation.reason_code, 'compound_range_conflict');
+    assert.equal(violation.effective_max, 26000);
+    assert.equal(violation.effective_min, 100);
+    assert.deepEqual(violation.sources, ['field_rule', 'component_db']);
+  } finally {
+    await fs.rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('crossValidate compound boundary: value within compound range passes', async () => {
+  const fixture = await createAdvancedEngineFixtureRoot();
+  try {
+    const engine = await FieldRulesEngine.create('mouse', {
+      config: { helperFilesRoot: fixture.helperRoot }
+    });
+    const result = engine.crossValidate('dpi', 25000, {
+      sensor: 'PAW3395',
+      dpi: 25000
+    });
+    assert.equal(result.ok, true);
+  } finally {
+    await fs.rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('crossValidate compound boundary: value exceeds both field-rule and component still triggers compound_range_conflict', async () => {
+  const fixture = await createAdvancedEngineFixtureRoot();
+  try {
+    const engine = await FieldRulesEngine.create('mouse', {
+      config: { helperFilesRoot: fixture.helperRoot }
+    });
+    const result = engine.crossValidate('dpi', 55000, {
+      sensor: 'PAW3395',
+      dpi: 55000
+    });
+    assert.equal(result.ok, false);
+    const violation = result.violations.find(v => v.rule === 'sensor_dpi_limit');
+    assert.ok(violation, 'should have sensor_dpi_limit violation');
+    assert.equal(violation.reason_code, 'compound_range_conflict');
+  } finally {
+    await fs.rm(fixture.root, { recursive: true, force: true });
+  }
+});

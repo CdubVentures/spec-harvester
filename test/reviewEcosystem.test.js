@@ -696,16 +696,15 @@ test('GRID-03: Candidate acceptance does NOT set overridden=true', async () => {
   } finally { await fs.rm(tempRoot, { recursive: true, force: true }); }
 });
 
-test('GRID-04: Missing value shows gray color and needs_review=true', async () => {
+test('GRID-04: Missing value shows gray color — visual treatment codes stripped (G7)', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'review-eco-'));
   try {
     const { storage, config } = await createFullFixture(tempRoot);
-    // Zowie encoder is 'unk'
     const payload = await buildProductReviewPayload({ storage, config, category: CATEGORY, productId: 'mouse-zowie-ec2-c' });
     assert.equal(payload.fields.encoder.selected.value, 'unk');
     assert.equal(payload.fields.encoder.selected.color, 'gray');
-    assert.equal(payload.fields.encoder.needs_review, true);
-    assert.ok(payload.fields.encoder.reason_codes.includes('missing_value'));
+    assert.equal(payload.fields.encoder.reason_codes.includes('missing_value'), false,
+      'missing_value is a visual treatment code and should be stripped (G7)');
   } finally { await fs.rm(tempRoot, { recursive: true, force: true }); }
 });
 
@@ -746,27 +745,27 @@ test('GRID-06: buildFieldState with multiple candidates includes evidence', asyn
   assert.equal(fieldState.candidates[2].source, 'reddit.com');
 });
 
-test('GRID-07: Low confidence value gets correct color', async () => {
-  // below_pass_target forces red
-  const redState = buildFieldState({
+test('GRID-07: Confidence maps to color via confidence dot only — visual treatment codes stripped (G7)', async () => {
+  const state07a = buildFieldState({
     field: 'weight',
     candidates: { weight: [{ candidate_id: 'c1', value: '59', score: 0.7, host: 'example.com' }] },
     normalized: { fields: { weight: '59' } },
     provenance: { weight: { value: '59', confidence: 0.7 } },
     summary: { missing_required_fields: [], fields_below_pass_target: ['weight'], critical_fields_below_pass_target: [] },
   });
-  assert.equal(redState.selected.color, 'red');
-  assert.ok(redState.reason_codes.includes('below_pass_target'));
+  assert.equal(state07a.selected.color, 'yellow',
+    'below_pass_target no longer forces red — confidence 0.7 maps to yellow via dot');
+  assert.equal(state07a.reason_codes.includes('below_pass_target'), false,
+    'below_pass_target is a visual treatment code and should be stripped (G7)');
 
-  // Without below_pass_target, 0.7 = yellow
-  const yellowState = buildFieldState({
+  const state07b = buildFieldState({
     field: 'weight',
     candidates: { weight: [{ candidate_id: 'c1', value: '59', score: 0.7, host: 'example.com' }] },
     normalized: { fields: { weight: '59' } },
     provenance: { weight: { value: '59', confidence: 0.7 } },
     summary: { missing_required_fields: [], fields_below_pass_target: [], critical_fields_below_pass_target: [] },
   });
-  assert.equal(yellowState.selected.color, 'yellow');
+  assert.equal(state07b.selected.color, 'yellow');
 });
 
 test('GRID-08: includeCandidates=false still reports count and source', async () => {

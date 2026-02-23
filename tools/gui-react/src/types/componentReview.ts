@@ -75,7 +75,7 @@ export interface EnumValueReviewItem {
   list_value_id?: number | null;
   enum_list_id?: number | null;
   value: string;
-  source: 'reference' | 'workbook' | 'pipeline' | 'manual';
+  source: 'reference' | 'pipeline' | 'manual';
   source_timestamp?: string | null;
   confidence: number;
   color: 'green' | 'yellow' | 'red' | 'gray' | 'purple';

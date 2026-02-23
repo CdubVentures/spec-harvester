@@ -7,7 +7,7 @@ import {
   buildSyntheticComponentCandidateId,
   buildSyntheticGridAttributeCandidateId,
   buildSyntheticGridCandidateId,
-  buildWorkbookFieldOverrideCandidateId,
+  buildUserFieldOverrideCandidateId,
 } from '../src/utils/candidateIdentifier.js';
 
 test('candidate identifiers are deterministic for identical input', () => {
@@ -43,7 +43,7 @@ test('candidate identifiers differ across contexts for same value', () => {
   assert.notEqual(component, enumId);
 });
 
-test('manual and workbook candidate identifiers are stable and scoped', () => {
+test('manual and user override candidate identifiers are stable and scoped', () => {
   const manual = buildManualOverrideCandidateId({
     category: 'mouse',
     productId: 'mouse-logitech-g-pro-x-superlight-2',
@@ -52,7 +52,7 @@ test('manual and workbook candidate identifiers are stable and scoped', () => {
     evidenceUrl: 'https://manufacturer.example/specs',
     evidenceQuote: 'Weight: 59 g',
   });
-  const workbook = buildWorkbookFieldOverrideCandidateId({
+  const userOverride = buildUserFieldOverrideCandidateId({
     productId: 'mouse-logitech-g-pro-x-superlight-2',
     fieldKey: 'weight',
     value: '59',
@@ -65,9 +65,9 @@ test('manual and workbook candidate identifiers are stable and scoped', () => {
   });
 
   assert.equal(manual.startsWith('manual-item_'), true);
-  assert.equal(workbook.startsWith('wb-item_'), true);
+  assert.equal(userOverride.startsWith('user-item_'), true);
   assert.equal(attr.startsWith('pl-grid-attr_'), true);
-  assert.notEqual(manual, workbook);
+  assert.notEqual(manual, userOverride);
 });
 
 test('scoped item candidate identifiers include product+field scope for raw source ids', () => {

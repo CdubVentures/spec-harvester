@@ -23,7 +23,7 @@ Goal: 6-11 rows per component table, 1-3 non-discovered rows, >=2 linked product
 
 ### Row origin behavior in test mode
 1. Rows seeded with `__discovery_source: 'pipeline'` are `Discovered`.
-2. Rows seeded with `__discovery_source: 'component_db'` are non-discovered/manual/import placeholders.
+2. Rows seeded with `__discovery_source: 'component_db'` are non-discovered/reference placeholders.
 3. At payload time, keep up to 3 non-discovered rows per component tab; hide discovered rows with no linked products and no evidence.
 
 ### Slot count formula (authoritative)
@@ -60,7 +60,7 @@ SC(K, F) = count(candidate rows WHERE product_id IN linked_products(K) AND field
 
 This is expected and correct — SC tells you how much evidence exists for a specific property, not how many products use the component.
 
-**LP 0 with SC > 0 on name/maker is also valid.** Non-discovered rows (seeded from the component DB or created via manual override) have no linked products. Their `name_tracked` and `maker_tracked` are initialized with a workbook candidate from the DB identity itself (`componentReviewData.js` lines 968-991, 997-1024) before the linked-product lookup runs. So a non-discovered row shows LP 0, SC 1 on `__name`, SC 1 on `__maker` (if maker is non-empty), and SC 0 on all property slots. A manual override changes the selected value but does not insert new candidate rows — SC stays the same.
+**LP 0 with SC > 0 on name/maker is also valid.** Non-discovered rows (seeded from the component DB or created via manual override) have no linked products. Their `name_tracked` and `maker_tracked` are initialized with a reference candidate from the DB identity itself (`componentReviewData.js`) before the linked-product lookup runs. So a non-discovered row shows LP 0, SC 1 on `__name`, SC 1 on `__maker` (if maker is non-empty), and SC 0 on all property slots. A manual override changes the selected value but does not insert new candidate rows — SC stays the same.
 
 ### Flag rules
 Flag definitions, the 6 real flags, non-flag visual treatments, and the flag-to-domain matrix are defined in `implementation/grid-rules/flag-rules.md`. Only real flags count toward `metrics.flags`.

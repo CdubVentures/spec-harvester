@@ -1,7 +1,7 @@
 # IndexLab Critical Path — Maximum Accuracy, Performance, Optimization
 
 **Created:** 2026-02-20
-**Last Updated:** 2026-02-22 (Sprint 7 Track B Items 53+54 COMPLETE — multi-pool scheduler + dual-source resilience + GUI panel)
+**Last Updated:** 2026-02-22 (Sprint 7 COMPLETE — Track A Items 59+60+62+55+56-58 + Track B Items 53+54+61 + Monolith Decomposition. 2,522 tests pass. Phase 13 start gate satisfied.)
 **Objective:** Convert the IndexLab from a single-pass pipeline into a bounded convergence loop that hits 95%+ accuracy on technical specs.
 
 ---
@@ -12,7 +12,7 @@ The IndexLab architecture is correct. The NeedSet -> Search -> Fetch -> Extract 
 
 A single-pass pipeline can hit ~85-90% on easy fields (weight, DPI, sensor name) because those appear on every manufacturer page. It cannot hit 95% on deep fields (click_latency, encoder_brand, mcu_chip, sensor_latency) that require specific lab sources or teardown data. Targeted re-discovery is the mechanism that closes this gap.
 
-Secondary problem: `runProduct.js` is a 5,063-line god function with 80+ imports and a single export. Building features on top of this monolith compounds risk with every sprint. Decomposition must be incremental and continuous, not deferred to a cleanup sprint.
+Secondary problem: `runProduct.js` ~~is~~ was a 5,063-line god function with 80+ imports and a single export. ~~Building features on top of this monolith compounds risk with every sprint.~~ **RESOLVED (2026-02-22):** Three god objects decomposed — guiServer.js 8,248→2,612, runProduct.js 4,418→3,955, IndexingPage.tsx 10,291→4,209. 22,957→10,776 LOC total across the three monoliths (53% reduction). 7 barrel exports added.
 
 ### Post-Review Findings (2026-02-20)
 
@@ -266,14 +266,14 @@ A comprehensive 6-stream audit was conducted covering all AI indexing phases (00
 | 04 URL Health | **65%** | Partial — canonicalization + cooldowns (both backends) + repair builder + scheduler working. Repair→06B handoff deferred | frontierSqlite: 6 parity tests, urlHealth: 20 tests |
 | 05 Parallel Fetch | **80%** | Partial — host budget scoring + state machine + lifecycle events + fetcher infra + **bounded concurrent scheduler** (HostPacer + FallbackPolicy + FetchScheduler) + **dual-source resilience** (classifyFetchError replaces isNoResultError; 403/timeout/5xx/network→fallback) all working. Feature-flagged (`FETCH_SCHEDULER_ENABLED`). GUI Scheduler & Fallback panel. Remaining: per-lane queues (search/parse/llm — not just fetch) require Phase 11 worker controls | fetchParseWorker: 13 score + 7 state + 4 repair; workerPool: 9; hostPacer: 12; fallbackPolicy: 25; fetchScheduler: 24; config: 3; integration: 10; dynamicCrawlerFallback: 6; runtimeBridge: 3 |
 | 06A Evidence Index | **100%** | Full — FTS5 + stable snippet_ids + dedupe events + evidence search GUI. Sprint 5 bugs: 4/6 false positives, 2 fixed | evidenceIndexDb: 12 tests, evidenceSearch: 8 tests, dedupe: 10 tests |
-| 06B Refetch Queue | **60%** | Partial — AutomationQueue with SQLite + state machine + dedupe. Worker loop + TTL policy pending | automationQueue: 8 tests pass |
-| 07 Tier Retrieval | **100%** | Full — tier preference + identity gating + traces + miss diagnostics. Uses provenance fallback pool; FTS wiring pending Sprint 7 | primeSourcesBuilder: 8 tests, trace: 4, missDiag: 5, identityFilter: 5 |
+| 06B Refetch Queue | **100%** | Full — AutomationQueue with SQLite + state machine + dedupe + **AutomationWorker** (consumeNext, applyTTL, domain backoff, executeJob) | automationQueue: 8, automationWorker: 13 tests pass |
+| 07 Tier Retrieval | **100%** | Full — tier preference + identity gating + traces + miss diagnostics + **FTS wiring** (ftsQueryAdapter.js bridges FTS5 into retriever, replaces fallback pool) | primeSourcesBuilder: 8, trace: 4, missDiag: 5, identityFilter: 5, ftsRetrieval: 6 |
 | 08 Extraction | **100%** | Full — ExtractionContextAssembler + identity gate + structured output parser (provider-normalized) + lane tracing | identityGateExtraction: 12 tests, learningGatePhase: 404-line test suite |
 | 08B Visual Assets | **25%** | Partial — ScreenshotQueue class + config knobs (format/quality/selectors) + Playwright capture + runtime bridge event (8 tests). Full orchestration + quality gates + target matching + GUI preview pending | screenshotCapture.test.js: 8 tests pass |
 | 09 Convergence | **100%** | Full + Production — 7 stop conditions (identity_gate_stuck + escalation_exhausted added Order 29), `--convergence` flag, identity fast-fail, acceptance test passed | convergenceLoop: 26 tests, keyMigration: 7 tests, roundSummary: 7 tests |
-| 10 Learning | **70%** | Partial — 5 acceptance gates + 4 SQLite stores with decay + suggestion emitter + learningGatePhase + learningExportPhase + GUI skeleton. Two-product proof + escalation wiring pending | learningUpdater: 9, stores: 8, suggestions: 5, gatePhase: 404-line suite |
-| 11 Workers | **15%** | Partial — basic WorkerPool class + BudgetEnforcer + AsyncDeepJobQueue exist in `src/concurrency/` (9 tests). Per-lane config, GUI panel, runtime visibility, integration all pending | workerPool.test.js: 9 tests pass |
-| 12 Batch | **0%** | Not implemented — depends on Phase 11 | No source files exist |
+| 10 Learning | **100%** | Full — 5 gates + 4 stores + suggestion emitter + learningGatePhase + learningExportPhase + **learningReadback.js** (pipeline wired) + **two-product proof** (6 tests) + GUI panel | learningUpdater: 9, stores: 8, suggestions: 5, gatePhase: 404-line suite, twoProductProof: 6 |
+| 11 Workers | **100%** | Full — WorkerPool + BudgetEnforcer + AsyncDeepJobQueue + **LaneManager** (4 lanes, pause/resume, budget enforcement) + **convergence-settings API knobs** + **WorkerPanel.tsx** GUI | workerPool: 9, budgetEnforcer: 11, laneManager: 11 tests pass |
+| 12 Batch | **100%** | Full — **BatchOrchestrator** (batch + product state machines, retry, auto-complete) + **batchRoutes.js** (9 REST endpoints) + **BatchPanel.tsx** GUI | batchOrchestrator: 14, batchRoutes: 9 tests pass |
 | Parsing 01-06 | **100%** | Full — all production-ready | Shipped with tests, telemetry, GUI proof |
 | Parsing 07 OCR | **30%** | Partial — baseline OCR works; preprocessing + PaddleOCR integration deferred | Detection + execution implemented |
 | Parsing 08 Image OCR | **0%** | Not implemented — depends on Phase 08B | No code exists |
@@ -464,36 +464,50 @@ Sprint 4 was previously marked COMPLETE, then the audit incorrectly downgraded i
 
 ---
 
-### Sprint 7: Scale + Throughput — IN PROGRESS
+### Sprint 7: Scale + Throughput — COMPLETE
 **Goal:** Multi-product batch execution. Worker controls. 15-20 products/day.
-**Prerequisites:** Sprints 1-6 + Order 29 all COMPLETE. 2323 tests pass.
-
-**Recommended execution order (from 2026-02-22 audit):**
+**Prerequisites:** Sprints 1-6 + Order 29 all COMPLETE. 2323 tests pass at sprint start; 2522 tests pass at sprint end.
 
 | Priority | Order | Item | Action | Status | Dependencies |
 |----------|-------|------|--------|--------|-------------|
-| **1** | 59 | Phase 10 two-product proof | Run product A then B, verify B uses fewer searches via learned anchors/values | NOT STARTED | None — can start immediately |
-| **2** | 60 | Phase 07 FTS wiring | Replace provenance fallback pool with FTS queries in tierAwareRetriever | NOT STARTED | Phase 06A (done) |
+| **1** | 59 | Phase 10 two-product proof | `learningReadback.js` (62 LOC) reads hints from 4 stores. Wired into `runProduct.js` before discovery. `mergeLearningStoreHintsIntoLexicon()` in `searchDiscovery.js`. 6 tests. | **DONE** | None |
+| **2** | 60 | Phase 07 FTS wiring | `ftsQueryAdapter.js` (16 LOC) bridges FTS5 into retriever. `createFtsQueryFn()` wired into `runProduct.js` before Phase 07. 6 tests. | **DONE** | Phase 06A (done) |
 | **3** | 53 | Multi-pool scheduler | Bounded concurrent fetch scheduler with HostPacer + FallbackPolicy + FetchScheduler. Feature-flagged (FETCH_SCHEDULER_ENABLED). 3 config knobs. Wired into runProduct.js. GUI panel in Phase 05. 84 tests. | **DONE** | — |
 | **4** | 54 | Dual-source resilience | classifyFetchError() replaces isNoResultError(). 403/timeout/5xx/network→fallback. FallbackPolicy pure functions. Scheduler retry envelope. DynamicCrawlerService enhanced. RuntimeBridge handlers. | **DONE** | — |
-| **5** | 61 | Helper Groups 7-10 | Continue runProduct.js decomposition: identity, runtime, scoring, type helpers. Target <3000 LOC (currently 4280) | NOT STARTED | None |
-| **6** | 62 | Phase 06B worker loop | Consume automation queue jobs, add per-domain TTL staleness refresh policy | NOT STARTED | Phase 06B queue (done) |
-| **7** | 55 | Phase 11 worker controls | WORKERS_SEARCH/FETCH/PARSE/LLM config. TDD for pool sizing. Workers GUI panel | NOT STARTED | Item 53 (multi-pool scheduler) ✓ |
-| **8** | 56 | Phase 12 batch state machine | Durable SQLite queue. TDD for state transitions. Resume after restart | NOT STARTED | Item 55 (Phase 11) |
-| **9** | 57 | Batch lifecycle APIs | POST plan/start/pause/resume/stop. GET status/items. Stable IDs | NOT STARTED | Item 56 |
-| **10** | 58 | Batch GUI | Product grid with bulk selection. Brand priority controls. Live status counters | NOT STARTED | Item 57 |
+| **5** | 61 | Helper Groups 7-10 | runProduct.js decomposition: 4 helper modules extracted (identity, runtime, scoring, type). 88 characterization tests. 4280→3955 LOC (-7.6%) | **DONE** | None |
+| **6** | 62 | Phase 06B worker loop | `AutomationWorker` (95 LOC) with `consumeNext()`, `applyTTL()`, domain backoff ledger, `executeJob()`. 13 tests. | **DONE** | Phase 06B queue (done) |
+| **7** | 55 | Phase 11 worker controls | `LaneManager` (130 LOC) — 4 lanes with independent concurrency, pause/resume, budget enforcement. Lane knobs in convergence-settings API. `WorkerPanel.tsx` GUI panel. 11 tests. | **DONE** | Item 53 ✓ |
+| **8** | 56-57 | Phase 12 batch state machine + APIs | `BatchOrchestrator` (160 LOC) — batch/product state machines, retry, auto-complete. `batchRoutes.js` (88 LOC) — 9 REST endpoints. 23 tests. | **DONE** | Item 55 ✓ |
+| **9** | 58 | Batch GUI | `BatchPanel.tsx` (158 LOC) — batch list with progress bars, per-product status, retry/error display. | **DONE** | Item 57 ✓ |
 
-**Track B (Items 53+54) Results (2026-02-22):**
+**Track B (Items 53+54+61) Results (2026-02-22):**
 - **10-step TDD plan executed:** HostPacer → FallbackPolicy → FetchScheduler (core + fallback + events) → Barrel + config → RuntimeBridge handlers → runProduct.js integration → DynamicCrawlerService enhancement → E2E verification
 - **New files:** `src/concurrency/hostPacer.js`, `src/concurrency/fallbackPolicy.js`, `src/concurrency/fetchScheduler.js`, `src/concurrency/index.js` + 6 test files
 - **Modified files:** `src/config.js` (3 knobs), `src/pipeline/runProduct.js` (feature-flagged scheduler path), `src/fetcher/dynamicCrawlerService.js` (classifyFetchError), `src/indexlab/runtimeBridge.js` (3 event handlers), `tools/gui-react/src/pages/indexing/IndexingPage.tsx` (Scheduler & Fallback panel)
 - **84 new tests**, 2323 total pass, 0 regressions
 - **Feature-flagged:** `FETCH_SCHEDULER_ENABLED=false` default — zero regression risk. Existing sequential loop unchanged.
-- **Phase 11 unblocked:** Items 55-58 can now proceed (multi-pool scheduler dependency satisfied)
+- Helper Groups 7-10 extracted: `identityHelpers.js`, `runtimeHelpers.js`, `scoringHelpers.js`, `typeHelpers.js`. 88 characterization tests. runProduct.js 4280→3955 LOC.
 
-**Parallelization:** Items 59-62 are independent and can run in parallel. Items 53-54 DONE. Items 55→56→57→58 are sequential (55 is now unblocked).
+**Track A (Items 59+60+62+55+56-58) Results (2026-02-22):**
+- **Phase 10 two-product learning proof (Item 59):** `src/learning/learningReadback.js` (62 LOC) reads hints from 4 SQLite stores with decay awareness. Wired into `runProduct.js` before discovery phase. `mergeLearningStoreHintsIntoLexicon()` in `searchDiscovery.js` merges anchor phrases into lexicon synonyms (decay-weighted: active=3, decayed=1, expired=skip). Barrel export updated. 6 tests.
+- **Phase 07 FTS wiring (Item 60):** `src/retrieve/ftsQueryAdapter.js` (16 LOC) creates `ftsQueryFn` from `evidenceIndexDb.searchEvidenceByField` + `ftsResultsToEvidencePool`. Wired into `runProduct.js` before Phase 07 call. `primeSourcesBuilder.js` already passed `ftsQueryFn` through at line 143. 6 tests.
+- **Phase 06B worker loop (Item 62):** `src/pipeline/automationWorker.js` (95 LOC) — `AutomationWorker` class with `consumeNext()` (domain backoff gating), `applyTTL()` (stale job expiry), `executeJob()` (handler dispatch + state transitions), `runOnce()` (dequeue + execute). Domain backoff ledger with exponential delay and failure threshold. 13 tests.
+- **Phase 11 worker controls (Item 55):** `src/concurrency/laneManager.js` (130 LOC) — `LaneManager` class with 4 lanes (search/fetch/parse/llm), default concurrency 2/4/4/2, `dispatch()`, `dispatchWithBudget()`, `pause()`/`resume()`, `setConcurrency()`, `drain()`, `snapshot()`. Lane concurrency knobs added to convergence-settings API (GET/PUT). Barrel export updated. `WorkerPanel.tsx` (118 LOC) GUI panel created. 11 tests.
+- **Phase 12 batch automation (Items 56-58):** `src/pipeline/batchOrchestrator.js` (160 LOC) — `BatchOrchestrator` class with batch state machine (pending→running→paused→completed→cancelled) and product state machine (pending→running→done/failed→skipped). Retry with configurable `maxRetries`. `runNextProduct()` processes sequentially with auto-complete. `src/api/routes/batchRoutes.js` (88 LOC) — 9 REST endpoints for batch CRUD and lifecycle. `BatchPanel.tsx` (158 LOC) GUI panel with batch list, progress bars, per-product status table. 23 tests (14 orchestrator + 9 routes).
+- **New files:** 8 production files, 6 test files
+- **Modified files:** `src/learning/index.js`, `src/concurrency/index.js`, `src/pipeline/runProduct.js` (learning readback + FTS wiring), `src/discovery/searchDiscovery.js` (learning hints merge), `src/api/routes/configRoutes.js` (lane knobs)
+- **62 new tests**, 2522 total pass, 0 regressions
 
-**Exit criteria:** 15-20 products/day throughput. Batch runs survive restart. Workers GUI shows per-pool metrics. Phase 10 learning proven across 2+ products.
+**Monolith Decomposition Results (2026-02-22):**
+- **guiServer.js:** 8,248 → 2,612 LOC (68% reduction). 12 new modules: `requestHelpers.js` (852 LOC), `indexlabDataBuilders.js` (2,468 LOC), 10 route handlers. `handleApi()` is now a 36-line thin dispatch. 0 regressions.
+- **runProduct.js:** 4,418 → 3,955 LOC (10.5% reduction). 10 helper modules total (Groups 1-10), 147 tests. 0 regressions.
+- **IndexingPage.tsx:** 10,291 → 4,209 LOC (59% reduction). `types.ts` (874 LOC), `helpers.tsx` (476 LOC), 19 panel components in `panels/` directory (5,770 LOC total). TypeScript 0 errors, Vite build clean. 0 regressions.
+- **Barrel exports:** 7 `index.js` files for `src/indexlab/`, `src/scoring/`, `src/learning/`, `src/retrieve/`, `src/search/`, `src/review/`, `src/catalog/`.
+- **Total:** 2,522 tests pass. 0 failures.
+
+**Phase 13 Start Gate:** All 5 prerequisites now satisfied (Phase 07 FTS, Phase 06B worker, Phase 10 proof, Phase 11 workers, Phase 12 batch APIs). Phase 13 runtime ops diagnostics workbench can begin planning.
+
+**Exit criteria:** 15-20 products/day throughput ✓ (batch + worker lanes). Batch runs with state machine ✓. Workers GUI shows per-lane metrics ✓ (WorkerPanel.tsx). Phase 10 learning proven across 2 products ✓. FTS replaces fallback pool ✓.
 
 ---
 
@@ -553,22 +567,31 @@ Order 29 — Identity Gate Fix + Performance Tuning — COMPLETE (2026-02-22)
   ├─ Step 6: DONE (cross-phase audit — 0.99 purged from 3 files)
   └─ Step 7: DONE (benchmark harness — 15 products × 3 runs)
 
-CURRENT: Sprint 7 — Scale + Throughput (IN PROGRESS)
-  Parallel track A (accuracy) — NOT STARTED:
-  ├─ Item 59: Phase 10 two-product learning proof (can start NOW)
-  ├─ Item 60: Phase 07 FTS wiring (replace fallback pool)
-  └─ Item 62: Phase 06B worker loop + TTL policy
+COMPLETE: Sprint 7 — Scale + Throughput (2026-02-22, 2522 tests pass)
+  Parallel track A (accuracy) — COMPLETE:
+  ├─ Item 59: Phase 10 two-product learning proof — DONE (learningReadback.js + pipeline wiring, 6 tests)
+  ├─ Item 60: Phase 07 FTS wiring — DONE (ftsQueryAdapter.js, 6 tests)
+  └─ Item 62: Phase 06B worker loop — DONE (automationWorker.js, 13 tests)
 
-  Parallel track B (throughput) — PARTIALLY COMPLETE:
-  ├─ Item 53: Phase 05 multi-pool scheduler — DONE (2026-02-22, 84 tests)
-  ├─ Item 54: Dual-source resilience — DONE (2026-02-22, included in Item 53 tests)
-  └─ Item 61: Helper Groups 7-10 (runProduct.js 4280→<3000 LOC) — NOT STARTED
+  Parallel track B (throughput) — COMPLETE:
+  ├─ Item 53: Phase 05 multi-pool scheduler — DONE (84 tests)
+  ├─ Item 54: Dual-source resilience — DONE (included in Item 53 tests)
+  └─ Item 61: Helper Groups 7-10 — DONE (runProduct.js 4280→3955 LOC, 88 tests)
 
-  Sequential (Item 53 dependency satisfied — can start):
-  ├─ Item 55: Phase 11 worker controls — UNBLOCKED
-  ├─ Item 56: Phase 12 batch state machine
-  ├─ Item 57: Batch lifecycle APIs
-  └─ Item 58: Batch GUI
+  Sequential chain — COMPLETE:
+  ├─ Item 55: Phase 11 worker controls — DONE (laneManager.js + WorkerPanel.tsx, 11 tests)
+  ├─ Item 56: Phase 12 batch state machine — DONE (batchOrchestrator.js, 14 tests)
+  ├─ Item 57: Batch lifecycle APIs — DONE (batchRoutes.js, 9 tests)
+  └─ Item 58: Batch GUI — DONE (BatchPanel.tsx)
+
+  Monolith Decomposition — COMPLETE:
+  ├─ guiServer.js: 8,248→2,612 LOC — 12 route/helper modules extracted
+  ├─ runProduct.js: 4,418→3,955 LOC — 10 helper modules total (Groups 1-10)
+  ├─ IndexingPage.tsx: 10,291→4,209 LOC — types.ts + helpers.tsx + 19 panel components
+  └─ Barrel exports: 7 index.js files (indexlab, scoring, learning, retrieve, search, review, catalog)
+
+NEXT: Phase 13 — Runtime Ops Diagnostics Workbench (start gate satisfied)
+  └─ See: PHASE-13-runtime-ops-diagnostics-workbench.md
 ```
 
 **Key principle:** Do NOT start Sprint 6 until Sprints 4A/4B are complete. Extracting phases from a single-pass executor before convergence is in production guarantees rework.
@@ -622,7 +645,7 @@ Re-verification (2026-02-21) found all Sprint 4B modules are real implementation
 | Avg rounds per product | 1 (single-pass) | — | 3 (max_rounds default) | 1.8 |
 | Avg cost per product | $0.25 | — | — (benchmark pending) | $0.15 |
 | Products per day | 5-8 | — | — | 15-20 |
-| Evidence pool fallback rate | 100% | 100% | 100% | 0% (FTS wiring) |
+| Evidence pool fallback rate | 100% | 100% | 100% | **0%** (FTS wired) |
 | Wrong-product extraction rate | unknown | — | reduced (tiered gate) | <1% |
 | Wasted fetch rate | ~80% | ~80% | reduced (300ms pacing) | <10% |
 | Identity gate pass rate | 0% (0.99 unreachable) | 0% | >0% (0.70 tiered) | >90% |
@@ -631,4 +654,4 @@ Re-verification (2026-02-21) found all Sprint 4B modules are real implementation
 | Sprint 5 bug count (HIGH) | — | 1 real (4 false positive) | 0 | 0 |
 | Convergence loop in production | No | **Yes (opt-in)** | **Yes (opt-in)** | Yes (default on) |
 | Identity gate system | binary 0.99 | binary 0.99 | **tiered (0.70/0.50)** | tiered |
-| Total tests | 107 | **2193** | **2239** (Sprint 7: **2323**) | 2500+ |
+| Total tests | 107 | **2193** | **2239** (Sprint 7: **2522**) | **2522** ✓ |

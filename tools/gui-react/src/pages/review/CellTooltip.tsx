@@ -128,8 +128,8 @@ export function CellTooltip({ state, children }: CellTooltipProps) {
             </div>
           )}
 
-          {/* Row 2b: Source name when no host (e.g. "workbook" or custom source) */}
-          {!hostSource && directSource && !['workbook', 'override', 'manual', 'unknown'].includes(directSource) && (
+          {/* Row 2b: Source name when no host (e.g. "reference" or custom source) */}
+          {!hostSource && directSource && !['reference', 'override', 'manual', 'unknown'].includes(directSource) && (
             <div className="text-gray-400 mb-1">
               Source: <span className="text-gray-300">{directSource}</span>
             </div>

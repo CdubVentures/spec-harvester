@@ -246,7 +246,8 @@ function buildFieldUncertainty(fields, provenance, contradictions, criticalField
 export function evaluateConstraintGraph({
   fields = {},
   provenance = {},
-  criticalFieldSet = new Set()
+  criticalFieldSet = new Set(),
+  crossValidationFailures = []
 }) {
   const contradictions = [];
 
@@ -255,6 +256,17 @@ export function evaluateConstraintGraph({
   ruleDimensionSanity(fields, contradictions);
   rulePerformanceSanity(fields, contradictions);
   ruleDependencyPairs(fields, contradictions);
+
+  for (const failure of crossValidationFailures) {
+    if (failure.reason_code === 'compound_range_conflict') {
+      addContradiction(contradictions, {
+        code: 'compound_range_conflict',
+        severity: 'error',
+        fields: [failure.field_key],
+        message: `${failure.field_key} value ${failure.actual} outside compound range [${failure.effective_min ?? '?'}, ${failure.effective_max ?? '?'}]`
+      });
+    }
+  }
 
   const field_uncertainty = buildFieldUncertainty(fields, provenance, contradictions, criticalFieldSet);
   const values = Object.values(field_uncertainty);

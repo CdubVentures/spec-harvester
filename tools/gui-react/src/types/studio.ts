@@ -29,6 +29,9 @@ export interface StudioPayload {
   fieldOrder: string[];
   uiFieldCatalog: Record<string, unknown> | null;
   guardrails?: Record<string, unknown>;
+  compiledAt?: string | null;
+  draftSavedAt?: string | null;
+  compileStale?: boolean;
 }
 
 export interface PriorityProfile {

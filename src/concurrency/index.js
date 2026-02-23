@@ -11,3 +11,4 @@ export {
   FETCHER_MODES
 } from './fallbackPolicy.js';
 export { createFetchScheduler } from './fetchScheduler.js';
+export { LaneManager } from './laneManager.js';

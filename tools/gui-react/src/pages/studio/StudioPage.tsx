@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import { api } from '../../api/client';
@@ -18,6 +18,7 @@ import { FieldRulesWorkbench } from './workbench/FieldRulesWorkbench';
 import { useFieldRulesStore } from './useFieldRulesStore';
 import { validateNewKeyTs, rewriteConstraintsTs, constraintRefsKey, reorderFieldOrder, deriveGroupsTs, validateNewGroupTs, validateBulkRows, type BulkKeyRow } from './keyUtils';
 import DraggableKeyList from './DraggableKeyList';
+import { invalidateFieldRulesQueries } from './invalidateFieldRulesQueries';
 import BulkPasteGrid, { type BulkGridRow } from '../../components/common/BulkPasteGrid';
 import {
   selectCls, inputCls, labelCls,
@@ -62,20 +63,21 @@ interface ComponentSourceRoles {
   [k: string]: unknown;
 }
 
-// ── Display label resolution: label > humanized key ─────────────────
+// â"€â"€ Display label resolution: label > humanized key â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function displayLabel(key: string, rule?: Record<string, unknown> | null): string {
   if (!rule) return humanizeField(key);
   const ui = (rule.ui || {}) as Record<string, unknown>;
   return String(ui.label || rule.label || humanizeField(key));
 }
 
-// ── Shared styles ───────────────────────────────────────────────────
+// â"€â"€ Shared styles â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 const btnPrimary = 'px-4 py-2 text-sm bg-accent text-white rounded hover:bg-blue-600 disabled:opacity-50';
 const btnSecondary = 'px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50';
 const btnDanger = 'px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50';
 const sectionCls = 'bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 p-4';
+const actionBtnWidth = 'w-56';
 
-// ── Field Rule Table Columns ────────────────────────────────────────
+// â"€â"€ Field Rule Table Columns â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 interface FieldRuleRow {
   key: string;
   label: string;
@@ -95,7 +97,7 @@ const fieldRuleColumns: ColumnDef<FieldRuleRow, unknown>[] = [
   { accessorKey: 'enumName', header: 'Enum', size: 100 },
 ];
 
-// ── Role definitions ────────────────────────────────────────────────
+// â"€â"€ Role definitions â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 const ROLE_DEFS = [
   { id: 'aliases', label: 'Name Variants (Aliases)' },
   { id: 'maker', label: 'Maker (Brand)' },
@@ -105,7 +107,7 @@ const ROLE_DEFS = [
 
 type RoleId = typeof ROLE_DEFS[number]['id'];
 
-// ── Property row type ───────────────────────────────────────────────
+// â"€â"€ Property row type â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 interface PropertyMapping {
   field_key: string;
   variance_policy: 'authoritative' | 'upper_bound' | 'lower_bound' | 'range' | 'override_allowed';
@@ -116,10 +118,10 @@ const VARIANCE_POLICIES = [
   { value: 'authoritative', label: 'Authoritative' },
   { value: 'upper_bound', label: 'Upper Bound' },
   { value: 'lower_bound', label: 'Lower Bound' },
-  { value: 'range', label: 'Range (±tolerance)' },
+  { value: 'range', label: 'Range (Â±tolerance)' },
 ] as const;
 
-// Legacy property key → product field key mapping (used during migration)
+// Legacy property key â†' product field key mapping (used during migration)
 const LEGACY_PROPERTY_MAP: Record<string, string> = {
   max_dpi: 'dpi',
   max_ips: 'ips',
@@ -319,7 +321,7 @@ function migrateProperty(p: Record<string, unknown>, _rules: Record<string, Fiel
 }
 
 
-// ── Tabs ────────────────────────────────────────────────────────────
+// â"€â"€ Tabs â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 const subTabs = [
   { id: 'mapping', label: '1) Mapping Studio' },
   { id: 'keys', label: '2) Key Navigator' },
@@ -341,15 +343,21 @@ function emptyComponentSource(): ComponentSource {
   };
 }
 
-// ────────────────────────────────────────────────────────────────────
+// â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 export function StudioPage() {
   const category = useUiStore((s) => s.category);
   const [activeTab, setActiveTab] = useState('mapping');
   const [selectedKey, setSelectedKey] = useState('');
   const setProcessStatus = useRuntimeStore((s) => s.setProcessStatus);
   const queryClient = useQueryClient();
+  const autoSaveEnabled = useUiStore((s) => s.autoSaveEnabled);
+  const setAutoSaveEnabled = useUiStore((s) => s.setAutoSaveEnabled);
+  const autoSaveMapEnabled = useUiStore((s) => s.autoSaveMapEnabled);
+  const setAutoSaveMapEnabled = useUiStore((s) => s.setAutoSaveMapEnabled);
+  const hydrated = useRef(false);
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saved'>('idle');
 
-  // ── Queries ─────────────────────────────────────────────────────
+  // â"€â"€ Queries â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   const { data: studio, isLoading } = useQuery({
     queryKey: ['studio', category],
     queryFn: () => api.get<StudioPayload>(`/studio/${category}/payload`),
@@ -390,28 +398,15 @@ export function StudioPage() {
     enabled: activeTab === 'keys' || activeTab === 'contract' || activeTab === 'context',
   });
 
-  // ── Invalidate studio queries when any process finishes ────────
+  // â"€â"€ Invalidate studio queries when any process finishes â"€â"€â"€â"€â"€â"€â"€â"€
   const processStatus = useRuntimeStore((s) => s.processStatus);
   useEffect(() => {
     if (!processStatus.running && processStatus.exitCode !== undefined) {
-      // Studio's own data
-      queryClient.invalidateQueries({ queryKey: ['studio', category] });
-      queryClient.invalidateQueries({ queryKey: ['studio-known-values', category] });
-      queryClient.invalidateQueries({ queryKey: ['studio-component-db', category] });
-      queryClient.invalidateQueries({ queryKey: ['studio-artifacts', category] });
-      // Downstream views that depend on compiled rules
-      queryClient.invalidateQueries({ queryKey: ['catalog', category] });
-      queryClient.invalidateQueries({ queryKey: ['reviewProductsIndex', category] });
-      queryClient.invalidateQueries({ queryKey: ['reviewLayout', category] });
-      queryClient.invalidateQueries({ queryKey: ['componentReviewData', category] });
-      queryClient.invalidateQueries({ queryKey: ['componentReviewLayout', category] });
-      queryClient.invalidateQueries({ queryKey: ['enumReviewData', category] });
-      queryClient.invalidateQueries({ queryKey: ['product', category] });
-      queryClient.invalidateQueries({ queryKey: ['fieldLabels', category] });
+      invalidateFieldRulesQueries(queryClient, category);
     }
   }, [processStatus.running, processStatus.exitCode, category]);
 
-  // ── Mutations ───────────────────────────────────────────────────
+  // â"€â"€ Mutations â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   const compileMut = useMutation({
     mutationFn: () => api.post<ProcessStatus>(`/studio/${category}/compile`),
     onSuccess: (data) => setProcessStatus(data),
@@ -429,21 +424,15 @@ export function StudioPage() {
     },
   });
 
-  const saveDraftsMut = useMutation({
+  const saveEditsMut = useMutation({
     mutationFn: (body: Record<string, unknown>) => api.post<unknown>(`/studio/${category}/save-drafts`, body),
     onSuccess: () => {
       fieldRulesStore.clearRenames();
-      queryClient.invalidateQueries({ queryKey: ['studio-drafts', category] });
-      queryClient.invalidateQueries({ queryKey: ['studio', category] });
-      queryClient.invalidateQueries({ queryKey: ['reviewLayout', category] });
-      queryClient.invalidateQueries({ queryKey: ['product', category] });
-      queryClient.invalidateQueries({ queryKey: ['componentReview', category] });
-      queryClient.invalidateQueries({ queryKey: ['enumReview', category] });
-      queryClient.invalidateQueries({ queryKey: ['fieldLabels', category] });
+      invalidateFieldRulesQueries(queryClient, category);
     },
   });
 
-  // ── Derived data ────────────────────────────────────────────────
+  // â"€â"€ Derived data â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   const rules = studio?.fieldRules || {};
   const fieldOrder = studio?.fieldOrder || Object.keys(rules);
   const wbMap = wbMapRes?.map || ({} as StudioConfig);
@@ -457,7 +446,7 @@ export function StudioPage() {
     values: Array.isArray(dl.manual_values) ? dl.manual_values.map(String) : (Array.isArray(dl.values) ? dl.values.map(String) : []),
   }));
 
-  // ── Field Rules Store: centralized editable state ──────────────
+  // â"€â"€ Field Rules Store: centralized editable state â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   const fieldRulesStore = useFieldRulesStore();
 
   useEffect(() => {
@@ -471,14 +460,41 @@ export function StudioPage() {
 
   const saveFromStore = useCallback(() => {
     const snap = useFieldRulesStore.getState().getSnapshot();
-    saveDraftsMut.mutate({
+    saveEditsMut.mutate({
       fieldRulesDraft: {
         ...(Object.keys(snap.rules).length > 0 ? { fields: snap.rules } : {}),
         ...(snap.fieldOrder.length > 0 ? { fieldOrder: snap.fieldOrder } : {}),
       },
       ...(Object.keys(snap.renames).length > 0 ? { renames: snap.renames } : {}),
+    }, {
+      onSuccess: () => {
+        if (autoSaveEnabled) {
+          setAutoSaveStatus('saved');
+          setTimeout(() => setAutoSaveStatus('idle'), 2000);
+        }
+      },
     });
-  }, [saveDraftsMut]);
+  }, [saveEditsMut, autoSaveEnabled]);
+
+  // Mark hydration complete after store has been initialized from server data
+  useEffect(() => {
+    if (fieldRulesStore.initialized) hydrated.current = true;
+  }, [fieldRulesStore.initialized]);
+
+  // Debounced auto-save
+  const editedRules = fieldRulesStore.editedRules;
+  const editedFieldOrder = fieldRulesStore.editedFieldOrder;
+  useEffect(() => {
+    if (!autoSaveEnabled || !fieldRulesStore.initialized || !hydrated.current) return;
+    const timer = setTimeout(saveFromStore, 1500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSaveEnabled, editedRules, editedFieldOrder, saveFromStore]);
+
+  const hasUnsavedChanges = useMemo(
+    () => Object.values(fieldRulesStore.editedRules).some((r: any) => r?._edited),
+    [fieldRulesStore.editedRules],
+  );
 
   const fieldRows: FieldRuleRow[] = useMemo(
     () =>
@@ -497,7 +513,7 @@ export function StudioPage() {
     [rules, fieldOrder],
   );
 
-  // ── Compile errors/warnings from guardrails ─────────────────────
+  // â"€â"€ Compile errors/warnings from guardrails â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   const compileErrors: string[] = [];
   const compileWarnings: string[] = [];
   if (studio?.guardrails) {
@@ -506,19 +522,66 @@ export function StudioPage() {
     if (Array.isArray(g.warnings)) compileWarnings.push(...(g.warnings as string[]));
   }
 
-  // ── Tooltip coverage ────────────────────────────────────────────
+  // â"€â"€ Tooltip coverage â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   const tooltipEntries = tooltipBank?.entries || {};
   const tooltipCount = Object.keys(tooltipEntries).length;
   const tooltipCoverage = fieldOrder.length > 0
     ? Math.round((fieldOrder.filter((k) => k in tooltipEntries).length / fieldOrder.length) * 100)
     : 0;
 
-  // ── Category guard ────────────────────────────────────────────
+  const saveStatus = (() => {
+    if (saveEditsMut.isPending) {
+      return { label: 'Savingâ€¦', dot: 'bg-gray-400', text: 'text-gray-500', border: 'border-gray-200 dark:border-gray-600' };
+    }
+    if (autoSaveEnabled) {
+      if (autoSaveStatus === 'saved') {
+        return { label: 'Auto-saved', dot: 'bg-green-500', text: 'text-green-600 dark:text-green-400', border: 'border-green-200 dark:border-green-700/60' };
+      }
+      return { label: 'Up to date', dot: 'bg-green-500', text: 'text-green-600 dark:text-green-400', border: 'border-green-200 dark:border-green-700/60' };
+    }
+    if (!fieldRulesStore.initialized) {
+      return null;
+    }
+    if (hasUnsavedChanges) {
+      return { label: 'Unsaved', dot: 'bg-amber-500', text: 'text-amber-600 dark:text-amber-400', border: 'border-amber-200 dark:border-amber-700/60' };
+    }
+    return { label: 'All saved', dot: 'bg-green-500', text: 'text-green-600 dark:text-green-400', border: 'border-green-200 dark:border-green-700/60' };
+  })();
+
+  const compileStatus = (() => {
+    if (compileMut.isPending) {
+      return { label: 'Compilingâ€¦', dot: 'bg-gray-400', text: 'text-gray-500', border: 'border-gray-200 dark:border-gray-600' };
+    }
+    if (compileMut.isError) {
+      return {
+        label: (compileMut.error as Error)?.message ? (compileMut.error as Error).message.slice(0, 36) : 'Compile failed',
+        dot: 'bg-red-500',
+        text: 'text-red-600 dark:text-red-400',
+        border: 'border-red-200 dark:border-red-700/60',
+      };
+    }
+    if (compileMut.isSuccess) {
+      return { label: 'Started', dot: 'bg-green-500', text: 'text-green-600 dark:text-green-400', border: 'border-green-200 dark:border-green-700/60' };
+    }
+    if (studio && studio.compileStale) {
+      return { label: 'Not compiled', dot: 'bg-amber-500', text: 'text-amber-600 dark:text-amber-400', border: 'border-amber-200 dark:border-amber-700/60' };
+    }
+    if (studio && !studio.compileStale) {
+      return { label: 'Compiled', dot: 'bg-green-500', text: 'text-green-600 dark:text-green-400', border: 'border-green-200 dark:border-green-700/60' };
+    }
+    return null;
+  })();
+  const saveStatusLabel = saveStatus?.label || 'All saved';
+  const saveStatusDot = saveStatus?.dot || 'bg-green-500';
+  const compileStatusLabel = compileStatus?.label || 'Compiled';
+  const compileStatusDot = compileStatus?.dot || 'bg-green-500';
+
+  // â"€â"€ Category guard â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   if (category === 'all') {
     return <p className="text-gray-500 mt-8 text-center">Select a specific category from the sidebar to configure field rules.</p>;
   }
 
-  // ── Loading state ───────────────────────────────────────────────
+  // â"€â"€ Loading state â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   if (isLoading) return <Spinner className="h-8 w-8 mx-auto mt-12" />;
 
   return (
@@ -549,26 +612,119 @@ export function StudioPage() {
       </div>
 
       {/* Action bar */}
-      <div className="flex items-center gap-3">
-        <button
-          onClick={() => saveDraftsMut.mutate({ fieldRulesDraft: drafts?.fieldRulesDraft, uiFieldCatalogDraft: drafts?.uiFieldCatalogDraft })}
-          disabled={saveDraftsMut.isPending}
-          className={btnSecondary}
-        >
-          {saveDraftsMut.isPending ? 'Saving...' : 'Save Draft'}
-        </button>
-        <button
-          onClick={() => compileMut.mutate()}
-          disabled={compileMut.isPending}
-          className={btnPrimary}
-        >
-          {compileMut.isPending ? 'Starting...' : 'Compile & Generate Artifacts'}
-        </button>
-        {compileMut.isSuccess ? <span className="text-sm text-green-600">Compile started — check Indexing Lab process output</span> : null}
-        {compileMut.isError ? <span className="text-sm text-red-600">{(compileMut.error as Error)?.message || 'Failed'}</span> : null}
-        <button onClick={() => queryClient.invalidateQueries()} className={btnSecondary}>Refresh</button>
-      </div>
+      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => saveEditsMut.mutate({ fieldRulesDraft: drafts?.fieldRulesDraft, uiFieldCatalogDraft: drafts?.uiFieldCatalogDraft })}
+            disabled={saveEditsMut.isPending || autoSaveEnabled}
+            className={`${btnSecondary} relative h-11 min-h-11 text-sm rounded inline-flex items-center justify-center overflow-visible whitespace-nowrap ${actionBtnWidth}`}
+          >
+            <span className="w-full text-center font-medium truncate">Save Edits</span>
+            <span className="absolute top-0 right-0 -ml-1 translate-x-1/2 -translate-y-1/2">
+              <Tip text={'Save Edits (manual)\n\nWrite your edits to draft only (fast iteration).\nDraft changes are merged on top of compiled rules.'} />
+            </span>
+            <Tooltip.Root>
+              <Tooltip.Trigger asChild>
+                <span
+                  tabIndex={0}
+                  aria-label={`Save status: ${saveStatusLabel}`}
+                  className={`absolute inline-block h-2.5 w-2.5 rounded-full ${saveStatusDot} border border-white/90 shadow-sm`}
+                  style={{ right: '3px', bottom: '3px' }}
+                />
+              </Tooltip.Trigger>
+              <Tooltip.Portal>
+                <Tooltip.Content
+                  className="z-50 max-w-xs px-3 py-2 text-xs leading-snug whitespace-pre-line text-gray-900 bg-white border border-gray-200 rounded shadow-lg dark:text-gray-100 dark:bg-gray-900 dark:border-gray-700"
+                  sideOffset={5}
+                >
+                  {saveStatusLabel}
+                  <Tooltip.Arrow className="fill-white dark:fill-gray-900" />
+                </Tooltip.Content>
+              </Tooltip.Portal>
+            </Tooltip.Root>
+          </button>
 
+          <button
+            onClick={() => setAutoSaveEnabled(!autoSaveEnabled)}
+            className={`${btnSecondary} relative h-11 min-h-11 text-sm rounded inline-flex items-center justify-center overflow-visible whitespace-nowrap ${actionBtnWidth} transition-colors ${
+              autoSaveEnabled
+                ? 'bg-accent/10 text-accent border-accent/40 shadow-inner dark:bg-accent/20 dark:border-accent/50'
+                : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+            }`}
+          >
+            <span className="w-full text-center font-medium truncate">{autoSaveEnabled ? 'Auto-save On' : 'Auto-save Off'}</span>
+            <span className="absolute top-0 right-0 -ml-1 translate-x-1/2 -translate-y-1/2">
+              <Tip text={'Auto-save\n\nWhen enabled, saves are automatically persisted after 1.5s of inactivity.\nAuto-save applies to all field rule and catalog edits.'} />
+            </span>
+          </button>
+
+          <button
+            onClick={() => compileMut.mutate()}
+            disabled={compileMut.isPending}
+            className={`${btnPrimary} relative h-11 min-h-11 text-sm rounded inline-flex items-center justify-center overflow-visible whitespace-nowrap ${actionBtnWidth}`}
+          >
+            <span className="w-full text-center font-medium truncate">{compileMut.isPending ? 'Compiling�' : 'Compile & Generate'}</span>
+            <span className="absolute top-0 right-0 -ml-1 translate-x-1/2 -translate-y-1/2">
+              <Tip text={
+                'Compile & Generate Artifacts\n\n'
+                + 'Reads your workbook (Excel) + draft edits and generates production artifacts:\n\n'
+                + '\u2022 field_rules.json \u2014 compiled field definitions\n'
+                + '\u2022 component_db/*.json \u2014 component databases\n'
+                + '\u2022 known_values.json \u2014 enum / known value lists\n'
+                + '\u2022 parse_templates.json \u2014 extraction templates\n\n'
+                + 'Workflow:\n'
+                + '\u2022 Edit in Studio \u2192 Save Edits (fast preview)\n'
+                + '\u2022 Ready to finalize \u2192 Compile (generates files)\n\n'
+                + 'Status values:\n'
+                + '\u2022 "Not compiled" \u2014 draft edits are newer than compile.\n'
+                + '\u2022 "Compiled" \u2014 artifacts are up to date.'
+              } />
+            </span>
+            <Tooltip.Root>
+              <Tooltip.Trigger asChild>
+                <span
+                  tabIndex={0}
+                  aria-label={`Compile status: ${compileStatusLabel}`}
+                  className={`absolute inline-block h-2.5 w-2.5 rounded-full ${compileStatusDot} border border-white/90 shadow-sm`}
+                  style={{ right: '3px', bottom: '3px' }}
+                />
+              </Tooltip.Trigger>
+              <Tooltip.Portal>
+                <Tooltip.Content
+                  className="z-50 max-w-xs px-3 py-2 text-xs leading-snug whitespace-pre-line text-gray-900 bg-white border border-gray-200 rounded shadow-lg dark:text-gray-100 dark:bg-gray-900 dark:border-gray-700"
+                  sideOffset={5}
+                >
+                  {compileStatusLabel}
+                  <Tooltip.Arrow className="fill-white dark:fill-gray-900" />
+                </Tooltip.Content>
+              </Tooltip.Portal>
+            </Tooltip.Root>
+          </button>
+
+          <button
+            onClick={async () => {
+              await api.post(`/studio/${category}/invalidate-cache`);
+              invalidateFieldRulesQueries(queryClient, category);
+            }}
+            className={`${btnSecondary} relative h-11 min-h-11 text-sm rounded inline-flex items-center justify-center overflow-visible whitespace-nowrap ${actionBtnWidth}`}
+          >
+            <span className="w-full text-center font-medium truncate">Refresh</span>
+                <span className="absolute top-0 right-0 -ml-1 translate-x-1/2 -translate-y-1/2">
+                  <Tip text={
+                    'Refresh\n\n'
+                    + 'Clears all caches and reloads from disk:\n\n'
+                + '\u2022 Server field rules cache\n'
+                + '\u2022 Server review layout cache\n'
+                + '\u2022 Browser query cache\n\n'
+                + 'When to use:\n'
+                + '\u2022 After editing files outside the GUI\n'
+                    + '\u2022 After a manual workbook change\n'
+                    + '\u2022 If displayed data appears stale'
+                  } />
+                </span>
+          </button>
+        </div>
+      </div>
       {/* Tab bar */}
       <div className="flex border-b border-gray-200 dark:border-gray-700">
         {subTabs.map((tab) => (
@@ -586,7 +742,7 @@ export function StudioPage() {
         ))}
       </div>
 
-      {/* ── Tab 1: Mapping Studio ────────────────────────────────── */}
+      {/* â"€â"€ Tab 1: Mapping Studio â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
       {activeTab === 'mapping' ? (
         <MappingStudioTab
           wbMap={wbMap}
@@ -599,26 +755,30 @@ export function StudioPage() {
           rules={storeRules}
           fieldOrder={storeFieldOrder}
           knownValues={knownValuesRes?.fields || {}}
+          autoSaveMapEnabled={autoSaveMapEnabled}
+          setAutoSaveMapEnabled={setAutoSaveMapEnabled}
         />
       ) : null}
 
-      {/* ── Tab 2: Key Navigator ─────────────────────────────────── */}
+      {/* â"€â"€ Tab 2: Key Navigator â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
       {activeTab === 'keys' ? (
         <KeyNavigatorTab
           category={category}
           selectedKey={selectedKey}
           onSelectKey={setSelectedKey}
           onSave={saveFromStore}
-          saving={saveDraftsMut.isPending}
-          saveSuccess={saveDraftsMut.isSuccess}
+          saving={saveEditsMut.isPending}
+          saveSuccess={saveEditsMut.isSuccess}
           knownValues={knownValuesRes?.fields || {}}
           enumLists={enumListsWithValues}
           componentDb={componentDbRes || {}}
           componentSources={(wbMap.component_sources || []) as ComponentSource[]}
+          autoSaveEnabled={autoSaveEnabled}
+          setAutoSaveEnabled={setAutoSaveEnabled}
         />
       ) : null}
 
-      {/* ── Tab 3: Field Contract (Workbench) ─────────────────────── */}
+      {/* â"€â"€ Tab 3: Field Contract (Workbench) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
       {activeTab === 'contract' ? (
         <FieldRulesWorkbench
           category={category}
@@ -629,13 +789,14 @@ export function StudioPage() {
           wbMap={wbMap}
           guardrails={studio?.guardrails as Record<string, unknown> | undefined}
           onSave={saveFromStore}
-          saving={saveDraftsMut.isPending}
-          saveSuccess={saveDraftsMut.isSuccess}
-          compileMut={compileMut}
+          saving={saveEditsMut.isPending}
+          saveSuccess={saveEditsMut.isSuccess}
+          autoSaveEnabled={autoSaveEnabled}
+          setAutoSaveEnabled={setAutoSaveEnabled}
         />
       ) : null}
 
-      {/* ── Tab 4: Compile & Reports ─────────────────────────────── */}
+      {/* â"€â"€ Tab 4: Compile & Reports â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
       {activeTab === 'reports' ? (
         <CompileReportsTab
           artifacts={artifacts || []}
@@ -652,11 +813,11 @@ export function StudioPage() {
   );
 }
 
-// ════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // Tab Components
-// ════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-// ── Mapping Studio ──────────────────────────────────────────────────
+// â"€â"€ Mapping Studio â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function MappingStudioTab({
   wbMap,
   tooltipCount,
@@ -668,6 +829,8 @@ function MappingStudioTab({
   rules,
   fieldOrder,
   knownValues,
+  autoSaveMapEnabled,
+  setAutoSaveMapEnabled,
 }: {
   wbMap: StudioConfig;
   tooltipCount: number;
@@ -679,11 +842,16 @@ function MappingStudioTab({
   rules: Record<string, FieldRule>;
   fieldOrder: string[];
   knownValues: Record<string, string[]>;
+  autoSaveMapEnabled: boolean;
+  setAutoSaveMapEnabled: (v: boolean) => void;
 }) {
   const [tooltipPath, setTooltipPath] = useState('');
   const [compSources, setCompSources] = useState<ComponentSource[]>([]);
   const [dataLists, setDataLists] = useState<DataListEntry[]>([]);
   const [seededVersion, setSeededVersion] = useState('');
+  const [showTooltipSource, setShowTooltipSource] = useState(false);
+  const [showComponentSourceMapping, setShowComponentSourceMapping] = useState(false);
+  const [showEnumSection, setShowEnumSection] = useState(false);
 
   const mapVersion = String(wbMap.version || '');
   useEffect(() => {
@@ -763,7 +931,18 @@ function MappingStudioTab({
     onSaveMap(assembleMap());
   }
 
-  // ── Component source handlers ─────────────────────────────────
+  const mapHydrated = useRef(false);
+  useEffect(() => {
+    if (seededVersion) mapHydrated.current = true;
+  }, [seededVersion]);
+
+  useEffect(() => {
+    if (!autoSaveMapEnabled || !mapHydrated.current) return;
+    const timer = setTimeout(() => onSaveMap(assembleMap()), 1500);
+    return () => clearTimeout(timer);
+  }, [autoSaveMapEnabled, tooltipPath, compSources, dataLists, assembleMap, onSaveMap]);
+
+  // â"€â"€ Component source handlers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   function addComponentSource() {
     setCompSources((prev) => [...prev, emptyComponentSource()]);
   }
@@ -778,7 +957,7 @@ function MappingStudioTab({
     );
   }
 
-  // ── Data list handlers ──────────────────────────────────────────
+  // â"€â"€ Data list handlers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   function addDataList() {
     setDataLists((prev) => [...prev, {
       field: '',
@@ -811,134 +990,221 @@ function MappingStudioTab({
 
   return (
     <div className="space-y-6">
-      <p className="text-sm text-gray-500">
-        Configure tooltip source, component mappings, and enum lists. All changes are local until you click "Save Mapping".
-      </p>
+      {/* -- Header: description left, save right -- */}
+      <div className="flex items-center gap-3">
+        <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed max-w-[50%]">
+          Configure how the compiler reads your Excel workbook. Map tooltip sources, define component types and their property slots, and set up enum / data lists with normalization rules.
+        </p>
+        <div className="flex-1" />
+        <button
+          onClick={handleSave}
+          disabled={saving || autoSaveMapEnabled}
+          className={`${btnSecondary} relative h-11 min-h-11 text-sm rounded inline-flex items-center justify-center overflow-visible whitespace-nowrap ${actionBtnWidth}`}
+        >
+          <span className="w-full text-center font-medium truncate">Save Mapping</span>
+          <span className="absolute top-0 right-0 -ml-1 translate-x-1/2 -translate-y-1/2">
+            <Tip text={'Save Mapping (manual)\n\nWrites your workbook map configuration to disk.\nThis tells the compiler how to read your Excel workbook.'} />
+          </span>
+          <Tooltip.Root>
+            <Tooltip.Trigger asChild>
+              <span
+                tabIndex={0}
+                aria-label={`Map save status: ${saving ? 'Saving\u2026' : saveSuccess ? 'Saved' : 'Ready'}`}
+                className={`absolute inline-block h-2.5 w-2.5 rounded-full ${saving ? 'bg-gray-400 animate-pulse' : saveSuccess ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'} border border-white/90 shadow-sm`}
+                style={{ right: '3px', bottom: '3px' }}
+              />
+            </Tooltip.Trigger>
+            <Tooltip.Portal>
+              <Tooltip.Content
+                className="z-50 max-w-xs px-3 py-2 text-xs leading-snug whitespace-pre-line text-gray-900 bg-white border border-gray-200 rounded shadow-lg dark:text-gray-100 dark:bg-gray-900 dark:border-gray-700"
+                sideOffset={5}
+              >
+                {saving ? 'Saving\u2026' : saveSuccess ? 'Saved' : 'Ready'}
+                <Tooltip.Arrow className="fill-white dark:fill-gray-900" />
+              </Tooltip.Content>
+            </Tooltip.Portal>
+          </Tooltip.Root>
+        </button>
+
+        <button
+          onClick={() => setAutoSaveMapEnabled(!autoSaveMapEnabled)}
+          className={`${btnSecondary} relative h-11 min-h-11 text-sm rounded inline-flex items-center justify-center overflow-visible whitespace-nowrap ${actionBtnWidth} transition-colors ${
+            autoSaveMapEnabled
+              ? 'bg-accent/10 text-accent border-accent/40 shadow-inner dark:bg-accent/20 dark:border-accent/50'
+              : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+          }`}
+        >
+          <span className="w-full text-center font-medium truncate">{autoSaveMapEnabled ? 'Auto-save On' : 'Auto-save Off'}</span>
+          <span className="absolute top-0 right-0 -ml-1 translate-x-1/2 -translate-y-1/2">
+            <Tip text={'Auto-save Mapping\n\nWhen enabled, mapping changes are automatically\nsaved after 1.5s of inactivity.\n\nWhat gets saved:\n\u2022 Tooltip source configuration\n\u2022 Component source mappings\n\u2022 Enum / data list definitions\n\nDefault: on. Setting persists across sessions.'} />
+          </span>
+        </button>
+      </div>
 
       {/* Tooltip Bank */}
-      <div className={sectionCls}>
-        <h3 className="text-sm font-semibold mb-3">Tooltip Source</h3>
-        <div className="grid grid-cols-4 gap-3">
-          <div className="col-span-2">
-            <div className={labelCls}>Tooltip Bank File (JS/JSON/MD)<Tip text={STUDIO_TIPS.tooltip_bank_file} /></div>
-            <input
-              className={`${inputCls} w-full font-mono text-xs`}
-              value={tooltipPath}
-              onChange={(e) => setTooltipPath(e.target.value)}
-              placeholder="(auto-discover hbs_tooltips*)"
-            />
+      <div className={`${sectionCls} relative`}>
+        <button
+          type="button"
+          aria-expanded={showTooltipSource}
+          onClick={() => setShowTooltipSource((prev) => !prev)}
+          className="w-full flex items-center justify-between gap-2 text-left text-sm font-semibold text-gray-700 dark:text-gray-100 hover:text-gray-900 dark:hover:text-white"
+        >
+          <span className="flex items-center gap-2">
+            <span className="inline-flex items-center justify-center w-5 h-5 border border-gray-300 dark:border-gray-600 rounded text-xs font-medium text-gray-500 dark:text-gray-300">{showTooltipSource ? '-' : '+'}</span>
+            <span>Tooltips Source</span>
+          </span>
+        </button>
+          <span className="absolute top-0 right-0 -ml-1 translate-x-1/2 -translate-y-1/2">
+            <Tip text={STUDIO_TIPS.tooltip_section_tooltip_bank} />
+          </span>
+        {showTooltipSource ? (
+          <div className="mt-3">
+            <div className="grid grid-cols-4 gap-3">
+              <div className="col-span-2">
+                <div className={labelCls}>Tooltip Bank File (JS/JSON/MD)<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.tooltip_bank_file} /></div>
+                <input
+                  className={`${inputCls} w-full font-mono text-xs`}
+                  value={tooltipPath}
+                  onChange={(e) => setTooltipPath(e.target.value)}
+                  placeholder="(auto-discover hbs_tooltips*)"
+                />
+              </div>
+              <div>
+                <div className={labelCls}>Bank Keys</div>
+                <span className="text-lg font-semibold">{tooltipCount}</span>
+              </div>
+              <div>
+                <div className={labelCls}>Coverage</div>
+                <span className="text-lg font-semibold">{tooltipCoverage}%</span>
+              </div>
+            </div>
+            {tooltipFiles.length > 0 ? (
+              <p className="text-xs text-gray-400 mt-2">Files: {tooltipFiles.join(', ')}</p>
+            ) : null}
           </div>
-          <div>
-            <div className={labelCls}>Bank Keys</div>
-            <span className="text-lg font-semibold">{tooltipCount}</span>
-          </div>
-          <div>
-            <div className={labelCls}>Coverage</div>
-            <span className="text-lg font-semibold">{tooltipCoverage}%</span>
-          </div>
-        </div>
-        {tooltipFiles.length > 0 ? (
-          <p className="text-xs text-gray-400 mt-2">Files: {tooltipFiles.join(', ')}</p>
         ) : null}
       </div>
 
       {/* Component Source Mapping */}
-      <div className={sectionCls}>
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h3 className="text-sm font-semibold">Component Source Mapping</h3>
+      <div className={`${sectionCls} relative`}>
+        <div className="flex items-start justify-between gap-3">
+          <button
+            type="button"
+            aria-expanded={showComponentSourceMapping}
+            onClick={() => setShowComponentSourceMapping((prev) => !prev)}
+            className="flex-1 flex items-center justify-between gap-2 text-left text-sm font-semibold text-gray-700 dark:text-gray-100 hover:text-gray-900 dark:hover:text-white"
+          >
+            <span className="flex items-center gap-2">
+              <span className="inline-flex items-center justify-center w-5 h-5 border border-gray-300 dark:border-gray-600 rounded text-xs font-medium text-gray-500 dark:text-gray-300">
+                {showComponentSourceMapping ? '-' : '+'}
+              </span>
+              <span>Component Source Mapping</span>
+            </span>
+        </button>
+        <span className="absolute top-0 right-0 -ml-1 translate-x-1/2 -translate-y-1/2">
+          <Tip text={STUDIO_TIPS.tooltip_section_component_sources} />
+        </span>
+          <div className="pt-0.5">
             <p className="text-xs text-gray-500 mt-1">
               Required: Primary Identifier role. Optional: Maker, Name Variants, Reference URLs, Attributes.
             </p>
           </div>
-          <div className="flex gap-2">
-            <button onClick={addComponentSource} className={btnSecondary}>
-              + Add Source
-            </button>
-            {compSources.length > 1 ? (
-              <button
-                onClick={() => removeComponentSource(compSources.length - 1)}
-                className={btnDanger}
-              >
-                Remove Last
-              </button>
-            ) : null}
-          </div>
         </div>
-
-        {compSources.length > 0 ? (
-          <div className="space-y-6">
-            {compSources.map((src, idx) => (
-              <EditableComponentSource
-                key={idx}
-                index={idx}
-                source={src}
-                onUpdate={(updates) => updateComponentSource(idx, updates)}
-                onRemove={() => removeComponentSource(idx)}
-                rules={rules}
-                fieldOrder={fieldOrder}
-                knownValues={knownValues}
-              />
-            ))}
+        {showComponentSourceMapping ? (
+          <div className="mt-3">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={addComponentSource} className={btnSecondary}>
+                  + Add Source
+                </button>
+              </div>
+            </div>
+            {compSources.length > 0 ? (
+              <div className="space-y-6">
+                {compSources.map((src, idx) => (
+                  <EditableComponentSource
+                    key={idx}
+                    index={idx}
+                    source={src}
+                    onUpdate={(updates) => updateComponentSource(idx, updates)}
+                    onRemove={() => removeComponentSource(idx)}
+                    rules={rules}
+                    fieldOrder={fieldOrder}
+                    knownValues={knownValues}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-gray-400 text-center py-4">
+                No component sources configured. Click "Add Source" to add one.
+              </div>
+            )}
           </div>
-        ) : (
-          <div className="text-sm text-gray-400 text-center py-4">
-            No component sources configured. Click "Add Source" to add one.
-          </div>
-        )}
+        ) : null}
       </div>
 
       {/* Enum Value Lists */}
-      <div className={sectionCls}>
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h3 className="text-sm font-semibold">Enums</h3>
-            <p className="text-xs text-gray-500 mt-1">
-              Define allowed values for enum fields.
-            </p>
-          </div>
-          <button onClick={addDataList} className={btnSecondary}>
-            + Add Enum
-          </button>
-        </div>
-
-        {dataLists.length > 0 ? (
-          <div className="space-y-3">
-            {dataLists.map((dl, idx) => (
-              <EditableDataList
-                key={idx}
-                entry={dl}
-                index={idx}
-                isDuplicate={duplicateDataListFields.has(dl.field)}
-                onUpdate={(updates) => updateDataList(idx, updates)}
-                onRemove={() => removeDataList(idx)}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className="text-sm text-gray-400 text-center py-4">
-            No enums configured. Click "+ Add Enum" to define enum value lists.
-          </div>
-        )}
-      </div>
-
-      {/* Save Mapping Button */}
-      <div className="flex items-center gap-3">
+      <div className={`${sectionCls} relative`}>
+      <div className="flex items-start justify-between gap-3">
         <button
-          onClick={handleSave}
-          disabled={saving}
-          className={`${btnPrimary} px-6 py-2.5`}
+          type="button"
+          aria-expanded={showEnumSection}
+          onClick={() => setShowEnumSection((prev) => !prev)}
+          className="flex-1 flex items-center justify-between gap-2 text-left text-sm font-semibold text-gray-700 dark:text-gray-100 hover:text-gray-900 dark:hover:text-white"
         >
-          {saving ? 'Saving...' : 'Save Mapping'}
+          <span className="flex items-center gap-2">
+            <span className="inline-flex items-center justify-center w-5 h-5 border border-gray-300 dark:border-gray-600 rounded text-xs font-medium text-gray-500 dark:text-gray-300">
+              {showEnumSection ? '-' : '+'}
+            </span>
+            <span>Enum</span>
+          </span>
         </button>
-        {saveSuccess ? <span className="text-sm text-green-600">Mapping saved</span> : null}
+        <span className="absolute top-0 right-0 -ml-1 translate-x-1/2 -translate-y-1/2">
+          <Tip text={STUDIO_TIPS.tooltip_section_enums} />
+        </span>
+        <div className="pt-0.5">
+          <p className="text-xs text-gray-500 mt-1">
+            Define allowed values for enum fields.
+          </p>
+        </div>
+      </div>
+        {showEnumSection ? (
+          <div className="mt-3">
+            <div className="flex items-center justify-between mb-3">
+              <div></div>
+              <button onClick={addDataList} className={btnSecondary}>
+                + Add Enum
+              </button>
+            </div>
+            {dataLists.length > 0 ? (
+              <div className="space-y-3">
+                {dataLists.map((dl, idx) => (
+                  <EditableDataList
+                    key={idx}
+                    entry={dl}
+                    index={idx}
+                    isDuplicate={duplicateDataListFields.has(dl.field)}
+                    onUpdate={(updates) => updateDataList(idx, updates)}
+                    onRemove={() => removeDataList(idx)}
+                  />
+                ))}
+              </div>
+            ) : (
+                <div className="text-sm text-gray-400 text-center py-4">
+                  No enums configured. Click "+ Add Enum" to define enum value lists.
+                </div>
+            )}
+          </div>
+        ) : null}
       </div>
 
     </div>
   );
 }
 
-// ── Constraint Editor ────────────────────────────────────────────────
+// â"€â"€ Constraint Editor â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 const CONSTRAINT_OPS = ['<=', '>=', '<', '>', '==', '!=', 'requires'] as const;
 
 type FieldTypeGroup = 'numeric' | 'date' | 'boolean' | 'string';
@@ -1016,7 +1282,7 @@ function ConstraintEditor({
   return (
     <div className="px-3 py-1.5 border-t border-gray-200 dark:border-gray-700 text-[11px]">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-gray-500">Constraints<Tip text={STUDIO_TIPS.comp_constraints} /></span>
+        <span className="text-gray-500">Constraints<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.comp_constraints} /></span>
         {constraints.length > 0 ? (
           <span className="text-[9px] bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded font-medium">Migrate to Key Navigator</span>
         ) : null}
@@ -1083,7 +1349,7 @@ function ConstraintEditor({
   );
 }
 
-// ── Range constraint pill grouping ─────────────────────────────────────
+// â"€â"€ Range constraint pill grouping â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 const RANGE_LOWER_OPS = new Set(['>=', '>']);
 const RANGE_UPPER_OPS = new Set(['<=', '<']);
 
@@ -1127,7 +1393,7 @@ function groupRangeConstraints(constraints: string[], currentKey: string): { ran
   return { ranges, singles };
 }
 
-// ── Key Constraint Editor (Key Navigator) ─────────────────────────────
+// â"€â"€ Key Constraint Editor (Key Navigator) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function KeyConstraintEditor({
   currentKey,
   constraints,
@@ -1424,7 +1690,7 @@ function KeyConstraintEditor({
   );
 }
 
-// ── Editable Enum List ───────────────────────────────────────────────
+// â"€â"€ Editable Enum List â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function EditableDataList({
   entry,
   index,
@@ -1438,11 +1704,14 @@ function EditableDataList({
   onUpdate: (updates: Partial<DataListEntry>) => void;
   onRemove: () => void;
 }) {
-  const [expanded, setExpanded] = useState(!entry.field);
+  const [expanded, setExpanded] = useState(false);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const [showAiSections, setShowAiSections] = useState(false);
 
   const valueCount = entry.manual_values.length;
   const listPriority = normalizePriorityProfile(entry.priority);
   const listAiAssist = normalizeAiAssistConfig(entry.ai_assist);
+  const listTitle = entry.field ? displayLabel(entry.field) : `Enum ${index + 1}`;
   function updatePriority(updates: Partial<PriorityProfile>) {
     onUpdate({ priority: { ...listPriority, ...updates } });
   }
@@ -1453,24 +1722,107 @@ function EditableDataList({
   // Collapsed view
   if (!expanded) {
     return (
-      <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-750 rounded border border-gray-200 dark:border-gray-600">
-        <span className="text-sm font-medium flex-1 min-w-0 truncate">{entry.field || <span className="italic text-gray-400">unnamed</span>}</span>
-        {valueCount > 0 && <span className="text-xs text-gray-500">{valueCount} values</span>}
-        {isDuplicate && <span className="text-xs text-red-500 font-medium">Duplicate!</span>}
-        <button onClick={() => setExpanded(true)} className="text-xs text-accent hover:underline">expand</button>
-        <button onClick={onRemove} className="text-xs text-red-500 hover:text-red-700">&times;</button>
+      <div className="border border-gray-200 dark:border-gray-700 rounded bg-gray-50 dark:bg-gray-750">
+        <div className="w-full flex items-center gap-2 px-3 py-2">
+          <button
+            type="button"
+            onClick={() => {
+              setExpanded(true);
+              setConfirmingRemove(false);
+            }}
+            className="relative flex-1 min-w-0 py-2 text-sm font-semibold text-left text-gray-700 dark:text-gray-100 hover:text-gray-900 dark:hover:text-white"
+          >
+            <span className="absolute left-0 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-5 h-5 border border-gray-300 dark:border-gray-600 rounded text-xs font-medium text-gray-500 dark:text-gray-300">+</span>
+            <span className="w-full text-left px-6 truncate">{listTitle}</span>
+            <span className="absolute right-0 top-1/2 -translate-y-1/2 inline-flex items-center gap-2">
+              {valueCount > 0 ? <span className="text-xs text-gray-500">{valueCount} values</span> : null}
+              {isDuplicate ? <span className="text-xs text-red-500 font-medium">Duplicate!</span> : null}
+            </span>
+          </button>
+          <div className="flex items-center gap-2">
+            {confirmingRemove ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setConfirmingRemove(false)}
+                  className="px-2 py-1 text-[11px] rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmingRemove(false);
+                    onRemove();
+                  }}
+                  className={`${btnDanger} !px-2 !py-1 text-[11px]`}
+                >
+                  Confirm remove
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmingRemove(true)}
+                className="px-2 py-1 text-[11px] rounded border border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-900/30 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/50"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+        </div>
       </div>
     );
   }
 
-  return (
-    <div className="border border-gray-200 dark:border-gray-600 rounded p-3 space-y-3 bg-gray-50 dark:bg-gray-750">
-      {/* Header row */}
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-gray-500 uppercase">Enum #{index + 1}</span>
-        <div className="flex gap-2">
-          <button onClick={() => setExpanded(false)} className="text-xs text-accent hover:underline">collapse</button>
-          <button onClick={onRemove} className={btnDanger + ' text-xs !px-2 !py-0.5'}>Remove</button>
+    return (
+      <div className="border border-gray-200 dark:border-gray-700 rounded p-3 space-y-3 bg-gray-50 dark:bg-gray-750">
+      <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setExpanded(false);
+              setConfirmingRemove(false);
+          }}
+          className="relative flex-1 min-w-0 py-2 text-sm font-semibold text-left text-gray-700 dark:text-gray-100 hover:text-gray-900 dark:hover:text-white"
+        >
+          <span className="absolute left-0 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-5 h-5 border border-gray-300 dark:border-gray-600 rounded text-xs font-medium text-gray-500 dark:text-gray-300">-</span>
+          <span className="w-full text-left px-6 truncate">{listTitle}</span>
+          <span className="absolute right-0 top-1/2 -translate-y-1/2 inline-flex items-center gap-2">
+            {valueCount > 0 ? <span className="text-xs text-gray-500">{valueCount} values</span> : null}
+            {isDuplicate ? <span className="text-xs text-red-500 font-medium">Duplicate!</span> : null}
+          </span>
+        </button>
+        <div className="flex items-center gap-2">
+          {confirmingRemove ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setConfirmingRemove(false)}
+                className="px-2 py-1 text-[11px] rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmingRemove(false);
+                  onRemove();
+                }}
+                className={`${btnDanger} !px-2 !py-1 text-[11px]`}
+              >
+                Confirm remove
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmingRemove(true)}
+              className="px-2 py-1 text-[11px] rounded border border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-900/30 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/50"
+            >
+              Remove
+            </button>
+          )}
         </div>
       </div>
 
@@ -1484,7 +1836,7 @@ function EditableDataList({
       <div className="grid grid-cols-[1fr_auto] gap-3 items-end">
         <div>
           <label className={labelCls}>
-            Field Name <Tip text={STUDIO_TIPS.data_list_field} />
+            Field Name <Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.data_list_field} />
           </label>
           <input
             className={inputCls + ' w-full'}
@@ -1495,7 +1847,7 @@ function EditableDataList({
         </div>
         <div>
           <label className={labelCls}>
-            Normalize <Tip text={STUDIO_TIPS.data_list_normalize} />
+            Normalize <Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.data_list_normalize} />
           </label>
           <select
             className={selectCls + ' w-full'}
@@ -1508,68 +1860,85 @@ function EditableDataList({
       </div>
 
       {/* List review priority / effort */}
-      <div className="border border-gray-200 dark:border-gray-600 rounded p-2.5 bg-white dark:bg-gray-800/40">
-        <div className="text-xs font-semibold text-gray-500 mb-2">AI Review Priority</div>
-        <div className="grid grid-cols-4 gap-2">
-          <div>
-            <label className={labelCls}>Required Level <Tip text={STUDIO_TIPS.required_level} /></label>
-            <select
-              className={selectCls + ' w-full'}
-              value={listPriority.required_level}
-              onChange={(e) => updatePriority({ required_level: e.target.value })}
-            >
-              <option value="identity">identity</option>
-              <option value="required">required</option>
-              <option value="critical">critical</option>
-              <option value="expected">expected</option>
-              <option value="optional">optional</option>
-              <option value="editorial">editorial</option>
-              <option value="commerce">commerce</option>
-            </select>
-          </div>
-          <div>
-            <label className={labelCls}>Availability <Tip text={STUDIO_TIPS.availability} /></label>
-            <select
-              className={selectCls + ' w-full'}
-              value={listPriority.availability}
-              onChange={(e) => updatePriority({ availability: e.target.value })}
-            >
-              <option value="always">always</option>
-              <option value="expected">expected</option>
-              <option value="sometimes">sometimes</option>
-              <option value="rare">rare</option>
-              <option value="editorial_only">editorial_only</option>
-            </select>
-          </div>
-          <div>
-            <label className={labelCls}>Difficulty <Tip text={STUDIO_TIPS.difficulty} /></label>
-            <select
-              className={selectCls + ' w-full'}
-              value={listPriority.difficulty}
-              onChange={(e) => updatePriority({ difficulty: e.target.value })}
-            >
-              <option value="easy">easy</option>
-              <option value="medium">medium</option>
-              <option value="hard">hard</option>
-              <option value="instrumented">instrumented</option>
-            </select>
-          </div>
-          <div>
-            <label className={labelCls}>Effort (1-10) <Tip text={STUDIO_TIPS.effort} /></label>
-            <input
-              type="number"
-              min={1}
-              max={10}
-              className={inputCls + ' w-full'}
-              value={listPriority.effort}
-              onChange={(e) => updatePriority({ effort: Math.max(1, Math.min(10, parseInt(e.target.value, 10) || 1)) })}
-            />
+      <button
+        type="button"
+        onClick={() => setShowAiSections((v) => !v)}
+        className="w-full flex items-center gap-2 mb-2"
+      >
+        <span className="inline-flex items-center justify-center w-5 h-5 border border-gray-300 dark:border-gray-600 rounded text-xs font-medium text-gray-500 dark:text-gray-300">{showAiSections ? '-' : '+'}</span>
+        <span className="text-xs font-semibold text-gray-500">AI Review Priority</span>
+      </button>
+      {showAiSections ? (
+        <div className="border border-gray-200 dark:border-gray-600 rounded p-2.5 bg-white dark:bg-gray-800/40">
+          <div className="grid grid-cols-4 gap-2">
+            <div>
+              <label className={labelCls}>Required Level <Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.required_level} /></label>
+              <select
+                className={selectCls + ' w-full'}
+                value={listPriority.required_level}
+                onChange={(e) => updatePriority({ required_level: e.target.value })}
+              >
+                <option value="identity">identity</option>
+                <option value="required">required</option>
+                <option value="critical">critical</option>
+                <option value="expected">expected</option>
+                <option value="optional">optional</option>
+                <option value="editorial">editorial</option>
+                <option value="commerce">commerce</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Availability <Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.availability} /></label>
+              <select
+                className={selectCls + ' w-full'}
+                value={listPriority.availability}
+                onChange={(e) => updatePriority({ availability: e.target.value })}
+              >
+                <option value="always">always</option>
+                <option value="expected">expected</option>
+                <option value="sometimes">sometimes</option>
+                <option value="rare">rare</option>
+                <option value="editorial_only">editorial_only</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Difficulty <Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.difficulty} /></label>
+              <select
+                className={selectCls + ' w-full'}
+                value={listPriority.difficulty}
+                onChange={(e) => updatePriority({ difficulty: e.target.value })}
+              >
+                <option value="easy">easy</option>
+                <option value="medium">medium</option>
+                <option value="hard">hard</option>
+                <option value="instrumented">instrumented</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Effort (1-10) <Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.effort} /></label>
+              <input
+                type="number"
+                min={1}
+                max={10}
+                className={inputCls + ' w-full'}
+                value={listPriority.effort}
+                onChange={(e) => updatePriority({ effort: Math.max(1, Math.min(10, parseInt(e.target.value, 10) || 1)) })}
+              />
+            </div>
           </div>
         </div>
-      </div>
+      ) : null}
 
       {/* List-level AI assist (same controls as Key Navigator) */}
-      {(() => {
+      <button
+        type="button"
+        onClick={() => setShowAiSections((v) => !v)}
+        className="w-full flex items-center gap-2 mb-2 mt-2"
+      >
+        <span className="inline-flex items-center justify-center w-5 h-5 border border-gray-300 dark:border-gray-600 rounded text-xs font-medium text-gray-500 dark:text-gray-300">{showAiSections ? '-' : '+'}</span>
+        <span className="text-xs font-semibold text-gray-500">AI Assist</span>
+      </button>
+      {showAiSections ? (() => {
         const explicitMode = listAiAssist.mode || '';
         const strategy = listAiAssist.model_strategy || 'auto';
         const explicitCalls = listAiAssist.max_calls || 0;
@@ -1604,10 +1973,10 @@ function EditableDataList({
 
         return (
           <div className="border border-gray-200 dark:border-gray-600 rounded p-2.5 bg-white dark:bg-gray-800/40">
-            <h4 className="text-xs font-semibold text-gray-500 mb-2">AI Assist<Tip text={STUDIO_TIPS.ai_mode} /></h4>
+            <h4 className="text-xs font-semibold text-gray-500 mb-2">AI Assist<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.ai_mode} /></h4>
             <div className="grid grid-cols-4 gap-2">
               <div>
-                <label className={labelCls}>Mode<Tip text={STUDIO_TIPS.ai_mode} /></label>
+                <label className={labelCls}>Mode<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.ai_mode} /></label>
                 <select
                   className={selectCls + ' w-full'}
                   value={explicitMode}
@@ -1621,7 +1990,7 @@ function EditableDataList({
                 </select>
               </div>
               <div>
-                <label className={labelCls}>Model Strategy<Tip text={STUDIO_TIPS.ai_model_strategy} /></label>
+                <label className={labelCls}>Model Strategy<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.ai_model_strategy} /></label>
                 <select
                   className={selectCls + ' w-full'}
                   value={strategy}
@@ -1633,7 +2002,7 @@ function EditableDataList({
                 </select>
               </div>
               <div>
-                <label className={labelCls}>Max Calls<Tip text={STUDIO_TIPS.ai_max_calls} /></label>
+              <label className={labelCls}>Max Calls<Tip text={STUDIO_TIPS.ai_max_calls} style={{ position: 'relative', left: '-3px', top: '-4px' }} /></label>
                 <input
                   className={inputCls + ' w-full'}
                   type="number"
@@ -1645,7 +2014,7 @@ function EditableDataList({
                 />
               </div>
               <div>
-                <label className={labelCls}>Max Tokens<Tip text={STUDIO_TIPS.ai_max_tokens} /></label>
+                <label className={labelCls}>Max Tokens<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.ai_max_tokens} /></label>
                 <input
                   className={inputCls + ' w-full'}
                   type="number"
@@ -1679,7 +2048,7 @@ function EditableDataList({
 
             <div className="mt-2">
               <div className="flex items-center gap-2 mb-1">
-                <span className={labelCls.replace(' mb-1', '')}>Extraction Guidance (sent to LLM)<Tip text={STUDIO_TIPS.ai_reasoning_note} /></span>
+                <span className={labelCls.replace(' mb-1', '')}>Extraction Guidance (sent to LLM)<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.ai_reasoning_note} /></span>
                 {!hasExplicit && <span className="text-[9px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500 italic font-medium">Auto</span>}
               </div>
               <textarea
@@ -1700,12 +2069,12 @@ function EditableDataList({
             </div>
           </div>
         );
-      })()}
+      })() : null}
 
       {/* Manual values */}
       <div>
         <label className={labelCls}>
-          Values <Tip text={STUDIO_TIPS.data_list_manual_values} />
+          Values <Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.data_list_manual_values} />
         </label>
         <TagPicker
           values={entry.manual_values}
@@ -1718,7 +2087,7 @@ function EditableDataList({
   );
 }
 
-// ── Editable Component Source ─────────────────────────────────────────
+// â"€â"€ Editable Component Source â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function EditableComponentSource({
   index,
   source,
@@ -1753,6 +2122,9 @@ function EditableComponentSource({
     return (roles.properties as unknown as typeof roles.properties).map((p) => migrateProperty(p, rules));
   });
   const [pendingFieldKey, setPendingFieldKey] = useState('');
+  const [showAiSections, setShowAiSections] = useState(false);
+  const [showTrackedRoles, setShowTrackedRoles] = useState(false);
+  const [showAttributes, setShowAttributes] = useState(false);
 
   // Group field keys by ui.group for the field key picker
   const fieldKeyGroups = useMemo(() => {
@@ -1844,19 +2216,128 @@ function EditableComponentSource({
   }
 
   const compType = source.component_type || source.type || '';
+  const [expanded, setExpanded] = useState(false);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const sourceTitle = compType
+    ? displayLabel(compType)
+    : `Source ${index + 1}`;
+  const trackedRoleCount = ['maker', 'aliases', 'links'].filter((role) => activeRoles.has(role as RoleId)).length;
+  const componentSummary = [
+    `${propertyRows.length} attribute${propertyRows.length !== 1 ? 's' : ''}`,
+    `${trackedRoleCount} tracked role${trackedRoleCount !== 1 ? 's' : ''}`,
+  ];
+
+  if (!expanded) {
+    return (
+      <div className="border border-gray-200 dark:border-gray-700 rounded bg-gray-50 dark:bg-gray-750">
+        <div className="w-full flex items-center gap-2 px-3 py-2">
+          <button
+            type="button"
+            onClick={() => {
+              setExpanded(true);
+              setConfirmingRemove(false);
+            }}
+            className="relative flex-1 min-w-0 py-2 text-sm font-semibold text-left text-gray-700 dark:text-gray-100 hover:text-gray-900 dark:hover:text-white"
+        >
+            <span className="absolute left-0 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-5 h-5 border border-gray-300 dark:border-gray-600 rounded text-xs font-medium text-gray-500 dark:text-gray-300">+</span>
+            <span className="w-full text-left px-6 truncate">{sourceTitle}</span>
+            <span className="absolute right-0 top-1/2 -translate-y-1/2 inline-flex items-center gap-2">
+              {componentSummary.length > 0 ? (
+                <span className="text-xs text-gray-500">{componentSummary.slice(0, 2).join(' | ')}</span>
+              ) : null}
+            </span>
+          </button>
+          <div className="flex items-center gap-2">
+            {confirmingRemove ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setConfirmingRemove(false)}
+                  className="px-2 py-1 text-[11px] rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmingRemove(false);
+                    onRemove();
+                  }}
+                  className={`${btnDanger} !px-2 !py-1 text-[11px]`}
+                >
+                  Confirm remove
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmingRemove(true)}
+                className="px-2 py-1 text-[11px] rounded border border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-900/30 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/50"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="border border-gray-200 dark:border-gray-700 rounded p-4 relative">
-      <div className="flex items-center justify-between mb-3">
-        <h4 className="text-sm font-semibold font-mono">
-          {compType || `source_${index + 1}`}
-        </h4>
-        <button onClick={onRemove} className="text-xs text-red-500 hover:text-red-700">Remove</button>
+    <div className="border border-gray-200 dark:border-gray-700 rounded p-4 bg-gray-50 dark:bg-gray-750">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            setExpanded(false);
+            setConfirmingRemove(false);
+          }}
+          className="relative flex-1 min-w-0 py-2 text-sm font-semibold text-left text-gray-700 dark:text-gray-100 hover:text-gray-900 dark:hover:text-white"
+        >
+          <span className="absolute left-0 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-5 h-5 border border-gray-300 dark:border-gray-600 rounded text-xs font-medium text-gray-500 dark:text-gray-300">-</span>
+            <span className="w-full text-left px-6 truncate">{sourceTitle}</span>
+            <span className="absolute right-0 top-1/2 -translate-y-1/2 inline-flex items-center gap-2">
+              {componentSummary.length > 0 ? (
+                <span className="text-xs text-gray-500">{componentSummary.slice(0, 2).join(' | ')}</span>
+              ) : null}
+            </span>
+        </button>
+        <div className="flex items-center gap-2 pt-0.5">
+          {confirmingRemove ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setConfirmingRemove(false)}
+                className="px-2 py-1 text-[11px] rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmingRemove(false);
+                  onRemove();
+                }}
+                className={`${btnDanger} !px-2 !py-1 text-[11px]`}
+              >
+                Confirm remove
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmingRemove(true)}
+              className="px-2 py-1 text-[11px] rounded border border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-900/30 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/50"
+            >
+              Remove
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Basic fields */}
       <div className="mb-3">
-        <div className={labelCls}>Component Type<Tip text={STUDIO_TIPS.component_type} /></div>
+        <div className={labelCls}>Component Type<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.component_type} /></div>
         <ComboSelect
           value={compType}
           onChange={(v) => onUpdate({ component_type: v, type: v })}
@@ -1866,68 +2347,86 @@ function EditableComponentSource({
       </div>
 
       {/* Component-level full review priority/effort */}
-      <div className="border border-gray-200 dark:border-gray-700 rounded p-3 mb-4 bg-gray-50 dark:bg-gray-900/20">
-        <div className="text-xs font-semibold text-gray-500 mb-2">AI Review Priority</div>
-        <div className="grid grid-cols-4 gap-3">
-          <div>
-            <div className={labelCls}>Required Level<Tip text={STUDIO_TIPS.required_level} /></div>
-            <select
-              className={`${selectCls} w-full`}
-              value={sourcePriority.required_level}
-              onChange={(e) => updatePriority({ required_level: e.target.value })}
-            >
-              <option value="identity">identity</option>
-              <option value="required">required</option>
-              <option value="critical">critical</option>
-              <option value="expected">expected</option>
-              <option value="optional">optional</option>
-              <option value="editorial">editorial</option>
-              <option value="commerce">commerce</option>
-            </select>
-          </div>
-          <div>
-            <div className={labelCls}>Availability<Tip text={STUDIO_TIPS.availability} /></div>
-            <select
-              className={`${selectCls} w-full`}
-              value={sourcePriority.availability}
-              onChange={(e) => updatePriority({ availability: e.target.value })}
-            >
-              <option value="always">always</option>
-              <option value="expected">expected</option>
-              <option value="sometimes">sometimes</option>
-              <option value="rare">rare</option>
-              <option value="editorial_only">editorial_only</option>
-            </select>
-          </div>
-          <div>
-            <div className={labelCls}>Difficulty<Tip text={STUDIO_TIPS.difficulty} /></div>
-            <select
-              className={`${selectCls} w-full`}
-              value={sourcePriority.difficulty}
-              onChange={(e) => updatePriority({ difficulty: e.target.value })}
-            >
-              <option value="easy">easy</option>
-              <option value="medium">medium</option>
-              <option value="hard">hard</option>
-              <option value="instrumented">instrumented</option>
-            </select>
-          </div>
-          <div>
-            <div className={labelCls}>Effort (1-10)<Tip text={STUDIO_TIPS.effort} /></div>
-            <input
-              className={`${inputCls} w-full`}
-              type="number"
-              min={1}
-              max={10}
-              value={sourcePriority.effort}
-              onChange={(e) => updatePriority({ effort: Math.max(1, Math.min(10, parseInt(e.target.value, 10) || 1)) })}
-            />
+      <button
+        type="button"
+        onClick={() => setShowAiSections((v) => !v)}
+        className="w-full flex items-center gap-2 mb-2"
+      >
+        <span className="inline-flex items-center justify-center w-5 h-5 border border-gray-300 dark:border-gray-600 rounded text-xs font-medium text-gray-500 dark:text-gray-300">{showAiSections ? '-' : '+'}</span>
+        <span className="text-xs font-semibold text-gray-500">AI Review Priority</span>
+      </button>
+      {showAiSections ? (
+        <div className="border border-gray-200 dark:border-gray-700 rounded p-3 mb-4 bg-gray-50 dark:bg-gray-900/20">
+          <div className="text-xs font-semibold text-gray-500 mb-2">AI Review Priority</div>
+          <div className="grid grid-cols-4 gap-3">
+            <div>
+              <div className={labelCls}>Required Level<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.required_level} /></div>
+              <select
+                className={`${selectCls} w-full`}
+                value={sourcePriority.required_level}
+                onChange={(e) => updatePriority({ required_level: e.target.value })}
+              >
+                <option value="identity">identity</option>
+                <option value="required">required</option>
+                <option value="critical">critical</option>
+                <option value="expected">expected</option>
+                <option value="optional">optional</option>
+                <option value="editorial">editorial</option>
+                <option value="commerce">commerce</option>
+              </select>
+            </div>
+            <div>
+              <div className={labelCls}>Availability<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.availability} /></div>
+              <select
+                className={`${selectCls} w-full`}
+                value={sourcePriority.availability}
+                onChange={(e) => updatePriority({ availability: e.target.value })}
+              >
+                <option value="always">always</option>
+                <option value="expected">expected</option>
+                <option value="sometimes">sometimes</option>
+                <option value="rare">rare</option>
+                <option value="editorial_only">editorial_only</option>
+              </select>
+            </div>
+            <div>
+              <div className={labelCls}>Difficulty<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.difficulty} /></div>
+              <select
+                className={`${selectCls} w-full`}
+                value={sourcePriority.difficulty}
+                onChange={(e) => updatePriority({ difficulty: e.target.value })}
+              >
+                <option value="easy">easy</option>
+                <option value="medium">medium</option>
+                <option value="hard">hard</option>
+                <option value="instrumented">instrumented</option>
+              </select>
+            </div>
+            <div>
+              <div className={labelCls}>Effort (1-10)<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.effort} /></div>
+              <input
+                className={`${inputCls} w-full`}
+                type="number"
+                min={1}
+                max={10}
+                value={sourcePriority.effort}
+                onChange={(e) => updatePriority({ effort: Math.max(1, Math.min(10, parseInt(e.target.value, 10) || 1)) })}
+              />
+            </div>
           </div>
         </div>
-      </div>
+      ) : null}
 
       {/* Component table-level AI assist */}
-      {(() => {
+      <button
+        type="button"
+        onClick={() => setShowAiSections((v) => !v)}
+        className="w-full flex items-center gap-2 mb-2"
+      >
+        <span className="inline-flex items-center justify-center w-5 h-5 border border-gray-300 dark:border-gray-600 rounded text-xs font-medium text-gray-500 dark:text-gray-300">{showAiSections ? '-' : '+'}</span>
+        <span className="text-xs font-semibold text-gray-500">AI Assist</span>
+      </button>
+      {showAiSections ? (() => {
         const explicitMode = sourceAiAssist.mode || '';
         const strategy = sourceAiAssist.model_strategy || 'auto';
         const explicitCalls = sourceAiAssist.max_calls || 0;
@@ -1962,10 +2461,10 @@ function EditableComponentSource({
 
         return (
           <div className="border border-gray-200 dark:border-gray-700 rounded p-3 mb-4 bg-gray-50 dark:bg-gray-900/20">
-            <h4 className="text-xs font-semibold text-gray-500 mb-2">AI Assist<Tip text={STUDIO_TIPS.ai_mode} /></h4>
+            <h4 className="text-xs font-semibold text-gray-500 mb-2">AI Assist<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.ai_mode} /></h4>
             <div className="grid grid-cols-4 gap-3">
               <div>
-                <div className={labelCls}>Mode<Tip text={STUDIO_TIPS.ai_mode} /></div>
+                <div className={labelCls}>Mode<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.ai_mode} /></div>
                 <select
                   className={`${selectCls} w-full`}
                   value={explicitMode}
@@ -1979,7 +2478,7 @@ function EditableComponentSource({
                 </select>
               </div>
               <div>
-                <div className={labelCls}>Model Strategy<Tip text={STUDIO_TIPS.ai_model_strategy} /></div>
+                <div className={labelCls}>Model Strategy<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.ai_model_strategy} /></div>
                 <select
                   className={`${selectCls} w-full`}
                   value={strategy}
@@ -1991,7 +2490,7 @@ function EditableComponentSource({
                 </select>
               </div>
               <div>
-                <div className={labelCls}>Max Calls<Tip text={STUDIO_TIPS.ai_max_calls} /></div>
+                <div className={labelCls}>Max Calls<Tip text={STUDIO_TIPS.ai_max_calls} style={{ position: 'relative', left: '-3px', top: '-4px' }} /></div>
                 <input
                   className={`${inputCls} w-full`}
                   type="number"
@@ -2003,7 +2502,7 @@ function EditableComponentSource({
                 />
               </div>
               <div>
-                <div className={labelCls}>Max Tokens<Tip text={STUDIO_TIPS.ai_max_tokens} /></div>
+                <div className={labelCls}>Max Tokens<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.ai_max_tokens} /></div>
                 <input
                   className={`${inputCls} w-full`}
                   type="number"
@@ -2037,7 +2536,7 @@ function EditableComponentSource({
 
             <div className="mt-2">
               <div className="flex items-center gap-2 mb-1">
-                <span className={labelCls.replace(' mb-1', '')}>Extraction Guidance (sent to LLM)<Tip text={STUDIO_TIPS.ai_reasoning_note} /></span>
+                <span className={labelCls.replace(' mb-1', '')}>Extraction Guidance (sent to LLM)<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.ai_reasoning_note} /></span>
                 {!hasExplicit && <span className="text-[9px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500 italic font-medium">Auto</span>}
               </div>
               <textarea
@@ -2058,12 +2557,24 @@ function EditableComponentSource({
             </div>
           </div>
         );
-      })()}
+      })() : null}
 
       {/* Tracked Roles */}
       <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
-        <div className="text-xs font-medium text-gray-500 mb-2">Tracked Roles</div>
-        <div className="flex flex-wrap gap-2 mb-2">
+        <button
+          type="button"
+          onClick={() => setShowTrackedRoles((v) => !v)}
+          className="w-full flex items-center justify-between gap-2 mb-2"
+        >
+          <span className="flex items-center gap-2">
+            <span className="inline-flex items-center justify-center w-5 h-5 border border-gray-300 dark:border-gray-600 rounded text-xs font-medium text-gray-500 dark:text-gray-300">{showTrackedRoles ? '-' : '+'}</span>
+            <span className="text-xs font-semibold text-gray-500">Tracked Roles</span>
+          </span>
+          <span className="text-[10px] text-gray-400">{trackedRoleCount} tracked roles</span>
+        </button>
+        {showTrackedRoles ? (
+          <div className="space-y-2">
+            <div className="flex flex-wrap gap-2">
           {([
             { id: 'name' as const, label: 'Name', alwaysOn: true },
             { id: 'maker' as const, label: 'Maker (Brand)', alwaysOn: false },
@@ -2105,7 +2616,7 @@ function EditableComponentSource({
           All tracked roles use <span className="font-semibold text-gray-500">Authoritative</span> variance policy
         </div>
 
-        {/* Alias values — shown when aliases role is active */}
+        {/* Alias values â€" shown when aliases role is active */}
         {activeRoles.has('aliases') ? (
           <div className="mb-4 border border-gray-200 dark:border-gray-700 rounded p-3 bg-gray-50 dark:bg-gray-900/20">
             <div className="flex items-center gap-2 mb-2">
@@ -2120,9 +2631,21 @@ function EditableComponentSource({
         ) : null}
 
         {/* Attributes (Properties) */}
-        <div className="mt-3">
-          <div className="flex items-center justify-between mb-2">
-            <div className={labelCls}>Attributes ({propertyRows.length})<Tip text={STUDIO_TIPS.comp_field_key} /></div>
+        <button
+          type="button"
+          onClick={() => setShowAttributes((v) => !v)}
+          className="w-full flex items-center justify-between gap-2 mb-2"
+        >
+          <span className="flex items-center gap-2">
+            <span className="inline-flex items-center justify-center w-5 h-5 border border-gray-300 dark:border-gray-600 rounded text-xs font-medium text-gray-500 dark:text-gray-300">{showAttributes ? '-' : '+'}</span>
+            <span className="text-xs font-semibold text-gray-500">Attributes ({propertyRows.length})<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.comp_field_key} /></span>
+          </span>
+          <span className="text-xs text-gray-400">{propertyRows.length} attribute{propertyRows.length !== 1 ? 's' : ''}</span>
+        </button>
+        {showAttributes ? (
+          <div className="mt-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className={labelCls}>Attributes ({propertyRows.length})<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.comp_field_key} /></div>
             {fieldOrder.length > 0 ? (
               <div className="flex items-center gap-2">
                 <select
@@ -2162,15 +2685,15 @@ function EditableComponentSource({
                 const varianceLocked = inherited ? (inherited.type !== 'number' || inherited.isBool || hasEnumSource) : false;
                 const lockReason = inherited
                   ? inherited.isBool
-                    ? 'Boolean field — variance locked to authoritative (yes/no only)'
+                    ? 'Boolean field â€" variance locked to authoritative (yes/no only)'
                     : isComponentDbEnum
-                      ? `enum.db (${inherited.enumSource.replace(/^component_db\./, '')}) — variance locked to authoritative`
+                      ? `enum.db (${inherited.enumSource.replace(/^component_db\./, '')}) â€" variance locked to authoritative`
                       : isExternalEnum
-                        ? `Enum (${inherited.enumSource.replace(/^(known_values|data_lists)\./, '')}) — variance locked to authoritative`
+                        ? `Enum (${inherited.enumSource.replace(/^(known_values|data_lists)\./, '')}) â€" variance locked to authoritative`
                         : inherited.type !== 'number' && inherited.fieldValues.length > 0
-                          ? `Manual values (${inherited.fieldValues.length}) — variance locked to authoritative`
+                          ? `Manual values (${inherited.fieldValues.length}) â€" variance locked to authoritative`
                           : inherited.type !== 'number'
-                            ? 'String property — variance locked to authoritative (only number fields without enums support variance)'
+                            ? 'String property â€" variance locked to authoritative (only number fields without enums support variance)'
                             : ''
                   : '';
                 return (
@@ -2178,7 +2701,7 @@ function EditableComponentSource({
                     <div className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end p-3 pb-2">
                       <div>
                         <div className="text-[10px] text-gray-400 mb-0.5">
-                          Field Key<Tip text={STUDIO_TIPS.comp_field_key} />
+                          Field Key<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.comp_field_key} />
                         </div>
                         <select
                           className={`${selectCls} w-full`}
@@ -2211,12 +2734,12 @@ function EditableComponentSource({
                         </select>
                       </div>
                       <div>
-                        <div className="text-[10px] text-gray-400 mb-0.5">Variance<Tip text={STUDIO_TIPS.comp_variance_policy} /></div>
+                        <div className="text-[10px] text-gray-400 mb-0.5">Variance<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.comp_variance_policy} /></div>
                         <select
                           className={`${selectCls} w-full ${varianceLocked || prop.variance_policy === 'override_allowed' ? 'opacity-50 cursor-not-allowed' : ''}`}
                           value={varianceLocked || prop.variance_policy === 'override_allowed' ? 'authoritative' : prop.variance_policy}
                           disabled={varianceLocked || prop.variance_policy === 'override_allowed'}
-                          title={prop.variance_policy === 'override_allowed' ? 'Disabled — override checkbox is active' : lockReason}
+                          title={prop.variance_policy === 'override_allowed' ? 'Disabled â€" override checkbox is active' : lockReason}
                           onChange={(e) => updatePropertyField(pidx, { variance_policy: e.target.value as PropertyMapping['variance_policy'] })}
                         >
                           {VARIANCE_POLICIES.map((vp) => (
@@ -2292,7 +2815,7 @@ function EditableComponentSource({
                     {!varianceLocked && (prop.variance_policy === 'upper_bound' || prop.variance_policy === 'lower_bound' || prop.variance_policy === 'range') ? (
                       <div className="px-3 pb-2">
                         <div className="flex items-center gap-2">
-                          <span className="text-[10px] text-gray-400">Tolerance<Tip text={STUDIO_TIPS.comp_tolerance} /></span>
+                          <span className="text-[10px] text-gray-400">Tolerance<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.comp_tolerance} /></span>
                           <input
                             className={`${inputCls} w-24`}
                             type="number"
@@ -2351,21 +2874,21 @@ function EditableComponentSource({
             <p className="text-xs text-gray-400">No attributes. Use the dropdown above to add field keys.</p>
           )}
         </div>
+        ) : null}
       </div>
+      ) : null}
 
       {/* Summary line */}
       <div className="mt-3 text-xs text-gray-400 flex flex-wrap gap-1.5">
-        <span className="px-1.5 py-0.5 rounded bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400">Name</span>
-        {activeRoles.has('maker') ? <span className="px-1.5 py-0.5 rounded bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400">Maker</span> : null}
-        {activeRoles.has('aliases') ? <span className="px-1.5 py-0.5 rounded bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400">Aliases</span> : null}
-        {activeRoles.has('links') ? <span className="px-1.5 py-0.5 rounded bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400">Links</span> : null}
-        {propertyRows.length > 0 ? <span className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400">{propertyRows.length} attribute{propertyRows.length !== 1 ? 's' : ''}</span> : null}
+        <span className="px-1.5 py-0.5 rounded bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400">{propertyRows.length} attribute{propertyRows.length !== 1 ? 's' : ''}</span>
+        <span className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400">{trackedRoleCount} tracked role{trackedRoleCount !== 1 ? 's' : ''}</span>
       </div>
+    </div>
     </div>
   );
 }
 
-// ── Key Navigator ───────────────────────────────────────────────────
+// â"€â"€ Key Navigator â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 // Helper to safely get nested values
 function getN(obj: Record<string, unknown>, path: string): unknown {
   return path.split('.').reduce((o: unknown, k) => (o && typeof o === 'object' ? (o as Record<string, unknown>)[k] : undefined), obj);
@@ -2388,22 +2911,55 @@ function arrN(obj: Record<string, unknown>, path: string): string[] {
 }
 
 // Collapsible section component
-function Section({ title, children, defaultOpen = false }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
+function Section({
+  title,
+  children,
+  defaultOpen = false,
+  titleTooltip,
+  centerTitle = false,
+}: {
+  title: string;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+  titleTooltip?: string;
+  centerTitle?: boolean;
+}) {
   const [open, setOpen] = useState(defaultOpen);
+  const titleCls = centerTitle ? 'text-center leading-snug' : 'text-left pl-1 leading-snug';
   return (
-    <div className="border border-gray-200 dark:border-gray-700 rounded">
+    <div className="relative border border-gray-200 dark:border-gray-700 rounded">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-3 py-2 text-sm font-semibold bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-t"
+        className="w-full min-h-9 flex items-center gap-2 px-3 py-2 text-sm font-semibold bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-t relative"
       >
-        <span>{title}</span>
-        <span className="text-gray-400">{open ? '\u25B2' : '\u25BC'}</span>
+      {centerTitle ? (
+        <>
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-5 h-5 border border-gray-300 dark:border-gray-600 rounded text-xs font-medium text-gray-500 dark:text-gray-300">
+            {open ? '-' : '+'}
+          </span>
+          <span className={`w-full ${titleCls}`}>{title}</span>
+        </>
+      ) : (
+        <>
+          <span className="inline-flex items-center justify-center w-5 h-5 border border-gray-300 dark:border-gray-600 rounded text-xs font-medium text-gray-500 dark:text-gray-300">
+            {open ? '-' : '+'}
+          </span>
+          <span className={titleCls}>{title}</span>
+        </>
+      )}
       </button>
+      {titleTooltip ? (
+        <span
+          className="absolute"
+          style={{ right: '-10px', top: '-2px', transform: 'translateY(-16px)' }}
+        >
+          <Tip text={titleTooltip} />
+        </span>
+      ) : null}
       {open ? <div className="p-3 space-y-3">{children}</div> : null}
     </div>
   );
 }
-
 
 function KeyNavigatorTab({
   category,
@@ -2416,6 +2972,8 @@ function KeyNavigatorTab({
   enumLists,
   componentDb,
   componentSources,
+  autoSaveEnabled,
+  setAutoSaveEnabled,
 }: {
   category: string;
   selectedKey: string;
@@ -2427,6 +2985,8 @@ function KeyNavigatorTab({
   enumLists: EnumEntry[];
   componentSources: ComponentSource[];
   componentDb: ComponentDbResponse;
+  autoSaveEnabled: boolean;
+  setAutoSaveEnabled: (v: boolean) => void;
 }) {
   const {
     editedRules, editedFieldOrder, updateField,
@@ -2699,119 +3259,149 @@ function KeyNavigatorTab({
       {/* Key detail editor */}
       <div className="flex-1 overflow-y-auto max-h-[calc(100vh-350px)] pr-2">
         {selectedKey && currentRule ? (
-          <div className="space-y-3">
-            <div className="sticky top-0 bg-white dark:bg-gray-900 py-2 z-10 border-b border-gray-200 dark:border-gray-700 space-y-2">
-              {/* Row 1: Label (read-only or editable) + actions */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 min-w-0">
-                  {editingLabel ? (() => {
-                    const trimmedLabel = editLabelValue.trim();
-                    const otherLabels = activeFieldOrder
-                      .filter(k => !k.startsWith('__grp::') && k !== selectedKey)
-                      .map(k => displayLabel(k, editedRules[k]).toLowerCase());
-                    const labelDup = trimmedLabel && otherLabels.includes(trimmedLabel.toLowerCase())
-                      ? 'A field with this label already exists'
-                      : null;
-                    const labelDisabled = !trimmedLabel || !!labelDup;
-                    const commitLabel = () => {
-                      if (labelDisabled) return;
-                      updateField(selectedKey, 'ui.label', trimmedLabel);
-                      setEditingLabel(false);
-                    };
-                    return <div className="flex flex-col gap-0.5">
-                      <div className="flex items-center gap-1.5">
-                        <input
-                          autoFocus
-                          className={`${inputCls} text-sm font-semibold py-0.5 px-1.5 w-56`}
-                          value={editLabelValue}
-                          onChange={(e) => setEditLabelValue(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') commitLabel();
-                            if (e.key === 'Escape') setEditingLabel(false);
-                          }}
-                        />
-                        <button
-                          onClick={commitLabel}
-                          disabled={labelDisabled}
-                          className="px-3 py-1 text-xs font-medium bg-accent text-white rounded hover:bg-blue-600 disabled:opacity-50"
-                        >Save</button>
-                        <button onClick={() => setEditingLabel(false)} className="px-3 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">Cancel</button>
-                      </div>
-                      {labelDup && <span className="text-[10px] text-red-500">{labelDup}</span>}
-                    </div>;
-                  })() : (
-                    <>
-                      <h3 className="text-lg font-semibold truncate">{displayLabel(selectedKey, currentRule as Record<string, unknown>)}</h3>
-                      <button
-                        onClick={() => { setEditingLabel(true); setEditLabelValue(displayLabel(selectedKey, currentRule as Record<string, unknown>)); }}
-                        className="px-1.5 py-0.5 text-xs text-gray-400 hover:text-accent rounded hover:bg-gray-100 dark:hover:bg-gray-700 flex-shrink-0"
-                        title="Edit label"
-                      >&#9998;</button>
-                    </>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  {currentRule._edited ? <span className="text-xs text-amber-500">Modified</span> : null}
-                  <button onClick={handleSaveAll} disabled={saving} className={btnPrimary}>
-                    {saving ? 'Saving...' : 'Save All Changes'}
-                  </button>
-                  {saveSuccess ? <span className="text-xs text-green-600">Saved</span> : null}
-                </div>
-              </div>
+          <div key={selectedKey} className="space-y-3">
+            <div className="sticky top-0 bg-white dark:bg-gray-900 z-10 border-b border-gray-200 dark:border-gray-700 mb-1">
+              {editingLabel ? (() => {
+                const trimmedLabel = editLabelValue.trim();
+                const otherLabels = activeFieldOrder
+                  .filter(k => !k.startsWith('__grp::') && k !== selectedKey)
+                  .map(k => displayLabel(k, editedRules[k]).toLowerCase());
+                const labelDup = trimmedLabel && otherLabels.includes(trimmedLabel.toLowerCase())
+                  ? 'A field with this label already exists'
+                  : null;
+                const labelDisabled = !trimmedLabel || !!labelDup;
+                const commitLabel = () => {
+                  if (labelDisabled) return;
+                  updateField(selectedKey, 'ui.label', trimmedLabel);
+                  setEditingLabel(false);
+                };
+                return <div className="flex flex-col justify-center gap-1 px-4 min-h-[44px]">
+                  <div className="flex items-center gap-2">
+                    <input
+                      autoFocus
+                      className={`${inputCls} text-lg font-semibold py-1 px-2 w-64`}
+                      value={editLabelValue}
+                      onChange={(e) => setEditLabelValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') commitLabel();
+                        if (e.key === 'Escape') setEditingLabel(false);
+                      }}
+                    />
+                    <button onClick={commitLabel} disabled={labelDisabled} className="px-3 py-1.5 text-xs font-medium bg-accent text-white rounded hover:bg-blue-600 disabled:opacity-50">Save</button>
+                    <button onClick={() => setEditingLabel(false)} className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">Cancel</button>
+                  </div>
+                  {labelDup && <span className="text-[10px] text-red-500 pl-1">{labelDup}</span>}
+                </div>;
+              })() : renamingKey ? (() => {
+                const renameErr = renameValue && renameValue.trim() !== selectedKey
+                  ? validateNewKeyTs(renameValue.trim(), activeFieldOrder.filter((k) => k !== selectedKey))
+                  : null;
+                const renameDisabled = !renameValue.trim() || renameValue.trim() === selectedKey || !!renameErr;
+                return <div className="flex flex-col justify-center gap-1 px-4 min-h-[44px]">
+                  <div className="flex items-center gap-2">
+                    <input
+                      autoFocus
+                      className={`${inputCls} text-sm font-mono py-1 px-2 w-52`}
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !renameDisabled) handleRenameKey(); if (e.key === 'Escape') setRenamingKey(false); }}
+                    />
+                    {renameErr && <span className="text-[10px] text-red-500">{renameErr}</span>}
+                    <button onClick={handleRenameKey} disabled={renameDisabled} className="px-3 py-1.5 text-xs font-medium bg-accent text-white rounded hover:bg-blue-600 disabled:opacity-50">Save</button>
+                    <button onClick={() => setRenamingKey(false)} className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">Cancel</button>
+                  </div>
+                </div>;
+              })() : (
+                <div className="flex items-center gap-3 px-4 min-h-[44px]">
+                  {/* Identity: label + key */}
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span
+                      className="text-lg font-semibold text-gray-900 dark:text-white truncate cursor-pointer hover:text-accent transition-colors leading-snug"
+                      onClick={() => { setEditingLabel(true); setEditLabelValue(displayLabel(selectedKey, currentRule as Record<string, unknown>)); }}
+                      title="Click to edit label"
+                    >
+                      {displayLabel(selectedKey, currentRule as Record<string, unknown>)}
+                    </span>
+                    <span
+                      className="text-[10px] text-gray-400 cursor-pointer hover:text-accent transition-colors flex-shrink-0"
+                      onClick={() => { setEditingLabel(true); setEditLabelValue(displayLabel(selectedKey, currentRule as Record<string, unknown>)); }}
+                    >&#9998;</span>
+                    <span className="text-gray-300 dark:text-gray-600 select-none text-lg leading-snug">|</span>
+                    <span
+                      className="text-sm text-gray-500 dark:text-gray-400 font-mono truncate cursor-pointer hover:text-accent transition-colors leading-snug"
+                      onClick={() => { setRenamingKey(true); setRenameValue(selectedKey); }}
+                      title="Click to rename key"
+                    >
+                      {selectedKey}
+                    </span>
+                    <span
+                      className="text-[10px] text-gray-400 cursor-pointer hover:text-accent transition-colors flex-shrink-0"
+                      onClick={() => { setRenamingKey(true); setRenameValue(selectedKey); }}
+                    >&#9998;</span>
+                    {Boolean(currentRule._edited) && (
+                      <span className="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 flex-shrink-0">Modified</span>
+                    )}
+                  </div>
 
-              {/* Row 2: Key (read-only or rename) + Delete */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  {renamingKey ? (() => {
-                    const renameErr = renameValue && renameValue.trim() !== selectedKey
-                      ? validateNewKeyTs(renameValue.trim(), activeFieldOrder.filter((k) => k !== selectedKey))
-                      : null;
-                    const renameDisabled = !renameValue.trim() || renameValue.trim() === selectedKey || !!renameErr;
-                    return <>
-                      <input
-                        autoFocus
-                        className={`${inputCls} text-xs font-mono py-0.5 px-1.5 w-48`}
-                        value={renameValue}
-                        onChange={(e) => setRenameValue(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter' && !renameDisabled) handleRenameKey(); if (e.key === 'Escape') setRenamingKey(false); }}
-                      />
-                      {renameErr && (
-                        <span className="text-[10px] text-red-500">{renameErr}</span>
+                  <div className="flex-1" />
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <button
+                      onClick={handleSaveAll}
+                      disabled={saving || autoSaveEnabled}
+                      className={`relative px-3 py-1.5 text-xs font-medium rounded border transition-colors ${
+                        saving ? 'text-gray-400 border-gray-200 dark:border-gray-700' : 'text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      } disabled:opacity-50`}
+                    >
+                      {saving ? 'Saving\u2026' : 'Save'}
+                    </button>
+                    <button
+                      onClick={() => setAutoSaveEnabled(!autoSaveEnabled)}
+                      className={`relative px-3 py-1.5 text-xs font-medium rounded border transition-colors overflow-visible ${
+                        autoSaveEnabled
+                          ? 'bg-accent/10 text-accent border-accent/40 shadow-inner dark:bg-accent/20 dark:border-accent/50'
+                          : 'text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      }`}
+                    >
+                      {autoSaveEnabled ? 'Auto-save On' : 'Auto-save Off'}
+                      {saving && (
+                        <span
+                          className="absolute inline-block h-2 w-2 rounded-full bg-gray-400 animate-pulse border border-white/90 shadow-sm"
+                          style={{ right: '2px', bottom: '2px' }}
+                        />
                       )}
-                      <button onClick={handleRenameKey} disabled={renameDisabled} className="px-3 py-1 text-xs font-medium bg-accent text-white rounded hover:bg-blue-600 disabled:opacity-50">Save</button>
-                      <button onClick={() => setRenamingKey(false)} className="px-3 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">Cancel</button>
-                    </>;
-                  })() : (
-                    <>
-                      <span className="text-xs text-gray-400 font-mono">{selectedKey}</span>
+                      {!saving && saveSuccess && (
+                        <span
+                          className="absolute inline-block h-2 w-2 rounded-full bg-green-500 border border-white/90 shadow-sm"
+                          style={{ right: '2px', bottom: '2px' }}
+                        />
+                      )}
+                    </button>
+                    {!confirmDelete ? (
                       <button
-                        onClick={() => { setRenamingKey(true); setRenameValue(selectedKey); }}
-                        className="px-1.5 py-0.5 text-xs text-gray-400 hover:text-accent rounded hover:bg-gray-100 dark:hover:bg-gray-700"
-                        title="Rename key"
-                      >&#9998;</button>
-                    </>
-                  )}
+                        onClick={() => setConfirmDelete(true)}
+                        className="px-3 py-1.5 text-xs font-medium text-red-600 rounded border border-red-300 dark:border-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                      >
+                        Delete
+                      </button>
+                    ) : (
+                      <span className="flex items-center gap-1.5">
+                        <span className="text-xs text-red-500 font-medium">Delete?</span>
+                        <button onClick={handleDeleteKey} className="px-2.5 py-1 text-xs font-medium bg-red-600 text-white rounded hover:bg-red-700">Yes</button>
+                        <button onClick={() => setConfirmDelete(false)} className="px-2.5 py-1 text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">No</button>
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {!confirmDelete ? (
-                    <button onClick={() => setConfirmDelete(true)} className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700">Delete Key</button>
-                  ) : (
-                    <div className="flex items-center gap-1.5 bg-red-50 dark:bg-red-900/20 border border-red-300 dark:border-red-700 rounded px-2.5 py-1.5">
-                      <span className="text-xs text-red-600 dark:text-red-400">Delete &quot;{selectedKey}&quot;? This cannot be undone.</span>
-                      <button onClick={handleDeleteKey} className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700">Confirm</button>
-                      <button onClick={() => setConfirmDelete(false)} className="px-3 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">Cancel</button>
-                    </div>
-                  )}
-                </div>
-              </div>
+              )}
             </div>
 
-            {/* ── Field Coupling Summary ────────────────────────────── */}
+            {/* â"€â"€ Field Coupling Summary â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
             {(() => {
               const pt = strN(currentRule, 'parse.template', strN(currentRule, 'parse_template'));
               const es = strN(currentRule, 'enum.source', strN(currentRule, 'enum_source'));
               const ep = strN(currentRule, 'enum.policy', strN(currentRule, 'enum_policy', 'open'));
-              const ic = strN(currentRule, 'ui.input_control', 'text');
               const ct = strN(currentRule, 'component.type');
               const chipCls = 'px-2 py-0.5 text-[11px] rounded-full font-medium';
               const isComponent = pt === 'component_reference';
@@ -2819,7 +3409,7 @@ function KeyNavigatorTab({
               const isNumeric = ['number_with_unit', 'list_of_numbers_with_unit', 'list_numbers_or_ranges_with_unit'].includes(pt);
               return (
                 <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 text-xs">
-                  <span className="text-gray-400 font-medium mr-1">Coupling:</span>
+                  <span className="text-gray-400 font-medium mr-1">Pipeline:</span>
                   <span className={`${chipCls} ${isComponent ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' : isBoolean ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : isNumeric ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300' : 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'}`}>
                     {pt || 'none'}
                   </span>
@@ -2831,8 +3421,6 @@ function KeyNavigatorTab({
                       <span className="text-gray-500">Source: <span className="font-mono">{es}</span></span>
                     </>
                   ) : null}
-                  <span className="text-gray-300 dark:text-gray-600">|</span>
-                  <span className="text-gray-500">Input: <span className="font-mono">{ic}</span></span>
                   {ct ? (
                     <>
                       <span className="text-gray-300 dark:text-gray-600">|</span>
@@ -2845,11 +3433,11 @@ function KeyNavigatorTab({
               );
             })()}
 
-            {/* ── Contract ────────────────────────────────────────── */}
-            <Section title="Contract (Type, Shape, Unit)" defaultOpen>
+            {/* â"€â"€ Contract â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
+            <Section title="Contract (Type, Shape, Unit)" titleTooltip={STUDIO_TIPS.key_section_contract}>
               <div className="grid grid-cols-4 gap-3">
                 <div>
-                  <div className={labelCls}>Data Type<Tip text={STUDIO_TIPS.data_type} /></div>
+                  <div className={labelCls}>Data Type<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.data_type} /></div>
                   <select className={`${selectCls} w-full`} value={strN(currentRule, 'contract.type', 'string')} onChange={(e) => updateField(selectedKey, 'contract.type', e.target.value)}>
                     <option value="string">string</option>
                     <option value="number">number</option>
@@ -2861,7 +3449,7 @@ function KeyNavigatorTab({
                   </select>
                 </div>
                 <div>
-                  <div className={labelCls}>Shape<Tip text={STUDIO_TIPS.shape} /></div>
+                  <div className={labelCls}>Shape<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.shape} /></div>
                   <select className={`${selectCls} w-full`} value={strN(currentRule, 'contract.shape', 'scalar')} onChange={(e) => updateField(selectedKey, 'contract.shape', e.target.value)}>
                     <option value="scalar">scalar</option>
                     <option value="list">list</option>
@@ -2870,21 +3458,21 @@ function KeyNavigatorTab({
                   </select>
                 </div>
                 <div>
-                  <div className={labelCls}>Unit<Tip text={STUDIO_TIPS.contract_unit} /></div>
+                  <div className={labelCls}>Unit<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.contract_unit} /></div>
                   <ComboSelect value={strN(currentRule, 'contract.unit')} onChange={(v) => updateField(selectedKey, 'contract.unit', v || null)} options={UNITS} placeholder="e.g. g, mm, Hz" />
                 </div>
                 <div>
-                  <div className={labelCls}>Unknown Token<Tip text={STUDIO_TIPS.unknown_token} /></div>
+                  <div className={labelCls}>Unknown Token<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.unknown_token} /></div>
                   <ComboSelect value={strN(currentRule, 'contract.unknown_token', 'unk')} onChange={(v) => updateField(selectedKey, 'contract.unknown_token', v)} options={UNKNOWN_TOKENS} placeholder="unk" />
                 </div>
               </div>
               <div className="grid grid-cols-4 gap-3">
                 <div>
-                  <div className={labelCls}>Rounding Decimals<Tip text={STUDIO_TIPS.rounding_decimals} /></div>
+                  <div className={labelCls}>Rounding Decimals<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.rounding_decimals} /></div>
                   <input className={`${inputCls} w-full`} type="number" min={0} max={6} value={numN(currentRule, 'contract.rounding.decimals', 0)} onChange={(e) => updateField(selectedKey, 'contract.rounding.decimals', parseInt(e.target.value, 10) || 0)} />
                 </div>
                 <div>
-                  <div className={labelCls}>Rounding Mode<Tip text={STUDIO_TIPS.rounding_mode} /></div>
+                  <div className={labelCls}>Rounding Mode<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.rounding_mode} /></div>
                   <select className={`${selectCls} w-full`} value={strN(currentRule, 'contract.rounding.mode', 'nearest')} onChange={(e) => updateField(selectedKey, 'contract.rounding.mode', e.target.value)}>
                     <option value="nearest">nearest</option>
                     <option value="floor">floor</option>
@@ -2894,17 +3482,17 @@ function KeyNavigatorTab({
                 <div className="flex items-end">
                   <label className="flex items-center gap-2 text-sm cursor-pointer">
                     <input type="checkbox" checked={boolN(currentRule, 'contract.unknown_reason_required', true)} onChange={(e) => updateField(selectedKey, 'contract.unknown_reason_required', e.target.checked)} className="rounded border-gray-300" />
-                    <span className="text-xs text-gray-500">Require unknown reason<Tip text={STUDIO_TIPS.require_unknown_reason} /></span>
+                    <span className="text-xs text-gray-500">Require unknown reason<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.require_unknown_reason} /></span>
                   </label>
                 </div>
               </div>
             </Section>
 
-            {/* ── Priority ────────────────────────────────────────── */}
-            <Section title="Priority & Effort" defaultOpen>
+            {/* â"€â"€ Priority â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
+            <Section title="Priority & Effort" titleTooltip={STUDIO_TIPS.key_section_priority}>
               <div className="grid grid-cols-4 gap-3">
                 <div>
-                  <div className={labelCls}>Required Level<Tip text={STUDIO_TIPS.required_level} /></div>
+                  <div className={labelCls}>Required Level<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.required_level} /></div>
                   <select className={`${selectCls} w-full`} value={strN(currentRule, 'priority.required_level', strN(currentRule, 'required_level', 'expected'))} onChange={(e) => updateField(selectedKey, 'priority.required_level', e.target.value)}>
                     <option value="identity">identity</option>
                     <option value="required">required</option>
@@ -2916,7 +3504,7 @@ function KeyNavigatorTab({
                   </select>
                 </div>
                 <div>
-                  <div className={labelCls}>Availability<Tip text={STUDIO_TIPS.availability} /></div>
+                  <div className={labelCls}>Availability<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.availability} /></div>
                   <select className={`${selectCls} w-full`} value={strN(currentRule, 'priority.availability', strN(currentRule, 'availability', 'expected'))} onChange={(e) => updateField(selectedKey, 'priority.availability', e.target.value)}>
                     <option value="always">always</option>
                     <option value="expected">expected</option>
@@ -2926,7 +3514,7 @@ function KeyNavigatorTab({
                   </select>
                 </div>
                 <div>
-                  <div className={labelCls}>Difficulty<Tip text={STUDIO_TIPS.difficulty} /></div>
+                  <div className={labelCls}>Difficulty<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.difficulty} /></div>
                   <select className={`${selectCls} w-full`} value={strN(currentRule, 'priority.difficulty', strN(currentRule, 'difficulty', 'easy'))} onChange={(e) => updateField(selectedKey, 'priority.difficulty', e.target.value)}>
                     <option value="easy">easy</option>
                     <option value="medium">medium</option>
@@ -2935,23 +3523,23 @@ function KeyNavigatorTab({
                   </select>
                 </div>
                 <div>
-                  <div className={labelCls}>Effort (1-10)<Tip text={STUDIO_TIPS.effort} /></div>
+                  <div className={labelCls}>Effort (1-10)<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.effort} /></div>
                   <input className={`${inputCls} w-full`} type="number" min={1} max={10} value={numN(currentRule, 'priority.effort', numN(currentRule, 'effort', 3))} onChange={(e) => updateField(selectedKey, 'priority.effort', parseInt(e.target.value, 10) || 1)} />
                 </div>
               </div>
               <div className="flex gap-6">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input type="checkbox" checked={boolN(currentRule, 'priority.publish_gate', boolN(currentRule, 'publish_gate'))} onChange={(e) => updateField(selectedKey, 'priority.publish_gate', e.target.checked)} className="rounded border-gray-300" />
-                  <span className="text-xs text-gray-500">Publish Gate<Tip text={STUDIO_TIPS.publish_gate} /></span>
+                  <span className="text-xs text-gray-500">Publish Gate<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.publish_gate} /></span>
                 </label>
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input type="checkbox" checked={boolN(currentRule, 'priority.block_publish_when_unk', boolN(currentRule, 'block_publish_when_unk'))} onChange={(e) => updateField(selectedKey, 'priority.block_publish_when_unk', e.target.checked)} className="rounded border-gray-300" />
-                  <span className="text-xs text-gray-500">Block publish when unk<Tip text={STUDIO_TIPS.block_publish_when_unk} /></span>
+                  <span className="text-xs text-gray-500">Block publish when unk<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.block_publish_when_unk} /></span>
                 </label>
               </div>
 
               {/* AI Assist */}
-              <h4 className="text-xs font-semibold text-gray-500 mt-4 mb-1">AI Assist<Tip text={STUDIO_TIPS.ai_mode} /></h4>
+              <h4 className="text-xs font-semibold text-gray-500 mt-4 mb-1">AI Assist<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.ai_mode} /></h4>
               {(() => {
                 const explicitMode = strN(currentRule, 'ai_assist.mode');
                 const strategy = strN(currentRule, 'ai_assist.model_strategy', 'auto');
@@ -2971,7 +3559,7 @@ function KeyNavigatorTab({
                 const derivedCalls = effort <= 3 ? 1 : effort <= 6 ? 2 : 3;
                 const effectiveCalls = explicitCalls > 0 ? Math.min(explicitCalls, 10) : derivedCalls;
 
-                // Resolve effective model — actual model names from env config
+                // Resolve effective model â€" actual model names from env config
                 const modeToModel: Record<string, { model: string; reasoning: boolean }> = {
                   off: { model: 'none', reasoning: false },
                   advisory: { model: 'gpt-5-low', reasoning: false },
@@ -2986,7 +3574,7 @@ function KeyNavigatorTab({
                   <>
                     <div className="grid grid-cols-4 gap-3">
                       <div>
-                        <div className={labelCls}>Mode<Tip text={STUDIO_TIPS.ai_mode} /></div>
+                        <div className={labelCls}>Mode<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.ai_mode} /></div>
                         <select className={`${selectCls} w-full`} value={explicitMode} onChange={(e) => updateField(selectedKey, 'ai_assist.mode', e.target.value || null)}>
                           <option value="">auto ({derivedMode})</option>
                           <option value="off">off &mdash; no LLM, deterministic only</option>
@@ -2996,7 +3584,7 @@ function KeyNavigatorTab({
                         </select>
                       </div>
                       <div>
-                        <div className={labelCls}>Model Strategy<Tip text={STUDIO_TIPS.ai_model_strategy} /></div>
+                        <div className={labelCls}>Model Strategy<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.ai_model_strategy} /></div>
                         <select className={`${selectCls} w-full`} value={strategy} onChange={(e) => updateField(selectedKey, 'ai_assist.model_strategy', e.target.value)}>
                           <option value="auto">auto &mdash; mode decides model</option>
                           <option value="force_fast">force_fast &mdash; always gpt-5-low</option>
@@ -3004,11 +3592,11 @@ function KeyNavigatorTab({
                         </select>
                       </div>
                       <div>
-                        <div className={labelCls}>Max Calls<Tip text={STUDIO_TIPS.ai_max_calls} /></div>
+                        <div className={labelCls}>Max Calls<Tip text={STUDIO_TIPS.ai_max_calls} style={{ position: 'relative', left: '-3px', top: '-4px' }} /></div>
                         <input className={`${inputCls} w-full`} type="number" min={1} max={10} value={explicitCalls || ''} onChange={(e) => updateField(selectedKey, 'ai_assist.max_calls', parseInt(e.target.value, 10) || null)} placeholder={`auto (${derivedCalls})`} />
                       </div>
                       <div>
-                        <div className={labelCls}>Max Tokens<Tip text={STUDIO_TIPS.ai_max_tokens} /></div>
+                        <div className={labelCls}>Max Tokens<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.ai_max_tokens} /></div>
                         <input className={`${inputCls} w-full`} type="number" min={256} max={65536} step={1024} value={numN(currentRule, 'ai_assist.max_tokens', 0) || ''} onChange={(e) => updateField(selectedKey, 'ai_assist.max_tokens', parseInt(e.target.value, 10) || null)} placeholder={`auto (${effectiveMode === 'off' ? '0' : effectiveMode === 'advisory' ? '4096' : effectiveMode === 'planner' ? '8192' : '16384'})`} />
                       </div>
                     </div>
@@ -3052,7 +3640,7 @@ function KeyNavigatorTab({
                     </div>
 
                     {(() => {
-                      // ── Auto-generate extraction guidance (mirrors backend autoGenerateExtractionGuidance) ──
+                      // â"€â"€ Auto-generate extraction guidance (mirrors backend autoGenerateExtractionGuidance) â"€â"€
                       const explicitNote = strN(currentRule, 'ai_assist.reasoning_note');
                       const type = strN(currentRule, 'contract.data_type', strN(currentRule, 'data_type', 'string'));
                       const shape = strN(currentRule, 'contract.shape', strN(currentRule, 'shape', 'scalar'));
@@ -3130,7 +3718,7 @@ function KeyNavigatorTab({
                       return (
                         <div className="mt-2">
                           <div className="flex items-center gap-2 mb-1">
-                            <span className={labelCls.replace(' mb-1', '')}>Extraction Guidance (sent to LLM)<Tip text={STUDIO_TIPS.ai_reasoning_note} /></span>
+                            <span className={labelCls.replace(' mb-1', '')}>Extraction Guidance (sent to LLM)<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.ai_reasoning_note} /></span>
                             {!hasExplicit && <span className="text-[9px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500 italic font-medium">Auto</span>}
                           </div>
                           <textarea
@@ -3156,8 +3744,8 @@ function KeyNavigatorTab({
               })()}
             </Section>
 
-            {/* ── Parse ───────────────────────────────────────────── */}
-            <Section title="Parse Rules" defaultOpen>
+            {/* â"€â"€ Parse â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
+            <Section title="Parse Rules" titleTooltip={STUDIO_TIPS.key_section_parse}>
               {(() => {
                 const pt = strN(currentRule, 'parse.template', strN(currentRule, 'parse_template'));
                 const showUnits = pt === 'number_with_unit' || pt === 'list_of_numbers_with_unit' || pt === 'list_numbers_or_ranges_with_unit';
@@ -3165,7 +3753,7 @@ function KeyNavigatorTab({
                   <>
                     <div className={showUnits ? 'grid grid-cols-4 gap-3' : ''}>
                       <div>
-                        <div className={labelCls}>Parse Template<Tip text={STUDIO_TIPS.parse_template} /></div>
+                        <div className={labelCls}>Parse Template<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.parse_template} /></div>
                         <select className={`${selectCls} w-full`} value={pt} onChange={(e) => updateField(selectedKey, 'parse.template', e.target.value)}>
                           <option value="">none</option>
                           <option value="text_field">text_field</option>
@@ -3184,11 +3772,11 @@ function KeyNavigatorTab({
                       {showUnits ? (
                         <>
                           <div>
-                            <div className={labelCls}>Parse Unit<Tip text={STUDIO_TIPS.parse_unit} /></div>
+                            <div className={labelCls}>Parse Unit<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.parse_unit} /></div>
                             <ComboSelect value={strN(currentRule, 'parse.unit')} onChange={(v) => updateField(selectedKey, 'parse.unit', v)} options={UNITS} placeholder="e.g. g" />
                           </div>
                           <div className="col-span-2">
-                            <div className={labelCls}>Unit Accepts<Tip text={STUDIO_TIPS.unit_accepts} /></div>
+                            <div className={labelCls}>Unit Accepts<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.unit_accepts} /></div>
                             <TagPicker values={arrN(currentRule, 'parse.unit_accepts')} onChange={(v) => updateField(selectedKey, 'parse.unit_accepts', v)} suggestions={UNIT_ACCEPTS_SUGGESTIONS} placeholder="g, grams..." />
                           </div>
                         </>
@@ -3198,21 +3786,21 @@ function KeyNavigatorTab({
                       <div className="flex gap-6 flex-wrap">
                         <label className="flex items-center gap-2 text-sm cursor-pointer">
                           <input type="checkbox" checked={boolN(currentRule, 'parse.allow_unitless')} onChange={(e) => updateField(selectedKey, 'parse.allow_unitless', e.target.checked)} className="rounded border-gray-300" />
-                          <span className="text-xs text-gray-500">Allow unitless<Tip text={STUDIO_TIPS.allow_unitless} /></span>
+                          <span className="text-xs text-gray-500">Allow unitless<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.allow_unitless} /></span>
                         </label>
                         <label className="flex items-center gap-2 text-sm cursor-pointer">
                           <input type="checkbox" checked={boolN(currentRule, 'parse.allow_ranges')} onChange={(e) => updateField(selectedKey, 'parse.allow_ranges', e.target.checked)} className="rounded border-gray-300" />
-                          <span className="text-xs text-gray-500">Allow ranges<Tip text={STUDIO_TIPS.allow_ranges} /></span>
+                          <span className="text-xs text-gray-500">Allow ranges<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.allow_ranges} /></span>
                         </label>
                         <label className="flex items-center gap-2 text-sm cursor-pointer">
                           <input type="checkbox" checked={boolN(currentRule, 'parse.strict_unit_required')} onChange={(e) => updateField(selectedKey, 'parse.strict_unit_required', e.target.checked)} className="rounded border-gray-300" />
-                          <span className="text-xs text-gray-500">Strict unit required<Tip text={STUDIO_TIPS.strict_unit_required} /></span>
+                          <span className="text-xs text-gray-500">Strict unit required<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.strict_unit_required} /></span>
                         </label>
                       </div>
                     ) : null}
                     {!showUnits && pt ? (
                       <div className="text-xs text-gray-400 italic mt-1">
-                        Unit settings hidden — {pt === 'boolean_yes_no_unk' ? 'boolean' : pt === 'component_reference' ? 'component reference' : pt.replace(/_/g, ' ')} template does not use units.
+                        Unit settings hidden â€" {pt === 'boolean_yes_no_unk' ? 'boolean' : pt === 'component_reference' ? 'component reference' : pt.replace(/_/g, ' ')} template does not use units.
                       </div>
                     ) : null}
                   </>
@@ -3220,8 +3808,8 @@ function KeyNavigatorTab({
               })()}
             </Section>
 
-            {/* ── Enum ────────────────────────────────────────────── */}
-            <Section title="Enum Policy" defaultOpen>
+            {/* â"€â"€ Enum â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
+            <Section title="Enum Policy" titleTooltip={STUDIO_TIPS.key_section_enum}>
               <EnumConfigurator
                 fieldKey={selectedKey}
                 rule={currentRule}
@@ -3232,135 +3820,12 @@ function KeyNavigatorTab({
               />
             </Section>
 
-            {/* ── Evidence ─────────────────────────────────────────── */}
-            <Section title="Evidence Requirements">
-              <div className="grid grid-cols-4 gap-3">
-                <div className="flex items-end">
-                  <label className="flex items-center gap-2 text-sm cursor-pointer">
-                    <input type="checkbox" checked={boolN(currentRule, 'evidence.required', boolN(currentRule, 'evidence_required', true))} onChange={(e) => updateField(selectedKey, 'evidence.required', e.target.checked)} className="rounded border-gray-300" />
-                    <span className="text-xs text-gray-500">Evidence Required<Tip text={STUDIO_TIPS.evidence_required} /></span>
-                  </label>
-                </div>
-                <div>
-                  <div className={labelCls}>Min Evidence Refs<Tip text={STUDIO_TIPS.min_evidence_refs} /></div>
-                  <input className={`${inputCls} w-full`} type="number" min={0} max={10} value={numN(currentRule, 'evidence.min_evidence_refs', numN(currentRule, 'min_evidence_refs', 1))} onChange={(e) => updateField(selectedKey, 'evidence.min_evidence_refs', parseInt(e.target.value, 10) || 0)} />
-                </div>
-                <div>
-                  <div className={labelCls}>Conflict Policy<Tip text={STUDIO_TIPS.conflict_policy} /></div>
-                  <select className={`${selectCls} w-full`} value={strN(currentRule, 'evidence.conflict_policy', 'resolve_by_tier_else_unknown')} onChange={(e) => updateField(selectedKey, 'evidence.conflict_policy', e.target.value)}>
-                    <option value="resolve_by_tier_else_unknown">resolve_by_tier_else_unknown</option>
-                    <option value="prefer_highest_tier">prefer_highest_tier</option>
-                    <option value="prefer_most_recent">prefer_most_recent</option>
-                    <option value="flag_for_review">flag_for_review</option>
-                  </select>
-                </div>
-                <div>
-                  <div className={labelCls}>Tier Preference<Tip text={STUDIO_TIPS.tier_preference} /></div>
-                  <TierPicker
-                    value={arrN(currentRule, 'evidence.tier_preference').length > 0 ? arrN(currentRule, 'evidence.tier_preference') : ['tier1', 'tier2', 'tier3']}
-                    onChange={(v) => updateField(selectedKey, 'evidence.tier_preference', v)}
-                  />
-                </div>
-              </div>
-            </Section>
 
-            {/* ── UI & Display ─────────────────────────────────────── */}
-            <Section title="UI & Display">
+            {/* Components - Component DB & Match Settings */}
+            <Section title="Components" titleTooltip={STUDIO_TIPS.key_section_components}>
               <div className="grid grid-cols-4 gap-3">
                 <div>
-                  <div className={labelCls}>Label<Tip text={STUDIO_TIPS.ui_label} /></div>
-                  <input className={`${inputCls} w-full`} value={strN(currentRule, 'ui.label', strN(currentRule, 'display_name'))} onChange={(e) => updateField(selectedKey, 'ui.label', e.target.value)} />
-                </div>
-                <div>
-                  <div className={labelCls}>Group<Tip text={STUDIO_TIPS.ui_group} /></div>
-                  <ComboSelect value={strN(currentRule, 'ui.group', strN(currentRule, 'group'))} onChange={(v) => updateField(selectedKey, 'ui.group', v)} options={GROUPS} placeholder="e.g. sensor_performance" />
-                </div>
-                <div>
-                  <div className={labelCls}>Input Control<Tip text={STUDIO_TIPS.input_control} /></div>
-                  <select className={`${selectCls} w-full`} value={strN(currentRule, 'ui.input_control', 'text')} onChange={(e) => updateField(selectedKey, 'ui.input_control', e.target.value)}>
-                    <option value="text">text</option>
-                    <option value="number">number</option>
-                    <option value="select">select</option>
-                    <option value="multi_select">multi_select</option>
-                    <option value="component_picker">component_picker</option>
-                    <option value="checkbox">checkbox</option>
-                    <option value="token_list">token_list</option>
-                    <option value="text_list">text_list</option>
-                    <option value="date">date</option>
-                    <option value="url">url</option>
-                  </select>
-                </div>
-                <div>
-                  <div className={labelCls}>Display Mode<Tip text={STUDIO_TIPS.display_mode} /></div>
-                  <select className={`${selectCls} w-full`} value={strN(currentRule, 'ui.display_mode', 'all')} onChange={(e) => updateField(selectedKey, 'ui.display_mode', e.target.value)}>
-                    <option value="all">all</option>
-                    <option value="summary">summary</option>
-                    <option value="detailed">detailed</option>
-                  </select>
-                </div>
-              </div>
-              <div className="grid grid-cols-4 gap-3">
-                <div>
-                  <div className={labelCls}>Suffix<Tip text={STUDIO_TIPS.ui_suffix} /></div>
-                  <ComboSelect value={strN(currentRule, 'ui.suffix')} onChange={(v) => updateField(selectedKey, 'ui.suffix', v || null)} options={SUFFIXES} placeholder="e.g. g, mm" />
-                </div>
-                <div>
-                  <div className={labelCls}>Prefix<Tip text={STUDIO_TIPS.ui_prefix} /></div>
-                  <ComboSelect value={strN(currentRule, 'ui.prefix')} onChange={(v) => updateField(selectedKey, 'ui.prefix', v || null)} options={PREFIXES} placeholder="e.g. $" />
-                </div>
-                <div>
-                  <div className={labelCls}>Display Decimals<Tip text={STUDIO_TIPS.display_decimals} /></div>
-                  <input className={`${inputCls} w-full`} type="number" min={0} max={6} value={numN(currentRule, 'ui.display_decimals', 0)} onChange={(e) => updateField(selectedKey, 'ui.display_decimals', parseInt(e.target.value, 10) || 0)} />
-                </div>
-                <div>
-                  <div className={labelCls}>Order<Tip text={STUDIO_TIPS.ui_order} /></div>
-                  <input className={`${inputCls} w-full`} type="number" min={0} value={numN(currentRule, 'ui.order', 0)} onChange={(e) => updateField(selectedKey, 'ui.order', parseInt(e.target.value, 10) || 0)} />
-                </div>
-              </div>
-              <div>
-                <div className={labelCls}>Tooltip / Guidance<Tip text={STUDIO_TIPS.tooltip_guidance} /></div>
-                <textarea className={`${inputCls} w-full`} rows={2} value={strN(currentRule, 'ui.tooltip_md')} onChange={(e) => updateField(selectedKey, 'ui.tooltip_md', e.target.value)} placeholder="Define how this field should be interpreted..." />
-              </div>
-              <div>
-                <div className={labelCls}>Aliases<Tip text={STUDIO_TIPS.aliases} /></div>
-                <TagPicker values={arrN(currentRule, 'aliases')} onChange={(v) => updateField(selectedKey, 'aliases', v)} placeholder="alternative names for this key" />
-              </div>
-            </Section>
-
-            {/* ── Search Hints ──────────────────────────────────────── */}
-            <Section title="Search Hints">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <div className={labelCls}>Domain Hints<Tip text={STUDIO_TIPS.domain_hints} /></div>
-                  <TagPicker values={arrN(currentRule, 'search_hints.domain_hints')} onChange={(v) => updateField(selectedKey, 'search_hints.domain_hints', v)} suggestions={DOMAIN_HINT_SUGGESTIONS} placeholder="manufacturer, rtings.com..." />
-                </div>
-                <div>
-                  <div className={labelCls}>Content Types<Tip text={STUDIO_TIPS.content_types} /></div>
-                  <TagPicker values={arrN(currentRule, 'search_hints.preferred_content_types')} onChange={(v) => updateField(selectedKey, 'search_hints.preferred_content_types', v)} suggestions={CONTENT_TYPE_SUGGESTIONS} placeholder="spec_sheet, datasheet..." />
-                </div>
-              </div>
-              <div>
-                <div className={labelCls}>Query Terms<Tip text={STUDIO_TIPS.query_terms} /></div>
-                <TagPicker values={arrN(currentRule, 'search_hints.query_terms')} onChange={(v) => updateField(selectedKey, 'search_hints.query_terms', v)} placeholder="alternative search terms" />
-              </div>
-            </Section>
-
-            {/* ── Cross-Field Constraints ────────────────────────── */}
-            <Section title="Cross-Field Constraints">
-              <KeyConstraintEditor
-                currentKey={selectedKey}
-                constraints={arrN(currentRule, 'constraints')}
-                onChange={(next) => updateField(selectedKey, 'constraints', next)}
-                fieldOrder={activeFieldOrder}
-                rules={editedRules}
-              />
-            </Section>
-
-            {/* ── Component Reference ─────────────────────────────── */}
-            <Section title="Components">
-              <div className="grid grid-cols-4 gap-3">
-                <div>
-                  <div className={labelCls}>Component DB<Tip text={STUDIO_TIPS.component_db} /></div>
+                  <div className={labelCls}>Component DB<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.component_db} /></div>
                   <select
                     className={`${selectCls} w-full`}
                     value={strN(currentRule, 'component.type')}
@@ -3379,7 +3844,7 @@ function KeyNavigatorTab({
                           allow_new_components: true,
                           require_identity_evidence: true,
                         });
-                        // Cascade: Component DB → Parse Template + Enum + UI
+                        // Cascade: Component DB â†' Parse Template + Enum + UI
                         updateField(selectedKey, 'parse.template', 'component_reference');
                         updateField(selectedKey, 'enum.source', `component_db.${v}`);
                         updateField(selectedKey, 'enum.policy', 'open_prefer_known');
@@ -3420,14 +3885,14 @@ function KeyNavigatorTab({
                 const derivedProps = (compSource?.roles?.properties || []).filter(p => p.field_key);
                 return (
                   <>
-                    {/* ── Match Settings ─────────────────────────────── */}
+                    {/* â"€â"€ Match Settings â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
                     <div className="mt-3 border-t border-gray-200 dark:border-gray-700 pt-3">
                       <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">Match Settings</div>
                       {/* Name Matching */}
                       <div className="text-[11px] font-medium text-gray-400 mb-1">Name Matching</div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <div className={labelCls}>Fuzzy Threshold<Tip text={STUDIO_TIPS.comp_match_fuzzy_threshold} /></div>
+                          <div className={labelCls}>Fuzzy Threshold<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.comp_match_fuzzy_threshold} /></div>
                           <input type="number" min={0} max={1} step={0.05}
                             className={`${selectCls} w-full`}
                             value={numN(currentRule, 'component.match.fuzzy_threshold', 0.75)}
@@ -3435,7 +3900,7 @@ function KeyNavigatorTab({
                           />
                         </div>
                         <div>
-                          <div className={labelCls}>Name Weight<Tip text={STUDIO_TIPS.comp_match_name_weight} /></div>
+                          <div className={labelCls}>Name Weight<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.comp_match_name_weight} /></div>
                           <input type="number" min={0} max={1} step={0.05}
                             className={`${selectCls} w-full`}
                             value={numN(currentRule, 'component.match.name_weight', 0.4)}
@@ -3443,7 +3908,7 @@ function KeyNavigatorTab({
                           />
                         </div>
                         <div>
-                          <div className={labelCls}>Auto-Accept Score<Tip text={STUDIO_TIPS.comp_match_auto_accept_score} /></div>
+                          <div className={labelCls}>Auto-Accept Score<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.comp_match_auto_accept_score} /></div>
                           <input type="number" min={0} max={1} step={0.05}
                             className={`${selectCls} w-full`}
                             value={numN(currentRule, 'component.match.auto_accept_score', 0.95)}
@@ -3451,7 +3916,7 @@ function KeyNavigatorTab({
                           />
                         </div>
                         <div>
-                          <div className={labelCls}>Flag Review Score<Tip text={STUDIO_TIPS.comp_match_flag_review_score} /></div>
+                          <div className={labelCls}>Flag Review Score<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.comp_match_flag_review_score} /></div>
                           <input type="number" min={0} max={1} step={0.05}
                             className={`${selectCls} w-full`}
                             value={numN(currentRule, 'component.match.flag_review_score', 0.65)}
@@ -3463,7 +3928,7 @@ function KeyNavigatorTab({
                       <div className="text-[11px] font-medium text-gray-400 mb-1 mt-3">Property Matching</div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <div className={labelCls}>Property Weight<Tip text={STUDIO_TIPS.comp_match_property_weight} /></div>
+                          <div className={labelCls}>Property Weight<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.comp_match_property_weight} /></div>
                           <input type="number" min={0} max={1} step={0.05}
                             className={`${selectCls} w-full`}
                             value={numN(currentRule, 'component.match.property_weight', 0.6)}
@@ -3471,7 +3936,7 @@ function KeyNavigatorTab({
                           />
                         </div>
                         <div className="col-span-2">
-                          <div className={labelCls}>Property Keys<Tip text={STUDIO_TIPS.comp_match_property_keys} /></div>
+                          <div className={labelCls}>Property Keys<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.comp_match_property_keys} /></div>
                           <div className="space-y-1.5">
                             {derivedProps.map(p => {
                               const raw = p.variance_policy || 'authoritative';
@@ -3487,15 +3952,15 @@ function KeyNavigatorTab({
                               const vp = isLocked && NUMERIC_ONLY_POLICIES.includes(raw) ? 'authoritative' : raw;
                               const fieldValues = knownValues[p.field_key || ''] || [];
                               const lockReason = isBool
-                                ? 'Boolean field — variance locked to authoritative'
+                                ? 'Boolean field â€" variance locked to authoritative'
                                 : isComponentDb
-                                  ? `enum.db (${enumSrc.replace(/^component_db\./, '')}) — variance locked to authoritative`
+                                  ? `enum.db (${enumSrc.replace(/^component_db\./, '')}) â€" variance locked to authoritative`
                                   : isExtEnum
-                                    ? `Enum (${enumSrc.replace(/^(known_values|data_lists)\./, '')}) — variance locked to authoritative`
+                                    ? `Enum (${enumSrc.replace(/^(known_values|data_lists)\./, '')}) â€" variance locked to authoritative`
                                     : contractType !== 'number' && fieldValues.length > 0
-                                      ? `Manual values (${fieldValues.length}) — variance locked to authoritative`
+                                      ? `Manual values (${fieldValues.length}) â€" variance locked to authoritative`
                                       : isLocked
-                                        ? 'String property — variance locked to authoritative'
+                                        ? 'String property â€" variance locked to authoritative'
                                         : '';
                               return (
                                 <div key={p.field_key} className="flex items-start gap-2 px-2 py-1 rounded bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
@@ -3529,7 +3994,7 @@ function KeyNavigatorTab({
                               );
                             })}
                             {derivedProps.length === 0 ? (
-                              <span className="text-xs text-gray-400 italic">No properties mapped — add in Mapping Studio</span>
+                              <span className="text-xs text-gray-400 italic">No properties mapped â€" add in Mapping Studio</span>
                             ) : null}
                           </div>
                         </div>
@@ -3540,7 +4005,94 @@ function KeyNavigatorTab({
               })() : null}
             </Section>
 
-            {/* ── Raw JSON ────────────────────────────────────────── */}
+            <Section title="Cross-Field Constraints" titleTooltip={STUDIO_TIPS.key_section_constraints}>
+              <KeyConstraintEditor
+                currentKey={selectedKey}
+                constraints={arrN(currentRule, 'constraints')}
+                onChange={(next) => updateField(selectedKey, 'constraints', next)}
+                fieldOrder={activeFieldOrder}
+                rules={editedRules}
+              />
+            </Section>
+
+            <Section title="Evidence Requirements" titleTooltip={STUDIO_TIPS.key_section_evidence}>
+              <div className="grid grid-cols-3 gap-3 items-start">
+                <div className="space-y-2">
+                  <div>
+                    <div className={labelCls}>Min Evidence Refs<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.min_evidence_refs} /></div>
+                    <input className={`${inputCls} w-full`} type="number" min={0} max={10} value={numN(currentRule, 'evidence.min_evidence_refs', numN(currentRule, 'min_evidence_refs', 1))} onChange={(e) => updateField(selectedKey, 'evidence.min_evidence_refs', parseInt(e.target.value, 10) || 0)} />
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={boolN(currentRule, 'evidence.required', boolN(currentRule, 'evidence_required', true))} onChange={(e) => updateField(selectedKey, 'evidence.required', e.target.checked)} className="rounded border-gray-300" />
+                    <span className="text-xs text-gray-500">Evidence required<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.evidence_required} /></span>
+                  </label>
+                </div>
+                <div>
+                  <div className={labelCls}>Conflict Policy<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.conflict_policy} /></div>
+                  <select className={`${selectCls} w-full`} value={strN(currentRule, 'evidence.conflict_policy', 'resolve_by_tier_else_unknown')} onChange={(e) => updateField(selectedKey, 'evidence.conflict_policy', e.target.value)}>
+                    <option value="resolve_by_tier_else_unknown">resolve_by_tier_else_unknown</option>
+                    <option value="prefer_highest_tier">prefer_highest_tier</option>
+                    <option value="prefer_most_recent">prefer_most_recent</option>
+                    <option value="flag_for_review">flag_for_review</option>
+                  </select>
+                </div>
+                <div>
+                  <div className={labelCls}>Tier Preference<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.tier_preference} /></div>
+                  <TierPicker
+                    value={arrN(currentRule, 'evidence.tier_preference').length > 0 ? arrN(currentRule, 'evidence.tier_preference') : ['tier1', 'tier2', 'tier3']}
+                    onChange={(v) => updateField(selectedKey, 'evidence.tier_preference', v)}
+                  />
+                </div>
+              </div>
+            </Section>
+
+            {/* â"€â"€ Extraction Hints & Aliases â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
+            <Section title="Extraction Hints & Aliases" titleTooltip={STUDIO_TIPS.key_section_ui}>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <div className={labelCls}>Input Control<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.input_control} /></div>
+                  <select className={`${selectCls} w-full`} value={strN(currentRule, 'ui.input_control', 'text')} onChange={(e) => updateField(selectedKey, 'ui.input_control', e.target.value)}>
+                    <option value="text">text</option>
+                    <option value="number">number</option>
+                    <option value="select">select</option>
+                    <option value="multi_select">multi_select</option>
+                    <option value="component_picker">component_picker</option>
+                    <option value="checkbox">checkbox</option>
+                    <option value="token_list">token_list</option>
+                    <option value="text_list">text_list</option>
+                    <option value="date">date</option>
+                    <option value="url">url</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <div className={labelCls}>Tooltip / Guidance<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.tooltip_guidance} /></div>
+                <textarea className={`${inputCls} w-full`} rows={2} value={strN(currentRule, 'ui.tooltip_md')} onChange={(e) => updateField(selectedKey, 'ui.tooltip_md', e.target.value)} placeholder="Define how this field should be interpreted..." />
+              </div>
+              <div>
+                <div className={labelCls}>Aliases<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.aliases} /></div>
+                <TagPicker values={arrN(currentRule, 'aliases')} onChange={(v) => updateField(selectedKey, 'aliases', v)} placeholder="alternative names for this key" />
+              </div>
+            </Section>
+
+            {/* â"€â"€ Search Hints â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
+            <Section title="Search Hints" titleTooltip={STUDIO_TIPS.key_section_search}>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <div className={labelCls}>Domain Hints<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.domain_hints} /></div>
+                  <TagPicker values={arrN(currentRule, 'search_hints.domain_hints')} onChange={(v) => updateField(selectedKey, 'search_hints.domain_hints', v)} suggestions={DOMAIN_HINT_SUGGESTIONS} placeholder="manufacturer, rtings.com..." />
+                </div>
+                <div>
+                  <div className={labelCls}>Content Types<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.content_types} /></div>
+                  <TagPicker values={arrN(currentRule, 'search_hints.preferred_content_types')} onChange={(v) => updateField(selectedKey, 'search_hints.preferred_content_types', v)} suggestions={CONTENT_TYPE_SUGGESTIONS} placeholder="spec_sheet, datasheet..." />
+                </div>
+              </div>
+              <div>
+                <div className={labelCls}>Query Terms<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.query_terms} /></div>
+                <TagPicker values={arrN(currentRule, 'search_hints.query_terms')} onChange={(v) => updateField(selectedKey, 'search_hints.query_terms', v)} placeholder="alternative search terms" />
+              </div>
+            </Section>
+
             <details className="mt-2">
               <summary className="text-xs text-gray-400 cursor-pointer">Full Rule JSON</summary>
               <div className="mt-2"><JsonViewer data={currentRule} maxDepth={3} /></div>
@@ -3564,7 +4116,7 @@ function KeyNavigatorTab({
             </div>
             <button
               onClick={() => { setBulkOpen(false); setBulkGridRows([]); setBulkGroup(''); }}
-              className="text-gray-400 hover:text-gray-600 text-lg leading-none"
+                    className="text-gray-400 hover:text-gray-600 text-lg leading-snug"
               aria-label="Close bulk paste modal"
             >&times;</button>
           </div>
@@ -3669,7 +4221,7 @@ function KeyNavigatorTab({
   );
 }
 
-// ── Field Contract ──────────────────────────────────────────────────
+// â"€â"€ Field Contract â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function FieldContractTab({
   fieldRows,
   rules,
@@ -3679,7 +4231,7 @@ function FieldContractTab({
 }) {
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-semibold">Field Contract Table<Tip text={STUDIO_TIPS.field_contract_table} /></h3>
+      <h3 className="text-sm font-semibold">Field Contract Table<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.field_contract_table} /></h3>
       <DataTable data={fieldRows} columns={fieldRuleColumns} searchable maxHeight="max-h-[calc(100vh-350px)]" />
 
       <details className="mt-4">
@@ -3692,7 +4244,7 @@ function FieldContractTab({
   );
 }
 
-// ── Compile & Reports ───────────────────────────────────────────────
+// â"€â"€ Compile & Reports â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function CompileReportsTab({
   artifacts,
   compileErrors,
@@ -3727,16 +4279,16 @@ function CompileReportsTab({
           {validateRulesMut.isPending ? 'Validating...' : 'Validate Rules'}
         </button>
         <Tip text={STUDIO_TIPS.run_compile} />
-        {compileMut.isSuccess ? <span className="text-sm text-green-600">Compile started — check Indexing Lab process output for logs</span> : null}
+        {compileMut.isSuccess ? <span className="text-sm text-green-600">Compile started â€" check Indexing Lab process output for logs</span> : null}
         {compileMut.isError ? <span className="text-sm text-red-600">{(compileMut.error as Error)?.message || 'Failed'}</span> : null}
-        {validateRulesMut.isSuccess ? <span className="text-sm text-green-600">Validation started — check Indexing Lab process output</span> : null}
+        {validateRulesMut.isSuccess ? <span className="text-sm text-green-600">Validation started â€" check Indexing Lab process output</span> : null}
         {validateRulesMut.isError ? <span className="text-sm text-red-600">{(validateRulesMut.error as Error)?.message || 'Validation failed'}</span> : null}
       </div>
 
       {/* Errors */}
       {compileErrors.length > 0 ? (
         <div className={`${sectionCls} border-red-200 dark:border-red-700`}>
-          <h4 className="text-sm font-semibold text-red-600 mb-2">Compile Errors ({compileErrors.length})<Tip text={STUDIO_TIPS.compile_errors} /></h4>
+          <h4 className="text-sm font-semibold text-red-600 mb-2">Compile Errors ({compileErrors.length})<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.compile_errors} /></h4>
           <ul className="text-sm space-y-1">
             {compileErrors.map((e, i) => <li key={i} className="text-red-600">{e}</li>)}
           </ul>
@@ -3746,7 +4298,7 @@ function CompileReportsTab({
       {/* Warnings */}
       {compileWarnings.length > 0 ? (
         <div className={`${sectionCls} border-yellow-200 dark:border-yellow-700`}>
-          <h4 className="text-sm font-semibold text-yellow-600 mb-2">Compile Warnings ({compileWarnings.length})<Tip text={STUDIO_TIPS.compile_warnings} /></h4>
+          <h4 className="text-sm font-semibold text-yellow-600 mb-2">Compile Warnings ({compileWarnings.length})<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.compile_warnings} /></h4>
           <ul className="text-sm space-y-1">
             {compileWarnings.map((w, i) => <li key={i} className="text-yellow-600">{w}</li>)}
           </ul>
@@ -3756,7 +4308,7 @@ function CompileReportsTab({
       {/* Generated Artifacts */}
       {artifacts.length > 0 ? (
         <div className={sectionCls}>
-          <h4 className="text-sm font-semibold mb-2">Generated Artifacts ({artifacts.length} files)<Tip text={STUDIO_TIPS.generated_artifacts} /></h4>
+          <h4 className="text-sm font-semibold mb-2">Generated Artifacts ({artifacts.length} files)<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.generated_artifacts} /></h4>
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-200 dark:border-gray-700">
@@ -3781,10 +4333,14 @@ function CompileReportsTab({
       {/* Guardrails */}
       {guardrails && Object.keys(guardrails).length > 0 ? (
         <div className={sectionCls}>
-          <h4 className="text-sm font-semibold mb-2">Guardrails Report<Tip text={STUDIO_TIPS.guardrails_report} /></h4>
+          <h4 className="text-sm font-semibold mb-2">Guardrails Report<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.guardrails_report} /></h4>
           <JsonViewer data={guardrails} />
         </div>
       ) : null}
     </div>
   );
 }
+
+
+
+

@@ -18,7 +18,6 @@ import {
   resolveHostBudgetState
 } from './fetchParseWorker.js';
 import { loadCategoryConfig } from '../categories/loader.js';
-import { loadProductCatalog } from '../catalog/productCatalog.js';
 import { SourcePlanner, buildSourceSummary } from '../planner/sourcePlanner.js';
 import { PlaywrightFetcher, DryRunFetcher, HttpFetcher, CrawleeFetcher } from '../fetcher/playwrightFetcher.js';
 import { selectFetcherMode } from '../fetcher/fetcherMode.js';
@@ -46,6 +45,7 @@ import {
   FieldAnchorsStore,
   ComponentLexiconStore
 } from '../learning/learningStores.js';
+import { readLearningHintsFromStores } from '../learning/learningReadback.js';
 import { sha256, sha256Buffer, stableHash, screenshotMimeType, screenshotExtension } from './helpers/cryptoHelpers.js';
 import {
   isDiscoveryOnlySourceUrl, isRobotsTxtUrl, isSitemapUrl, hasSitemapXmlSignals,
@@ -68,6 +68,25 @@ import {
 import {
   buildFieldReasoning, emitFieldDecisionEvents, buildProvisionalHypothesisQueue
 } from './helpers/reasoningHelpers.js';
+import { toInt, toFloat, toBool, isIndexingHelperFlowEnabled } from './helpers/typeHelpers.js';
+import {
+  resolveIdentityAmbiguitySnapshot, buildRunIdentityFingerprint,
+  bestIdentityFromSources, isIdentityLockedField,
+  helperSupportsProvisionalFill, deriveNeedSetIdentityState,
+  resolveExtractionGateOpen, buildNeedSetIdentityAuditRows
+} from './helpers/identityHelpers.js';
+import {
+  parseMinEvidenceRefs, sendModeIncludesPrime,
+  selectPreferredRouteRow, deriveRouteMatrixPolicy,
+  loadRouteMatrixPolicyForRun, resolveRuntimeControlKey,
+  resolveIndexingResumeKey, defaultRuntimeOverrides,
+  normalizeRuntimeOverrides, applyRuntimeOverridesToPlanner
+} from './helpers/runtimeHelpers.js';
+import {
+  PASS_TARGET_EXEMPT_FIELDS, markSatisfiedLlmFields,
+  refreshFieldsBelowPassTarget, isAnchorLocked,
+  resolveTargets, resolveLlmTargetFields
+} from './helpers/scoringHelpers.js';
 import { buildIdentityObject, buildAbortedNormalized, buildValidatedNormalized } from '../normalizer/mouseNormalizer.js';
 import { exportRunArtifacts } from '../exporter/exporter.js';
 import { writeFinalOutputs } from '../exporter/finalExporter.js';
@@ -151,6 +170,7 @@ import { buildIndexingSchemaPackets } from '../indexlab/indexingSchemaPackets.js
 import { validateIndexingSchemaPackets } from '../indexlab/indexingSchemaPacketsValidator.js';
 import { buildPhase07PrimeSources } from '../retrieve/primeSourcesBuilder.js';
 import { indexDocument } from '../index/evidenceIndexDb.js';
+import { createFtsQueryFn } from '../retrieve/ftsQueryAdapter.js';
 import { applyIdentityGateToCandidates } from './identityGateExtraction.js';
 import { buildDedupeOutcomeEvent } from './dedupeOutcomeEvent.js';
 import {
@@ -171,492 +191,11 @@ import {
 } from '../learning/fieldAvailability.js';
 import { applyInferencePolicies } from '../inference/inferField.js';
 import {
-  normalizeIdentityToken,
-  ambiguityLevelFromFamilyCount,
   normalizeAmbiguityLevel,
   resolveIdentityLockStatus
 } from '../utils/identityNormalize.js';
 
-async function resolveIdentityAmbiguitySnapshot({ config, category = '', identityLock = {} } = {}) {
-  const brandToken = normalizeIdentityToken(identityLock?.brand);
-  const modelToken = normalizeIdentityToken(identityLock?.model);
-  if (!brandToken || !modelToken) {
-    return {
-      family_model_count: 0,
-      ambiguity_level: 'unknown',
-      source: 'missing_identity'
-    };
-  }
-
-  try {
-    const catalog = await loadProductCatalog(config || {}, String(category || '').trim().toLowerCase());
-    const rows = Object.values(catalog?.products || {});
-    const familyCount = rows.filter((row) =>
-      normalizeIdentityToken(row?.brand) === brandToken
-      && normalizeIdentityToken(row?.model) === modelToken
-    ).length;
-    const safeCount = Math.max(1, familyCount);
-    return {
-      family_model_count: safeCount,
-      ambiguity_level: ambiguityLevelFromFamilyCount(safeCount),
-      source: 'catalog'
-    };
-  } catch {
-    return {
-      family_model_count: 1,
-      ambiguity_level: 'easy',
-      source: 'fallback'
-    };
-  }
-}
-
-function buildRunIdentityFingerprint({ category = '', productId = '', identityLock = {} } = {}) {
-  const lockBrand = normalizeIdentityToken(identityLock?.brand);
-  const lockModel = normalizeIdentityToken(identityLock?.model);
-  const lockVariant = normalizeIdentityToken(identityLock?.variant);
-  const lockSku = normalizeIdentityToken(identityLock?.sku);
-  const seed = [
-    normalizeIdentityToken(category),
-    normalizeIdentityToken(productId),
-    lockBrand,
-    lockModel,
-    lockVariant,
-    lockSku
-  ].join('|');
-  return `sha256:${sha256(seed)}`;
-}
-
-function parseMinEvidenceRefs(value, fallback = 1) {
-  const parsed = Number.parseInt(String(value ?? ''), 10);
-  if (!Number.isFinite(parsed)) {
-    return Math.max(1, Number.parseInt(String(fallback || 1), 10) || 1);
-  }
-  return Math.max(1, parsed);
-}
-
-function sendModeIncludesPrime(value = '') {
-  const token = String(value || '').trim().toLowerCase();
-  return token.includes('prime');
-}
-
-function selectPreferredRouteRow(rows = [], scope = 'field') {
-  const scoped = (Array.isArray(rows) ? rows : [])
-    .filter((row) => String(row?.scope || '').trim().toLowerCase() === String(scope || '').trim().toLowerCase());
-  if (scoped.length === 0) {
-    return null;
-  }
-  return scoped
-    .slice()
-    .sort((a, b) => {
-      const effortA = Number.parseInt(String(a?.effort ?? 0), 10) || 0;
-      const effortB = Number.parseInt(String(b?.effort ?? 0), 10) || 0;
-      if (effortA !== effortB) return effortB - effortA;
-      const minA = parseMinEvidenceRefs(a?.llm_output_min_evidence_refs_required, 1);
-      const minB = parseMinEvidenceRefs(b?.llm_output_min_evidence_refs_required, 1);
-      return minB - minA;
-    })[0] || null;
-}
-
-function deriveRouteMatrixPolicy({
-  routeRows = [],
-  categoryConfig = null
-} = {}) {
-  const preferredField = selectPreferredRouteRow(routeRows, 'field');
-  const preferredComponent = selectPreferredRouteRow(routeRows, 'component');
-  const preferredList = selectPreferredRouteRow(routeRows, 'list');
-  const ruleMinRefs = [];
-  const fieldRules = categoryConfig?.fieldRules?.fields || {};
-  for (const rule of Object.values(fieldRules || {})) {
-    if (!rule || typeof rule !== 'object') continue;
-    ruleMinRefs.push(parseMinEvidenceRefs(rule?.evidence?.min_evidence_refs ?? rule?.min_evidence_refs ?? 1, 1));
-  }
-  const routeMinRefs = (Array.isArray(routeRows) ? routeRows : [])
-    .map((row) => parseMinEvidenceRefs(row?.llm_output_min_evidence_refs_required, 1));
-  const minEvidenceRefsEffective = Math.max(
-    1,
-    ...ruleMinRefs,
-    ...routeMinRefs
-  );
-  const scalarSend = String(
-    preferredField?.scalar_linked_send || 'scalar value + prime sources'
-  ).trim();
-  const componentSend = String(
-    preferredComponent?.component_values_send || 'component values + prime sources'
-  ).trim();
-  const listSend = String(
-    preferredList?.list_values_send || 'list values prime sources'
-  ).trim();
-  const primeVisualSend =
-    sendModeIncludesPrime(scalarSend) ||
-    sendModeIncludesPrime(componentSend) ||
-    sendModeIncludesPrime(listSend);
-
-  return {
-    scalar_linked_send: scalarSend,
-    component_values_send: componentSend,
-    list_values_send: listSend,
-    llm_output_min_evidence_refs_required: minEvidenceRefsEffective,
-    min_evidence_refs_effective: minEvidenceRefsEffective,
-    prime_sources_visual_send: primeVisualSend,
-    table_linked_send: primeVisualSend
-  };
-}
-
-async function loadRouteMatrixPolicyForRun({
-  config = {},
-  category = '',
-  categoryConfig = null,
-  logger = null
-} = {}) {
-  const categoryToken = String(category || '').trim().toLowerCase();
-  let routeRows = [];
-  if (categoryToken) {
-    let specDb = null;
-    try {
-      const { SpecDb } = await import('../db/specDb.js');
-      const dbPath = `${String(config.specDbDir || '.specfactory_tmp').replace(/[\\\/]+$/, '')}/${categoryToken}/spec.sqlite`;
-      specDb = new SpecDb({
-        dbPath,
-        category: categoryToken
-      });
-      routeRows = specDb.getLlmRouteMatrix();
-    } catch (error) {
-      logger?.warn?.('route_matrix_policy_load_failed', {
-        category: categoryToken,
-        message: error?.message || 'unknown_error'
-      });
-    } finally {
-      try {
-        specDb?.close?.();
-      } catch {
-        // best effort
-      }
-    }
-  }
-  const derived = deriveRouteMatrixPolicy({
-    routeRows,
-    categoryConfig
-  });
-  return {
-    ...derived,
-    source: routeRows.length > 0 ? 'spec_db' : 'category_rules_default',
-    row_count: routeRows.length
-  };
-}
-
-function bestIdentityFromSources(sourceResults, identityLock = {}) {
-  const expectedVariant = normalizeIdentityToken(identityLock?.variant);
-  const identityMatched = (sourceResults || []).filter((source) => source.identity?.match);
-  const pool = identityMatched.length > 0 ? identityMatched : (sourceResults || []);
-  const sorted = [...pool].sort((a, b) => {
-    const aMatched = a.identity?.match ? 1 : 0;
-    const bMatched = b.identity?.match ? 1 : 0;
-    if (bMatched !== aMatched) {
-      return bMatched - aMatched;
-    }
-    if ((b.identity?.score || 0) !== (a.identity?.score || 0)) {
-      return (b.identity?.score || 0) - (a.identity?.score || 0);
-    }
-
-    const aVariant = normalizeIdentityToken(a.identityCandidates?.variant);
-    const bVariant = normalizeIdentityToken(b.identityCandidates?.variant);
-    const variantScore = (variant) => {
-      if (expectedVariant) {
-        if (variant === expectedVariant) {
-          return 2;
-        }
-        if (variant && (variant.includes(expectedVariant) || expectedVariant.includes(variant))) {
-          return 1;
-        }
-        if (!variant) {
-          return 0.25;
-        }
-        return 0;
-      }
-      return variant ? 0 : 1;
-    };
-    const aVariantScore = variantScore(aVariant);
-    const bVariantScore = variantScore(bVariant);
-    if (bVariantScore !== aVariantScore) {
-      return bVariantScore - aVariantScore;
-    }
-
-    return (a.tier || 99) - (b.tier || 99);
-  });
-  return sorted[0]?.identityCandidates || {};
-}
-
-const PASS_TARGET_EXEMPT_FIELDS = new Set(['id', 'brand', 'model', 'base_model', 'category', 'sku']);
 const RUN_DEDUPE_MODE = 'serp_url+content_hash';
-
-function toInt(value, fallback = 0) {
-  const parsed = Number.parseInt(String(value ?? ''), 10);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function toFloat(value, fallback = 0) {
-  const parsed = Number.parseFloat(String(value ?? ''));
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function toBool(value, fallback = false) {
-  if (value === undefined || value === null || value === '') {
-    return fallback;
-  }
-  const token = String(value).trim().toLowerCase();
-  return token === '1' || token === 'true' || token === 'yes' || token === 'on';
-}
-
-
-
-function resolveRuntimeControlKey(storage, config = {}) {
-  const raw = String(config.runtimeControlFile || '_runtime/control/runtime_overrides.json').trim();
-  if (!raw) {
-    return storage.resolveOutputKey('_runtime/control/runtime_overrides.json');
-  }
-  if (raw.startsWith(`${config.s3OutputPrefix || 'specs/outputs'}/`)) {
-    return raw;
-  }
-  return storage.resolveOutputKey(raw);
-}
-
-function resolveIndexingResumeKey(storage, category, productId) {
-  return storage.resolveOutputKey('_runtime', 'indexing_resume', category, `${productId}.json`);
-}
-
-function defaultRuntimeOverrides() {
-  return {
-    pause: false,
-    max_urls_per_product: null,
-    max_queries_per_product: null,
-    blocked_domains: [],
-    force_high_fields: [],
-    disable_llm: false,
-    disable_search: false,
-    notes: ''
-  };
-}
-
-function normalizeRuntimeOverrides(payload = {}) {
-  const input = payload && typeof payload === 'object' ? payload : {};
-  return {
-    ...defaultRuntimeOverrides(),
-    ...input,
-    pause: Boolean(input.pause),
-    max_urls_per_product: input.max_urls_per_product === null || input.max_urls_per_product === undefined
-      ? null
-      : Math.max(1, toInt(input.max_urls_per_product, 0)),
-    max_queries_per_product: input.max_queries_per_product === null || input.max_queries_per_product === undefined
-      ? null
-      : Math.max(1, toInt(input.max_queries_per_product, 0)),
-    blocked_domains: Array.isArray(input.blocked_domains)
-      ? [...new Set(input.blocked_domains.map((row) => String(row || '').trim().toLowerCase().replace(/^www\./, '')).filter(Boolean))]
-      : [],
-    force_high_fields: Array.isArray(input.force_high_fields)
-      ? [...new Set(input.force_high_fields.map((row) => String(row || '').trim()).filter(Boolean))]
-      : [],
-    disable_llm: Boolean(input.disable_llm),
-    disable_search: Boolean(input.disable_search),
-    notes: String(input.notes || '')
-  };
-}
-
-function applyRuntimeOverridesToPlanner(planner, overrides = {}) {
-  if (!planner || typeof planner !== 'object') {
-    return;
-  }
-  if (Number.isFinite(Number(overrides.max_urls_per_product)) && Number(overrides.max_urls_per_product) > 0) {
-    planner.maxUrls = Math.max(1, Number(overrides.max_urls_per_product));
-  }
-  for (const host of overrides.blocked_domains || []) {
-    planner.blockHost(host, 'runtime_override_blocked_domain');
-  }
-}
-
-function markSatisfiedLlmFields(fieldSet, fields = [], anchors = {}) {
-  if (!(fieldSet instanceof Set)) {
-    return;
-  }
-  for (const field of fields || []) {
-    const token = String(field || '').trim();
-    if (!token) {
-      continue;
-    }
-    if (isIdentityLockedField(token) || isAnchorLocked(token, anchors)) {
-      continue;
-    }
-    fieldSet.add(token);
-  }
-}
-
-function refreshFieldsBelowPassTarget({
-  fieldOrder = [],
-  provenance = {},
-  criticalFieldSet = new Set()
-}) {
-  const fieldsBelowPassTarget = [];
-  const criticalFieldsBelowPassTarget = [];
-  for (const field of fieldOrder || []) {
-    if (PASS_TARGET_EXEMPT_FIELDS.has(field)) {
-      continue;
-    }
-    const bucket = provenance?.[field] || {};
-    const passTarget = Number.parseInt(String(bucket?.pass_target ?? 1), 10);
-    const meetsPassTarget = Boolean(bucket?.meets_pass_target);
-    if (passTarget <= 0) {
-      continue;
-    }
-    if (!meetsPassTarget) {
-      fieldsBelowPassTarget.push(field);
-      if (criticalFieldSet.has(field)) {
-        criticalFieldsBelowPassTarget.push(field);
-      }
-    }
-  }
-  return {
-    fieldsBelowPassTarget,
-    criticalFieldsBelowPassTarget
-  };
-}
-
-function isAnchorLocked(field, anchors) {
-  const value = anchors?.[field];
-  return String(value || '').trim() !== '';
-}
-
-function isIdentityLockedField(field) {
-  return ['id', 'brand', 'model', 'base_model', 'category', 'sku'].includes(field);
-}
-
-function resolveTargets(job, categoryConfig) {
-  return {
-    targetCompleteness:
-      job.requirements?.targetCompleteness ?? categoryConfig.schema.targets?.targetCompleteness ?? 0.9,
-    targetConfidence:
-      job.requirements?.targetConfidence ?? categoryConfig.schema.targets?.targetConfidence ?? 0.8
-  };
-}
-
-function resolveLlmTargetFields(job, categoryConfig) {
-  const fromRequirements = Array.isArray(job.requirements?.llmTargetFields)
-    ? job.requirements.llmTargetFields
-    : [];
-  const fromRequired = Array.isArray(job.requirements?.requiredFields)
-    ? job.requirements.requiredFields
-    : [];
-  const base = normalizeFieldList([
-    ...fromRequirements,
-    ...fromRequired,
-    ...(categoryConfig.requiredFields || []),
-    ...(categoryConfig.schema?.critical_fields || [])
-  ], {
-    fieldOrder: categoryConfig.fieldOrder || []
-  });
-  return [...new Set(base)];
-}
-
-function helperSupportsProvisionalFill(helperContext, identityLock = {}) {
-  const topMatch = helperContext?.supportive_matches?.[0] || helperContext?.active_match || null;
-  if (!topMatch) {
-    return false;
-  }
-
-  const expectedBrand = normalizeIdentityToken(identityLock?.brand);
-  const expectedModel = normalizeIdentityToken(identityLock?.model);
-  if (!expectedBrand || !expectedModel) {
-    return false;
-  }
-
-  const matchBrand = normalizeIdentityToken(topMatch.brand);
-  const matchModel = normalizeIdentityToken(topMatch.model);
-  if (matchBrand !== expectedBrand || matchModel !== expectedModel) {
-    return false;
-  }
-
-  const expectedVariant = normalizeIdentityToken(identityLock?.variant);
-  if (!expectedVariant) {
-    return true;
-  }
-
-  const matchVariant = normalizeIdentityToken(topMatch.variant);
-  if (!matchVariant) {
-    return true;
-  }
-
-  return (
-    matchVariant === expectedVariant ||
-    matchVariant.includes(expectedVariant) ||
-    expectedVariant.includes(matchVariant)
-  );
-}
-
-function deriveNeedSetIdentityState({
-  identityGate = {},
-  identityConfidence = 0
-} = {}) {
-  if (identityGate?.validated && Number(identityConfidence || 0) >= 0.95) {
-    return 'locked';
-  }
-  const reasonCodes = Array.isArray(identityGate?.reasonCodes) ? identityGate.reasonCodes : [];
-  const hasConflictCode = reasonCodes.some((row) => {
-    const token = String(row || '').toLowerCase();
-    return token.includes('conflict') || token.includes('mismatch') || token.includes('major_anchor');
-  });
-  if (hasConflictCode || identityGate?.status === 'IDENTITY_CONFLICT') {
-    return 'conflict';
-  }
-  if (Number(identityConfidence || 0) >= 0.70) {
-    return 'provisional';
-  }
-  return 'unlocked';
-}
-
-function resolveExtractionGateOpen({
-  identityLock = {},
-  identityGate = {}
-} = {}) {
-  if (identityGate?.validated) {
-    return true;
-  }
-  const reasonCodes = Array.isArray(identityGate?.reasonCodes) ? identityGate.reasonCodes : [];
-  const hasHardConflict = reasonCodes.some((row) => {
-    const token = String(row || '').toLowerCase();
-    return token.includes('conflict') || token.includes('mismatch') || token.includes('major_anchor');
-  }) || String(identityGate?.status || '').toUpperCase() === 'IDENTITY_CONFLICT';
-  if (hasHardConflict) {
-    return false;
-  }
-  const hasVariant = Boolean(normalizeIdentityToken(identityLock?.variant));
-  if (hasVariant) {
-    return false;
-  }
-  const familyCount = Math.max(0, Number.parseInt(String(identityLock?.family_model_count || 0), 10) || 0);
-  const ambiguityLevel = normalizeAmbiguityLevel(
-    identityLock?.ambiguity_level || ambiguityLevelFromFamilyCount(familyCount)
-  );
-  if (ambiguityLevel === 'hard' || ambiguityLevel === 'very_hard' || ambiguityLevel === 'extra_hard') {
-    return false;
-  }
-  return Boolean(normalizeIdentityToken(identityLock?.brand) && normalizeIdentityToken(identityLock?.model));
-}
-
-function buildNeedSetIdentityAuditRows(identityReport = {}, limit = 24) {
-  const pages = Array.isArray(identityReport?.pages) ? identityReport.pages : [];
-  return pages
-    .map((row) => ({
-      source_id: String(row?.source_id || '').trim(),
-      url: String(row?.url || '').trim(),
-      decision: String(row?.decision || '').trim().toUpperCase(),
-      confidence: toFloat(row?.confidence, 0),
-      reason_codes: Array.isArray(row?.reason_codes) ? row.reason_codes.slice(0, 12) : []
-    }))
-    .filter((row) => row.source_id || row.url)
-    .slice(0, Math.max(1, Number(limit || 24)));
-}
-
-function isIndexingHelperFlowEnabled(config = {}) {
-  return Boolean(config?.helperFilesEnabled && config?.indexingHelperFilesEnabled);
-}
 
 export async function runProduct({ storage, config, s3Key, jobOverride = null, roundContext = null }) {
   const runId = buildRunId();
@@ -1157,6 +696,36 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     ...new Set([...(runtimeOverrides.force_high_fields || []), ...escalatedFromRound])
   ];
 
+  let learningStoreHints = null;
+  if (config.selfImproveEnabled) {
+    let learningReadDb = null;
+    try {
+      const { SpecDb } = await import('../db/specDb.js');
+      const categoryToken = String(category || '').trim().toLowerCase();
+      const dbPath = `${String(config.specDbDir || '.specfactory_tmp').replace(/[\\\/]+$/, '')}/${categoryToken}/spec.sqlite`;
+      learningReadDb = new SpecDb({ dbPath, category: categoryToken });
+      const readStores = {
+        urlMemory: new UrlMemoryStore(learningReadDb.db),
+        domainFieldYield: new DomainFieldYieldStore(learningReadDb.db),
+        fieldAnchors: new FieldAnchorsStore(learningReadDb.db),
+        componentLexicon: new ComponentLexiconStore(learningReadDb.db)
+      };
+      const focusFields = normalizeFieldList(
+        roundContext?.missing_required_fields || requiredFields || [],
+        { fieldOrder: categoryConfig.fieldOrder || [] }
+      );
+      learningStoreHints = readLearningHintsFromStores({
+        stores: readStores,
+        category: categoryToken,
+        focusFields
+      });
+    } catch {
+      // learning readback is non-essential
+    } finally {
+      try { learningReadDb?.close?.(); } catch { /* best effort */ }
+    }
+  }
+
   const discoveryConfig = runtimeOverrides.disable_search
     ? { ...config, discoveryEnabled: false, searchProvider: 'none' }
     : config;
@@ -1180,7 +749,8 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     },
     llmContext,
     frontierDb,
-    runtimeTraceWriter: traceWriter
+    runtimeTraceWriter: traceWriter,
+    learningStoreHints
   });
 
   planner.seed(discoveryResult.approvedUrls || [], { forceBrandBypass: false });
@@ -3447,10 +3017,20 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     0
   );
   const endpointMining = aggregateEndpointSignals(sourceResults, 80);
+  const compoundFailures = (runtimeGateResult.failures || [])
+    .flatMap(f => (f.violations || []).filter(v => v.reason_code === 'compound_range_conflict').map(v => ({
+      field_key: f.field,
+      reason_code: v.reason_code,
+      effective_min: v.effective_min,
+      effective_max: v.effective_max,
+      actual: v.actual,
+      sources: v.sources
+    })));
   const constraintAnalysis = evaluateConstraintGraph({
     fields: normalized.fields,
     provenance,
-    criticalFieldSet: categoryConfig.criticalFieldSet
+    criticalFieldSet: categoryConfig.criticalFieldSet,
+    crossValidationFailures: compoundFailures
   });
   const hypothesisSourceResults = sourceResults.filter((source) => !isHelperSyntheticSource(source));
   const hypothesisQueue = buildHypothesisQueue({
@@ -3525,6 +3105,9 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
       decayFloor: config.needsetEvidenceDecayFloor
     }
   });
+  const ftsQueryFn = config.evidenceIndexDb
+    ? createFtsQueryFn({ db: config.evidenceIndexDb, category, productId })
+    : null;
   const phase07PrimeSources = buildPhase07PrimeSources({
     runId,
     category,
@@ -3542,7 +3125,8 @@ export async function runProduct({ storage, config, s3Key, jobOverride = null, r
     options: {
       maxHitsPerField: config.retrievalMaxHitsPerField || 24,
       maxPrimeSourcesPerField: config.retrievalMaxPrimeSources || 8
-    }
+    },
+    ftsQueryFn
   });
   const phase08SummaryFromBatches = buildPhase08SummaryFromBatches(phase08BatchRows);
   const phase08Extraction = {

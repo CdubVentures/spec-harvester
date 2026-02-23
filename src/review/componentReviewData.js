@@ -10,9 +10,9 @@ import { evaluateVarianceBatch } from './varianceEvaluator.js';
 import {
   buildComponentReviewSyntheticCandidateId,
   buildSyntheticComponentCandidateId,
-  buildWorkbookComponentCandidateId,
+  buildReferenceComponentCandidateId,
   buildPipelineEnumCandidateId,
-  buildWorkbookEnumCandidateId
+  buildReferenceEnumCandidateId
 } from '../utils/candidateIdentifier.js';
 import { buildComponentIdentifier } from '../utils/componentIdentifier.js';
 
@@ -178,7 +178,7 @@ function clamp01(value, fallback = 0) {
 function normalizeSourceToken(source) {
   const token = normalizeToken(source);
   if (!token) return '';
-  if (token === 'component_db' || token === 'known_values' || token === 'workbook' || token === 'excel import' || token === 'reference') {
+  if (token === 'component_db' || token === 'known_values' || token === 'reference') {
     return 'reference';
   }
   if (token === 'pipeline' || token.startsWith('pipeline')) return 'pipeline';
@@ -760,9 +760,9 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
   const reviewDoc = await safeReadJson(reviewPath);
   const reviewItems = Array.isArray(reviewDoc?.items) ? reviewDoc.items : [];
 
-  // Immutable workbook/import baseline for this component type.
-  const workbookByIdentity = new Map();
-  const workbookByName = new Map();
+  // Immutable reference baseline for this component type from component DB.
+  const refDbByIdentity = new Map();
+  const refDbByName = new Map();
   try {
     const dbDir = path.join(helperRoot, category, '_generated', 'component_db');
     const dbFiles = await listJsonFiles(dbDir);
@@ -774,15 +774,15 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
         if (!name) continue;
         const maker = String(item?.maker || '').trim();
         const identityKey = `${name.toLowerCase()}::${maker.toLowerCase()}`;
-        workbookByIdentity.set(identityKey, item);
-        if (!workbookByName.has(name.toLowerCase())) {
-          workbookByName.set(name.toLowerCase(), item);
+        refDbByIdentity.set(identityKey, item);
+        if (!refDbByName.has(name.toLowerCase())) {
+          refDbByName.set(name.toLowerCase(), item);
         }
       }
       break;
     }
   } catch {
-    // Best-effort workbook baseline only.
+    // Best-effort reference baseline only.
   }
 
   // Index review items by component name (case-insensitive)
@@ -954,9 +954,9 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
     for (const row of propRows) {
       propMap[row.property_key] = row;
     }
-    const workbookIdentityKey = `${String(itemName || '').toLowerCase()}::${String(itemMaker || '').toLowerCase()}`;
-    const workbookItem = workbookByIdentity.get(workbookIdentityKey)
-      || workbookByName.get(String(itemName || '').toLowerCase())
+    const refDbIdentityKey = `${String(itemName || '').toLowerCase()}::${String(itemMaker || '').toLowerCase()}`;
+    const refDbItem = refDbByIdentity.get(refDbIdentityKey)
+      || refDbByName.get(String(itemName || '').toLowerCase())
       || null;
     const componentIdentifier = buildComponentIdentifier(componentType, itemName, itemMaker);
     let nameKeyState = null;
@@ -974,8 +974,8 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
       componentKeyStateByProperty = new Map();
     }
 
-    // Build wb_* candidate helper
-    const buildWbCandidate = (id, rawValue, dbGeneratedAt) => rawValue != null && rawValue !== '' ? [{
+    // Build ref_* candidate helper for component DB reference data
+    const buildRefCandidate = (id, rawValue, dbGeneratedAt) => rawValue != null && rawValue !== '' ? [{
       candidate_id: id,
       value: rawValue,
       score: 1.0,
@@ -1001,17 +1001,17 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
     const nameIsPipeline = nameSource === 'pipeline';
     const nameBaseConfidence = nameIsPipeline ? 0.6 : 1.0;
     const nameNeedsReview = isSharedLanePending(nameKeyState, nameIsPipeline);
-    const workbookNameValue = String(workbookItem?.name || '').trim();
-    const nameWbCandidates = workbookNameValue
-      ? buildWbCandidate(
-        buildWorkbookComponentCandidateId({
+    const refNameValue = String(refDbItem?.name || '').trim();
+    const nameRefCandidates = refNameValue
+      ? buildRefCandidate(
+        buildReferenceComponentCandidateId({
           componentType,
           componentName: itemName,
           componentMaker: itemMaker,
           propertyKey: '__name',
-          value: workbookNameValue,
+          value: refNameValue,
         }),
-        workbookNameValue,
+        refNameValue,
         identity.created_at
       )
       : [];
@@ -1029,24 +1029,24 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
       variance_policy: null,
       constraints: [],
       overridden: nameIsOverridden,
-      candidate_count: nameWbCandidates.length,
-      candidates: nameWbCandidates,
+      candidate_count: nameRefCandidates.length,
+      candidates: nameRefCandidates,
       accepted_candidate_id: String(nameKeyState?.selected_candidate_id || '').trim() || null,
     };
 
     // Maker tracked state
     const makerIsOverridden = nameSource === 'user'; // identity source covers both name+maker
     const makerNeedsReview = isSharedLanePending(makerKeyState, !itemMaker && !makerIsOverridden);
-    const workbookMakerValue = String(workbookItem?.maker || '').trim();
-    const makerWbCandidates = workbookMakerValue ? buildWbCandidate(
-      buildWorkbookComponentCandidateId({
+    const refMakerValue = String(refDbItem?.maker || '').trim();
+    const makerRefCandidates = refMakerValue ? buildRefCandidate(
+      buildReferenceComponentCandidateId({
         componentType,
         componentName: itemName,
         componentMaker: itemMaker,
         propertyKey: '__maker',
-        value: workbookMakerValue,
+        value: refMakerValue,
       }),
-      workbookMakerValue,
+      refMakerValue,
       identity.created_at
     ) : [];
     const maker_tracked = {
@@ -1063,8 +1063,8 @@ async function buildComponentReviewPayloadsSpecDb({ config = {}, category, compo
       variance_policy: null,
       constraints: [],
       overridden: makerIsOverridden,
-      candidate_count: makerWbCandidates.length,
-      candidates: makerWbCandidates,
+      candidate_count: makerRefCandidates.length,
+      candidates: makerRefCandidates,
       accepted_candidate_id: String(makerKeyState?.selected_candidate_id || '').trim() || null,
     };
 
@@ -1546,9 +1546,9 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
     const nameVal = nameOverride ?? item.name ?? '';
     const nameHasRaw = Boolean(item.name);
     const nameHasOverride = nameOverride !== undefined;
-    // Generate workbook candidate for name when value comes from compiled workbook
-    const nameWbCandidate = nameHasRaw ? [{
-      candidate_id: buildWorkbookComponentCandidateId({
+    // Generate reference candidate for name when value comes from component DB
+    const nameRefCandidate = nameHasRaw ? [{
+      candidate_id: buildReferenceComponentCandidateId({
         componentType,
         componentName: item.name,
         componentMaker: item.maker || '',
@@ -1587,8 +1587,8 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
       variance_policy: null,
       constraints: [],
       overridden: nameHasOverride,
-      candidate_count: nameWbCandidate.length,
-      candidates: nameWbCandidate,
+      candidate_count: nameRefCandidate.length,
+      candidates: nameRefCandidate,
       accepted_candidate_id: null,
     };
 
@@ -1620,7 +1620,7 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
           source_id: 'pipeline',
         },
       };
-      // Avoid duplicating if workbook candidate already present with same value
+      // Avoid duplicating if reference candidate already present with same value
       if (!name_tracked.candidates.some((c) => c.value === pipelineNameCandidate.value && c.source_id === 'pipeline')) {
         name_tracked.candidates.push(pipelineNameCandidate);
         name_tracked.candidate_count = name_tracked.candidates.length;
@@ -1662,9 +1662,9 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
     const makerVal = makerOverride ?? item.maker ?? '';
     const makerHasRaw = Boolean(item.maker);
     const makerHasOverride = makerOverride !== undefined;
-    // Generate workbook candidate for maker when value comes from compiled workbook
-    const makerWbCandidate = makerHasRaw ? [{
-      candidate_id: buildWorkbookComponentCandidateId({
+    // Generate reference candidate for maker when value comes from component DB
+    const makerRefCandidate = makerHasRaw ? [{
+      candidate_id: buildReferenceComponentCandidateId({
         componentType,
         componentName: item.name,
         componentMaker: item.maker || '',
@@ -1703,8 +1703,8 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
       variance_policy: null,
       constraints: [],
       overridden: makerHasOverride,
-      candidate_count: makerWbCandidate.length,
-      candidates: makerWbCandidate,
+      candidate_count: makerRefCandidate.length,
+      candidates: makerRefCandidate,
       accepted_candidate_id: null,
     };
 
@@ -1793,9 +1793,9 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
       if (hasOverride) reasonCodes.push('manual_override');
       for (const c of fieldConstraints) reasonCodes.push(`constraint:${c}`);
 
-      // Generate workbook candidate when value comes from compiled workbook
-      const wbCandidate = hasRawValue ? [{
-        candidate_id: buildWorkbookComponentCandidateId({
+      // Generate reference candidate when value comes from component DB
+      const refCandidate = hasRawValue ? [{
+        candidate_id: buildReferenceComponentCandidateId({
           componentType,
           componentName: item.name,
           componentMaker: item.maker || '',
@@ -1834,8 +1834,8 @@ async function buildComponentReviewPayloadsLegacy({ config = {}, category, compo
         variance_policy: variance,
         constraints: fieldConstraints,
         overridden: hasOverride,
-        candidate_count: wbCandidate.length,
-        candidates: wbCandidate,
+        candidate_count: refCandidate.length,
+        candidates: refCandidate,
         accepted_candidate_id: null,
       };
 
@@ -2232,7 +2232,7 @@ async function buildEnumReviewPayloadsSpecDb({ config = {}, category, specDb }) 
         });
       } else if (source !== 'manual') {
         candidates.push({
-          candidate_id: buildWorkbookEnumCandidateId({ fieldKey: field, value: row.value }),
+          candidate_id: buildReferenceEnumCandidateId({ fieldKey: field, value: row.value }),
           value: row.value,
           score: 1.0,
           source_id: 'reference',
@@ -2327,11 +2327,11 @@ async function buildEnumReviewPayloadsLegacy({ config = {}, category, specDb = n
   const helperRoot = path.resolve(config.helperFilesRoot || 'helper_files');
   const kvPath = path.join(helperRoot, category, '_generated', 'known_values.json');
   const suggestPath = path.join(helperRoot, category, '_suggestions', 'enums.json');
-  const wbMapPath = path.join(helperRoot, category, '_control_plane', 'workbook_map.json');
+  const controlMapPath = path.join(helperRoot, category, '_control_plane', 'workbook_map.json');
 
   const kv = await safeReadJson(kvPath);
   const suggestions = await safeReadJson(suggestPath);
-  const wbMap = await safeReadJson(wbMapPath);
+  const wbMap = await safeReadJson(controlMapPath);
 
   const kvFields = isObject(kv?.fields) ? kv.fields : {};
   const kvGeneratedAt = kv?.generated_at || '';
@@ -2379,19 +2379,19 @@ async function buildEnumReviewPayloadsLegacy({ config = {}, category, specDb = n
   const fields = [];
 
   for (const field of [...allFields].sort()) {
-    const workbookValues = toArray(kvFields[field]);
+    const knownValues = toArray(kvFields[field]);
     const suggestedValues = toArray(sugByField[field]);
     const manualSet = manualLookup[field] || new Set();
 
     const valueMap = new Map();
 
-    // Add workbook values (high confidence)
+    // Add known values (high confidence)
     // Source reflects ORIGINAL provenance — never destroyed by user actions:
     //   'pipeline' = originally discovered by pipeline, user accepted it
     //   'manual'   = user added it fresh (not from pipeline)
     //   'reference' = from the reference database, untouched by user
     const pipelineOriginSet = pipelineOriginByField[field] || new Set();
-    for (const v of workbookValues) {
+    for (const v of knownValues) {
       const normalized = String(v).trim().toLowerCase();
       if (!normalized) continue;
       const isManual = manualSet.has(normalized);
@@ -2405,10 +2405,10 @@ async function buildEnumReviewPayloadsLegacy({ config = {}, category, specDb = n
         valueSource = 'reference'; // From reference database
       }
       // Build candidate for audit trail (manual overrides are NOT candidates per source hierarchy)
-      const wbCandidates = valueSource === 'manual' ? [] : [{
+      const refCandidates = valueSource === 'manual' ? [] : [{
         candidate_id: valueSource === 'pipeline'
           ? buildPipelineEnumCandidateId({ fieldKey: field, value: v })
-          : buildWorkbookEnumCandidateId({ fieldKey: field, value: v }),
+          : buildReferenceEnumCandidateId({ fieldKey: field, value: v }),
         value: String(v).trim(),
         score: 1.0,
         source_id: valueSource === 'pipeline' ? 'pipeline' : 'reference',
@@ -2420,9 +2420,9 @@ async function buildEnumReviewPayloadsLegacy({ config = {}, category, specDb = n
           retrieved_at: kvGeneratedAt,
           snippet_id: '',
           snippet_hash: '',
-          quote: valueSource === 'pipeline' ? 'Discovered by pipeline, accepted by user' : `Imported from ${category}Data.xlsm`,
+          quote: valueSource === 'pipeline' ? 'Discovered by pipeline, accepted by user' : 'From reference database',
           quote_span: null,
-          snippet_text: valueSource === 'pipeline' ? 'Discovered by pipeline, accepted by user' : `Imported from ${category}Data.xlsm`,
+          snippet_text: valueSource === 'pipeline' ? 'Discovered by pipeline, accepted by user' : 'From reference database',
           source_id: valueSource === 'pipeline' ? 'pipeline' : 'reference',
         },
       }];
@@ -2433,7 +2433,7 @@ async function buildEnumReviewPayloadsLegacy({ config = {}, category, specDb = n
         confidence: 1.0,
         color: 'green',
         needs_review: false,
-        candidates: wbCandidates,
+        candidates: refCandidates,
         accepted_candidate_id: null,
       });
     }

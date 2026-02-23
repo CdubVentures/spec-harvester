@@ -12,6 +12,7 @@ interface EnumConfiguratorProps {
   enumLists: EnumEntry[];
   parseTemplate: string;
   onUpdate: (path: string, value: unknown) => void;
+  renderLabelSuffix?: (fieldPath: string) => React.ReactNode;
 }
 
 type SourceTab = 'manual' | 'enum';
@@ -60,6 +61,7 @@ export function EnumConfigurator({
   enumLists,
   parseTemplate,
   onUpdate,
+  renderLabelSuffix,
 }: EnumConfiguratorProps) {
   const currentSource = strN(rule, 'enum.source', strN(rule, 'enum_source'));
   const currentPolicy = strN(rule, 'enum.policy', strN(rule, 'enum_policy', 'open'));
@@ -119,7 +121,7 @@ export function EnumConfigurator({
       {/* ── Row 1: Policy + Match Settings ──────────────────────── */}
       <div className="grid grid-cols-3 gap-3">
         <div>
-          <div className={labelCls}>Enum Policy<Tip text={STUDIO_TIPS.enum_policy} /></div>
+          <div className={`${labelCls} flex items-center`}><span>Enum Policy<Tip text={STUDIO_TIPS.enum_policy} /></span>{renderLabelSuffix?.('enum.policy')}</div>
           <select
             className={`${selectCls} w-full`}
             value={currentPolicy}
@@ -131,7 +133,7 @@ export function EnumConfigurator({
           </select>
         </div>
         <div>
-          <div className={labelCls}>Match Strategy<Tip text={STUDIO_TIPS.match_strategy} /></div>
+          <div className={`${labelCls} flex items-center`}><span>Match Strategy<Tip text={STUDIO_TIPS.match_strategy} /></span>{renderLabelSuffix?.('enum.match.strategy')}</div>
           <select
             className={`${selectCls} w-full`}
             value={matchStrategy}
@@ -144,7 +146,7 @@ export function EnumConfigurator({
         </div>
         {matchStrategy === 'fuzzy' ? (
           <div>
-            <div className={labelCls}>Fuzzy Threshold<Tip text={STUDIO_TIPS.fuzzy_threshold} /></div>
+            <div className={`${labelCls} flex items-center`}><span>Fuzzy Threshold<Tip text={STUDIO_TIPS.fuzzy_threshold} /></span>{renderLabelSuffix?.('enum.match.fuzzy_threshold')}</div>
             <input
               className={`${inputCls} w-full`}
               type="number"
@@ -162,7 +164,7 @@ export function EnumConfigurator({
 
       {/* ── Row 2: Value Source Tabs ─────────────────────────────── */}
       <div>
-        <div className={labelCls}>Value Source<Tip text={STUDIO_TIPS.enum_value_source} /></div>
+        <div className={`${labelCls} flex items-center`}><span>Value Source<Tip text={STUDIO_TIPS.enum_value_source} /></span>{renderLabelSuffix?.('enum.source')}</div>
         <div className="flex items-end gap-0.5 border-b border-gray-200 dark:border-gray-700">
           <button
             className={activeTab === 'manual' ? tabActive : tabInactive}

@@ -11,9 +11,10 @@ interface Props {
   globalFilter: string;
   onGlobalFilter: (val: string) => void;
   onSave: () => void;
-  onCompile: () => void;
   saving: boolean;
-  compiling: boolean;
+  saveSuccess: boolean;
+  autoSaveEnabled: boolean;
+  setAutoSaveEnabled: (v: boolean) => void;
 }
 
 export function WorkbenchColumnPresets({
@@ -24,9 +25,10 @@ export function WorkbenchColumnPresets({
   globalFilter,
   onGlobalFilter,
   onSave,
-  onCompile,
   saving,
-  compiling,
+  saveSuccess,
+  autoSaveEnabled,
+  setAutoSaveEnabled,
 }: Props) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
@@ -102,17 +104,32 @@ export function WorkbenchColumnPresets({
       {/* Actions */}
       <button
         onClick={onSave}
-        disabled={saving}
-        className="px-3 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
+        disabled={saving || autoSaveEnabled}
+        className="px-3 py-1.5 text-xs font-medium border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors"
       >
-        {saving ? 'Saving...' : 'Save'}
+        {saving ? 'Saving…' : 'Save'}
       </button>
       <button
-        onClick={onCompile}
-        disabled={compiling}
-        className="px-3 py-1 text-xs bg-accent text-white rounded hover:bg-blue-600 disabled:opacity-50"
+        onClick={() => setAutoSaveEnabled(!autoSaveEnabled)}
+        className={`relative px-3 py-1.5 text-xs font-medium rounded border transition-colors overflow-visible ${
+          autoSaveEnabled
+            ? 'bg-accent/10 text-accent border-accent/40 shadow-inner dark:bg-accent/20 dark:border-accent/50'
+            : 'text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700'
+        }`}
       >
-        {compiling ? 'Compiling...' : 'Compile'}
+        {autoSaveEnabled ? 'Auto-save On' : 'Auto-save Off'}
+        {saving && (
+          <span
+            className="absolute inline-block h-2 w-2 rounded-full bg-gray-400 animate-pulse border border-white/90 shadow-sm"
+            style={{ right: '2px', bottom: '2px' }}
+          />
+        )}
+        {!saving && saveSuccess && (
+          <span
+            className="absolute inline-block h-2 w-2 rounded-full bg-green-500 border border-white/90 shadow-sm"
+            style={{ right: '2px', bottom: '2px' }}
+          />
+        )}
       </button>
     </div>
   );

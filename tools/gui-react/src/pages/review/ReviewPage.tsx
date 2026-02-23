@@ -40,7 +40,7 @@ function candidateSourceLabel(candidate: ReviewCandidate | null | undefined): st
   if (explicitSource) return explicitSource;
   const sourceId = String(candidate.source_id || '').trim().toLowerCase();
   if (sourceId === 'pipeline') return 'Pipeline';
-  if (sourceId === 'workbook' || sourceId === 'reference') return 'Reference';
+  if (sourceId === 'reference') return 'Reference';
   if (sourceId === 'user') return 'user';
   if (sourceId) return sourceId;
   const evidenceUrl = String(candidate.evidence?.url || '').trim();
@@ -751,7 +751,6 @@ export function ReviewPage() {
             && (
               Boolean(activeFieldState.accepted_candidate_id)
               || String(kr?.userAcceptPrimary || '').trim().toLowerCase() === 'accepted'
-              || activeFieldState.source === 'workbook'
               || activeFieldState.source === 'reference'
               || activeFieldState.source === 'manual'
               || activeFieldState.source === 'user'

@@ -15,6 +15,8 @@ import {
   STUDIO_TIPS,
 } from '../studioConstants';
 import { useFieldRulesStore } from '../useFieldRulesStore';
+import { SystemBadges } from './SystemBadges';
+import type { DownstreamSystem } from './systemMapping';
 import type { DrawerTab } from './workbenchTypes';
 import type { EnumEntry, ComponentDbResponse, ComponentSource, ComponentSourceProperty } from '../../../types/studio';
 
@@ -55,6 +57,27 @@ export function WorkbenchDrawer({
   const { updateField } = useFieldRulesStore();
 
   const update = (path: string, value: unknown) => updateField(fieldKey, path, value);
+
+  const handleConsumerToggle = (fieldPath: string, system: DownstreamSystem, enabled: boolean) => {
+    const currentConsumers = (rule.consumers || {}) as Record<string, Record<string, boolean>>;
+    const fieldOverrides = { ...(currentConsumers[fieldPath] || {}) };
+    if (enabled) {
+      delete fieldOverrides[system];
+    } else {
+      fieldOverrides[system] = false;
+    }
+    const nextConsumers = { ...currentConsumers };
+    if (Object.keys(fieldOverrides).length === 0) {
+      delete nextConsumers[fieldPath];
+    } else {
+      nextConsumers[fieldPath] = fieldOverrides;
+    }
+    update('consumers', Object.keys(nextConsumers).length > 0 ? nextConsumers : undefined);
+  };
+
+  const B = ({ p }: { p: string }) => (
+    <SystemBadges fieldPath={p} rule={rule} onToggle={handleConsumerToggle} />
+  );
 
   // Navigation
   const idx = fieldOrder.indexOf(fieldKey);
@@ -133,10 +156,10 @@ export function WorkbenchDrawer({
       {/* Tab content */}
       <div className="p-4 space-y-3">
         {activeTab === 'contract' && (
-          <ContractTab fieldKey={fieldKey} rule={rule} onUpdate={update} />
+          <ContractTab fieldKey={fieldKey} rule={rule} onUpdate={update} B={B} />
         )}
         {activeTab === 'parse' && (
-          <ParseTab rule={rule} onUpdate={update} />
+          <ParseTab rule={rule} onUpdate={update} B={B} />
         )}
         {activeTab === 'enum' && (
           <EnumTab
@@ -145,16 +168,17 @@ export function WorkbenchDrawer({
             knownValues={knownValues}
             enumLists={enumLists}
             onUpdate={update}
+            B={B}
           />
         )}
         {activeTab === 'evidence' && (
-          <EvidenceTab rule={rule} onUpdate={update} />
+          <EvidenceTab rule={rule} onUpdate={update} B={B} />
         )}
         {activeTab === 'search' && (
-          <SearchTab rule={rule} onUpdate={update} />
+          <SearchTab rule={rule} onUpdate={update} B={B} />
         )}
         {activeTab === 'deps' && (
-          <DepsTab rule={rule} fieldKey={fieldKey} onUpdate={update} componentSources={componentSources} knownValues={knownValues} />
+          <DepsTab rule={rule} fieldKey={fieldKey} onUpdate={update} componentSources={componentSources} knownValues={knownValues} B={B} />
         )}
         {activeTab === 'preview' && (
           <PreviewTab
@@ -170,15 +194,17 @@ export function WorkbenchDrawer({
   );
 }
 
+type BadgeSlot = React.ComponentType<{ p: string }>;
+
 // ── Contract Tab ─────────────────────────────────────────────────────
-function ContractTab({ fieldKey, rule, onUpdate }: { fieldKey: string; rule: Record<string, unknown>; onUpdate: (path: string, val: unknown) => void }) {
+function ContractTab({ fieldKey, rule, onUpdate, B }: { fieldKey: string; rule: Record<string, unknown>; onUpdate: (path: string, val: unknown) => void; B: BadgeSlot }) {
   const tooltipMd = strN(rule, 'ui.tooltip_md');
 
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <div className={labelCls}>Data Type<Tip text={STUDIO_TIPS.data_type} /></div>
+          <div className={`${labelCls} flex items-center`}><span>Data Type<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.data_type} /></span><B p="contract.type" /></div>
           <select className={`${selectCls} w-full`} value={strN(rule, 'contract.type', 'string')} onChange={(e) => onUpdate('contract.type', e.target.value)}>
             <option value="string">string</option>
             <option value="number">number</option>
@@ -190,7 +216,7 @@ function ContractTab({ fieldKey, rule, onUpdate }: { fieldKey: string; rule: Rec
           </select>
         </div>
         <div>
-          <div className={labelCls}>Shape<Tip text={STUDIO_TIPS.shape} /></div>
+          <div className={`${labelCls} flex items-center`}><span>Shape<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.shape} /></span><B p="contract.shape" /></div>
           <select className={`${selectCls} w-full`} value={strN(rule, 'contract.shape', 'scalar')} onChange={(e) => onUpdate('contract.shape', e.target.value)}>
             <option value="scalar">scalar</option>
             <option value="list">list</option>
@@ -201,21 +227,21 @@ function ContractTab({ fieldKey, rule, onUpdate }: { fieldKey: string; rule: Rec
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <div className={labelCls}>Unit<Tip text={STUDIO_TIPS.contract_unit} /></div>
+          <div className={`${labelCls} flex items-center`}><span>Unit<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.contract_unit} /></span><B p="contract.unit" /></div>
           <ComboSelect value={strN(rule, 'contract.unit')} onChange={(v) => onUpdate('contract.unit', v || null)} options={UNITS} placeholder="e.g. g, mm" />
         </div>
         <div>
-          <div className={labelCls}>Unknown Token<Tip text={STUDIO_TIPS.unknown_token} /></div>
+          <div className={`${labelCls} flex items-center`}><span>Unknown Token<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.unknown_token} /></span><B p="contract.unknown_token" /></div>
           <ComboSelect value={strN(rule, 'contract.unknown_token', 'unk')} onChange={(v) => onUpdate('contract.unknown_token', v)} options={UNKNOWN_TOKENS} placeholder="unk" />
         </div>
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <div className={labelCls}>Rounding<Tip text={STUDIO_TIPS.rounding_decimals} /></div>
+          <div className={`${labelCls} flex items-center`}><span>Rounding<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.rounding_decimals} /></span><B p="contract.rounding.decimals" /></div>
           <input className={`${inputCls} w-full`} type="number" min={0} max={6} value={numN(rule, 'contract.rounding.decimals', 0)} onChange={(e) => onUpdate('contract.rounding.decimals', parseInt(e.target.value, 10) || 0)} />
         </div>
         <div>
-          <div className={labelCls}>Rounding Mode<Tip text={STUDIO_TIPS.rounding_mode} /></div>
+          <div className={`${labelCls} flex items-center`}><span>Rounding Mode<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.rounding_mode} /></span><B p="contract.rounding.mode" /></div>
           <select className={`${selectCls} w-full`} value={strN(rule, 'contract.rounding.mode', 'nearest')} onChange={(e) => onUpdate('contract.rounding.mode', e.target.value)}>
             <option value="nearest">nearest</option>
             <option value="floor">floor</option>
@@ -227,7 +253,7 @@ function ContractTab({ fieldKey, rule, onUpdate }: { fieldKey: string; rule: Rec
       <h4 className="text-xs font-semibold text-gray-500 mt-4">Priority & Effort</h4>
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <div className={labelCls}>Required Level<Tip text={STUDIO_TIPS.required_level} /></div>
+          <div className={`${labelCls} flex items-center`}><span>Required Level<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.required_level} /></span><B p="priority.required_level" /></div>
           <select className={`${selectCls} w-full`} value={strN(rule, 'priority.required_level', strN(rule, 'required_level', 'expected'))} onChange={(e) => onUpdate('priority.required_level', e.target.value)}>
             <option value="identity">identity</option>
             <option value="required">required</option>
@@ -239,7 +265,7 @@ function ContractTab({ fieldKey, rule, onUpdate }: { fieldKey: string; rule: Rec
           </select>
         </div>
         <div>
-          <div className={labelCls}>Availability<Tip text={STUDIO_TIPS.availability} /></div>
+          <div className={`${labelCls} flex items-center`}><span>Availability<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.availability} /></span><B p="priority.availability" /></div>
           <select className={`${selectCls} w-full`} value={strN(rule, 'priority.availability', strN(rule, 'availability', 'expected'))} onChange={(e) => onUpdate('priority.availability', e.target.value)}>
             <option value="always">always</option>
             <option value="expected">expected</option>
@@ -251,7 +277,7 @@ function ContractTab({ fieldKey, rule, onUpdate }: { fieldKey: string; rule: Rec
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <div className={labelCls}>Difficulty<Tip text={STUDIO_TIPS.difficulty} /></div>
+          <div className={`${labelCls} flex items-center`}><span>Difficulty<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.difficulty} /></span><B p="priority.difficulty" /></div>
           <select className={`${selectCls} w-full`} value={strN(rule, 'priority.difficulty', strN(rule, 'difficulty', 'easy'))} onChange={(e) => onUpdate('priority.difficulty', e.target.value)}>
             <option value="easy">easy</option>
             <option value="medium">medium</option>
@@ -260,18 +286,20 @@ function ContractTab({ fieldKey, rule, onUpdate }: { fieldKey: string; rule: Rec
           </select>
         </div>
         <div>
-          <div className={labelCls}>Effort (1-10)<Tip text={STUDIO_TIPS.effort} /></div>
+          <div className={`${labelCls} flex items-center`}><span>Effort (1-10)<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.effort} /></span><B p="priority.effort" /></div>
           <input className={`${inputCls} w-full`} type="number" min={1} max={10} value={numN(rule, 'priority.effort', numN(rule, 'effort', 3))} onChange={(e) => onUpdate('priority.effort', parseInt(e.target.value, 10) || 1)} />
         </div>
       </div>
       <div className="flex gap-4">
         <label className="flex items-center gap-2 text-xs cursor-pointer">
           <input type="checkbox" checked={boolN(rule, 'priority.publish_gate', boolN(rule, 'publish_gate'))} onChange={(e) => onUpdate('priority.publish_gate', e.target.checked)} className="rounded border-gray-300" />
-          Publish Gate<Tip text={STUDIO_TIPS.publish_gate} />
+          Publish Gate<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.publish_gate} />
+          <B p="priority.publish_gate" />
         </label>
         <label className="flex items-center gap-2 text-xs cursor-pointer">
           <input type="checkbox" checked={boolN(rule, 'priority.block_publish_when_unk', boolN(rule, 'block_publish_when_unk'))} onChange={(e) => onUpdate('priority.block_publish_when_unk', e.target.checked)} className="rounded border-gray-300" />
-          Block when unk<Tip text={STUDIO_TIPS.block_publish_when_unk} />
+          Block when unk<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.block_publish_when_unk} />
+          <B p="priority.block_publish_when_unk" />
         </label>
       </div>
 
@@ -308,7 +336,7 @@ function ContractTab({ fieldKey, rule, onUpdate }: { fieldKey: string; rule: Rec
           <>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <div className={labelCls}>Mode<Tip text={STUDIO_TIPS.ai_mode} /></div>
+                <div className={`${labelCls} flex items-center`}><span>Mode<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.ai_mode} /></span><B p="ai_assist.mode" /></div>
                 <select className={`${selectCls} w-full`} value={explicitMode} onChange={(e) => onUpdate('ai_assist.mode', e.target.value || null)}>
                   <option value="">auto ({derivedMode})</option>
                   <option value="off">off — no LLM</option>
@@ -318,7 +346,7 @@ function ContractTab({ fieldKey, rule, onUpdate }: { fieldKey: string; rule: Rec
                 </select>
               </div>
               <div>
-                <div className={labelCls}>Model Strategy<Tip text={STUDIO_TIPS.ai_model_strategy} /></div>
+                <div className={`${labelCls} flex items-center`}><span>Model Strategy<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.ai_model_strategy} /></span><B p="ai_assist.model_strategy" /></div>
                 <select className={`${selectCls} w-full`} value={strategy} onChange={(e) => onUpdate('ai_assist.model_strategy', e.target.value)}>
                   <option value="auto">auto — mode decides</option>
                   <option value="force_fast">force_fast — gpt-5-low</option>
@@ -328,11 +356,11 @@ function ContractTab({ fieldKey, rule, onUpdate }: { fieldKey: string; rule: Rec
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <div className={labelCls}>Max Calls<Tip text={STUDIO_TIPS.ai_max_calls} /></div>
+                <div className={`${labelCls} flex items-center`}><span>Max Calls<Tip text={STUDIO_TIPS.ai_max_calls} style={{ position: 'relative', left: '-3px', top: '-4px' }} /></span><B p="ai_assist.max_calls" /></div>
                 <input className={`${inputCls} w-full`} type="number" min={1} max={10} value={explicitCalls || ''} onChange={(e) => onUpdate('ai_assist.max_calls', parseInt(e.target.value, 10) || null)} placeholder={`auto (${derivedCalls})`} />
               </div>
               <div>
-                <div className={labelCls}>Max Tokens<Tip text={STUDIO_TIPS.ai_max_tokens} /></div>
+                <div className={`${labelCls} flex items-center`}><span>Max Tokens<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.ai_max_tokens} /></span><B p="ai_assist.max_tokens" /></div>
                 <input className={`${inputCls} w-full`} type="number" min={256} max={65536} step={1024} value={numN(rule, 'ai_assist.max_tokens', 0) || ''} onChange={(e) => onUpdate('ai_assist.max_tokens', parseInt(e.target.value, 10) || null)} placeholder={`auto (${effectiveMode === 'off' ? '0' : effectiveMode === 'advisory' ? '4096' : effectiveMode === 'planner' ? '8192' : '16384'})`} />
               </div>
             </div>
@@ -404,7 +432,7 @@ function ContractTab({ fieldKey, rule, onUpdate }: { fieldKey: string; rule: Rec
               return (
                 <div>
                   <div className="flex items-center gap-2 mb-1">
-                    <span className={labelCls.replace(' mb-1', '')}>Extraction Guidance<Tip text={STUDIO_TIPS.ai_reasoning_note} /></span>
+                    <span className={labelCls.replace(' mb-1', '')}>Extraction Guidance<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.ai_reasoning_note} /></span><B p="ai_assist.reasoning_note" />
                     {!hasExplicit && <span className="text-[9px] px-1 py-0.5 rounded bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500 italic font-medium">Auto</span>}
                   </div>
                   <textarea
@@ -432,7 +460,7 @@ function ContractTab({ fieldKey, rule, onUpdate }: { fieldKey: string; rule: Rec
       {/* Tooltip / description preview */}
       <h4 className="text-xs font-semibold text-gray-500 mt-4">Description & Tooltip</h4>
       <div>
-        <div className={labelCls}>Tooltip / Guidance<Tip text={STUDIO_TIPS.tooltip_guidance} /></div>
+        <div className={`${labelCls} flex items-center`}><span>Tooltip / Guidance<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.tooltip_guidance} /></span><B p="ui.tooltip_md" /></div>
         <textarea
           className={`${inputCls} w-full`}
           rows={3}
@@ -452,14 +480,14 @@ function ContractTab({ fieldKey, rule, onUpdate }: { fieldKey: string; rule: Rec
 }
 
 // ── Parse Tab ────────────────────────────────────────────────────────
-function ParseTab({ rule, onUpdate }: { rule: Record<string, unknown>; onUpdate: (path: string, val: unknown) => void }) {
+function ParseTab({ rule, onUpdate, B }: { rule: Record<string, unknown>; onUpdate: (path: string, val: unknown) => void; B: BadgeSlot }) {
   const pt = strN(rule, 'parse.template', strN(rule, 'parse_template'));
   const showUnits = ['number_with_unit', 'list_of_numbers_with_unit', 'list_numbers_or_ranges_with_unit'].includes(pt);
 
   return (
     <div className="space-y-3">
       <div>
-        <div className={labelCls}>Parse Template<Tip text={STUDIO_TIPS.parse_template} /></div>
+        <div className={`${labelCls} flex items-center`}><span>Parse Template<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.parse_template} /></span><B p="parse.template" /></div>
         <select className={`${selectCls} w-full`} value={pt} onChange={(e) => onUpdate('parse.template', e.target.value)}>
           <option value="">none</option>
           <option value="text_field">text_field</option>
@@ -496,26 +524,29 @@ function ParseTab({ rule, onUpdate }: { rule: Record<string, unknown>; onUpdate:
         <>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <div className={labelCls}>Parse Unit<Tip text={STUDIO_TIPS.parse_unit} /></div>
+              <div className={`${labelCls} flex items-center`}><span>Parse Unit<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.parse_unit} /></span><B p="parse.unit" /></div>
               <ComboSelect value={strN(rule, 'parse.unit')} onChange={(v) => onUpdate('parse.unit', v)} options={UNITS} placeholder="e.g. g" />
             </div>
             <div>
-              <div className={labelCls}>Unit Accepts<Tip text={STUDIO_TIPS.unit_accepts} /></div>
+              <div className={`${labelCls} flex items-center`}><span>Unit Accepts<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.unit_accepts} /></span><B p="parse.unit_accepts" /></div>
               <TagPicker values={arrN(rule, 'parse.unit_accepts')} onChange={(v) => onUpdate('parse.unit_accepts', v)} suggestions={UNIT_ACCEPTS_SUGGESTIONS} placeholder="g, grams..." />
             </div>
           </div>
           <div className="flex flex-wrap gap-4">
             <label className="flex items-center gap-2 text-xs cursor-pointer">
               <input type="checkbox" checked={boolN(rule, 'parse.allow_unitless')} onChange={(e) => onUpdate('parse.allow_unitless', e.target.checked)} className="rounded border-gray-300" />
-              Allow unitless<Tip text={STUDIO_TIPS.allow_unitless} />
+              Allow unitless<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.allow_unitless} />
+              <B p="parse.allow_unitless" />
             </label>
             <label className="flex items-center gap-2 text-xs cursor-pointer">
               <input type="checkbox" checked={boolN(rule, 'parse.allow_ranges')} onChange={(e) => onUpdate('parse.allow_ranges', e.target.checked)} className="rounded border-gray-300" />
-              Allow ranges<Tip text={STUDIO_TIPS.allow_ranges} />
+              Allow ranges<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.allow_ranges} />
+              <B p="parse.allow_ranges" />
             </label>
             <label className="flex items-center gap-2 text-xs cursor-pointer">
               <input type="checkbox" checked={boolN(rule, 'parse.strict_unit_required')} onChange={(e) => onUpdate('parse.strict_unit_required', e.target.checked)} className="rounded border-gray-300" />
-              Strict unit<Tip text={STUDIO_TIPS.strict_unit_required} />
+              Strict unit<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.strict_unit_required} />
+              <B p="parse.strict_unit_required" />
             </label>
           </div>
         </>
@@ -536,12 +567,14 @@ function EnumTab({
   knownValues,
   enumLists,
   onUpdate,
+  B,
 }: {
   fieldKey: string;
   rule: Record<string, unknown>;
   knownValues: Record<string, string[]>;
   enumLists: EnumEntry[];
   onUpdate: (path: string, val: unknown) => void;
+  B: BadgeSlot;
 }) {
   const parseTemplate = strN(rule, 'parse.template', strN(rule, 'parse_template'));
   return (
@@ -552,12 +585,13 @@ function EnumTab({
       enumLists={enumLists}
       parseTemplate={parseTemplate}
       onUpdate={onUpdate}
+      renderLabelSuffix={(path) => <B p={path} />}
     />
   );
 }
 
 // ── Evidence Tab ─────────────────────────────────────────────────────
-function EvidenceTab({ rule, onUpdate }: { rule: Record<string, unknown>; onUpdate: (path: string, val: unknown) => void }) {
+function EvidenceTab({ rule, onUpdate, B }: { rule: Record<string, unknown>; onUpdate: (path: string, val: unknown) => void; B: BadgeSlot }) {
   const pubGate = boolN(rule, 'priority.publish_gate', boolN(rule, 'publish_gate'));
   const blockUnk = boolN(rule, 'priority.block_publish_when_unk', boolN(rule, 'block_publish_when_unk'));
   const evReq = boolN(rule, 'evidence.required', boolN(rule, 'evidence_required', true));
@@ -568,16 +602,17 @@ function EvidenceTab({ rule, onUpdate }: { rule: Record<string, unknown>; onUpda
       <div className="flex items-center gap-3">
         <label className="flex items-center gap-2 text-xs cursor-pointer">
           <input type="checkbox" checked={evReq} onChange={(e) => onUpdate('evidence.required', e.target.checked)} className="rounded border-gray-300" />
-          Evidence Required<Tip text={STUDIO_TIPS.evidence_required} />
+          Evidence Required<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.evidence_required} />
+          <B p="evidence.required" />
         </label>
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <div className={labelCls}>Min Evidence Refs<Tip text={STUDIO_TIPS.min_evidence_refs} /></div>
+          <div className={`${labelCls} flex items-center`}><span>Min Evidence Refs<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.min_evidence_refs} /></span><B p="evidence.min_evidence_refs" /></div>
           <input className={`${inputCls} w-full`} type="number" min={0} max={10} value={minRefs} onChange={(e) => onUpdate('evidence.min_evidence_refs', parseInt(e.target.value, 10) || 0)} />
         </div>
         <div>
-          <div className={labelCls}>Conflict Policy<Tip text={STUDIO_TIPS.conflict_policy} /></div>
+          <div className={`${labelCls} flex items-center`}><span>Conflict Policy<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.conflict_policy} /></span><B p="evidence.conflict_policy" /></div>
           <select className={`${selectCls} w-full`} value={strN(rule, 'evidence.conflict_policy', 'resolve_by_tier_else_unknown')} onChange={(e) => onUpdate('evidence.conflict_policy', e.target.value)}>
             <option value="resolve_by_tier_else_unknown">resolve_by_tier_else_unknown</option>
             <option value="prefer_highest_tier">prefer_highest_tier</option>
@@ -587,7 +622,7 @@ function EvidenceTab({ rule, onUpdate }: { rule: Record<string, unknown>; onUpda
         </div>
       </div>
       <div>
-        <div className={labelCls}>Tier Preference<Tip text={STUDIO_TIPS.tier_preference} /></div>
+        <div className={`${labelCls} flex items-center`}><span>Tier Preference<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.tier_preference} /></span><B p="evidence.tier_preference" /></div>
         <TierPicker
           value={arrN(rule, 'evidence.tier_preference').length > 0 ? arrN(rule, 'evidence.tier_preference') : ['tier1', 'tier2', 'tier3']}
           onChange={(v) => onUpdate('evidence.tier_preference', v)}
@@ -624,19 +659,19 @@ function EvidenceTab({ rule, onUpdate }: { rule: Record<string, unknown>; onUpda
 }
 
 // ── Search Tab ───────────────────────────────────────────────────────
-function SearchTab({ rule, onUpdate }: { rule: Record<string, unknown>; onUpdate: (path: string, val: unknown) => void }) {
+function SearchTab({ rule, onUpdate, B }: { rule: Record<string, unknown>; onUpdate: (path: string, val: unknown) => void; B: BadgeSlot }) {
   return (
     <div className="space-y-3">
       <div>
-        <div className={labelCls}>Domain Hints<Tip text={STUDIO_TIPS.domain_hints} /></div>
+        <div className={`${labelCls} flex items-center`}><span>Domain Hints<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.domain_hints} /></span><B p="search_hints.domain_hints" /></div>
         <TagPicker values={arrN(rule, 'search_hints.domain_hints')} onChange={(v) => onUpdate('search_hints.domain_hints', v)} suggestions={DOMAIN_HINT_SUGGESTIONS} placeholder="manufacturer, rtings.com..." />
       </div>
       <div>
-        <div className={labelCls}>Content Types<Tip text={STUDIO_TIPS.content_types} /></div>
+        <div className={`${labelCls} flex items-center`}><span>Content Types<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.content_types} /></span><B p="search_hints.preferred_content_types" /></div>
         <TagPicker values={arrN(rule, 'search_hints.preferred_content_types')} onChange={(v) => onUpdate('search_hints.preferred_content_types', v)} suggestions={CONTENT_TYPE_SUGGESTIONS} placeholder="spec_sheet, datasheet..." />
       </div>
       <div>
-        <div className={labelCls}>Query Terms<Tip text={STUDIO_TIPS.query_terms} /></div>
+        <div className={`${labelCls} flex items-center`}><span>Query Terms<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.query_terms} /></span><B p="search_hints.query_terms" /></div>
         <TagPicker values={arrN(rule, 'search_hints.query_terms')} onChange={(v) => onUpdate('search_hints.query_terms', v)} placeholder="alternative search terms" />
       </div>
     </div>
@@ -644,12 +679,12 @@ function SearchTab({ rule, onUpdate }: { rule: Record<string, unknown>; onUpdate
 }
 
 // ── Deps (Component) Tab ─────────────────────────────────────────────
-function DepsTab({ rule, fieldKey: _fieldKey, onUpdate, componentSources, knownValues }: { rule: Record<string, unknown>; fieldKey: string; onUpdate: (path: string, val: unknown) => void; componentSources: ComponentSource[]; knownValues: Record<string, string[]> }) {
+function DepsTab({ rule, fieldKey: _fieldKey, onUpdate, componentSources, knownValues, B }: { rule: Record<string, unknown>; fieldKey: string; onUpdate: (path: string, val: unknown) => void; componentSources: ComponentSource[]; knownValues: Record<string, string[]>; B: BadgeSlot }) {
   const { editedRules } = useFieldRulesStore();
   return (
     <div className="space-y-3">
       <div>
-        <div className={labelCls}>Component DB<Tip text={STUDIO_TIPS.component_db} /></div>
+        <div className={`${labelCls} flex items-center`}><span>Component DB<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.component_db} /></span><B p="component.type" /></div>
         <select
           className={`${selectCls} w-full`}
           value={strN(rule, 'component.type')}
@@ -700,25 +735,25 @@ function DepsTab({ rule, fieldKey: _fieldKey, onUpdate, componentSources, knownV
               <div className="text-[11px] font-medium text-gray-400 mb-1">Name Matching</div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <div className={labelCls}>Fuzzy Threshold<Tip text={STUDIO_TIPS.comp_match_fuzzy_threshold} /></div>
+                  <div className={`${labelCls} flex items-center`}><span>Fuzzy Threshold<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.comp_match_fuzzy_threshold} /></span><B p="component.match.fuzzy_threshold" /></div>
                   <input type="number" min={0} max={1} step={0.05} className={`${selectCls} w-full`}
                     value={numN(rule, 'component.match.fuzzy_threshold', 0.75)}
                     onChange={(e) => onUpdate('component.match.fuzzy_threshold', parseFloat(e.target.value) || 0.75)} />
                 </div>
                 <div>
-                  <div className={labelCls}>Name Weight<Tip text={STUDIO_TIPS.comp_match_name_weight} /></div>
+                  <div className={`${labelCls} flex items-center`}><span>Name Weight<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.comp_match_name_weight} /></span><B p="component.match.name_weight" /></div>
                   <input type="number" min={0} max={1} step={0.05} className={`${selectCls} w-full`}
                     value={numN(rule, 'component.match.name_weight', 0.4)}
                     onChange={(e) => onUpdate('component.match.name_weight', parseFloat(e.target.value) || 0.4)} />
                 </div>
                 <div>
-                  <div className={labelCls}>Auto-Accept<Tip text={STUDIO_TIPS.comp_match_auto_accept_score} /></div>
+                  <div className={`${labelCls} flex items-center`}><span>Auto-Accept<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.comp_match_auto_accept_score} /></span><B p="component.match.auto_accept_score" /></div>
                   <input type="number" min={0} max={1} step={0.05} className={`${selectCls} w-full`}
                     value={numN(rule, 'component.match.auto_accept_score', 0.95)}
                     onChange={(e) => onUpdate('component.match.auto_accept_score', parseFloat(e.target.value) || 0.95)} />
                 </div>
                 <div>
-                  <div className={labelCls}>Flag Review<Tip text={STUDIO_TIPS.comp_match_flag_review_score} /></div>
+                  <div className={`${labelCls} flex items-center`}><span>Flag Review<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.comp_match_flag_review_score} /></span><B p="component.match.flag_review_score" /></div>
                   <input type="number" min={0} max={1} step={0.05} className={`${selectCls} w-full`}
                     value={numN(rule, 'component.match.flag_review_score', 0.65)}
                     onChange={(e) => onUpdate('component.match.flag_review_score', parseFloat(e.target.value) || 0.65)} />
@@ -728,13 +763,13 @@ function DepsTab({ rule, fieldKey: _fieldKey, onUpdate, componentSources, knownV
               <div className="text-[11px] font-medium text-gray-400 mb-1 mt-2">Property Matching</div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <div className={labelCls}>Prop Weight<Tip text={STUDIO_TIPS.comp_match_property_weight} /></div>
+                  <div className={`${labelCls} flex items-center`}><span>Prop Weight<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.comp_match_property_weight} /></span><B p="component.match.property_weight" /></div>
                   <input type="number" min={0} max={1} step={0.05} className={`${selectCls} w-full`}
                     value={numN(rule, 'component.match.property_weight', 0.6)}
                     onChange={(e) => onUpdate('component.match.property_weight', parseFloat(e.target.value) || 0.6)} />
                 </div>
                 <div className="col-span-2">
-                  <div className={labelCls}>Property Keys<Tip text={STUDIO_TIPS.comp_match_property_keys} /></div>
+                  <div className={labelCls}>Property Keys<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.comp_match_property_keys} /></div>
                   {(() => {
                     const compType = strN(rule, 'component.type');
                     const compSource = componentSources.find(
@@ -804,7 +839,7 @@ function DepsTab({ rule, fieldKey: _fieldKey, onUpdate, componentSources, knownV
         </>
       )}
       <div>
-        <div className={labelCls}>Aliases<Tip text={STUDIO_TIPS.aliases} /></div>
+        <div className={`${labelCls} flex items-center`}><span>Aliases<Tip style={{ position: 'relative', left: '-3px', top: '-4px' }} text={STUDIO_TIPS.aliases} /></span><B p="aliases" /></div>
         <TagPicker values={arrN(rule, 'aliases')} onChange={(v) => onUpdate('aliases', v)} placeholder="alternative names for this key" />
       </div>
     </div>

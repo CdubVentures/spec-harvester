@@ -196,6 +196,7 @@ function normalizeFieldContract(rule = {}) {
 const REAL_FLAG_CODES = new Set([
   'variance_violation',
   'constraint_conflict',
+  'compound_range_conflict',
   'dependency_missing',
   'new_component',
   'new_enum_value',
@@ -284,7 +285,8 @@ function inferReasonCodes({
   selectedValue,
   selectedConfidence,
   summary,
-  hasConflict = false
+  hasConflict = false,
+  hasCompoundConflict = false
 }) {
   const reasons = [];
   const below = new Set(toArray(summary.fields_below_pass_target).map((item) => normalizeField(item)));
@@ -295,23 +297,9 @@ function inferReasonCodes({
     ? summary.field_reasoning[field]
     : (isObject(summary.field_reasoning?.[normalizedField]) ? summary.field_reasoning[normalizedField] : {});
 
-  if (!hasKnownValue(selectedValue)) {
-    reasons.push('missing_value');
-  }
-  if (criticalBelow.has(normalizedField)) {
-    reasons.push('critical_field_below_pass_target');
-  } else if (below.has(normalizedField)) {
-    reasons.push('below_pass_target');
-  }
-  if (missingRequired.has(normalizedField)) {
-    reasons.push('missing_required_field');
-  }
-  if (selectedConfidence < 0.6 && hasKnownValue(selectedValue)) {
-    reasons.push('low_confidence');
-  } else if (selectedConfidence < 0.85 && hasKnownValue(selectedValue)) {
-    reasons.push('needs_review_confidence');
-  }
-  if (hasConflict) {
+  if (hasCompoundConflict) {
+    reasons.push('compound_range_conflict');
+  } else if (hasConflict) {
     reasons.push('constraint_conflict');
   }
   const unknownReason = String(fieldReasoning.unknown_reason || '').trim();
@@ -660,15 +648,18 @@ export function buildFieldState({
     }
   }
 
-  const hasConflict = toArray(summary.constraint_analysis?.contradictions).some((row) =>
+  const fieldContradictions = toArray(summary.constraint_analysis?.contradictions).filter((row) =>
     toArray(row?.fields).map((token) => normalizeField(token)).includes(fieldKey)
   );
+  const hasConflict = fieldContradictions.length > 0;
+  const hasCompoundConflict = fieldContradictions.some((row) => row?.code === 'compound_range_conflict');
   const reasonCodes = inferReasonCodes({
     field: fieldKey,
     selectedValue: resolvedSelectedValue,
     selectedConfidence: resolvedSelectedConfidence,
     summary,
-    hasConflict
+    hasConflict,
+    hasCompoundConflict
   });
 
   const color = hasKnownValue(resolvedSelectedValue)

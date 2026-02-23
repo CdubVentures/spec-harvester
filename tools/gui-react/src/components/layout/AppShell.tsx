@@ -7,6 +7,7 @@ import { api } from '../../api/client';
 import { useUiStore } from '../../stores/uiStore';
 import { useRuntimeStore } from '../../stores/runtimeStore';
 import { isTestCategory } from '../../utils/testMode';
+import { invalidateFieldRulesQueries } from '../../pages/studio/invalidateFieldRulesQueries';
 import { wsManager } from '../../api/ws';
 import { useEventsStore } from '../../stores/eventsStore';
 import { useIndexLabStore, type IndexLabEvent } from '../../stores/indexlabStore';
@@ -65,17 +66,7 @@ export function AppShell() {
         const msg = data as { type?: string; category?: string };
         const cat = msg.category;
         if (cat) {
-          queryClient.invalidateQueries({ queryKey: ['reviewProductsIndex', cat] });
-          queryClient.invalidateQueries({ queryKey: ['componentReviewData', cat] });
-          queryClient.invalidateQueries({ queryKey: ['componentReviewLayout', cat] });
-          queryClient.invalidateQueries({ queryKey: ['enumReviewData', cat] });
-          queryClient.invalidateQueries({ queryKey: ['product', cat] });
-          queryClient.invalidateQueries({ queryKey: ['catalog', cat] });
-          queryClient.invalidateQueries({ queryKey: ['studio-known-values', cat] });
-          queryClient.invalidateQueries({ queryKey: ['fieldLabels', cat] });
-          queryClient.invalidateQueries({ queryKey: ['reviewLayout', cat] });
-          queryClient.invalidateQueries({ queryKey: ['studio', cat] });
-          queryClient.invalidateQueries({ queryKey: ['studio-drafts', cat] });
+          invalidateFieldRulesQueries(queryClient, cat);
         }
       }
     });

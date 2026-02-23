@@ -70,24 +70,24 @@ export function buildSyntheticComponentCandidateId({ componentType, componentNam
   return buildCandidateId('pl_comp', withMaker);
 }
 
-export function buildWorkbookComponentCandidateId({ componentType, componentName, componentMaker, propertyKey, value = '' }) {
+export function buildReferenceComponentCandidateId({ componentType, componentName, componentMaker, propertyKey, value = '' }) {
   const baseParts = [componentType, componentName, propertyKey, value];
   const withMaker = componentMaker !== undefined
     ? [componentType, componentName, componentMaker, propertyKey, value]
     : baseParts;
-  return buildCandidateId('wb_comp', withMaker);
+  return buildCandidateId('ref_comp', withMaker);
 }
 
 export function buildPipelineEnumCandidateId({ fieldKey, value }) {
   return buildCandidateId('pl_enum', [fieldKey, value]);
 }
 
-export function buildWorkbookEnumCandidateId({ fieldKey, value }) {
-  return buildCandidateId('wb_enum', [fieldKey, value]);
+export function buildReferenceEnumCandidateId({ fieldKey, value }) {
+  return buildCandidateId('ref_enum', [fieldKey, value]);
 }
 
-export function buildWorkbookFieldOverrideCandidateId({ productId, fieldKey, value = '' }) {
-  return buildCandidateId('wb_item', [productId, fieldKey, value]);
+export function buildUserFieldOverrideCandidateId({ productId, fieldKey, value = '' }) {
+  return buildCandidateId('user_item', [productId, fieldKey, value]);
 }
 
 export function buildManualOverrideCandidateId({ category, productId, fieldKey, value, evidenceUrl = '', evidenceQuote = '' }) {

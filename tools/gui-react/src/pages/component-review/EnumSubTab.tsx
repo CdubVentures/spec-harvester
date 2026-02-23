@@ -648,7 +648,7 @@ export function EnumSubTab({
             const hasMeaningfulValue = hasKnownValue(vi.value);
             const isAccepted = hasMeaningfulValue
               && !vi.needs_review
-              && (vi.source === 'manual' || vi.source === 'workbook' || vi.source === 'reference' || Boolean(vi.accepted_candidate_id));
+              && (vi.source === 'manual' || vi.source === 'reference' || Boolean(vi.accepted_candidate_id));
             const drawerIsPending = acceptMutation.isPending || removeMutation.isPending || drawerRenameMutation.isPending;
 
             const extraActions = (

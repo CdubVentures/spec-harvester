@@ -20,6 +20,7 @@ import {
   ruleShape as parseRuleShape,
   ruleUnit as parseRuleUnit
 } from './ruleAccessors.js';
+import { computeCompoundRange, evaluateCompoundRange } from './compoundBoundary.js';
 
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -1258,12 +1259,26 @@ export class FieldRulesEngine {
         if (compareValue === null) {
           continue;
         }
-        const maxAllowed = compareValue * (1 + (tolerancePercent / 100));
-        if (triggerNumeric > maxAllowed) {
+        const componentMax = compareValue * (1 + (tolerancePercent / 100));
+        const fieldRange = parseRange(this.rules[key] || {});
+        const compoundRange = computeCompoundRange({
+          ruleMin: fieldRange.min,
+          ruleMax: fieldRange.max,
+          componentMin: null,
+          componentMax
+        });
+        const evaluation = evaluateCompoundRange(triggerNumeric, compoundRange);
+        if (!evaluation.ok) {
           violations.push({
             rule: rule.rule_id || 'component_db_lookup',
             severity: 'error',
-            message: `${key} exceeds ${lookupField} ${compareField}`
+            message: `${key} exceeds ${lookupField} ${compareField}`,
+            reason_code: evaluation.reason_code,
+            effective_min: evaluation.effective_min,
+            effective_max: evaluation.effective_max,
+            actual: evaluation.actual,
+            sources: evaluation.sources,
+            violated_bound: evaluation.violated_bound
           });
           continue;
         }

@@ -89,6 +89,20 @@ function runComponentIdentityUpdateTx({
   const oldComponentIdentifier = buildComponentIdentifier(componentType, currentName, currentMaker);
   const newComponentIdentifier = buildComponentIdentifier(componentType, nextName, nextMaker);
   const tx = runtimeSpecDb.db.transaction(() => {
+    const collisionTarget = runtimeSpecDb.db.prepare(`
+      SELECT id FROM component_identity
+      WHERE category = ? AND component_type = ? AND canonical_name = ? AND maker = ? AND id != ?
+      LIMIT 1
+    `).get(runtimeSpecDb.category, componentType, nextName, nextMaker, componentIdentityId);
+
+    if (collisionTarget) {
+      runtimeSpecDb.mergeComponentIdentities({
+        sourceId: componentIdentityId,
+        targetId: collisionTarget.id,
+      });
+      return { merged: true, survivingId: collisionTarget.id };
+    }
+
     runtimeSpecDb.db.prepare(`
       UPDATE component_identity
       SET canonical_name = ?, maker = ?, source = ?, updated_at = datetime('now')
@@ -111,11 +125,14 @@ function runComponentIdentityUpdateTx({
         WHERE category = ? AND target_kind = 'component_key' AND component_identifier = ?
       `).run(newComponentIdentifier, runtimeSpecDb.category, oldComponentIdentifier);
     }
+    return { merged: false };
   });
-  tx();
+  const result = tx();
   return {
     oldComponentIdentifier,
     newComponentIdentifier,
+    merged: result?.merged || false,
+    survivingId: result?.survivingId || null,
   };
 }
 
@@ -252,7 +269,7 @@ async function handleComponentOverrideEndpoint({
     getSpecDbReady,
     resolveComponentMutationContext,
     isMeaningfulValue,
-    candidateLooksWorkbook,
+    candidateLooksReference,
     normalizeLower,
     buildComponentIdentifier,
     applySharedLaneState,
@@ -311,9 +328,9 @@ async function handleComponentOverrideEndpoint({
       const sourceToken = String(candidateSource || '').trim().toLowerCase();
       const resolveSelectionSource = () => {
         if (!requestedCandidateId) return 'user';
-        const candidateLooksWorkbookFlag = candidateLooksWorkbook(requestedCandidateId, sourceToken);
+        const isReferenceCandidate = candidateLooksReference(requestedCandidateId, sourceToken);
         const candidateLooksUser = sourceToken.includes('manual') || sourceToken.includes('user');
-        if (candidateLooksWorkbookFlag) return 'component_db';
+        if (isReferenceCandidate) return 'component_db';
         if (candidateLooksUser) return 'user';
         return 'pipeline';
       };

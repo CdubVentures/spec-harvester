@@ -26,7 +26,6 @@ export function trafficTextColor(color: string): string {
 /** Light-theme source badge (used in drawers, tables, badges) */
 export const sourceBadgeClass: Record<string, string> = {
   reference: 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300',
-  workbook: 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300',
   override: 'bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300',
   pipeline: 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300',
   manual:   'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300',
@@ -39,7 +38,6 @@ export const sourceBadgeClass: Record<string, string> = {
 /** Dark-background source badge (used in tooltips which have a dark bg) */
 export const sourceBadgeDarkClass: Record<string, string> = {
   reference: 'bg-blue-700/60 text-blue-200',
-  workbook: 'bg-blue-700/60 text-blue-200',
   override: 'bg-orange-700/60 text-orange-200',
   pipeline: 'bg-amber-700/60 text-amber-200',
   manual:   'bg-green-700/60 text-green-200',

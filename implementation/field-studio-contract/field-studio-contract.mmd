@@ -1,0 +1,192 @@
+---
+title: "Field Studio Contract v2 — Rule Hierarchy, Flags & Test Coverage"
+---
+graph TB
+    %% ═══════════════════════════════════════════════════════════════════
+    %% LEVEL 0 — ROOT
+    %% ═══════════════════════════════════════════════════════════════════
+    ROOT(["<b>FIELD STUDIO CONTRACT</b>"])
+
+    %% ═══════════════════════════════════════════════════════════════════
+    %% LEVEL 1 — DATA TYPES (7 types branch horizontally)
+    %% ═══════════════════════════════════════════════════════════════════
+    ROOT --> T_STR & T_NUM & T_INT & T_BOOL & T_DATE & T_URL & T_CREF
+
+    T_STR["<b>string</b><br/>scalar ✓ | list/set ✓<br/>trim + normalize"]
+    T_NUM["<b>number</b><br/>scalar ✓ | list ✓<br/>parse + unit convert"]
+    T_INT["<b>integer</b><br/>scalar ✓ | list ✓<br/>round to whole"]
+    T_BOOL["<b>boolean</b><br/>scalar only ✓<br/>yes / no / unk"]
+    T_DATE["<b>date</b><br/>scalar only ✓<br/>any → ISO-8601"]
+    T_URL["<b>url</b><br/>scalar only ✓<br/>new URL() check"]
+    T_CREF["<b>component_ref</b><br/>scalar only ✓<br/>→ Component Grid"]
+
+    %% ═══════════════════════════════════════════════════════════════════
+    %% LEVEL 2 — STRING ENUM POLICIES (branch from string)
+    %% ═══════════════════════════════════════════════════════════════════
+    T_STR --> EP_NONE & EP_CLOSED & EP_OPK & EP_OPEN & EP_CWC & EP_LIST_RULES
+
+    EP_NONE["No enum ✓<br/>Free text value"]
+    EP_CLOSED["<b>enum: closed</b> ✓<br/>Reject unknown → unk<br/>⚑constraint_conflict"]
+    EP_OPK["<b>enum: open_prefer_known</b> ✓<br/>Accept new + curation<br/>⚑new_enum_value"]
+    EP_OPEN["<b>enum: open</b> ✓<br/>Accept any value<br/>needs_curation=true"]
+    EP_CWC["<b>enum: closed_with_curation</b><br/>Reject + queue curator<br/>⚠G11 untested"]
+    EP_LIST_RULES["<b>list_rules</b> ✓<br/>dedupe case-insens<br/>sort: asc/desc/none<br/>min/max_items"]
+
+    %% ═══════════════════════════════════════════════════════════════════
+    %% LEVEL 2 — NUMBER RULES (branch from number/integer)
+    %% ═══════════════════════════════════════════════════════════════════
+    T_NUM --> NUM_RANGE & NUM_UNIT & NUM_ROUND
+    T_INT --> NUM_RANGE
+
+    NUM_RANGE["<b>Range</b> ✓<br/>min ≤ val ≤ max<br/>OOR → ⚑constraint_conflict"]
+    NUM_UNIT["<b>Unit Conversion</b> ✓<br/>oz→g | lbs→g | in→mm<br/>cm→mm | Hz | ms | dpi | gf"]
+    NUM_ROUND["<b>Rounding</b> ✓<br/>decimals: 0-10<br/>mode: nearest/up/down"]
+
+    %% ═══════════════════════════════════════════════════════════════════
+    %% LEVEL 2 — COMPONENT REF RULES (branch from component_ref)
+    %% ═══════════════════════════════════════════════════════════════════
+    T_CREF --> CREF_MATCH & CREF_DISAMBIG & CREF_VAR
+
+    CREF_MATCH["<b>Identity Match</b> ✓<br/>exact → alias → fuzzy<br/>auto_accept ≥ 0.95<br/>flag_review ≥ 0.65<br/>allow_new_components"]
+    CREF_DISAMBIG["<b>Maker Disambig</b> ✓<br/>6-step: type_brand →<br/>type_maker → fk_brand →<br/>fk_maker → brand → maker"]
+    CREF_VAR["<b>Variance Policies</b> ✓<br/>authoritative ⚑variance_violation<br/>upper_bound ⚑ | lower_bound ⚑<br/>range ±tol ⚑ | override_allowed"]
+
+    %% ═══════════════════════════════════════════════════════════════════
+    %% LEVEL 1 — CROSS-CUTTING RULES (parallel to types)
+    %% ═══════════════════════════════════════════════════════════════════
+    ROOT --> RULES["<b>CROSS-CUTTING RULES</b>"]
+    RULES --> PRI & EVID & CONSTR & CONF & AI_M
+
+    PRI["<b>PRIORITY</b> ✓<br/>identity | critical | required<br/>expected | optional<br/>difficulty: easy→instrumented<br/>availability: always→rare"]
+    EVID["<b>EVIDENCE</b> ✓<br/>min_refs ≥ N → ⚑below_min_evidence<br/>tier_pref: T1(1.0) → T4(0.4)<br/>conflict: resolve_by_tier<br/>preserve_all → ⚑conflict_policy_hold"]
+    CONSTR["<b>CONSTRAINTS</b> ✓<br/>Range → ⚑constraint_conflict<br/>CompDB → ⚑constraint_conflict<br/>Range∩CompDB → ⚑compound_range_conflict<br/>Group → ⚑dependency_missing<br/>Mutual exclusion | Conditional"]
+    CONF["<b>CONFIDENCE</b> ✓<br/>Gray=0 | Red<0.6<br/>Yellow 0.6-0.84<br/>Green ≥ 0.85<br/>⚑constraint_conflict → Red<br/>⚑compound_range_conflict → Red"]
+    AI_M["<b>AI ASSIST</b><br/>off | advisory | planner | judge<br/>Auto: required→judge<br/>expected+hard→planner"]
+
+    %% ═══════════════════════════════════════════════════════════════════
+    %% LEVEL 1 — THREE REVIEW DOMAINS
+    %% ═══════════════════════════════════════════════════════════════════
+    ROOT --> ITEM_D & COMP_D & ENUM_D
+
+    %% ── ITEM GRID ──
+    subgraph ITEM_G [" ITEM GRID "]
+        ITEM_D["<b>ITEM GRID</b><br/>item_field_state<br/>Row = product<br/>Col = field_key"]
+        ITEM_D --> I_SRC["Sources ✓<br/>pipeline | user<br/>reference | synthetic"]
+        ITEM_D --> I_MUT["4 Mutations ✓<br/>override | manual<br/>AI confirm | accept"]
+        ITEM_D --> I_SC["9 Scenarios<br/>#1 happy ✓ | #11 range ✓⚑<br/>#12 xval ✓⚑ | #15 min_evid ✓⚑<br/>#16 tier ✓ | #17 preserve ✓⚑<br/>#18 missing ✓ | #19 consensus ✓<br/>#20 list_dedup ✓"]
+        ITEM_D --> I_FL["⚑constraint_conflict ✓<br/>⚑compound_range_conflict ✓<br/>⚑below_min_evidence ✓<br/>⚑conflict_policy_hold ✓<br/>⚑dependency_missing ⚠"]
+    end
+
+    %% ── COMPONENT GRID ──
+    subgraph COMP_G [" COMPONENT GRID "]
+        COMP_D["<b>COMPONENT GRID</b><br/>identity + values<br/>Row = type::name::maker"]
+        COMP_D --> C_KEY["Row UNIQUE ✓<br/>Collision → merge ✓ G2/G6"]
+        COMP_D --> C_SLOTS["5 Slots ✓<br/>__name | __maker | property<br/>__links | __aliases"]
+        COMP_D --> C_AGG["<b>AGG INVARIANT</b> ✓<br/>C(K,F) = SUM cands ALL<br/>linked products per F<br/>IDENTICAL every slot"]
+        COMP_D --> C_LIFE["Lifecycle ✓<br/>exact→link | fuzzy→unresolved<br/>maker set → collision check<br/>merge: links+vals+aliases+KRS"]
+        COMP_D --> C_SC["Scenarios<br/>#2,4,6,7 new ✓⚑new_component<br/>#3,5 similar ✓<br/>#13 constraints ✓⚑<br/>#14 variance ✓⚑"]
+        COMP_D --> C_FL["⚑variance_violation ✓<br/>⚑constraint_conflict ✓<br/>⚑compound_range_conflict ✓<br/>⚑new_component ✓"]
+    end
+
+    %% ── ENUM GRID ──
+    subgraph ENUM_G [" ENUM GRID "]
+        ENUM_D["<b>ENUM GRID</b><br/>enum_lists + list_values<br/>Row = field_key"]
+        ENUM_D --> E_SRC["Sources ✓<br/>known_values | manual<br/>pipeline (policy-dep ✓G5)"]
+        ENUM_D --> E_POL["4 Policies<br/>open ✓ | open_prefer_known ✓⚑<br/>closed ✓⚑ | closed_with_curation ⚠G11"]
+        ENUM_D --> E_TRANS["Policy Transition ✓ G5<br/>closed→open: review 1→0<br/>open→closed: review 0→1<br/>overridden untouched"]
+        ENUM_D --> E_MUT["5 Actions ✓<br/>add | remove | accept<br/>confirm | rename+cascade"]
+        ENUM_D --> E_SC["Scenarios<br/>#8 new_enum ✓⚑<br/>#9 similar ✓<br/>#10 closed_reject ✓⚑"]
+        ENUM_D --> E_FL["⚑new_enum_value ✓"]
+    end
+
+    %% ═══════════════════════════════════════════════════════════════════
+    %% CROSS-LINKS between types and domains
+    %% ═══════════════════════════════════════════════════════════════════
+    EP_CLOSED -.->|"enforcement"| E_POL
+    EP_OPK -.->|"enforcement"| E_POL
+    CREF_MATCH -.->|"identity"| C_LIFE
+    CREF_VAR -.->|"property scoring"| C_FL
+    NUM_RANGE -.->|"comp property"| CREF_VAR
+    NUM_RANGE -.->|"compound intersection"| CONSTR
+
+    %% ═══════════════════════════════════════════════════════════════════
+    %% LEVEL 2 — LANE STATE + FLAGS + MERGE
+    %% ═══════════════════════════════════════════════════════════════════
+    ITEM_D & COMP_D & ENUM_D --> LN_STATE
+
+    LN_STATE["<b>LANE STATE MACHINE</b><br/>key_review_state ✓"]
+    LN_STATE --> LN_AI & LN_USR & LN_TR & LN_OVR
+
+    LN_AI["<b>AI Confirm</b> ✓<br/>pending → confirmed<br/>Transaction-safe ✓G8"]
+    LN_USR["<b>User Accept</b> ✓<br/>null → accepted"]
+    LN_TR["<b>Transitions</b> ✓<br/>Accept+Δsel → AI regresses<br/>Accept+= → AI stays<br/>Confirm=CANDIDATE<br/>Accept=SLOT"]
+    LN_OVR["<b>Override AI</b> ⚠G4<br/>regression untested"]
+
+    C_LIFE --> MERGE["<b>MERGE SYSTEM</b> ✓ G2/G6<br/>Collision detect (type,name,maker)<br/>Links → target (skip dupes)<br/>Values → target wins<br/>KRS → confirmed>accepted>pending"]
+
+    %% ═══════════════════════════════════════════════════════════════════
+    %% LEVEL 2 — FLAGS
+    %% ═══════════════════════════════════════════════════════════════════
+    I_FL & C_FL & E_FL --> FL_SYS["<b>FLAG SYSTEM</b>"]
+    FL_SYS --> FL_REAL & FL_VIS
+
+    FL_REAL["<b>8 REAL FLAGS → metrics</b><br/>1. ⚑variance_violation ✓#14<br/>2. ⚑constraint_conflict ✓#11,12,13<br/>3. ⚑compound_range_conflict ✓#12,13<br/>4. ⚑new_component ✓#2,4,6,7<br/>5. ⚑new_enum_value ✓#8<br/>6. ⚑below_min_evidence ✓#15<br/>7. ⚑conflict_policy_hold ✓#17<br/>8. ⚑dependency_missing ⚠#12"]
+    FL_VIS["<b>Visual Treatments</b> ✓G7<br/>6 codes STRIPPED<br/>constraint_conflict +<br/>compound_range_conflict<br/>promote to real flags"]
+
+    %% ═══════════════════════════════════════════════════════════════════
+    %% BOTTOM — TEST COVERAGE + GAPS + CANDIDATE IDs
+    %% ═══════════════════════════════════════════════════════════════════
+    FL_SYS & LN_STATE & MERGE --> BOTTOM["<b>TEST COVERAGE & GAPS</b>"]
+    BOTTOM --> TC_ALL & G_ALL & CID
+
+    TC_ALL["<b>2463 TESTS — 12 files</b><br/>contractDriven (155+): S0-S8 ✓<br/>laneState (28) + apiContract (17) ✓<br/>ecosystem (43) + runtimeGate (32) ✓<br/>cascade (10) + engine (15) ✓<br/>enumPolicy (5) + merge (5) ✓<br/>gridData (8) + candId (5) + cache (12) ✓<br/>compoundBoundary (14) ✓"]
+
+    G_ALL["<b>GAP STATUS</b><br/><b>FIXED:</b> G2/G6 merge ✓ | G5 enum ✓<br/>G7 visual strip ✓ | G8 transaction ✓<br/><b>BY DESIGN:</b> G1 G3 G10<br/><b>REMAINING:</b> G4 override→AI ⚠<br/>G9 no undo ⚠ | G11 closed_curation ⚠<br/>G12 record shape ⚠ | G13 unicode ⚠<br/>G14 evidence freshness ⚠"]
+
+    CID["<b>CANDIDATE IDs</b> ✓<br/>9 prefixes | Scope: prod::field::raw<br/>Collision: ::dup_N | FNV-1a hash<br/>Synthetic READ-only"]
+
+    %% ═══════════════════════════════════════════════════════════════════
+    %% STYLES
+    %% ═══════════════════════════════════════════════════════════════════
+    classDef rootStyle fill:#1a1a2e,stroke:#e94560,stroke-width:4px,color:#eee,font-weight:bold,font-size:16px
+    classDef typeStyle fill:#161b22,stroke:#58a6ff,stroke-width:2px,color:#c9d1d9
+    classDef numStyle fill:#161b22,stroke:#f0883e,stroke-width:2px,color:#c9d1d9
+    classDef otherStyle fill:#161b22,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
+    classDef enumStyle fill:#1a0a2e,stroke:#bc8cff,stroke-width:2px,color:#d2a8ff
+    classDef enumGapStyle fill:#2d0a2a,stroke:#f85149,stroke-width:2px,color:#ffa198
+    classDef rulesStyle fill:#0d1117,stroke:#a371f7,stroke-width:2px,color:#c9d1d9
+    classDef itemStyle fill:#0d1a2e,stroke:#58a6ff,stroke-width:2px,color:#c9d1d9
+    classDef compStyle fill:#0a1f0a,stroke:#3fb950,stroke-width:2px,color:#c9d1d9
+    classDef aggStyle fill:#0a2f0a,stroke:#3fb950,stroke-width:3px,color:#7ee787,font-weight:bold
+    classDef enumGridStyle fill:#1a0a2e,stroke:#bc8cff,stroke-width:2px,color:#d2a8ff
+    classDef laneStyle fill:#0d1117,stroke:#58a6ff,stroke-width:2px,color:#c9d1d9
+    classDef mergeStyle fill:#0a1f0a,stroke:#3fb950,stroke-width:3px,color:#7ee787,font-weight:bold
+    classDef flagStyle fill:#2d0a0a,stroke:#f85149,stroke-width:2px,color:#ffa198
+    classDef flagVisStyle fill:#1a1000,stroke:#d29922,stroke-width:1px,color:#e3b341
+    classDef testStyle fill:#071a07,stroke:#56d364,stroke-width:2px,color:#c9d1d9
+    classDef gapStyle fill:#1a1a2e,stroke:#e94560,stroke-width:2px,color:#eee
+    classDef cidStyle fill:#0d1117,stroke:#a371f7,stroke-width:1px,color:#8b949e
+    classDef bridgeStyle fill:#1a1a2e,stroke:#484f58,stroke-width:2px,color:#c9d1d9,font-weight:bold
+
+    class ROOT rootStyle
+    class T_STR,STR_SC,STR_LI typeStyle
+    class T_NUM,T_INT numStyle
+    class T_BOOL,T_DATE,T_URL,T_CREF otherStyle
+    class EP_NONE,EP_CLOSED,EP_OPK,EP_OPEN,EP_LIST_RULES enumStyle
+    class EP_CWC enumGapStyle
+    class NUM_RANGE,NUM_UNIT,NUM_ROUND numStyle
+    class CREF_MATCH,CREF_DISAMBIG,CREF_VAR otherStyle
+    class RULES,PRI,EVID,CONSTR,CONF,AI_M rulesStyle
+    class ITEM_D,I_SRC,I_MUT,I_SC,I_FL itemStyle
+    class COMP_D,C_KEY,C_SLOTS,C_LIFE,C_SC,C_FL compStyle
+    class C_AGG aggStyle
+    class ENUM_D,E_SRC,E_POL,E_TRANS,E_MUT,E_SC,E_FL enumGridStyle
+    class LN_STATE,LN_AI,LN_USR,LN_TR laneStyle
+    class LN_OVR flagStyle
+    class MERGE mergeStyle
+    class FL_SYS,BOTTOM bridgeStyle
+    class FL_REAL flagStyle
+    class FL_VIS flagVisStyle
+    class TC_ALL testStyle
+    class G_ALL gapStyle
+    class CID cidStyle

@@ -36,11 +36,16 @@ The primary use case is populating a product-spec database (e.g. monitors, mice)
 ```
 src/
   cli/             - CLI entry points (spec.js is main; indexlab.js for IndexLab)
-  api/             - guiServer.js (WS + REST), reviewRoutes, mutationRoutes
+  api/             - guiServer.js (WS + REST dispatch shell, 2612 LOC), reviewRoutes, mutationRoutes
+  api/helpers/      - requestHelpers.js (60+ shared utilities extracted from guiServer)
+  api/routes/       - infraRoutes, configRoutes, indexlabRoutes, catalogRoutes, brandRoutes,
+                     studioRoutes, reviewRoutes, testModeRoutes, queueBillingLearningRoutes,
+                     sourceStrategyRoutes, indexlabDataBuilders (all extracted from guiServer)
   pipeline/        - runProduct.js (main orchestrator), consensusPhase.js, learningExportPhase.js,
                      runOrchestrator.js, automationQueue.js
   pipeline/helpers/ - cryptoHelpers, urlHelpers, provenanceHelpers, candidateHelpers,
-                     evidenceHelpers, reasoningHelpers (extracted from runProduct.js)
+                     evidenceHelpers, reasoningHelpers, identityHelpers, runtimeHelpers,
+                     scoringHelpers, typeHelpers (Groups 1-10 extracted from runProduct.js)
   learning/        - learningUpdater.js, learningStores.js, learningSuggestionEmitter.js
   indexlab/        - needsetEngine.js, runtimeBridge.js, indexingSchemaPackets.js
   discovery/       - searchDiscovery.js
@@ -68,7 +73,10 @@ tools/
   gui-react/       - React+TypeScript GUI (Vite, builds to dist/)
     src/
       pages/
-        indexing/  - IndexingPage.tsx (IndexLab UI — all phase panels)
+        indexing/  - IndexingPage.tsx (layout shell, 4209 LOC), types.ts, helpers.tsx
+        indexing/panels/ - 19 extracted panel components (Overview, Runtime, Picker,
+                     SearchProfile, SerpExplorer, Phase05-09, Phase06/06b,
+                     LlmOutput, LlmMetrics, EventStream, NeedSet, etc.)
         component-review/ - ComponentReviewDrawer.tsx, EnumSubTab.tsx
       components/common/ - CellDrawer.tsx, Tip.tsx
 
@@ -92,9 +100,9 @@ out/               - pipeline output specs
 
 We are working on `SECTION-03-ai-indexing-lab-execution.md` and its canonical phase files in `implementation/ai-indexing-plans/`.
 
-### Phase Status Summary (Audited 2026-02-22, 2239 tests pass)
+### Phase Status Summary (Audited 2026-02-22, 2443 tests pass)
 
-**Sprints 1-6 + Order 29: COMPLETE. Sprint 7 Track B (Items 53+54): COMPLETE. 2323 tests pass.**
+**Sprints 1-6 + Order 29: COMPLETE. Sprint 7 Track B (Items 53+54+61): COMPLETE. Monolith Decomposition: COMPLETE. 2443 tests pass.**
 
 | Phase | File | Status |
 |-------|------|--------|
@@ -125,9 +133,20 @@ We are working on `SECTION-03-ai-indexing-lab-execution.md` and its canonical ph
 1. **Phase 10 two-product proof** — Can start now. Acceptance gate for Phase 10 completion.
 2. **Phase 07 FTS wiring** — Replace fallback pool with FTS queries.
 3. ~~**Phase 05 multi-pool scheduler**~~ — **DONE** (Sprint 7 Track B). Phase 11 unblocked.
-4. **Helper Groups 7-10** — Continue runProduct.js decomposition (4280 → <3000 LOC).
+4. ~~**Helper Groups 7-10**~~ — **DONE** (Sprint 7 Track B). runProduct.js 4280→3955 LOC. 88 characterization tests.
 5. **Phase 06B worker loop + TTL** — Consume automation queue.
 6. **Phase 11 worker controls** → **Phase 12 batch automation** (sequential dependency — now unblocked).
+
+### Monolith Decomposition Status (COMPLETE — 2026-02-22)
+
+| File | Before | After | Reduction |
+|------|--------|-------|-----------|
+| guiServer.js | 8,248 | 2,612 | 68% |
+| runProduct.js | 4,418 | 3,955 | 10.5% |
+| IndexingPage.tsx | 10,291 | 4,209 | 59% |
+| **Total** | **22,957** | **10,776** | **53%** |
+
+New modules: 12 route/helper files (guiServer), 10 pipeline helper files (runProduct), 21 panel/type/helper files (IndexingPage), 7 barrel exports. 2,443 tests pass.
 
 ### Key Source Files for Section 03
 
@@ -148,8 +167,11 @@ src/llm/extractCandidatesLLM.js         - LLM extraction batches
 src/llm/extractionContext.js            - Phase 08 context matrix assembler
 src/llm/fieldBatching.js               - batch grouping strategy
 src/llm/discoveryPlanner.js            - Phase 02 LLM search planner
-src/api/guiServer.js                   - all REST + WS endpoints
-tools/gui-react/src/pages/indexing/IndexingPage.tsx  - all IndexLab GUI panels
+src/api/guiServer.js                   - REST + WS dispatch shell (2,612 LOC)
+src/api/helpers/requestHelpers.js      - shared request utilities (extracted)
+src/api/routes/                        - 10+ route handler modules (extracted)
+tools/gui-react/src/pages/indexing/IndexingPage.tsx  - IndexLab layout shell (4,209 LOC)
+tools/gui-react/src/pages/indexing/panels/           - 19 panel components (extracted)
 ```
 
 ### Event Model (NDJSON — Phase 00)

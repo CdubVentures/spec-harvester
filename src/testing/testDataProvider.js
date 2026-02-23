@@ -626,6 +626,15 @@ function buildScenarioDefsFromContract({ componentTypes, knownValuesCatalogs, ra
     defs.push({ id: id++, name: 'cross_validation', category: 'Constraints', desc: `Triggers ${rules.length} cross-validation rules`, aiCalls: 'callLlmWithRouting â†’ source data crafted to trigger rule violations' });
   }
 
+  // N+5b. Compound range conflict (field-rule range + component bound intersection)
+  const compoundFields = toArr(rules)
+    .filter(r => r?.check?.type === 'component_db_lookup')
+    .map(r => r.trigger_field)
+    .filter(f => rangeConstraints[f]);
+  if (compoundFields.length > 0) {
+    defs.push({ id: id++, name: 'compound_range_conflict', category: 'Constraints', desc: `Value between field-rule max and component max for ${compoundFields.join(', ')}`, aiCalls: 'callLlmWithRouting: source data with values that pass field-rule but fail compound range' });
+  }
+
   // N+6. Component constraint violations (e.g., sensor_date <= release_date)
   const constrainedTypes = componentTypes.filter(ct => Object.keys(ct.allConstraints).length > 0);
   if (constrainedTypes.length > 0) {
@@ -817,6 +826,17 @@ function assignFieldTestNumbers({ key, type, shape, template, policy, source, ra
   }
 
   if ((requiredLevel === 'required' || requiredLevel === 'critical') && missingId > 0) tests.add(missingId);
+
+  const compoundId = findScenarioId(scenarioDefs, 'compound_range_conflict');
+  if (compoundId > 0 && range !== '-') {
+    const compoundTriggers = new Set(
+      toArr(crossRules)
+        .filter(r => r?.check?.type === 'component_db_lookup')
+        .map(r => r.trigger_field)
+        .filter(Boolean)
+    );
+    if (compoundTriggers.has(key)) tests.add(compoundId);
+  }
 
   const constraintId = findScenarioId(scenarioDefs, 'component_constraints');
   if (constraintId > 0) {

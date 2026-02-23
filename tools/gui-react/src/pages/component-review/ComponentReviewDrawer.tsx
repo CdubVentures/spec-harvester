@@ -852,7 +852,6 @@ export function ComponentReviewDrawer({
       && !state.overridden
       && (
         Boolean(state.accepted_candidate_id)
-        || state.source === 'workbook'
         || state.source === 'reference'
         || state.source === 'manual'
         || state.source === 'user'
@@ -981,7 +980,6 @@ export function ComponentReviewDrawer({
       && !state.overridden
       && (
         Boolean(state.accepted_candidate_id)
-        || state.source === 'workbook'
         || state.source === 'reference'
         || state.source === 'manual'
         || state.source === 'user'

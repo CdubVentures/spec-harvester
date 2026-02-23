@@ -15,7 +15,7 @@ import { normalizeProductIdentity } from './identityDedup.js';
 import { loadWorkbookProducts, loadWorkbookProductsWithFields } from './workbookProductLoader.js';
 import { generateIdentifier, nextAvailableId } from './productIdentity.js';
 import { migrateProductArtifacts, appendRenameLog } from './artifactMigration.js';
-import { buildWorkbookFieldOverrideCandidateId } from '../utils/candidateIdentifier.js';
+import { buildUserFieldOverrideCandidateId } from '../utils/candidateIdentifier.js';
 
 function catalogPath(config, category) {
   const root = config?.helperFilesRoot || 'helper_files';
@@ -616,7 +616,7 @@ export async function seedFromWorkbook({
           overridden_by: null,
           overridden_at: setAt,
           validated: null,
-          candidate_id: buildWorkbookFieldOverrideCandidateId({
+          candidate_id: buildUserFieldOverrideCandidateId({
             productId: pid,
             fieldKey: field,
             value: trimmed,

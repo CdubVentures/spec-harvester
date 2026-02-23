@@ -44,6 +44,9 @@ export const TIER_DEFS = [
 export const STUDIO_TIPS: Record<string, string> = {
   // Tab 1: Mapping Studio
   tooltip_bank_file: 'Path to a JS/JSON/MD file with tooltip text for field keys. Auto-discovered if matching hbs_tooltips*.',
+  tooltip_section_tooltip_bank: 'Tooltips source controls the shared tooltip reference file used for field guidance.',
+  tooltip_section_component_sources: 'Component Source Mapping stores component identity aliases, links, and attributes used for matching.',
+  tooltip_section_enums: 'Enum lists define canonical values for fields and drive enum validation and suggestions.',
   component_type: 'Type of component this sheet describes (sensor, switch, encoder, material). Used as the component reference key.',
   comp_field_key: 'Select a field key to bind this component attribute to. Type, unit, parse template, and evidence rules are inherited from the field key definition.',
   comp_variance_policy: 'How the component DB value relates to the product spec value.\n\n'
@@ -66,6 +69,7 @@ export const STUDIO_TIPS: Record<string, string> = {
   data_list_manual_values: 'Enum values for this field. Used during extraction and validation.',
 
   // Tab 2: Key Navigator - Contract
+  key_section_contract: 'Contract defines the field data type, shape, unit, and numeric formatting applied during parsing and reporting.',
   data_type: 'Fundamental data type. string: text, number: decimal, integer: whole, boolean: yes/no, date, url, enum: from a fixed set, component_ref: links to component DB.',
   shape: 'Value cardinality. scalar: single value, list: array, structured: nested object, key_value: dictionary.',
   contract_unit: 'Measurement unit for numeric fields (g, mm, Hz, dpi, ms). Blank for non-numeric.',
@@ -75,6 +79,7 @@ export const STUDIO_TIPS: Record<string, string> = {
   require_unknown_reason: 'If checked, setting a value to the unknown token requires an explanation of why the data is unavailable.',
 
   // Tab 2: Key Navigator - Priority
+  key_section_priority: 'Priority, availability, difficulty, and effort settings drive extraction urgency and scheduling of this field.',
   required_level: 'Field importance. identity: product ID, required/critical: essential, expected: should exist, optional: nice-to-have, editorial: narrative, commerce: pricing.',
   availability: 'How often this data exists. always: every product, expected: most, sometimes: ~half, rare: few, editorial_only: reviews only.',
   difficulty: 'Extraction difficulty. easy: directly stated, medium: some inference, hard: buried/inconsistent, instrumented: needs physical measurement.',
@@ -83,6 +88,7 @@ export const STUDIO_TIPS: Record<string, string> = {
   block_publish_when_unk: 'If checked, products with this field set to the unknown token cannot be published.',
 
   // Tab 2: Key Navigator - Parse
+  key_section_parse: 'Parse rules control how source text is interpreted and converted into this field\'s stored value.',
   parse_template: 'Parse Template defines the output type/shape (boolean/number/list/url/component). Boolean templates auto-lock enums to Yes/No. Component_reference templates auto-set alias matching. All other templates leave enum fully configurable.',
   parse_unit: 'Default unit assumed when source text has no explicit unit. E.g. \'g\' so \'80\' becomes \'80 g\'. Only shown for number-based templates.',
   unit_accepts: 'Unit variations the parser recognizes. E.g. for grams: g, grams, gram, gr. Only shown for number-based templates.',
@@ -91,6 +97,7 @@ export const STUDIO_TIPS: Record<string, string> = {
   strict_unit_required: 'Values MUST include a unit suffix. Rejects bare numbers. Overrides Allow unitless.',
 
   // Tab 2: Key Navigator - Enum
+  key_section_enum: 'Enum policy and enum source define accepted vocabulary, matching behavior, and suggestions for this field.',
   enum_policy: 'Enum Policy controls vocabulary matching after parsing. closed: requires a known list, rejects unknowns. open_prefer_known: prefers known values but accepts new evidence-backed values and queues them as suggestions. open: accepts any value (valid for all field types including number, url, date). For boolean fields, this is auto-locked to closed/yes_no.',
   enum_source: 'Enum value list source. Use data_lists.{name} for enum lists (e.g. data_lists.shape), component_db.{type} for component names (e.g. component_db.sensor), or yes_no for boolean enums.',
   match_strategy: 'alias: match known aliases and name variants. exact: exact string match only. fuzzy: similarity scoring with configurable threshold.',
@@ -103,12 +110,14 @@ export const STUDIO_TIPS: Record<string, string> = {
   enum_component_values: 'Entity names from the component database. Shows all components of this type with their maker and aliases.',
 
   // Tab 2: Key Navigator - Evidence
+  key_section_evidence: 'Evidence settings determine proof requirements and confidence thresholds for accepting values for this field.',
   evidence_required: 'If checked, every value must cite at least one source reference (URL + snippet).',
   min_evidence_refs: 'Minimum distinct source references needed to accept a value. Higher = more confident but more unknowns.',
   conflict_policy: 'resolve_by_tier_else_unknown: use tier ranking, fall back to unknown. prefer_highest_tier: always trust best tier. prefer_most_recent: newest source. flag_for_review: mark for manual review.',
   tier_preference: 'Source trust ordering. Tier 1 (Manufacturer): OEM specs. Tier 2 (Lab): independent tests. Tier 3 (Retailer): store listings. Tier 4 (Community): forums/reviews. Tier 5 (Aggregator): comparison sites.',
 
   // Tab 2: Key Navigator - UI & Display
+  key_section_ui: 'UI controls determine how the field is displayed and edited in generated product views.',
   ui_label: 'Human-readable display name shown in UI and reports (e.g. \'Weight\' instead of \'weight_grams\').',
   ui_group: 'Category for organizing fields in the sidebar and reports. Fields with the same group appear together.',
   input_control: 'UI widget for manual editing. text: free text, number: spinner, select: dropdown, checkbox: toggle, token_list: tag input, text_list: multiline, date: date picker.',
@@ -121,11 +130,14 @@ export const STUDIO_TIPS: Record<string, string> = {
   aliases: 'Alternative names for this field key. Used for fuzzy matching across sources with different naming.',
 
   // Tab 2: Key Navigator - Search Hints
+  key_section_search: 'Search hints bias crawling and extraction by prioritizing domains, content types, and query terms.',
   domain_hints: 'Preferred website domains/types. E.g. \'manufacturer\' for OEM sites, or specific domains like \'rtings.com\'.',
   content_types: 'Content types most likely to have this data. E.g. spec_sheet, datasheet, review, manual, pdf.',
   query_terms: 'Extra search terms for this field. E.g. for polling_rate: \'report rate\', \'USB poll rate\'.',
 
   // Tab 2: Key Navigator - Component
+  key_section_components: 'Component settings control matching and inference from component databases.',
+  key_section_constraints: 'Cross-field constraints enforce logical relationships and consistency checks between this field and others.',
   component_db: 'Links this field to a component database (sensor, switch, encoder, material). Pipeline looks up component data alongside product data.',
   comp_match_fuzzy_threshold: 'Minimum string similarity (0-1) for a component name to be considered a fuzzy match candidate. Default 0.75 means 75% character similarity required. Lower = more candidates but more false matches.',
   comp_match_name_weight: 'How much the name similarity score counts in the combined matching score (0-1). Default 0.4 = 40% from name. The rest comes from property_weight. Higher = name matters more than property comparison.',

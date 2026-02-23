@@ -203,7 +203,7 @@ async function handleEnumOverrideEndpoint({
     resolveEnumMutationContext,
     isMeaningfulValue,
     normalizeLower,
-    candidateLooksWorkbook,
+    candidateLooksReference,
     applySharedLaneState,
     getPendingEnumSharedCandidateIds,
     specDbCache,
@@ -251,7 +251,7 @@ async function handleEnumOverrideEndpoint({
     if (!field) return respond(400, { error: 'field required' });
     if (!value) return respond(400, { error: 'value required' });
 
-    // SQL-first runtime path (legacy workbook_map/known_values writes removed from write path)
+    // SQL-first runtime path (known_values writes removed from write path)
     try {
       const normalized = String(value).trim().toLowerCase();
       const nowIso = new Date().toISOString();
@@ -340,11 +340,11 @@ async function handleEnumOverrideEndpoint({
           || priorStateStatus === 'pending'
           || Boolean(existingLv?.needs_review)
           || Boolean(oldLv?.needs_review);
-        const looksWorkbook = candidateLooksWorkbook(requestedCandidateId, sourceToken);
+        const looksReference = candidateLooksReference(requestedCandidateId, sourceToken);
         const selectedSource = String(
           existingLv?.source
           || oldLv?.source
-          || (looksWorkbook ? 'known_values' : 'pipeline')
+          || (looksReference ? 'known_values' : 'pipeline')
         );
         const resolvedCandidateId = acceptedCandidateId;
         const resolvedLv = upsertEnumListValueAndFetch({
@@ -613,7 +613,7 @@ async function handleEnumRenameEndpoint({
       return respond(200, { ok: true, field, changed: false });
     }
 
-    // SQL-first runtime path (legacy workbook_map/known_values writes removed from write path)
+    // SQL-first runtime path (known_values writes removed from write path)
     try {
       const affectedProductIds = runtimeSpecDb.renameListValueById(
         listValueId,

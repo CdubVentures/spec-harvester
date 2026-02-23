@@ -2594,6 +2594,115 @@ export class SpecDb {
       .run(overridden ? 1 : 0, this.category, componentType, componentName, componentMaker || '');
   }
 
+  mergeComponentIdentities({ sourceId, targetId }) {
+    const category = this.category;
+    const source = this.db.prepare('SELECT * FROM component_identity WHERE id = ? AND category = ?').get(sourceId, category);
+    const target = this.db.prepare('SELECT * FROM component_identity WHERE id = ? AND category = ?').get(targetId, category);
+    if (!source || !target) return;
+
+    const tx = this.db.transaction(() => {
+      this.db.prepare(`
+        UPDATE item_component_links
+        SET component_name = ?, component_maker = ?, updated_at = datetime('now')
+        WHERE category = ? AND component_type = ? AND component_name = ? AND component_maker = ?
+          AND NOT EXISTS (
+            SELECT 1 FROM item_component_links t
+            WHERE t.category = item_component_links.category
+              AND t.product_id = item_component_links.product_id
+              AND t.field_key = item_component_links.field_key
+              AND t.component_type = ?
+              AND t.component_name = ?
+              AND t.component_maker = ?
+          )
+      `).run(
+        target.canonical_name, target.maker,
+        category, source.component_type, source.canonical_name, source.maker,
+        target.component_type, target.canonical_name, target.maker
+      );
+      this.db.prepare(`
+        DELETE FROM item_component_links
+        WHERE category = ? AND component_type = ? AND component_name = ? AND component_maker = ?
+      `).run(category, source.component_type, source.canonical_name, source.maker);
+
+      const sourceValues = this.db.prepare(
+        'SELECT * FROM component_values WHERE category = ? AND component_type = ? AND component_name = ? AND component_maker = ?'
+      ).all(category, source.component_type, source.canonical_name, source.maker);
+      for (const sv of sourceValues) {
+        const targetHas = this.db.prepare(
+          'SELECT id FROM component_values WHERE category = ? AND component_type = ? AND component_name = ? AND component_maker = ? AND property_key = ?'
+        ).get(category, target.component_type, target.canonical_name, target.maker, sv.property_key);
+        if (targetHas) {
+          this.db.prepare('DELETE FROM component_values WHERE id = ?').run(sv.id);
+        } else {
+          this.db.prepare(`
+            UPDATE component_values
+            SET component_name = ?, component_maker = ?, component_identity_id = ?, updated_at = datetime('now')
+            WHERE id = ?
+          `).run(target.canonical_name, target.maker, targetId, sv.id);
+        }
+      }
+
+      const sourceAliases = this.db.prepare(
+        'SELECT * FROM component_aliases WHERE component_id = ?'
+      ).all(sourceId);
+      for (const sa of sourceAliases) {
+        const targetHas = this.db.prepare(
+          'SELECT id FROM component_aliases WHERE component_id = ? AND alias = ?'
+        ).get(targetId, sa.alias);
+        if (targetHas) {
+          this.db.prepare('DELETE FROM component_aliases WHERE id = ?').run(sa.id);
+        } else {
+          this.db.prepare(
+            'UPDATE component_aliases SET component_id = ? WHERE id = ?'
+          ).run(targetId, sa.id);
+        }
+      }
+
+      const sourceIdentifier = `${source.component_type}::${source.canonical_name}::${source.maker}`;
+      const targetIdentifier = `${target.component_type}::${target.canonical_name}::${target.maker}`;
+
+      const sourceKrs = this.db.prepare(
+        "SELECT * FROM key_review_state WHERE category = ? AND target_kind = 'component_key' AND component_identifier = ?"
+      ).all(category, sourceIdentifier);
+
+      const STATUS_RANK = { confirmed: 3, accepted: 2, pending: 1 };
+      for (const sk of sourceKrs) {
+        const targetKrs = this.db.prepare(
+          "SELECT * FROM key_review_state WHERE category = ? AND target_kind = 'component_key' AND component_identifier = ? AND property_key = ?"
+        ).get(category, targetIdentifier, sk.property_key);
+
+        if (targetKrs) {
+          const sourceRank = STATUS_RANK[sk.ai_confirm_shared_status] || 0;
+          const targetRank = STATUS_RANK[targetKrs.ai_confirm_shared_status] || 0;
+          if (sourceRank > targetRank) {
+            this.db.prepare(`
+              UPDATE key_review_state
+              SET ai_confirm_shared_status = ?, ai_confirm_shared_confidence = ?,
+                  selected_value = COALESCE(?, selected_value),
+                  selected_candidate_id = COALESCE(?, selected_candidate_id),
+                  updated_at = datetime('now')
+              WHERE id = ?
+            `).run(
+              sk.ai_confirm_shared_status, sk.ai_confirm_shared_confidence,
+              sk.selected_value, sk.selected_candidate_id,
+              targetKrs.id
+            );
+          }
+          this.db.prepare('DELETE FROM key_review_state WHERE id = ?').run(sk.id);
+        } else {
+          this.db.prepare(`
+            UPDATE key_review_state
+            SET component_identifier = ?, component_identity_id = ?, updated_at = datetime('now')
+            WHERE id = ?
+          `).run(targetIdentifier, targetId, sk.id);
+        }
+      }
+
+      this.db.prepare('DELETE FROM component_identity WHERE id = ? AND category = ?').run(sourceId, category);
+    });
+    tx();
+  }
+
   deleteKeyReviewStateRowsByIds(stateIds = []) {
     const ids = Array.isArray(stateIds)
       ? stateIds

@@ -1,10 +1,8 @@
 // ── FieldRulesWorkbench: top-level orchestrator for Tab 3 ────────────
 import { useState, useMemo, useCallback } from 'react';
-import type { UseMutationResult } from '@tanstack/react-query';
 import type { SortingState } from '@tanstack/react-table';
 import type { ColumnPreset } from './workbenchTypes';
 import type { EnumEntry, ComponentDbResponse, ComponentSource } from '../../../types/studio';
-import type { ProcessStatus } from '../../../types/events';
 import { buildWorkbenchRows } from './workbenchHelpers';
 import { buildColumns, getPresetVisibility } from './workbenchColumns';
 import { WorkbenchColumnPresets } from './WorkbenchColumnPresets';
@@ -24,7 +22,8 @@ interface Props {
   onSave: () => void;
   saving: boolean;
   saveSuccess: boolean;
-  compileMut: UseMutationResult<ProcessStatus, Error, void, unknown>;
+  autoSaveEnabled: boolean;
+  setAutoSaveEnabled: (v: boolean) => void;
 }
 
 export function FieldRulesWorkbench({
@@ -38,7 +37,8 @@ export function FieldRulesWorkbench({
   onSave,
   saving,
   saveSuccess,
-  compileMut,
+  autoSaveEnabled,
+  setAutoSaveEnabled,
 }: Props) {
   const { editedRules, editedFieldOrder, updateField } = useFieldRulesStore();
 
@@ -147,12 +147,11 @@ export function FieldRulesWorkbench({
           globalFilter={globalFilter}
           onGlobalFilter={setGlobalFilter}
           onSave={handleSave}
-          onCompile={() => compileMut.mutate()}
           saving={saving}
-          compiling={compileMut.isPending}
+          saveSuccess={saveSuccess}
+          autoSaveEnabled={autoSaveEnabled}
+          setAutoSaveEnabled={setAutoSaveEnabled}
         />
-
-        {saveSuccess && <div className="text-xs text-green-600 mb-1">Saved successfully</div>}
 
         <WorkbenchTable
           rows={rows}

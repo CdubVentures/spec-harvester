@@ -388,13 +388,13 @@ async function seedListValues(db, fieldRules, config, category) {
     }
   }
 
-  // From workbook_map.json manual_enum_values
+  // From control plane manual enum values
   const helperRoot = config.helperFilesRoot || 'helper_files';
-  const workbookMapPath = path.join(helperRoot, category, '_control_plane', 'workbook_map.json');
-  const workbookMap = await readJsonIfExists(workbookMapPath);
-  const manualEnumTimestamps = isObject(workbookMap?.manual_enum_timestamps) ? workbookMap.manual_enum_timestamps : {};
-  if (isObject(workbookMap?.manual_enum_values)) {
-    for (const [fieldKey, values] of Object.entries(workbookMap.manual_enum_values)) {
+  const controlMapPath = path.join(helperRoot, category, '_control_plane', 'workbook_map.json');
+  const controlMap = await readJsonIfExists(controlMapPath);
+  const manualEnumTimestamps = isObject(controlMap?.manual_enum_timestamps) ? controlMap.manual_enum_timestamps : {};
+  if (isObject(controlMap?.manual_enum_values)) {
+    for (const [fieldKey, values] of Object.entries(controlMap.manual_enum_values)) {
       if (!Array.isArray(values)) continue;
       for (const value of values) {
         const trimmed = String(value || '').trim();
@@ -434,7 +434,48 @@ async function seedListValues(db, fieldRules, config, category) {
   }
 
   tx(rows);
+
+  const policyByField = new Map();
+  const knownByField = new Map();
+  for (const row of rows) {
+    if (row.enumPolicy) policyByField.set(row.fieldKey, row.enumPolicy);
+    if (row.source === 'known_values') {
+      if (!knownByField.has(row.fieldKey)) knownByField.set(row.fieldKey, new Set());
+      knownByField.get(row.fieldKey).add(row.normalizedValue);
+    }
+  }
+  for (const [fieldKey, policy] of policyByField) {
+    const knownNormalized = knownByField.get(fieldKey) || new Set();
+    reEvaluateEnumPolicy(db, fieldKey, policy, knownNormalized);
+  }
+
   return { count };
+}
+
+// ── Enum policy re-evaluation ──────────────────────────────────────────────
+
+export function reEvaluateEnumPolicy(db, fieldKey, newPolicy, knownNormalizedValues) {
+  const category = db.category;
+  const isClosedPolicy = newPolicy === 'closed' || newPolicy === 'closed_with_curation';
+
+  db.db.prepare(
+    'UPDATE list_values SET enum_policy = ?, updated_at = datetime(\'now\') WHERE category = ? AND field_key = ?'
+  ).run(newPolicy, category, fieldKey);
+
+  const pipelineRows = db.db.prepare(
+    'SELECT id, normalized_value, overridden FROM list_values WHERE category = ? AND field_key = ? AND source = ?'
+  ).all(category, fieldKey, 'pipeline');
+
+  const update = db.db.prepare(
+    'UPDATE list_values SET needs_review = ?, updated_at = datetime(\'now\') WHERE id = ?'
+  );
+
+  for (const row of pipelineRows) {
+    if (row.overridden) continue;
+    const inKnownSet = knownNormalizedValues.has(row.normalized_value);
+    const needsReview = !inKnownSet && isClosedPolicy ? 1 : 0;
+    update.run(needsReview, row.id);
+  }
 }
 
 // ── Per-source candidate collector ───────────────────────────────────────────

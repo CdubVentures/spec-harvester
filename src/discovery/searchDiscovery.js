@@ -762,6 +762,25 @@ async function runWithConcurrency(items = [], concurrency = 1, worker) {
   return output;
 }
 
+function mergeLearningStoreHintsIntoLexicon(lexicon = {}, storeHints = null) {
+  if (!storeHints || !storeHints.anchorsByField) return lexicon;
+  const merged = { ...lexicon, fields: { ...(lexicon.fields || {}) } };
+  for (const [field, anchors] of Object.entries(storeHints.anchorsByField)) {
+    if (!Array.isArray(anchors) || anchors.length === 0) continue;
+    const existing = merged.fields[field] || {};
+    const synonyms = { ...(existing.synonyms || {}) };
+    for (const anchor of anchors) {
+      if (anchor.decayStatus === 'expired') continue;
+      const phrase = String(anchor.phrase || '').trim().toLowerCase();
+      if (!phrase || phrase.length < 3) continue;
+      const weight = anchor.decayStatus === 'decayed' ? 1 : 3;
+      synonyms[phrase] = { count: (synonyms[phrase]?.count || 0) + weight };
+    }
+    merged.fields[field] = { ...existing, synonyms };
+  }
+  return merged;
+}
+
 async function loadLearningArtifacts({
   storage,
   category
@@ -855,7 +874,8 @@ export async function discoverCandidateSources({
   planningHints = {},
   llmContext = {},
   frontierDb = null,
-  runtimeTraceWriter = null
+  runtimeTraceWriter = null,
+  learningStoreHints = null
 }) {
   if (!config.discoveryEnabled) {
     return {
@@ -918,12 +938,13 @@ export async function discoverCandidateSources({
     }
   }
 
+  const enrichedLexicon = mergeLearningStoreHintsIntoLexicon(learning.lexicon, learningStoreHints);
   const profileMaxQueries = Math.max(6, Number(config.discoveryMaxQueries || 8) * 2);
   const searchProfileBase = buildSearchProfile({
     job,
     categoryConfig,
     missingFields,
-    lexicon: learning.lexicon,
+    lexicon: enrichedLexicon,
     learnedQueries: learning.queryTemplates,
     maxQueries: profileMaxQueries,
     brandResolution
